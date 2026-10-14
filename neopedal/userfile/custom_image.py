@@ -32,7 +32,7 @@ import threading
 import weakref
 from array import array
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Iterator
 from functools import partial
 from typing import Any
 
@@ -41,6 +41,7 @@ from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPixmap
 
 from ..const_file import FileExt
 from ..validator import image_exists
+from . import replace_retry
 
 TINTED_FOLDER = "tinted"  # readable copies of logos (game image folder): on_dark_*.png, on_light_*.png
 TINT_HEIGHT = 120  # pixels of readable copies (at most, 4 times as wide)
@@ -239,7 +240,7 @@ class Deferral:
 
 
 @contextlib.contextmanager
-def deferred_logos():
+def deferred_logos() -> Iterator[Deferral]:
     """Within: logo_for_background (this thread) answers "" for a logo whose readable copy is not decided yet
     instead of making it (UI thread never waits for one); `missed` tells caller to look for it in background"""
     state = Deferral()
@@ -334,7 +335,7 @@ def _make_logo_for_background(path: str, light_background: bool, stamp: float) -
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if image.save(temp):
-            os.replace(temp, target)
+            replace_retry(temp, target)
             return target
     except OSError:
         pass
@@ -343,7 +344,7 @@ def _make_logo_for_background(path: str, light_background: bool, stamp: float) -
     return path
 
 
-def watch_game_logos():
+def watch_game_logos() -> None:
     """Readable copies of game logos made as soon as the game image cache saves them (fetch thread), for
     light & dark backgrounds, so showing a logo never waits for one (once per cache); logos saved by earlier
     runs given theirs in background (once per game image folder, after any other logo job)"""
@@ -362,7 +363,7 @@ def watch_game_logos():
     images.add_file_listener(_picture_saved)
 
 
-def _picture_saved(kind: str, path: str):
+def _picture_saved(kind: str, path: str) -> None:
     """Game image cache saved a picture (fetch thread): readable copies of a logo made at once"""
     from .game_images import LOGO_KINDS
 
@@ -401,7 +402,7 @@ def pregenerate_logo(path: str) -> bool:
     return made
 
 
-def pregenerate_logos(cache) -> int:
+def pregenerate_logos(cache: Any) -> int:
     """Readable copies of logos of game image cache not decided yet, for both backgrounds; number of logos
     concerned"""
     if cache is None:
@@ -409,7 +410,7 @@ def pregenerate_logos(cache) -> int:
     return sum(pregenerate_logo(path) for path in logo_files(cache.folder))
 
 
-def _pregenerate_folder(folder: str):
+def _pregenerate_folder(folder: str) -> None:
     """Logos of game image folder given readable copies one by one in background (logo jobs of overlays &
     pages run first)"""
     for path in logo_files(folder):
@@ -429,7 +430,7 @@ class LogoLoader:
     IDLE_SECONDS = 10.0
     MAX_RESULTS = 256  # results nobody took any more (widget closed) dropped, oldest first
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: queue.PriorityQueue = queue.PriorityQueue()
         self._order = itertools.count()  # same priority: first queued first
@@ -439,7 +440,7 @@ class LogoLoader:
         self._idle = threading.Condition(self._lock)
         self.finished = 0
 
-    def result(self, key, job: Callable[[], Any]) -> tuple[bool, Any]:
+    def result(self, key: Hashable, job: Callable[[], Any]) -> tuple[bool, Any]:
         """(True, job result) once done, (False, None) while running (job queued if not yet)"""
         with self._lock:
             if key in self._results:
@@ -449,7 +450,7 @@ class LogoLoader:
             self._queue(key, job, 0, True)
         return False, None
 
-    def run(self, key, job: Callable[[], Any], background: bool = False) -> bool:
+    def run(self, key: Hashable, job: Callable[[], Any], background: bool = False) -> bool:
         """Job queued unless key is queued already (result dropped), after every other job if background;
         True if queued"""
         with self._lock:
@@ -458,7 +459,7 @@ class LogoLoader:
             self._queue(key, job, 1 if background else 0, False)
         return True
 
-    def _queue(self, key, job: Callable[[], Any], priority: int, keep: bool):
+    def _queue(self, key: Hashable, job: Callable[[], Any], priority: int, keep: bool) -> None:
         """Job queued, worker started if none (under lock)"""
         self._running.add(key)
         if self._thread is None:
@@ -471,7 +472,7 @@ class LogoLoader:
         with self._idle:
             return self._idle.wait_for(lambda: not self._running, timeout)
 
-    def _run(self):
+    def _run(self) -> None:
         while True:
             try:
                 _, _, key, job, keep = self._jobs.get(timeout=self.IDLE_SECONDS)
@@ -655,7 +656,7 @@ class BrandLogos:
         path, image = value if value is not None else ("", QImage())
         return brand_logo_pixmap(path, image, self.max_width, self.max_height)
 
-    def _wait(self, brand: str):
+    def _wait(self, brand: str) -> None:
         self._waited.add(brand)
         if self._timer is None:
             widget = self._widget()
@@ -665,11 +666,11 @@ class BrandLogos:
             self._timer.setSingleShot(True)
             self._timer.setInterval(self.CHECK_MS)
             logos = weakref.ref(self)
-            self._timer.timeout.connect(lambda: (cache := logos()) is not None and cache.check())
+            self._timer.timeout.connect(lambda: (cache := logos()) is not None and cache.check())  # type: ignore[func-returns-value]
         if not self._timer.isActive():
             self._timer.start()
 
-    def check(self):
+    def check(self) -> None:
         """Waited logos ready given to widget, others checked again later"""
         from .game_images import images
 

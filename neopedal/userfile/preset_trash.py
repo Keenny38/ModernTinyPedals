@@ -39,6 +39,7 @@ from time import localtime, strftime, time
 from typing import NamedTuple
 
 from ..const_file import FileExt
+from . import replace_retry, write_json
 from .layout_profile import FILE_EXTENSION as LAYOUT_EXTENSION
 
 logger = logging.getLogger(__name__)
@@ -96,15 +97,15 @@ def move_to_trash(
         raise FileNotFoundError(f"preset not found: {filename}")
     entry = TrashEntry(new_entry_folder(settings_path), filename, time(), dict(references or {}))
     try:
-        with open(os.path.join(entry.folder, INFO_FILENAME), "w", encoding="utf-8") as file:
-            json.dump({"filename": filename, "deleted": entry.deleted, "references": entry.references}, file)
-        os.replace(source, os.path.join(entry.folder, filename))
+        write_json(os.path.join(entry.folder, INFO_FILENAME),
+                   {"filename": filename, "deleted": entry.deleted, "references": entry.references}, raise_error=True)
+        replace_retry(source, os.path.join(entry.folder, filename))
     except OSError:
         shutil.rmtree(entry.folder, ignore_errors=True)  # never leave an entry without preset
         raise
     layouts = f"{os.path.splitext(filename)[0]}{LAYOUT_EXTENSION}"
     with suppress(OSError):  # layout profiles, if any
-        os.replace(os.path.join(settings_path, layouts), os.path.join(entry.folder, layouts))
+        replace_retry(os.path.join(settings_path, layouts), os.path.join(entry.folder, layouts))
     logger.info("USERDATA: preset %s moved to trash", filename)
     return entry
 
@@ -197,13 +198,13 @@ def restore_from_trash(settings_path: str, entry: TrashEntry, filename: str = ""
     filename = filename or entry.filename
     if preset_exists(settings_path, filename):
         raise FileExistsError(f"preset already exists: {filename}")
-    os.replace(os.path.join(entry.folder, entry.filename), os.path.join(settings_path, filename))
+    replace_retry(os.path.join(entry.folder, entry.filename), os.path.join(settings_path, filename))
     layouts = f"{os.path.splitext(entry.filename)[0]}{LAYOUT_EXTENSION}"
     target_layouts = os.path.join(settings_path, f"{os.path.splitext(filename)[0]}{LAYOUT_EXTENSION}")
     source_layouts = os.path.join(entry.folder, layouts)
     if os.path.isfile(source_layouts) and not os.path.exists(target_layouts):
         with suppress(OSError):
-            os.replace(source_layouts, target_layouts)
+            replace_retry(source_layouts, target_layouts)
     shutil.rmtree(entry.folder, ignore_errors=True)
     logger.info("USERDATA: preset %s restored from trash", filename)
     return filename

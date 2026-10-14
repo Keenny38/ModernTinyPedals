@@ -50,7 +50,7 @@ def test_corner_labels_kept_while_moving(opener, warnings):  # noqa: F811
     dialog = opener()
     view, backend = dialog.view, dialog.backend
     chart = chart_of(view)
-    if not backend.cornerMarks:
+    if not backend.cornerTable.marks:
         pytest.skip("no corners")
     evaluate(view, chart, "setView(0, 1200, false)")
     wait(0.1)

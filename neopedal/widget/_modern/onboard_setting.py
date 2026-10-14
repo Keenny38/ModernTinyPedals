@@ -25,11 +25,16 @@ motor map, front & rear anti-roll bars.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import OnboardSettingConfig
 
 ITEMS = (
     ("abs", "ABS"),
@@ -45,6 +50,8 @@ ITEMS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: OnboardSettingConfig
 
     options = ("font_size", "layout", *(f"show_{key}" for key, _ in ITEMS), *display_order_options("onboard_setting"))
 

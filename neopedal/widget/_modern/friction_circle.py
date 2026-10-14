@@ -27,6 +27,7 @@ Lateral & longitudinal G under it, with recent peak.
 from __future__ import annotations
 
 from collections import deque
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QPolygonF
@@ -38,11 +39,16 @@ from .base import ModernOverlay
 from .draw import disc, panel
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import FrictionCircleConfig
+
 TRACE_PARTS = 6  # trace drawn in parts, older parts fainter
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: FrictionCircleConfig
 
     options = (
         "font_size", "display_size", "display_radius_g", "show_inverted_orientation", "show_readings",

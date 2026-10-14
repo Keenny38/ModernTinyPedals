@@ -1,14 +1,11 @@
-"""Race calculator audit fixes: failed saves warned, fuel unit of plans & share codes,
+"""Race calculator audit fixes: failed saves warned, fuel unit of plans,
 huge & nan values of files, tyre planner texts translated"""
 
-import base64
 import json
 import os
-import zlib
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMessageBox
 
 from neopedal import i18n
@@ -174,7 +171,7 @@ def test_tyre_plan_save_failures_warned(make_page, warnings, monkeypatch, tmp_pa
     assert not warnings.toasts
 
 
-# Item 11: fuel unit of race plans & share codes, nan refused
+# Item 11: fuel unit of race plans
 def set_fuel_inputs(backend):
     from neopedal.fuel_strategy import MARGIN_UNITS
 
@@ -187,24 +184,15 @@ def set_fuel_inputs(backend):
     backend.setInput("input_safety_margin", 5.0)
 
 
-def paste(page, monkeypatch, code: str):
-    from neopedal.ui import race_calculator
-
-    monkeypatch.setattr(race_calculator.QInputDialog, "getText", staticmethod(lambda *args, **kwargs: (code, True)))
-    page.backend.pasteShareCode()
-
-
-def test_share_code_converted_to_fuel_unit(make_page, warnings, monkeypatch):
-    from neopedal.ui.quick.race_model import decode_share_code, encode_share_code
-
+def test_plan_file_converted_to_fuel_unit(make_page, warnings, tmp_path):
     litre = make_page("Liter")
     set_fuel_inputs(litre.backend)
-    litre.backend.copyShareCode()
-    code = QGuiApplication.clipboard().text()
-    assert decode_share_code(code)["fuel_unit"] == "Liter"
+    assert litre.backend.race_plan_data()["fuel_unit"] == "Liter"
+    target = tmp_path / "litre.race-plan"
+    target.write_text(json.dumps(litre.backend.race_plan_data()), encoding="utf-8")
 
     gallon = make_page("Gallon")
-    paste(gallon, monkeypatch, code)
+    assert gallon.backend.load_race_plan(str(target))
     values = gallon.backend.values
     assert not warnings
     assert values["input_tank_capacity"] == pytest.approx(26.42)  # 100 L
@@ -217,16 +205,11 @@ def test_share_code_converted_to_fuel_unit(make_page, warnings, monkeypatch):
     assert values["input_race_laps"] == 40
     assert gallon.backend.race_plan_data()["fuel_unit"] == "Gallon"
 
-    # Gallon code opened by a litre user
+    # Gallon plan opened by a litre user
+    target.write_text(json.dumps(gallon.backend.race_plan_data()), encoding="utf-8")
     other = make_page("Liter")
-    paste(other, monkeypatch, encode_share_code(gallon.backend.race_plan_data()))
+    assert other.backend.load_race_plan(str(target))
     assert other.backend.values["input_tank_capacity"] == pytest.approx(100.01, abs=0.02)
-
-    # Code without unit (before fuel unit was kept): litres
-    data = litre.backend.race_plan_data()
-    del data["fuel_unit"]
-    paste(gallon, monkeypatch, encode_share_code(data))
-    assert gallon.backend.values["input_tank_capacity"] == pytest.approx(26.42)
     assert not warnings
 
 
@@ -243,24 +226,6 @@ def test_plan_file_without_unit_kept_in_page_unit(make_page, warnings, tmp_path)
     assert other.backend.load_race_plan(str(target))
     assert other.backend.values["input_tank_capacity"] == pytest.approx(capacity)
     assert not warnings
-
-
-def test_share_code_with_nan_refused(make_page, warnings, monkeypatch):
-    from neopedal.ui.quick.race_model import RACE_PLAN_FORMAT, SHARE_CODE_PREFIX, decode_share_code
-
-    page = make_page()
-    set_fuel_inputs(page.backend)
-    for number in ("NaN", "Infinity", "-Infinity", "1e999"):
-        text = f'{{"format":"{RACE_PLAN_FORMAT}","inputs":{{"input_tank_capacity":{number}}}}}'
-        code = SHARE_CODE_PREFIX + base64.urlsafe_b64encode(zlib.compress(text.encode())).decode()
-        with pytest.raises(ValueError):
-            decode_share_code(code)
-        paste(page, monkeypatch, code)
-    assert len(warnings) == 4 and all(text == "Invalid race plan share code." for text in warnings)
-    assert page.backend.values["input_tank_capacity"] == pytest.approx(100.0)  # nothing applied
-    assert not warnings.toasts
-    paste(page, monkeypatch, SHARE_CODE_PREFIX + base64.urlsafe_b64encode(zlib.compress(b"[1]")).decode())
-    assert len(warnings) == 5  # not a race plan: warned too
 
 
 # Item 23: huge & nan values of files
@@ -286,6 +251,18 @@ def test_huge_plan_values_not_half_applied(make_page, warnings):
     rule = backend.tyrePlan["rule"]
     assert rule["maximum_tyre"] == 999 and rule["tyre_change_time_1"] == pytest.approx(99.0)
     assert backend.tyrePlan["name"] == "Huge"
+
+
+def test_race_plan_of_older_version_applied(make_page, warnings):
+    """Plan saved by a version until 0.23.0 (Modern Tiny Pedals format name) still opened"""
+    from neopedal.ui.quick.race_model import RACE_PLAN_FORMAT
+
+    backend = make_page().backend
+    assert RACE_PLAN_FORMAT == "neopedal-race-plan"
+    old = {"format": "modern-tiny-pedals-race-plan", "inputs": {"input_pit_seconds": 42.0}}
+    assert backend.apply_race_plan(old, "Old")
+    assert backend.values["input_pit_seconds"] == pytest.approx(42.0)
+    assert not backend.apply_race_plan({**old, "format": "other-race-plan"}, "Other")
 
 
 def test_nan_tread_of_tyre_file_shown(make_page, warnings, monkeypatch, tmp_path):

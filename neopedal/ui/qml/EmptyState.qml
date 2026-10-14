@@ -12,7 +12,7 @@ Column {
     width: Math.min(parent ? parent.width - theme.em * 2 : theme.em * 24, theme.em * 26)
     spacing: theme.em * 0.6
     opacity: visible ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 200 } }
+    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
 
     Icon {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -27,7 +27,7 @@ Column {
         wrapMode: Text.WordWrap
         text: state.title
         color: theme.text
-        font.pointSize: theme.fontPoint * 1.1
+        font.pointSize: theme.fontSubtitle
         font.weight: Font.DemiBold
     }
     Text {
@@ -40,6 +40,7 @@ Column {
         lineHeight: 1.15
     }
     TpButton {
+        objectName: "emptyStateAction"
         anchors.horizontalCenter: parent.horizontalCenter
         visible: state.actionText !== ""
         text: state.actionText

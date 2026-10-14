@@ -83,6 +83,7 @@ class Theme(NamedTuple):
     lap_behind: QColor
     border: QColor
     highlight: QColor  # player row background tint
+    light: bool = False  # light overlay theme (colors given for dark & light backgrounds pick light)
 
     def tint(self, color: QColor, alpha: int) -> QColor:
         """Same color with alpha (shared color, never modified)
@@ -119,4 +120,4 @@ def build_theme(style: dict, surface_alpha: int = 235) -> Theme:
         border = QColor(255, 255, 255, BORDER_ALPHA)
     highlight = QColor(colors["accent"])
     highlight.setAlpha(HIGHLIGHT_ALPHA)
-    return Theme(border=border, highlight=highlight, **colors)
+    return Theme(border=border, highlight=highlight, light=theme.light, **colors)

@@ -87,9 +87,9 @@ Item {
         height: row.rowType === "header" ? Math.round(theme.em * 2.9)
               : row.rowType === "order" ? orderLoader.implicitHeight + theme.em * 1.2
               : Math.max(optionLoader.implicitHeight + theme.em * 0.9, theme.em * 2.9)
-        radius: theme.em * 0.7
+        radius: theme.radiusXl
         color: row.rowType === "header" ? (theme.dark ? Qt.lighter(theme.base, 1.08) : Qt.darker(theme.base, 1.015)) : theme.base
-        Behavior on height { enabled: row.rowType === "order" && row.settled; NumberAnimation { duration: 150 } }
+        Behavior on height { enabled: row.rowType === "order" && row.settled; NumberAnimation { duration: theme.motionBase } }
 
         // Square corners between rows of a card
         Rectangle {
@@ -129,9 +129,9 @@ Item {
             opacity: 0
             SequentialAnimation {
                 id: flashAnimation
-                NumberAnimation { target: flashRect; property: "opacity"; to: 0.28; duration: 180 }
-                PauseAnimation { duration: 350 }
-                NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: flashRect; property: "opacity"; to: 0.28; duration: theme.motionBase }
+                PauseAnimation { duration: theme.animate ? 350 : 0 }  // animations off: no flash
+                NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: theme.animate ? 700 : 0; easing.type: Easing.InOutQuad }
             }
         }
 
@@ -152,14 +152,14 @@ Item {
                     anchors.fill: parent
                     anchors.leftMargin: theme.em * 0.6
                     anchors.rightMargin: theme.em * 0.5
-                    spacing: theme.em * 0.45
+                    spacing: theme.em * 0.5
                     Icon {
                         visible: !backend.filtering
                         glyph: ""  // chevron down
                         size: theme.em * 0.7
                         color: theme.dimText
                         rotation: row.model.collapsed ? -90 : 0
-                        Behavior on rotation { enabled: row.settled; NumberAnimation { duration: 150 } }
+                        Behavior on rotation { enabled: row.settled; NumberAnimation { duration: theme.motionBase } }
                     }
                     Text {
                         Layout.fillWidth: true
@@ -178,7 +178,7 @@ Item {
                         visible: row.model.collapsed
                         text: row.model.count
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         font.features: { "tnum": 1 }
                     }
                     TpButton {
@@ -223,7 +223,7 @@ Item {
                     text: row.help !== "" ? row.help
                                                 : i18n.tr("Order of shown items, top first: drag them, or use the arrows.")
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     wrapMode: Text.WordWrap
                 }
                 Repeater {
@@ -234,7 +234,7 @@ Item {
                         required property int index
                         Layout.fillWidth: true
                         implicitHeight: Math.round(theme.em * 2.1)
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         property real shift: 0  // dragged distance
                         z: dragger.active ? 10 : 0
                         color: dragger.active ? theme.raised : orderArea.containsMouse ? theme.hover : "transparent"
@@ -367,7 +367,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 1
                     opacity: row.dimmed ? 0.55 : 1
-                    Behavior on opacity { enabled: row.settled; NumberAnimation { duration: 150 } }
+                    Behavior on opacity { enabled: row.settled; NumberAnimation { duration: theme.motionBase } }
                     Text {
                         Layout.fillWidth: true
                         text: row.label
@@ -384,21 +384,21 @@ Item {
                         visible: row.help !== ""
                         text: row.help
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
                         MouseArea { id: helpArea; anchors.fill: parent; hoverEnabled: helpText.truncated; acceptedButtons: Qt.NoButton }
                         ToolTip.visible: helpText.truncated && helpArea.containsMouse
                         ToolTip.text: row.help
-                        ToolTip.delay: 500
+                        ToolTip.delay: theme.tipDelay
                     }
                     Text {
                         Layout.fillWidth: true
                         visible: row.note !== "" || row.hint !== ""
                         text: [row.hint, row.note].filter(function(part) { return part !== "" }).join("  ·  ")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         font.italic: true
                         wrapMode: Text.WordWrap
                     }
@@ -407,7 +407,7 @@ Item {
                         visible: row.error !== ""
                         text: "⚠ " + row.error
                         color: theme.loss
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -418,7 +418,7 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     enabled: !row.locked
                     opacity: row.dimmed ? 0.6 : 1  // still editable
-                    Behavior on opacity { enabled: row.settled; NumberAnimation { duration: 150 } }
+                    Behavior on opacity { enabled: row.settled; NumberAnimation { duration: theme.motionBase } }
                     sourceComponent: row.kind === "bool" ? boolEditor
                                    : row.kind === "choice" || row.kind === "font" ? choiceEditor
                                    : row.kind === "integer" || row.kind === "float" ? numberEditor
@@ -521,7 +521,7 @@ Item {
             Rectangle {
                 Layout.preferredWidth: Math.round(theme.em * 2.05)
                 Layout.preferredHeight: Layout.preferredWidth
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: row.model.color !== "" ? row.model.color : "transparent"
                 border.width: 1
                 border.color: swatchArea.containsMouse ? theme.accent : theme.border
@@ -540,7 +540,7 @@ Item {
                 }
                 ToolTip.visible: swatchArea.containsMouse
                 ToolTip.text: i18n.tr("Select Color")
-                ToolTip.delay: 500
+                ToolTip.delay: theme.tipDelay
                 Accessible.role: Accessible.Button
                 Accessible.name: i18n.tr("Select Color")
             }

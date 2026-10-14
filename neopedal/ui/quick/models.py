@@ -179,6 +179,8 @@ class DictListModel(QAbstractListModel):
                         changed = True
                 previous = value
         # Inserted rows (new keys, or a key listed again), runs together, then changed values of kept rows
+        # (following kept rows notified together, see update_many: positions of kept rows are final once listed)
+        kept_values: list[tuple[int, Mapping]] = []
         position = 0
         while position < len(rows):
             if not self._kept_at(rows, position, key, kept, wanted):
@@ -191,9 +193,9 @@ class DictListModel(QAbstractListModel):
                 changed = True
                 position = last + 1
                 continue
-            changed = self.update_row(position, rows[position]) or changed
+            kept_values.append((position, rows[position]))
             position += 1
-        return changed
+        return self.update_many(kept_values) or changed
 
     @staticmethod
     def _kept_at(rows: list[dict], position: int, key: str, kept: Mapping, wanted: Mapping) -> bool:

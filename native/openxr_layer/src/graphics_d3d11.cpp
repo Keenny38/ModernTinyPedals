@@ -96,6 +96,25 @@ public:
         return true;
     }
 
+    bool upload_rect(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height,
+                     const Rect& rect) override {
+        if (image_index >= textures_.size() || pixels == nullptr || rect.width == 0 || rect.height == 0 ||
+            static_cast<uint64_t>(rect.x) + rect.width > width || static_cast<uint64_t>(rect.y) + rect.height > height) {
+            return upload(image_index, pixels, width, height);
+        }
+        D3D11_BOX box = {rect.x, rect.y, 0, rect.x + rect.width, rect.y + rect.height, 1};
+        const uint8_t* first = pixels + (static_cast<size_t>(rect.y) * width + rect.x) * 4u;
+        const bool lock = multithread_ != nullptr && multithread_->GetMultithreadProtected() != FALSE;
+        if (lock) {
+            multithread_->Enter();
+        }
+        context_->UpdateSubresource(textures_[image_index], 0, &box, first, width * 4u, 0);
+        if (lock) {
+            multithread_->Leave();
+        }
+        return true;
+    }
+
 private:
     ID3D11Device* device_;
     ID3D11DeviceContext* context_ = nullptr;

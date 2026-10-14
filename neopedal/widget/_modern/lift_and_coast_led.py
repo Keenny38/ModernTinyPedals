@@ -26,6 +26,8 @@ optionally mirrored on two sides.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QPainter
 
@@ -34,12 +36,17 @@ from ...module_info import minfo
 from .base import ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import LiftAndCoastLedConfig
+
 OFF, LOW, CRITICAL, LOCK, ABS, SLIP, TC = range(7)
 GLOW_ALPHA = 60  # soft glow around lit LED
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: LiftAndCoastLedConfig
 
     options = (
         "display_orientation", "inner_gap", "show_background", "enable_double_side_led", "double_side_led_gap",

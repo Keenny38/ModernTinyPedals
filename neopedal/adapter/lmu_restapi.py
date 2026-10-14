@@ -25,13 +25,15 @@ from __future__ import annotations
 import logging
 
 from ..const_common import WHEELS_NA
-from ..process.game_info import parse_chat, parse_contacts, parse_distance, parse_setup_name
+from ..process.game_info import ContactsParser, parse_chat, parse_distance, parse_setup_name
 from ..process.garage import export_lmu_car_setup
 from ..process.vehicle import absolute_refilling, export_wheels, steerlock_to_number
 from ..process.weather import FORECAST_DEFAULT, WeatherNode, forecast_rf2
-from .restapi_connector import ResOutput, RestAPITask, valid_json_value
+from .restapi_connector import AppendedListDecoder, ResOutput, RestAPITask, valid_json_value
 
 logger = logging.getLogger(__name__)
+CHAT_OVERLAYS = ("chat",)  # overlays reading chat messages
+CONTACTS_OVERLAYS = ("black_box",)  # overlays reading contacts (Director & replays pages request their own)
 
 
 class RestAPIData:
@@ -63,7 +65,7 @@ class RestAPIData:
         "setupModified",
     )
 
-    def __init__(self):
+    def __init__(self) -> None:
         # LMU, RF2
         self.timeScale: int = 1
         self.privateQualifying: int = 0
@@ -88,7 +90,7 @@ class RestAPIData:
         self.setupName: str = ""
         self.setupModified: bool = False
 
-    def __del__(self):
+    def __del__(self) -> None:
         if logger is not None:  # module globals are cleared at interpreter exit
             logger.info("RestAPI: GC: RestAPIData")
 
@@ -124,7 +126,7 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
         ResOutput("chatMessages", (), parse_chat),
     )
     res_contacts = (
-        ResOutput("contacts", (), parse_contacts),
+        ResOutput("contacts", (), ContactsParser()),  # growing list: only new entries parsed
     )
     res_gamestate = (
         ResOutput("pitEntryDistance", -1.0, parse_distance, ("PitEntryDist",)),
@@ -138,15 +140,18 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
         ResOutput("repairTime", 0.0, valid_json_value, ("damage",)),
     )
     # Define task set (repeated tasks: minimum interval, maximum interval while data unchanged)
+    # Damage & refill: 1s while driving, 0.5s in pit lane or garage (pit menu edited)
     return (
         RestAPITask("/rest/sessions/weather", res_weatherforecast, "enable_weather_info", False, 0.1),
         RestAPITask("/rest/sessions", res_sessionsinfo, "enable_session_info", False, 0.1),
         RestAPITask("/rest/garage/getPlayerGarageData", res_garagesetup, "enable_garage_setup_info", False, 0.1),
         RestAPITask("/rest/garage/summary", res_setupsummary, "enable_garage_setup_info", False, 0.1),
-        RestAPITask("/rest/garage/UIScreen/RepairAndRefuel", res_currentstint, "enable_vehicle_info", True, 0.2, 1.0),
+        RestAPITask("/rest/garage/UIScreen/RepairAndRefuel", res_currentstint, "enable_vehicle_info", True, 1.0, 1.0,
+                    pit_interval=0.5),
         RestAPITask("/rest/strategy/pitstop-estimate", res_pitstoptime, "enable_vehicle_info", True, 1.0, 2.0),
         RestAPITask("/rest/garage/UIScreen/TireManagement", res_expectedusage, "enable_vehicle_info", True, 1.0),
-        RestAPITask("/rest/chat/", res_chat, "enable_race_info", True, 0.5, 1.0),
-        RestAPITask("/rest/watch/getIncidentsList/1", res_contacts, "enable_race_info", True, 1.0, 1.0),
+        RestAPITask("/rest/chat/", res_chat, "enable_race_info", True, 0.5, 1.0, overlays=CHAT_OVERLAYS),
+        RestAPITask("/rest/watch/getIncidentsList/1", res_contacts, "enable_race_info", True, 1.0, 1.0,
+                    overlays=CONTACTS_OVERLAYS, decoder=AppendedListDecoder()),
         RestAPITask("/rest/sessions/GetGameState", res_gamestate, "enable_race_info", True, 1.0),
     )

@@ -41,11 +41,11 @@ The **Lap Time Reference** card on the right shows the **level scale** of the se
 
 ## All Tracks (career)
 
-`All Tracks`, first entry of the track selector, shows your career on one page: each track with the best lap of each class, colored by its level, track totals and last driven date, plus the count of your best laps per level. Double-click a track to open it. `View` > `Sort Tracks by Last Driven` lists recent tracks first.
+`All Tracks`, first entry of the track selector, is the page that opens (also when you come back after 2 minutes away). It shows your career on one page: each track with the best lap of each class, colored by its level, track totals and last driven date, plus the count of your best laps per level. Double-click a track to open it. `View` > `Sort Tracks by Last Driven` lists recent tracks first.
 
 - **Activity**: a calendar of the last 12 months, one square per day colored by your driving time (all tracks), with the days driven, the total time and your longest streak. Hover a day for its sessions.
 - **Recent Sessions**: your latest sessions on every track, with the best lap (★ when it was your personal best), the race result and the session type. Click one to open its track with its car selected.
-- **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty) and contacts per race. Positions are class positions. With Le Mans Ultimate, your **Driver Rank** and **Safety Rank** too, as the game menu shows them, each in its color with the progress to the next tier, and the change since your previous rank (`▲ +10%`): every change of rank is kept in `driver_ranks.history` of the global config folder.
+- **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty) and contacts per race. Positions are class positions. With Le Mans Ultimate, your **Driver Rank** and **Safety Rank** too, as the game menu shows them, each in its color with the progress to the next tier, and the change since your previous rank (`▲ +10%`): every change of rank is kept in `driver_ranks.history` of the global config folder. Your **badge** as well (`Good Driver`, `Trusted Racer`, `Rookie`, `Warning`...), with the game's icon, name and description; the icon is downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`. **Several game accounts** on one computer (several Steam accounts): ranks are kept per account, the account in use is the one signed in to Steam (followed live), and your other accounts are listed below with their Steam name and picture, last ranks seen, badge and date. When the game rewrites its menu file without your ranks, the last ranks seen of the account in use are shown with their date.
 
 ![Driver card with ranks](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-card-ranks.png)
 
@@ -66,10 +66,12 @@ Personal bests are compared with the community LMU lap time sheet of [ohne_speed
 |---|---|
 | `Alien` | about 100 % |
 | `Competitive` | 101 % |
-| `Good` | 102 % |
-| `Midpack` | 103-104 % |
-| `Tail-ender` | 105-106 % |
-| `Offline` | slower |
+| `Good` | 102-103 % |
+| `Midpack` | 104-105 % |
+| `Tail-ender` | 106 % |
+| `Offline` | 107 % and slower |
+
+The sheet's 101 % column is the slowest lap time of 101 % (101.5 % of the class reference), and so on: a lap time equal to a limit as shown counts in that level. The ladder is a **race pace** ladder: the level is the one of your personal best, your qualifying and race bests are marked on the ladder of the reference card. `Theoretical` (best sectors) and `Potential` are of the **class**, as the Sectors module keeps them: best sectors may be of another brand.
 
 The sheet is downloaded once a day when the page opens and kept for offline use. The `Reference` menu has `Update Reference`, `Change Sheet Address...` (another sheet with the same layout) and `Compare With Community Lap Times` (on or off). `View` > `Colorblind colors` uses colors easier to tell apart.
 
@@ -78,7 +80,7 @@ The sheet is downloaded once a day when the page opens and kept for offline use.
 Under the table, side by side (one at a time with the list button when the window is narrow):
 
 - **Progression**: best lap of each session (dots, new personal bests highlighted) and your personal best over time (line over a shaded area), with round lap time grid lines and the level limits (dashed, level letter at the end). Filter by `All`, `Practice`, `Qualifying` or `Race`; the filter applies to the sessions list too. The line under the chart gives the date of your personal best and the game version it was set with (`PB 1:09.984 set on 03/10/2026 · Version 1.42`).
-- **Sessions**: sessions of the selected car, newest first: date, session type, game version (`v1.42`), best lap (★ personal best), valid laps, race result (position, podium in color, DNF or DQ), or your class position from the game results file (`P3/12`). A lightning mark shows contacts or penalties. The tooltip adds driving time and distance and, from the results file, position, gap, contacts, penalties, track limits points, online or single player and server. Click a session linked to a results file to open it in [Race Results](Race-Results.md).
+- **Sessions**: sessions of the selected car, newest first: date, session type, game version (`v1.42`), best lap (★ personal best), valid laps, race result (position, podium in color, DNF or DQ), or your class position from the game results file (`P3/12`). A lightning mark shows contacts or penalties. The tooltip adds driving time and distance and, from the results file, position, gap, contacts, penalties, track limits points, online or single player and server. Click a session linked to a results file to open it in [Results & Replays](Race-Results.md).
 - **Stints & Consistency**: pace and lap time change per lap **by tyre compound** over your recorded stints, and a **consistency index** per session and per track (lap time spread of clean laps; lower is more consistent).
 
 The game version is recorded with each session since 0.23.0 (Le Mans Ultimate); older sessions take it from the game results file of the session. Sessions are linked to the game results files by track, session type and time.

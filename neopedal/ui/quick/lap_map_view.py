@@ -153,11 +153,11 @@ def yaw_calibration(lap: LapData) -> tuple[float, float]:
     return (sign, offset) if error < math.radians(8) else (0.0, 0.0)
 
 
-def frame_normals(frame: dict[str, Any], lap: PlotLap, line: lap_map.MapLine) -> list[tuple[float, float]]:
+def frame_normals(frame: dict[str, Any], lap: PlotLap, line: lap_map.MapLine) -> lap_map.PackedNormals:
     """Normals of lap line turned like map from map frame (see MapView.map_frame), computed ones left in frame"""
     cached = frame["normals"].get(lap.key)
     if cached is None or cached[0] is not lap.data or cached[1] != frame["angle"] or cached[2] != len(line.xs):
-        cached = (lap.data, frame["angle"], len(line.xs), normals(line.xs, line.ys))
+        cached = (lap.data, frame["angle"], len(line.xs), lap_map.PackedNormals(line.xs, line.ys))
         frame["normals"][lap.key] = frame["new"]["normals"][lap.key] = cached
     return cached[3]
 
@@ -295,7 +295,8 @@ class MapView(BackendBase):
     def build_trails(self, x: float):
         """Last seconds of each lap behind cursor, fading in (trail option)
 
-        Built again only once a lap moved about a pixel on map (cursor moves of a few meters: same trails).
+        Trail of a lap built again only once that lap moved about a pixel on map (cursor moves of a few meters, laps
+        stopped past their end: same trails; playback: only laps that moved, not every lap each frame).
         """
         if not self._map or not self._map_options.get("trail") or not self._map_shown:
             self._trail_state = None
@@ -303,22 +304,28 @@ class MapView(BackendBase):
         meters_per_pixel = self._map_view[2]
         ends = [self.data.lap_distance_at_x(lap, x) for _, lap in self._map_lines]
         state = self._trail_state
-        if (state is not None and state[0] is self._map and state[1] == meters_per_pixel
-                and len(state[2]) == len(ends)
-                and all(abs(end - last) < meters_per_pixel for end, last in zip(ends, state[2]))):
-            return
-        self._trail_state = (self._map, meters_per_pixel, ends)
-        for (line, lap), keys, end in zip(self._map_lines, self._map["lines"], ends):
+        if state is None or state[0] is not self._map or state[1] != meters_per_pixel or len(state[2]) != len(ends):
+            built = [math.nan] * len(ends)  # other map or scale: every trail built
+        else:
+            built = list(state[2])
+        changed = False
+        for index, ((line, lap), keys, end) in enumerate(zip(self._map_lines, self._map["lines"], ends)):
+            if abs(end - built[index]) < meters_per_pixel:  # nan (not built): False
+                continue
+            built[index] = end
             distances, times = self.data.lap_times(lap)
             if not distances:
                 continue
+            changed = True
             start = interpolate(times, distances, interpolate(distances, times, end) - TRAIL_SECONDS)
             bright = lap.color.lighter(165)  # stands out over its own driving line
             VertexStore.set(keys["trail"], lap_map.trail_band(
                 line, self.line_normals(lap, line), start, end, (bright.red(), bright.green(), bright.blue()),
                 meters_per_pixel * 3.2, meters_per_pixel * TRAIL_GAP))
-        self._trail_revision += 1
-        self.trailChanged.emit()
+        self._trail_state = (self._map, meters_per_pixel, built)
+        if changed:
+            self._trail_revision += 1
+            self.trailChanged.emit()
 
     @Slot(float, str, result=dict)
     def placementAt(self, x: float, lap_key: str = "") -> dict:
@@ -466,14 +473,13 @@ class MapView(BackendBase):
         if reference_line is not None and reference_line is self._road:  # official circuit stands for reference line
             kept = grids.get(ROAD_GRID)
             self._grids[ROAD_GRID] = kept if kept is not None and kept.line is self._road else lap_map.LineGrid(self._road)
-        xs = self._road.xs + [x for line, _ in self._map_lines for x in line.xs]
-        ys = self._road.ys + [y for line, _ in self._map_lines for y in line.ys]
+        drawn = [self._road, *(line for line, _ in self._map_lines)]  # map bounds: of every line drawn
         limits = self.shown_limits()
         if limits is not None:
-            xs = xs + limits.left.xs + limits.right.xs
-            ys = ys + limits.left.ys + limits.right.ys
-        for part in self._pit:
-            xs, ys = xs + part.xs, ys + part.ys
+            drawn += [limits.left, limits.right]
+        drawn += self._pit
+        xs = [bound for line in drawn if line.xs for bound in (min(line.xs), max(line.xs))]  # lines packed: never joined
+        ys = [bound for line in drawn if line.ys for bound in (min(line.ys), max(line.ys))]
         events = self.map_event_points()
         self._map = {
             "road": self.prefix + "map|road", "edge": self.prefix + "map|edge", "colored": self.prefix + "map|colored",
@@ -556,14 +562,14 @@ class MapView(BackendBase):
         on reference lap. Each label zooms charts on its corner (start & end distances).
         Labels with a time delta are drawn first when labels overlap (priority).
         """
-        if self._official:
+        if self._corner_table.official:
             return self.official_points()
         line = self.reference_map_line()
-        if line is None or not self._corner_rows:
+        if line is None or not self.corner_rows():
             return []
         return [self.corner_point(*lap_map.point_at(line, row.corner.apex), corner_label(row.corner.number), index, row,
                                   row.corner.start, row.corner.end, row.time_delta)
-                for index, row in enumerate(self._corner_rows)]
+                for index, row in enumerate(self.corner_rows())]
 
     def official_points(self) -> list[dict]:
         """Official corners on map, time lost / gained of each corner found on reference lap shown on the official
@@ -574,10 +580,10 @@ class MapView(BackendBase):
         """
         delta_on: dict[int, tuple[bool, CornerComparison]] = {}  # official corner index: covered, corner found
         loose: list[CornerComparison] = []  # corners found shown at their own apex
-        for row in self._corner_rows:
-            inside = self.official_in(row)
-            nearest = min(inside or self._official, key=lambda corner: abs(corner.distance - row.corner.apex))
-            index = self._official.index(nearest)
+        for row in self.corner_rows():
+            inside = self._corner_table.official_in(row)
+            nearest = min(inside or self._corner_table.official, key=lambda corner: abs(corner.distance - row.corner.apex))
+            index = self._corner_table.official.index(nearest)
             held = delta_on.get(index)
             if (inside or abs(nearest.distance - row.corner.apex) <= 200) and (held is None or (inside and not held[0])):
                 if held is not None:  # corner only near the official corner: own label
@@ -586,13 +592,13 @@ class MapView(BackendBase):
             else:
                 loose.append(row)
         points = []
-        for index, corner in enumerate(self._official):
+        for index, corner in enumerate(self._corner_table.official):
             held = delta_on.get(index)
             found = held[1] if held is not None else next(
-                (row for row in self._corner_rows if corner in self.official_in(row)), None)
+                (row for row in self.corner_rows() if corner in self._corner_table.official_in(row)), None)
             start, end = (found.corner.start, found.corner.end) if found is not None else (
                 corner.distance - 120, corner.distance + 120)
-            points.append(self.corner_point(*self.rotate_point(corner.x, corner.y), self.official_text(corner.label),
+            points.append(self.corner_point(*self.rotate_point(corner.x, corner.y), self._corner_table.official_text(corner.label),
                                             index, found, start, end, held[1].time_delta if held is not None else None))
         line = self.reference_map_line()
         if line is not None:
@@ -606,7 +612,7 @@ class MapView(BackendBase):
         """Corner label on map: position, name, corner row (-1 if none), range zoomed on click, time delta"""
         return {
             "x": x, "y": y, "label": label, "index": index,
-            "row": self._corner_rows.index(row) if row is not None else -1,
+            "row": self.corner_rows().index(row) if row is not None else -1,
             "start": start, "end": end,
             "delta": signed(delta, 2) if delta is not None else "",
             "deltaColor": COLOR_LOSS if delta is not None and delta > 0.005
@@ -619,7 +625,7 @@ class MapView(BackendBase):
 
         Each point tells its corner, speed & distance, and differences with reference lap.
         """
-        if not self._map_lines or not self._corner_rows or self.data.reference is None:
+        if not self._map_lines or not self.corner_rows() or self.data.reference is None:
             return []
         convert, unit = self.data.units["speed"]
         speed_channel = CHANNEL_MAP["speed_kph"]
@@ -631,19 +637,19 @@ class MapView(BackendBase):
         turns: dict[int, float] = {}  # turning direction at each corner apex (reference line)
         reference_trackouts: dict[int, float] = {}  # track-out point of reference lap in each corner
         if lefts and reference_line is not None:
-            for index, row in enumerate(self._corner_rows):
+            for index, row in enumerate(self.corner_rows()):
                 turns[index] = lap_map.turning(reference_line, min(bisect.bisect_left(
                     reference_line.distances, row.corner.apex), len(reference_line.xs) - 1))
-            reference_trackouts = self.lap_trackouts(self.data.reference, reference_stats, turns, reference_line)
+            reference_trackouts = self._corner_table.lap_trackouts(self.data.reference, reference_stats, turns, reference_line)
         points = []
         for order, (line, lap) in enumerate(self._map_lines):
             sampled, lap_stats = self.lap_corner_stats(lap)
             is_reference = lap is self.data.reference
             name = self.short_label(lap.key)
             scale = self.data.scale_of(lap)  # corner stats in reference distances, map line in lap distances
-            trackouts = self.lap_trackouts(lap, lap_stats, turns, reference_line) \
+            trackouts = self._corner_table.lap_trackouts(lap, lap_stats, turns, reference_line) \
                 if turns and reference_line is not None else {}
-            for index, row in enumerate(self._corner_rows):
+            for index, row in enumerate(self.corner_rows()):
                 stats, reference = lap_stats[index], reference_stats[index]
                 if stats is None:
                     continue
@@ -1078,8 +1084,8 @@ class MapView(BackendBase):
         shown = lap_map.part(line, start, end) if end > start else lap_map.MapLine([], [], [])
         VertexStore.set(self._map["rangeKey"], lap_map.line_band(shown, meters_per_pixel * 7))
         selected = lap_map.MapLine([], [], [])
-        if 0 <= self._selected_corner < len(self._corner_rows):
-            corner = self._corner_rows[self._selected_corner].corner
+        if 0 <= self._selected_corner < len(self.corner_rows()):
+            corner = self.corner_rows()[self._selected_corner].corner
             selected = lap_map.part(line, corner.start, corner.end)
         VertexStore.set(self._map["selectedKey"], lap_map.line_band(selected, meters_per_pixel * 9))
 
@@ -1091,7 +1097,7 @@ class MapView(BackendBase):
         return {
             "map": dict(self._map), "lines": list(self._map_lines), "road": self._road, "angle": self._map_angle,
             "limits": self._limits, "show_limits": bool(self._map_options.get("limits")), "edges": self._edges,
-            "reference": reference, "hysteresis": self._hysteresis, "sectors": tuple(self.data.sector_lines),
+            "reference": reference, "hysteresis": self._corner_table.sensitivity(), "sectors": tuple(self.data.sector_lines),
             "pit": list(self._pit), "reference_line": reference_line, "guide": self.guide_line(),
             "spreads": list(self.brake_spreads().values()), "lap_shapes": dict(self._lap_shapes),
             "normals": dict(self._normals), "zones": dict(self._zones), "arrows": self._arrows,
@@ -1226,7 +1232,8 @@ class MapView(BackendBase):
             key = (frame["limits"], frame["angle"])
             if not frame["edge_normals"] or not keys_match(frame["edge_normals"][0], key):
                 frame["edge_normals"] = frame["new"]["edge_normals"] = (key, (
-                    normals(limits.left.xs, limits.left.ys), normals(limits.right.xs, limits.right.ys)))
+                    lap_map.PackedNormals(limits.left.xs, limits.left.ys),
+                    lap_map.PackedNormals(limits.right.xs, limits.right.ys)))
             keep = lap_map.kept_indexes(limits.left, meters_per_pixel * 0.75)
             edges = [band_part(edge.xs, edge.ys, edge_normals, keep, meters_per_pixel * 1.1)
                      for edge, edge_normals in zip((limits.left, limits.right), frame["edge_normals"][1])]
@@ -1250,11 +1257,11 @@ class MapView(BackendBase):
             cached = self._turned[lap.key] = (lap.data, self._map_angle, lap_map.rotate_line(line, self._map_angle))
         return cached[2]
 
-    def line_normals(self, lap: PlotLap, line: lap_map.MapLine) -> list[tuple[float, float]]:
+    def line_normals(self, lap: PlotLap, line: lap_map.MapLine) -> lap_map.PackedNormals:
         """Normals of lap line turned like map: same at every map scale, computed once per lap & map rotation"""
         cached = self._normals.get(lap.key)
         if cached is None or cached[0] is not lap.data or cached[1] != self._map_angle or cached[2] != len(line.xs):
-            cached = (lap.data, self._map_angle, len(line.xs), normals(line.xs, line.ys))
+            cached = (lap.data, self._map_angle, len(line.xs), lap_map.PackedNormals(line.xs, line.ys))
             self._normals[lap.key] = cached
         return cached[3]
 
@@ -1307,7 +1314,7 @@ class MapView(BackendBase):
         if mode == "line":
             return (mode, reference, compared_data, line, self._map_angle)
         if mode == "corners":
-            return (mode, reference, self._corner_key, colorblind, line, self._map_angle)
+            return (mode, reference, self._corner_table.key, colorblind, line, self._map_angle)
         if mode == "minisectors":
             return (mode, tuple(lap.data for _, lap in self._map_lines), tuple(lap.color.rgba() for _, lap in self._map_lines),
                     tuple(lap.clean for _, lap in self._map_lines), line, self._map_angle)
@@ -1343,7 +1350,7 @@ class MapView(BackendBase):
             colors = lap_map.gain_colors_from_delta(delta[0], delta[1], line, self.data.scale_of(lap),
                                                     self.data.delta_window, bool(self._map_options.get("colorblind")))
         elif mode == "corners":  # reference line colored corner by corner by compared lap time delta
-            corners = [(row.corner.start, row.corner.end, row.time_delta) for row in self._corner_rows
+            corners = [(row.corner.start, row.corner.end, row.time_delta) for row in self.corner_rows()
                        if row.time_delta is not None]
             colors = lap_map.corner_delta_colors(line, corners, bool(self._map_options.get("colorblind")))
         elif mode == "minisectors":  # reference line colored by fastest shown lap of each mini-sector
@@ -1516,13 +1523,39 @@ class MapView(BackendBase):
     def map_cursor(self, x: float, constant: bool = True) -> list[dict]:
         """Map positions at cursor (see mapCursor), lap color & key left out unless constant (cursorState: QML takes
         them from map laps)"""
+        positions, texts = self.map_positions(x, True)
         points = []
+        for index, (lap, (gap, slip)) in enumerate(zip((lap for _, lap in self._map_lines), texts)):
+            point = {"x": positions[index * 3], "y": positions[index * 3 + 1], "angle": positions[index * 3 + 2],
+                     "gap": gap, "slip": slip}
+            if constant:
+                point.update(color=lap.color.name(), lap=lap.key)
+            points.append(point)
+        return points
+
+    def map_positions(self, x: float, texts: bool = False) -> tuple[list[float], list[tuple[str, str]]]:
+        """Map position of each lap at cursor as one flat list (x, y, angle in degrees of each lap: playback frames
+        move cars without building a dict per lap), gap to reference lap & slip angle texts of each lap if texts"""
+        positions: list[float] = []
+        labels: list[tuple[str, str]] = []
         reference = self.data.reference
         reference_distance = self.data.lap_distance_at_x(reference, x) if reference is not None else 0.0
         reference_distance *= self.data.scale_of(reference) if reference is not None else 1.0
         deltas = self.data.reference_deltas
         for line, lap in self._map_lines:
             distance = self.data.lap_distance_at_x(lap, x)  # lap distance (own line)
+            travel = math.degrees(lap_map.heading_at(line, distance))
+            angle, slip = travel, ""
+            heading = self.lap_heading(lap, distance)
+            if heading is not None:  # car pointing direction (recorded), driving direction: slip angle
+                angle = math.degrees(heading + self._map_angle)
+                if texts:
+                    drift = (angle - travel + 180) % 360 - 180
+                    slip = f"{drift:+.0f}°" if abs(drift) >= 1.5 else ""
+            positions += (interpolate(line.distances, line.xs, distance), interpolate(line.distances, line.ys, distance),
+                          angle)
+            if not texts:
+                continue
             along = distance * self.data.scale_of(lap)  # reference distance
             gap = ""  # behind (+) or ahead (-) of reference lap: time on distance axis, meters on time axis
             if lap is not reference:
@@ -1530,19 +1563,8 @@ class MapView(BackendBase):
                     gap = distance_text(reference_distance - along, sign=True)
                 elif lap.key in deltas and deltas[lap.key][0]:
                     gap = signed(interpolate(*deltas[lap.key], along), 2, " s")
-            travel = math.degrees(lap_map.heading_at(line, distance))
-            angle, slip = travel, ""
-            heading = self.lap_heading(lap, distance)
-            if heading is not None:  # car pointing direction (recorded), driving direction: slip angle
-                angle = math.degrees(heading + self._map_angle)
-                drift = (angle - travel + 180) % 360 - 180
-                slip = f"{drift:+.0f}°" if abs(drift) >= 1.5 else ""
-            point = {"x": interpolate(line.distances, line.xs, distance),
-                     "y": interpolate(line.distances, line.ys, distance), "angle": angle, "gap": gap, "slip": slip}
-            if constant:
-                point.update(color=lap.color.name(), lap=lap.key)
-            points.append(point)
-        return points
+            labels.append((gap, slip))
+        return positions, labels
 
     def lap_heading(self, lap: PlotLap, distance: float) -> float | None:
         """Car heading on map at distance (radians, map not turned) from recorded yaw, None if not recorded

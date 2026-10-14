@@ -21,33 +21,47 @@ ColumnLayout {
         return Math.floor(total / 60) + ":" + (total % 60 < 10 ? "0" : "") + (total % 60)
     }
 
+    // HUD part of the game in the HUD menu: checked while the game shows it
+    component HudAction: Action {
+        property string key: ""
+        objectName: "hud_" + key
+        checkable: true
+        enabled: backend.camera.hudState[key] !== undefined
+        checked: backend.camera.hudState[key] === true
+        onTriggered: {
+            backend.camera.toggleHudComponent(key)
+            // click toggled checked by itself: state of game shown again (also when the toggle was refused)
+            checked = Qt.binding(function() { return backend.camera.hudState[key] === true })
+        }
+    }
+
     // Camera button of desk: highlighted while it is the camera of the game
     component CameraButton: AbstractButton {
         id: control
         property string key: ""
-        readonly property bool current: backend.cameraKey === key
+        readonly property bool current: backend.camera.cameraKey === key
         objectName: "camera_" + key
         hoverEnabled: true
         focusPolicy: Qt.NoFocus
         implicitHeight: Math.round(theme.em * 2.1)
         implicitWidth: Math.max(label.implicitWidth + theme.em * 1.0, theme.em * 3.2)
         Layout.fillWidth: true
-        onClicked: backend.selectCamera(key)
+        onClicked: backend.camera.selectCamera(key)
         ToolTip.visible: hovered && label.truncated
         ToolTip.text: text
         background: Rectangle {
-            radius: theme.em * 0.45
-            color: control.current ? theme.loss
+            radius: theme.radiusMd
+            color: control.current ? theme.lossFill
                  : control.down ? theme.border : control.hovered ? theme.hover : theme.raised
             border.width: control.current ? 0 : 1
             border.color: theme.border
-            Behavior on color { ColorAnimation { duration: 120 } }
+            Behavior on color { ColorAnimation { duration: theme.motionFast } }
         }
         contentItem: Text {
             id: label
             text: control.text
             color: control.current ? "white" : theme.text
-            font.pointSize: theme.fontPoint * 0.88
+            font.pointSize: theme.fontSmall
             font.weight: control.current ? Font.DemiBold : Font.Normal
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -62,7 +76,7 @@ ColumnLayout {
         border.color: desk.hasCar ? Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.6) : theme.border
         ColumnLayout {
             id: airColumn
-            anchors { left: parent.left; right: parent.right; top: parent.top; margins: theme.em * 0.65 }
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: theme.em * 0.7 }
             spacing: theme.em * 0.4
 
             RowLayout {
@@ -71,15 +85,15 @@ ColumnLayout {
                 Rectangle {  // on air light
                     implicitHeight: Math.round(theme.em * 1.6)
                     implicitWidth: airText.implicitWidth + theme.em * 1.2
-                    radius: theme.em * 0.3
-                    color: desk.hasCar ? theme.loss : theme.raised
+                    radius: theme.radiusSm
+                    color: desk.hasCar ? theme.lossFill : theme.raised
                     Text {
                         id: airText
                         anchors.centerIn: parent
                         text: i18n.tr("On Air").toUpperCase()
                         color: desk.hasCar ? "white" : theme.dimText
                         font.weight: Font.Bold
-                        font.pointSize: theme.fontPoint * 0.8
+                        font.pointSize: theme.fontCaption
                         font.letterSpacing: 1
                     }
                 }
@@ -136,17 +150,17 @@ ColumnLayout {
                         text: desk.hasCar ? (desk.onAir.number !== "" ? "#" + desk.onAir.number + "  " : "") + desk.onAir.driver
                                           : i18n.tr("No car on air yet")
                         color: desk.hasCar ? theme.text : theme.dimText
-                        font.pointSize: theme.fontPoint * 1.35
+                        font.pointSize: theme.fontLarge
                         font.weight: Font.Bold
                         elide: Text.ElideRight
                     }
                     Text {
                         Layout.fillWidth: true
                         text: desk.hasCar ? "P" + desk.onAir.classPosition + " " + desk.onAir.carClass
-                                            + (backend.cameraLabel !== "" ? "  ·  " + backend.cameraLabel : "")
+                                            + (backend.camera.cameraLabel !== "" ? "  ·  " + backend.camera.cameraLabel : "")
                                           : i18n.tr("Pick a car, a camera or a suggestion; the automatic mode cuts by itself.")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                         elide: Text.ElideRight
                         wrapMode: desk.hasCar ? Text.NoWrap : Text.WordWrap
                     }
@@ -155,16 +169,18 @@ ColumnLayout {
             // Pit radar: cars near the car on air in the pit lane (alongside in red)
             Flow {
                 Layout.fillWidth: true
-                visible: (desk.onAir.pitRadar || []).length > 0
+                visible: backend.pitRadarCount > 0
                 spacing: theme.em * 0.3
                 Repeater {
-                    model: desk.onAir.pitRadar || []
+                    model: backend.pitRadarRows  // own model: distances change in place, card bindings untouched
                     delegate: Pill {
-                        required property var modelData
-                        text: "#" + modelData.number + "  " + (modelData.alongside ? i18n.tr("Alongside")
-                              : (modelData.ahead ? "\u25b2 " : "\u25bc ") + modelData.distance)
-                        tint: modelData.alongside ? theme.loss : theme.warning
-                        solid: modelData.alongside
+                        required property string number
+                        required property string distance
+                        required property bool alongside
+                        required property bool ahead
+                        text: "#" + number + "  " + (alongside ? i18n.tr("Alongside") : (ahead ? "\u25b2 " : "\u25bc ") + distance)
+                        tint: alongside ? theme.loss : theme.warning
+                        solid: alongside
                     }
                 }
             }
@@ -202,12 +218,13 @@ ColumnLayout {
                 visible: desk.mode === "auto" && remaining > 0 && !backend.carLocked
                 text: i18n.tr("Operator cut: director cuts again in %1 s").arg(Math.ceil(remaining))
                 color: theme.warning
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
                 Timer {
                     interval: 500
                     repeat: true
-                    running: desk.mode === "auto" && (desk.onAir.holdMs || 0) > 0 && pageState.active
+                    // stops once the hold ran out (a new hold time makes remaining positive again)
+                    running: desk.mode === "auto" && holdText.remaining > 0 && pageState.active
                     triggeredOnStart: true
                     onTriggered: holdText.now = Date.now()
                 }
@@ -222,21 +239,21 @@ ColumnLayout {
         ColumnLayout {
             id: cameraColumn
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: theme.em * 0.6 }
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             Repeater {
                 model: ["Driving", "Onboard", "Trackside"]
                 delegate: ColumnLayout {
                     id: group
                     required property string modelData
                     Layout.fillWidth: true
-                    spacing: theme.em * 0.25
+                    spacing: theme.em * 0.3
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
                             Layout.fillWidth: true
                             text: i18n.tr(group.modelData).toUpperCase()
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.75
+                            font.pointSize: theme.fontCaption
                             font.weight: Font.DemiBold
                             font.letterSpacing: 0.5
                         }
@@ -245,29 +262,78 @@ ColumnLayout {
                             implicitHeight: Math.round(theme.em * 1.6)
                             glyph: ""
                             tip: i18n.tr("Previous camera angle")
-                            onClicked: backend.stepCamera(group.modelData, -1)
+                            onClicked: backend.camera.stepCamera(group.modelData, -1)
                         }
                         TpButton {
                             flat: true
                             implicitHeight: Math.round(theme.em * 1.6)
                             glyph: ""
                             tip: i18n.tr("Next camera angle")
-                            onClicked: backend.stepCamera(group.modelData, 1)
+                            onClicked: backend.camera.stepCamera(group.modelData, 1)
                         }
                     }
                     GridLayout {
                         Layout.fillWidth: true
-                        columns: Math.max(2, Math.min(group.modelData === "Trackside" ? 5 : 4, Math.floor(width / (theme.em * 6.5))))
+                        // Width of the card column (same as this grid's): its own width would rearrange it again
+                        columns: Math.max(2, Math.min(group.modelData === "Trackside" ? 5 : 4,
+                                                      Math.floor(cameraColumn.width / (theme.em * 6.5))))
                         columnSpacing: theme.em * 0.25
                         rowSpacing: theme.em * 0.25
                         Repeater {
-                            model: backend.cameras.filter(function(camera) { return camera.group === group.modelData })
+                            model: backend.camera.camerasByGroup[group.modelData] || []
                             delegate: CameraButton {
                                 required property var modelData
                                 key: modelData.key
                                 text: modelData.text
                             }
                         }
+                    }
+                }
+            }
+            // HUD of the game (as the Game Replays page): all or each part, clean pictures for the stream
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: theme.em * 0.2
+                Text {
+                    Layout.fillWidth: true
+                    text: i18n.tr("Game HUD").toUpperCase()
+                    color: theme.dimText
+                    font.pointSize: theme.fontCaption
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 0.5
+                }
+                TpButton {
+                    id: hudButton
+                    objectName: "hudButton"
+                    flat: true
+                    implicitHeight: Math.round(theme.em * 1.6)
+                    glyph: ""  // view
+                    tip: i18n.tr("Game HUD")
+                    enabled: backend.inSession
+                    checked: hudMenu.visible
+                    // Menu right aligned on button (page edge): never cut by window
+                    onClicked: {
+                        if (hudMenu.visible) {
+                            hudMenu.close()
+                            return
+                        }
+                        backend.camera.refreshHud()  // parts shown asked again: checks follow the game
+                        hudMenu.popup(hudButton, hudButton.width - hudMenu.width, hudButton.height + 4)
+                    }
+                    TpMenu {
+                        id: hudMenu
+                        width: Math.max(implicitWidth, theme.em * 20)
+                        // As a middle click in game: its web panels too (no Rest API command for them)
+                        Action { text: i18n.tr("Show / Hide Game UI (middle click)"); onTriggered: backend.camera.toggleGameUi() }
+                        MenuSeparator {}
+                        Action { text: i18n.tr("Show HUD"); onTriggered: backend.camera.setHudShown(true) }
+                        Action { text: i18n.tr("Hide HUD"); onTriggered: backend.camera.setHudShown(false) }
+                        MenuSeparator {}
+                        HudAction { key: "chat"; text: i18n.tr("Chat") }
+                        HudAction { key: "mfd"; text: i18n.tr("MFD") }
+                        HudAction { key: "speedo"; text: i18n.tr("Car HUD") }
+                        HudAction { key: "timing"; text: i18n.tr("Timing") }
+                        HudAction { key: "trackMap"; text: i18n.tr("Track Map") }
                     }
                 }
             }
@@ -281,25 +347,25 @@ ColumnLayout {
                     Layout.fillWidth: true
                     text: i18n.tr("Replay").toUpperCase()
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.75
+                    font.pointSize: theme.fontCaption
                     font.weight: Font.DemiBold
                 }
-                TpButton { glyph: ""; text: "10 s"; flat: true; tip: i18n.tr("Back 10 seconds"); onClicked: backend.jump(-10) }  // rewind
+                TpButton { glyph: ""; text: "10 s"; flat: true; tip: i18n.tr("Back 10 seconds"); onClicked: backend.camera.jump(-10) }  // rewind
                 TpButton {
-                    readonly property bool moving: backend.lastCommand !== "" && backend.lastCommand !== "VCRCOMMAND_STOP"
+                    readonly property bool moving: backend.camera.lastCommand !== "" && backend.camera.lastCommand !== "VCRCOMMAND_STOP"
                     accent: true
                     glyph: moving ? "" : ""  // pause, play
                     tip: (moving ? i18n.tr("Pause replay") : i18n.tr("Play replay")) + " (" + i18n.tr("Space") + ")"
-                    onClicked: backend.togglePlay()
+                    onClicked: backend.camera.togglePlay()
                 }
                 TpButton {
                     glyph: ""  // slow
                     flat: true
-                    checked: backend.lastCommand === "VCRCOMMAND_SLOW"
+                    checked: backend.camera.lastCommand === "VCRCOMMAND_SLOW"
                     tip: i18n.tr("Play slowly")
-                    onClicked: backend.playback("VCRCOMMAND_SLOW")
+                    onClicked: backend.camera.playback("VCRCOMMAND_SLOW")
                 }
-                TpButton { glyph: ""; text: "10 s"; flat: true; tip: i18n.tr("Forward 10 seconds"); onClicked: backend.jump(10) }  // fast forward
+                TpButton { glyph: ""; text: "10 s"; flat: true; tip: i18n.tr("Forward 10 seconds"); onClicked: backend.camera.jump(10) }  // fast forward
             }
         }
     }
@@ -321,7 +387,7 @@ ColumnLayout {
                     text: desk.mode === "auto" ? i18n.tr("Director Queue") : i18n.tr("Suggestions")
                     color: theme.text
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 1.05
+                    font.pointSize: theme.fontSubtitle
                     elide: Text.ElideRight
                 }
                 TpButton {
@@ -339,7 +405,7 @@ ColumnLayout {
                 visible: desk.mode === "manual"
                 text: i18n.tr("Manual mode: you cut alone. Assisted mode lists stories worth showing, automatic mode cuts to them by itself.")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.88
+                font.pointSize: theme.fontSmall
                 wrapMode: Text.WordWrap
             }
             Item {
@@ -354,7 +420,7 @@ ColumnLayout {
                 spacing: theme.em * 0.3
                 model: backend.suggestionRows
                 boundsBehavior: Flickable.StopAtBounds
-                displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
+                displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
                 delegate: Rectangle {
                     id: story
                     required property string key
@@ -369,7 +435,7 @@ ColumnLayout {
                     readonly property color tint: desk.tone(tone)
                     width: ListView.view.width
                     height: Math.round(theme.em * 3.0)
-                    radius: theme.em * 0.45
+                    radius: theme.radiusMd
                     color: storyArea.containsMouse ? theme.hover : best ? Qt.rgba(tint.r, tint.g, tint.b, 0.1) : "transparent"
                     border.width: 1
                     border.color: best ? Qt.rgba(tint.r, tint.g, tint.b, 0.45) : theme.border
@@ -399,7 +465,7 @@ ColumnLayout {
                                 Layout.fillWidth: true
                                 text: story.kindText + (story.detail !== "" ? "  ·  " + story.detail : "")
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.8
+                                font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
                             }
                         }

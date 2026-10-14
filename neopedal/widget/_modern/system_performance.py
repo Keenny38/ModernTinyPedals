@@ -25,6 +25,7 @@ CPU & memory usage of system and of this app.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import psutil
 from PySide6.QtGui import QPainter
@@ -35,9 +36,14 @@ from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SystemPerformanceConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SystemPerformanceConfig
 
     options = (
         "font_size", "layout", "average_samples", "show_system_performance", "show_neopedal_performance",
@@ -79,4 +85,5 @@ class Realtime(StatsMixin, ModernOverlay):
                 self.cpu[key] = self.ema(self.cpu[key], app_cpu_percent(self.app_info, self.cpu_count))
                 memory = f"{self.app_memory.megabytes():.1f}MB"
             values.append(Value(f"{self.cpu[key]:.2f}%", bar=fraction(self.cpu[key] / 100), sub=memory))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

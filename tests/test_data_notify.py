@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from neopedal.adapter import data_notify, lmu_connector, rf2_connector
+from neopedal.adapter import _sync, data_notify, lmu_connector, rf2_connector
 from neopedal.adapter.data_notify import DataNotifier
 from neopedal.module import _base, module_delta, module_recorder
 
@@ -22,8 +22,7 @@ def notifier(monkeypatch):
     fresh = DataNotifier()
     monkeypatch.setattr(data_notify, "notifier", fresh)
     monkeypatch.setattr(_base, "notifier", fresh)
-    monkeypatch.setattr(lmu_connector, "notifier", fresh)
-    monkeypatch.setattr(rf2_connector, "notifier", fresh)
+    monkeypatch.setattr(_sync, "notifier", fresh)  # update thread of LMU & rF2 connectors
     monkeypatch.setattr(module_delta, "notifier", fresh)
     return fresh
 
@@ -38,6 +37,9 @@ def make_module(active=0.01, idle=0.4):
     module._done = threading.Event()
     module._done.set()
     module._wake = threading.Event()
+    module._wake_derived = threading.Event()
+    module._wake_state = threading.Event()
+    module._next_update = 0.0
     module.active_interval = active
     module.idle_interval = idle
     module._max_wait = max(active, min(idle, _base.DATA_MAX_WAIT))
@@ -449,17 +451,27 @@ def test_lmu_loop_rebuilds_maps_and_notifies_only_on_new_data(notifier, monkeypa
     assert sync.tele_map[1] == (0, 1)
 
 
-def test_lmu_loop_unknown_copy_state_rebuilds_every_tick(notifier, monkeypatch):
-    """Direct access & replay (copy state unknown): same as before, maps rebuilt every tick"""
+def test_lmu_loop_unknown_copy_state_rebuilds_on_index_key_change(notifier, monkeypatch):
+    """Direct access & replay (copy state unknown): maps rebuilt only once scoring sample or vehicle counts changed"""
     sync, zone, data = lmu_sync()
     maps = []
     original_map = lmu_connector.SyncData._SyncData__update_tele_map
     monkeypatch.setattr(
         lmu_connector.SyncData, "_SyncData__update_tele_map", lambda self: (maps.append(1), original_map(self)))
     data.scoring.scoringInfo.mCurrentET = 1.0
-    stop = ScriptedStop([lambda: zone.results.append(None)] * 4)
+
+    def scoring_sample():
+        data.scoring.scoringInfo.mCurrentET += 0.2
+        zone.results.append(None)
+
+    def vehicle_left():
+        data.telemetry.activeVehicles = 1
+        zone.results.append(None)
+
+    stop = ScriptedStop([lambda: zone.results.append(None)] * 3 + [scoring_sample, vehicle_left, lambda: None])
     sync._SyncData__update_loop(stop)
-    assert len(maps) == 4
+    assert len(maps) == 3  # first tick, scoring sample, telemetry vehicle count
+    assert sync.tele_map[1] == (0, -1)
 
 
 def test_lmu_player_lost_paused_after_5_ticks_without_new_data(notifier):

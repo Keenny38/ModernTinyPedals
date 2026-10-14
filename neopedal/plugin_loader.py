@@ -53,11 +53,15 @@ import sys
 import time
 from contextlib import suppress
 from types import MappingProxyType, ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import safe_mode
 from .const_app import LEGACY_PACKAGE
+from .userfile import write_json
 from .validator import is_finite_number
+
+if TYPE_CHECKING:
+    from .template.widget_config_types import PluginConfig
 
 logger = logging.getLogger(__name__)
 
@@ -255,11 +259,7 @@ def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER, expected_digest:
         raise ValueError("plugin code changed after confirmation, review it again")
     trusted = load_trusted()
     trusted[widget_name] = digest
-    filename = trust_filename()
-    temp_filename = f"{filename}.tmp"
-    with open(temp_filename, "w", encoding="utf-8") as file:
-        json.dump(trusted, file, indent=4, sort_keys=True)
-    os.replace(temp_filename, filename)
+    write_json(trust_filename(), trusted, indent=4, raise_error=True, sort_keys=True)
     logger.info("PLUGIN: trusted %s (%s)", widget_name, digest[:12])
     return digest
 
@@ -358,6 +358,8 @@ def error_placeholder(module_name: str, widget_name: str, message: str) -> Modul
 
     class Realtime(Overlay):
         """Plugin error"""
+
+        wcfg: PluginConfig
 
         def __init__(self, config, widget_name):
             super().__init__(config, widget_name)

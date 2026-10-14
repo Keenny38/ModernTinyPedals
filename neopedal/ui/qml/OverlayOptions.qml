@@ -10,11 +10,15 @@ import QtQuick.Layouts
 TpPage {
     id: page
 
-    readonly property bool narrow: width < theme.em * 56
+    readonly property bool narrow: width < theme.bpNarrow
     readonly property bool previewShown: width >= theme.em * 74
     readonly property var info: backend.overlayInfo
     property var menuData: null  // option row of the "more" menu
 
+    // Field being edited committed (Apply, Ctrl+S: buttons & shortcuts take no focus): focus left
+    function commitEdits() {
+        page.forceActiveFocus()
+    }
     function focusSearch() {
         search.forceActiveFocus()
         search.selectAll()
@@ -91,6 +95,20 @@ TpPage {
         }
         onClosed: list.forceActiveFocus()
     }
+    TextMetrics { id: shareMetrics; text: i18n.tr("Import Overlay Settings...") }
+    TpMenu {
+        id: shareMenu
+        width: Math.max(theme.em * 13, shareMetrics.advanceWidth + theme.em * 3.8)  // longest item never cut
+        MenuItem {
+            text: i18n.tr("Export Overlay Settings...")
+            onTriggered: backend.exportOverlays()
+        }
+        MenuItem {
+            text: i18n.tr("Import Overlay Settings...")
+            onTriggered: backend.importOverlays()
+        }
+        onClosed: list.forceActiveFocus()
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -145,10 +163,10 @@ TpPage {
                             anchors.left: parent.left
                             anchors.leftMargin: theme.em * 0.5
                             anchors.bottom: parent.bottom
-                            anchors.bottomMargin: theme.em * 0.25
+                            anchors.bottomMargin: theme.em * 0.3
                             text: parent.section
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                             font.weight: Font.DemiBold
                         }
                     }
@@ -160,11 +178,10 @@ TpPage {
                         readonly property int badgeCount: backend.filtering && backend.scopeAll ? model.matches : model.changed
                         width: ListView.view.width
                         height: Math.round(theme.em * 2.2)
-                        radius: theme.em * 0.5
-                        color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.2 : 0.13)
-                             : entryArea.containsMouse ? theme.hover : "transparent"
+                        radius: theme.radiusMd
+                        color: theme.rowColor(entryArea.containsMouse, selected)
                         opacity: dimmed ? 0.45 : 1
-                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
                         Accessible.role: Accessible.PageTab
                         Accessible.name: model.label
                         Accessible.selected: selected
@@ -190,7 +207,7 @@ TpPage {
                         }
                         Text {
                             anchors.left: stateDot.right
-                            anchors.leftMargin: theme.em * 0.55
+                            anchors.leftMargin: theme.em * 0.6
                             anchors.right: badge.visible ? badge.left : customized.left
                             anchors.rightMargin: theme.em * 0.3
                             anchors.verticalCenter: parent.verticalCenter
@@ -207,7 +224,7 @@ TpPage {
                             anchors.verticalCenter: parent.verticalCenter
                             text: visible ? entry.model.customized : ""
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                             font.features: { "tnum": 1 }
                         }
                         Rectangle {
@@ -219,14 +236,14 @@ TpPage {
                             height: Math.round(theme.em * 1.3)
                             width: Math.max(height, badgeText.implicitWidth + theme.em * 0.6)
                             radius: height / 2
-                            color: entry.model.errors > 0 && !(backend.filtering && backend.scopeAll) ? theme.loss
-                                 : backend.filtering && backend.scopeAll ? theme.hover : theme.accent
+                            color: entry.model.errors > 0 && !(backend.filtering && backend.scopeAll) ? theme.lossFill
+                                 : backend.filtering && backend.scopeAll ? theme.hover : theme.accentFill
                             Text {
                                 id: badgeText
                                 anchors.centerIn: parent
                                 text: entry.badgeCount
                                 color: backend.filtering && backend.scopeAll ? theme.text : "white"
-                                font.pointSize: theme.fontPoint * 0.75
+                                font.pointSize: theme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
                             }
@@ -243,7 +260,7 @@ TpPage {
                         }
                         ToolTip.visible: entryArea.containsMouse && entry.model.customized > 0
                         ToolTip.text: ToolTip.visible ? i18n.trm("Modified: " + entry.model.customized) : ""
-                        ToolTip.delay: 700
+                        ToolTip.delay: theme.tipDelay
                     }
                 }
             }
@@ -284,7 +301,7 @@ TpPage {
                 Rectangle {
                     Layout.preferredWidth: Math.round(theme.em * 2.6)
                     Layout.preferredHeight: Layout.preferredWidth
-                    radius: theme.em * 0.6
+                    radius: theme.radiusLg
                     readonly property color tint: backend.filtering && backend.scopeAll || page.info.color === ""
                                                   ? theme.accent : page.info.color
                     color: Qt.rgba(tint.r, tint.g, tint.b, theme.dark ? 0.2 : 0.14)
@@ -304,7 +321,7 @@ TpPage {
                               ? (backend.searching ? i18n.tr("Search results") : i18n.tr("Modified options"))
                               : page.info.label
                         color: theme.text
-                        font.pointSize: theme.fontPoint * 1.45
+                        font.pointSize: theme.fontTitle
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
@@ -318,6 +335,18 @@ TpPage {
                                 .filter(function(part) { return part !== "" }).join("  ·  ")
                         color: theme.dimText
                         elide: Text.ElideRight
+                    }
+                }
+                Pill {  // display profile set: some options follow it
+                    visible: !(backend.filtering && backend.scopeAll) && page.info.profile !== ""
+                    text: page.info.profile
+                    glyph: "\uE71C"  // filter
+                    tint: theme.accent
+                    tip: i18n.tr("Options set by this profile show its value: changing one switches to Custom. Click to show the option.")
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.showOption(page.info.profileOption)
                     }
                 }
                 Pill {
@@ -351,6 +380,14 @@ TpPage {
                     tip: i18n.tr("Every option of this overlay back to default (saved with Apply)")
                     onClicked: backend.resetOverlay()
                 }
+                TpButton {
+                    id: shareButton
+                    flat: true
+                    glyph: ""  // export
+                    text: page.narrow ? "" : i18n.tr("Share")
+                    tip: i18n.tr("Export or import overlay settings as a file")
+                    onClicked: shareMenu.popup(shareButton, 0, shareButton.height)
+                }
             }
 
             // Search & filters
@@ -375,7 +412,7 @@ TpPage {
                     onActivated: function(index) { backend.setScopeAll(index === 1) }
                     ToolTip.visible: scopeArea.containsMouse
                     ToolTip.text: i18n.tr("Where search & filter look")
-                    ToolTip.delay: 700
+                    ToolTip.delay: theme.tipDelay
                     MouseArea { id: scopeArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                 }
                 TpSwitch {
@@ -394,10 +431,24 @@ TpPage {
                     tip: i18n.tr("Show every option, including colors, thresholds and labels")
                     onClicked: backend.setAdvanced(!backend.advanced)
                 }
+                TpCombo {  // user display profiles: current display saved as one
+                    visible: page.info.userProfiles.length > 0 && !(backend.filtering && backend.scopeAll)
+                    width: theme.em * 11
+                    model: [{ label: i18n.tr("Save as Profile...") }].concat(page.info.userProfiles)
+                    textRole: "label"
+                    currentIndex: 0
+                    tip: i18n.tr("Save shown items as a display profile, then pick it in Display Profile (saved with Apply or Save)")
+                    onActivated: function(index) {
+                        if (index > 0)
+                            backend.saveUserProfile(page.info.userProfiles[index - 1].name)
+                        currentIndex = 0
+                    }
+                }
                 TpCombo {
                     visible: page.info.themes.length > 0 && !(backend.filtering && backend.scopeAll)
                     width: theme.em * 11
-                    model: [i18n.tr("Color Theme...")].concat(page.info.themes.map(function(entry) { return entry.label }))
+                    model: [{ label: i18n.tr("Color Theme...") }].concat(page.info.themes)
+                    textRole: "label"
                     currentIndex: 0
                     tip: i18n.tr("Set every color to a theme (saved only with Apply or Save)")
                     onActivated: function(index) {
@@ -503,16 +554,21 @@ TpPage {
                     Layout.fillHeight: true
                     Layout.preferredWidth: expanded ? Math.max(Math.round(theme.em * 21), Math.round(parent.width * 0.5))
                                                     : Math.round(theme.em * 21)
-                    Behavior on Layout.preferredWidth { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                    Behavior on Layout.preferredWidth { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
                     Layout.bottomMargin: theme.em * 1.0
                     Layout.rightMargin: theme.em * 1.0
-                    radius: theme.em * 0.7
+                    radius: theme.radiusXl
                     color: theme.base
                     border.width: 1
                     border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
 
                     onShownZoomChanged: scaleTimer.restart()
-                    Component.onCompleted: scaleTimer.restart()
+                    // hidden (narrow page, search of every overlay): edits not drawn for nothing
+                    onVisibleChanged: backend.setPreviewVisible(visible)
+                    Component.onCompleted: {
+                        backend.setPreviewVisible(visible)
+                        scaleTimer.restart()
+                    }
                     Timer {  // drawn again at new size once zoom & panel width settle
                         id: scaleTimer
                         interval: 200
@@ -554,7 +610,7 @@ TpPage {
                         Rectangle {  // dark backdrop: overlays are drawn for a game picture
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            radius: theme.em * 0.5
+                            radius: theme.radiusMd
                             color: "#1E1F22"
                             clip: true
                             Flickable {
@@ -577,14 +633,28 @@ TpPage {
                                     source: backend.previewUrl
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
-                                    mipmap: true
+                                    mipmap: false  // decoded at shown size (sourceSize below): no mipmaps
                                     // Old picture kept while the new one decodes off the UI thread
                                     asynchronous: true
                                     retainWhileLoading: true
                                     cache: false  // one picture per edit: never shown again
                                     sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                                     opacity: backend.previewState === 4 ? 0.4 : 1
-                                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                                    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
+                                    // Overlays with parts (black box): click a part to show its options
+                                    HoverHandler {
+                                        enabled: page.info.previewParts === true
+                                        cursorShape: Qt.PointingHandCursor
+                                    }
+                                    TapHandler {
+                                        enabled: page.info.previewParts === true
+                                        onSingleTapped: function(eventPoint) {
+                                            var left = (previewImage.width - previewImage.paintedWidth) / 2
+                                            var top = (previewImage.height - previewImage.paintedHeight) / 2
+                                            backend.previewClicked((eventPoint.position.x - left) / previewImage.paintedWidth,
+                                                                   (eventPoint.position.y - top) / previewImage.paintedHeight)
+                                        }
+                                    }
                                 }
                                 TapHandler {
                                     onDoubleTapped: previewPanel.zoom = previewPanel.zoom > 0 ? 0 : 1
@@ -659,7 +729,7 @@ TpPage {
                 Layout.preferredHeight: shown ? barRow.implicitHeight + theme.em * 1.0 : 0
                 clip: true
                 color: theme.dark ? Qt.lighter(theme.window, 1.1) : Qt.darker(theme.window, 1.04)
-                Behavior on Layout.preferredHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on Layout.preferredHeight { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
                 Rectangle { width: parent.width; height: 1; color: theme.border }
 
                 RowLayout {
@@ -716,7 +786,10 @@ TpPage {
                         text: i18n.tr("Apply")
                         tip: i18n.tr("Save & apply (Ctrl+S)")
                         enabled: backend.errorCount === 0
-                        onClicked: backend.apply()
+                        onClicked: {
+                            page.commitEdits()
+                            backend.apply()
+                        }
                     }
                 }
             }

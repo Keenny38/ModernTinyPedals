@@ -44,8 +44,11 @@ def test_levels_and_percent():
     spa = parse_lap_references(SHEET).entries[("Spa", "LMP2elms")]
     assert spa.level(120.9) == 0  # Alien
     assert spa.level(121.5) == 1  # Competitive
-    assert spa.level(124.0) == 3 and spa.level(125.9) == 3  # Midpack (103 & 104%)
-    assert spa.level(127.0) == 4  # Tail-ender
+    assert spa.level(123.0) == 2 and spa.level(124.0) == 2  # Good (102 & 103%, as the sheet)
+    assert spa.level(125.9) == 3 and spa.level(127.0) == 3  # Midpack (104 & 105%)
+    assert spa.level(128.0) == 4  # Tail-ender (106%)
+    assert spa.level(129.0) == 5  # Offline (107%)
+    assert spa.level(127.13047) == 3 and spa.level(127.1306) == 4  # as shown: 2:07.130 within "≤ 2:07.130"
     assert spa.level(140.0) == 5  # Offline
     assert spa.level(0) == -1
     assert spa.percent(121.5) == pytest.approx(121.5 / 120.48 * 100)
@@ -64,6 +67,7 @@ def test_levels_and_percent():
     ("Silverstone International", "Silverstone (International)"),
     ("Sebring International Raceway", "Sebring"),
     ("Lusail Short Circuit", "Qatar (short)"),
+    ("Losail International Circuit", "Qatar"),  # LMU spelling of the full circuit
     ("Circuit Paul Ricard 1A-V2", "Paul Ricard (1A v2)"),
     ("Autódromo José Carlos Pace", "Interlagos"),
     ("Nürburgring", ""),
@@ -117,6 +121,8 @@ def viewer(ui_env, monkeypatch):
                         lambda self: "Circuit de Spa-Francorchamps Endurance", raising=False)
     page = driver_stats_viewer.DriverStatsViewer(None)
     wait_jobs(page.backend)  # lap time reference read in background
+    page.backend.selectTrack("Circuit de Spa-Francorchamps Endurance")  # page opens on All Tracks
+    wait_jobs(page.backend)
     yield page.backend
     page.close()
     page.deleteLater()
@@ -131,16 +137,6 @@ def wait_jobs(backend, timeout: float = 10):
         QCoreApplication.processEvents()
         time.sleep(0.002)
     QCoreApplication.processEvents()
-
-
-class Now:
-    """Thread run at once"""
-
-    def __init__(self, target, **kwargs):
-        self.target = target
-
-    def start(self):
-        self.target()
 
 
 def test_viewer_levels_in_table(viewer):
@@ -164,36 +160,29 @@ def test_viewer_reference_card(viewer):
     reference = viewer.reference
     assert reference["visible"] and "Spa" in reference["detail"]
     marks = [row["marks"] for row in reference["ladder"]]
-    assert "PB" in marks[1] and "Race" in marks[3]  # PB competitive, race best midpack
+    assert "PB" in marks[1] and "Race" in marks[2]  # PB competitive, race best good (103%)
     assert "Oreca ELMS" in reference["fastest"]
     viewer.selectRow("Oreca 07")
     assert not viewer.reference["visible"] and "classification" in viewer.reference["reason"]
 
 
 def test_viewer_reference_off_and_download(viewer, monkeypatch):
-    from neopedal.ui.quick import stats_backend
-
     viewer.setCompare(False)
     assert cfg.user.config["driver_stats_viewer"]["enable_lap_reference"] is False
     assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "-"
-    # Download (run at once, sheet with Spa LMP2 only)
+    # Download (page job, sheet with Spa LMP2 only)
     only_lmp2 = HEADER + SHEET.splitlines(keepends=True)[2]
     monkeypatch.setattr(lap_reference, "fetch_sheet", lambda url, timeout=15: only_lmp2)
-    monkeypatch.setattr(stats_backend.threading, "Thread", Now)
     viewer.setCompare(True)  # turned on: downloaded again (cache older? forced below)
     viewer.updateReference()
-    QCoreApplication.processEvents()
-    wait_jobs(viewer)  # saved & parsed in background
+    wait_jobs(viewer)  # downloaded, then saved & parsed in background
     assert set(viewer.references.entries) == {("Spa", "LMP2elms")}
     assert lap_reference.load_cache(cfg.path.config)[0] == only_lmp2
 
 
-def test_viewer_download_failure_keeps_cache(viewer, monkeypatch):
-    from neopedal.ui.quick import stats_backend
-
-    monkeypatch.setattr(stats_backend.threading, "Thread", Now)
+def test_viewer_download_failure_keeps_cache(viewer):
     viewer.updateReference()  # offline (conftest)
-    QCoreApplication.processEvents()
+    wait_jobs(viewer)  # download job
     assert viewer.references.entries  # cached reference kept
     assert viewer.reference_error and "Community lap times" in viewer.referenceText
 

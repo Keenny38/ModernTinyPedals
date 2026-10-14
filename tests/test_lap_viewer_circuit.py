@@ -106,7 +106,7 @@ def test_motec_lap_of_other_circuit_shown_alone(page, tmp_path):  # noqa: F811
     before = shown(page)
     log = tmp_path / "Monza run.ld"
     write_logger_ld(str(log), logger_channels(track=1000.0), venue="Monza")
-    page.import_motec([str(log)], background=False)
+    page.exports.import_motec([str(log)], background=False)
     wait_loaded(page)
     keys = shown(page)
     assert keys and not set(keys) & set(before) and not listed(page) & set(before)

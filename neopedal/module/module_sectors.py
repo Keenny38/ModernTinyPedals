@@ -22,15 +22,14 @@ Sectors module
 
 from __future__ import annotations
 
-from time import monotonic
-
 from .. import realtime_state
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import SectorData, minfo
 from ..userfile.sector_best import merge_sector_best, read_sector_best_file, save_sector_best_file
 from ..validator import generator_init, is_same_session, session_token, valid_sectors
-from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp
+from ._base import PENDING_CHECK, WAIT_STATE_CHANGE, DataModule, PendingLap, data_stamp
+from ._lap_state import LOAD, SKIP, LapState
 
 
 class Realtime(DataModule):
@@ -76,11 +75,11 @@ class Realtime(DataModule):
                     waiting = gen_record_sectors.send(vehicle_resets)
 
                 else:
-                    if reset:
-                        reset = False
-                        update_interval = self.idle_interval
+                    reset = False
                     if waiting:  # left track just after line: keep validating lap just completed
                         waiting = gen_record_sectors.send(PENDING_CHECK)
+                    # Idle until activity changes, unless a lap waits for validation
+                    update_interval = self.idle_interval if waiting else WAIT_STATE_CHANGE
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_record_sectors)
@@ -95,11 +94,6 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
     seconds before data is saved & reset (MODULE_STOP: last check), so its S3 & personal best sectors
     are not lost. Yields whether a lap is waiting for validation.
     """
-    last_reset = None  # reset check
-    sent_reset = None  # last reset value sent
-    delayed_save = False
-    next_checkpoint = 0.0  # monotonic time of next save while driving
-    pending: PendingLap | None = None  # lap just completed, S3 not set yet
     readable = True  # sector file readable at load, False if not accessible (never saved over)
 
     last_sector_idx = -1  # previous recorded sector index value
@@ -112,8 +106,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
 
     def save_data():
         """Best sectors saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
-        nonlocal delayed_save, readable, next_checkpoint
-        next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
+        nonlocal readable
         if not readable:  # not accessible at load: best sectors of file kept
             saved, readable = read_sector_best_file(
                 filepath=filepath,
@@ -134,16 +127,11 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 alltime_best_tb=output_alltime.sectorBestTB,
                 alltime_best_pb=output_alltime.sectorBestPB,
             )
-            delayed_save = False
+            lap_state.delayed_save = False
 
-    def resolve_pending(final: bool = False):
+    def resolved_lap(lap: PendingLap, valid: bool):
         """Set S3 of lap completed before player left track once validated by game"""
-        nonlocal pending, last_sector_idx, delayed_save
-        if pending is None:
-            return
-        valid = pending.resolve(final)
-        if valid is None:
-            return
+        nonlocal last_sector_idx
         if valid:
             laptime_valid = api.read.timing.last_laptime()
             last_sector2 = api.read.timing.last_sector2()
@@ -156,44 +144,22 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                     curr_sector1=-1.0,
                     curr_sector2=-1.0,
                     last_sector2=last_sector2,
-                    is_last_lap_bad=pending.data,
+                    is_last_lap_bad=lap.data,
                 )
-            if not delayed_save and last_sector_idx == 0:
-                delayed_save = valid_sectors(output_alltime.sectorPrev)
-        pending = None
+            if not lap_state.delayed_save and last_sector_idx == 0:
+                lap_state.delayed_save = valid_sectors(output_alltime.sectorPrev)
+
+    # Lap waiting for its S3, best sectors saved on reset & checkpoints
+    lap_state = LapState(resolved_lap, save_data, checkpoint=True)
 
     while True:
-        reset = yield pending is not None
+        step = lap_state.receive((yield lap_state.pending is not None))
+        if step == SKIP:
+            continue
 
-        # Player inactive: only validate lap just completed (saved on reset)
-        if reset is PENDING_CHECK:
-            if last_reset == sent_reset:  # no reset waiting
-                resolve_pending()
-                continue
-            reset = sent_reset  # reset waiting for lap validation
-        elif reset is not MODULE_STOP:
-            sent_reset = reset
-
-        # Reset
-        if last_reset != reset:
-            # Left track just after line: set S3 of lap just completed before saving (bounded wait)
-            if pending is not None:
-                resolve_pending(final=reset is MODULE_STOP)
-                if pending is not None:
-                    continue
-
-            # Save data
-            if delayed_save:
-                save_data()
-
-            # Delay reset until driving (module stopping: data saved only)
-            if reset is MODULE_STOP or not realtime_state.active:
-                continue
-            last_reset = reset
-
+        # Reset (data saved, then loaded once driving)
+        if step == LOAD:
             # Load data (laps not saved, file not accessible: discarded, file kept)
-            delayed_save = False
-            next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
             output_session.reset()
             output_alltime.reset()
             last_lap_stime = -1.0
@@ -214,22 +180,19 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 backup=True,  # own sector file, replaced by next save
             )
 
-        # Checkpoint while driving (crash, power loss)
-        if delayed_save and monotonic() >= next_checkpoint:
-            save_data()
-
         # Pit visit & track limits of lap in progress (flag of lap just completed may stay a moment)
         lap_stime = api.read.timing.start()
         if last_lap_stime != lap_stime:
             # Line crossed after sector 3 of lap (not back to garage): lap kept until its S3 is set
-            if pending is None and 0 <= s3_lap_stime == last_lap_stime < lap_stime and last_sector_idx == 2:
-                pending = PendingLap(lap_stime - last_lap_stime, lap_stime, is_bad_lap)
+            if lap_state.pending is None and 0 <= s3_lap_stime == last_lap_stime < lap_stime and last_sector_idx == 2:
+                lap_state.pending = PendingLap(lap_stime - last_lap_stime, lap_stime, is_bad_lap)
             last_lap_stime = lap_stime
             last_lap_bad = is_bad_lap  # line crossed: flag of finished lap kept for its S3 (computed later)
             is_bad_lap = False
         is_bad_lap |= api.read.vehicle.in_pits()
+        pending = lap_state.pending
         if pending is not None and not pending.deadline and api.read.timing.elapsed() - pending.finish > 10:
-            pending = None  # no S3 for lap just completed (no valid lap time)
+            lap_state.pending = None  # no S3 for lap just completed (no valid lap time)
         lap_started = api.read.timing.current_laptime() > 1
         if lap_started:
             is_bad_lap |= api.read.lap.invalidated()
@@ -279,12 +242,12 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             )
 
             # Save if recorded new valid data
-            if not delayed_save and last_sector_idx == sector_idx:
-                delayed_save = valid_sectors(output_alltime.sectorPrev)
+            if not lap_state.delayed_save and last_sector_idx == sector_idx:
+                lap_state.delayed_save = valid_sectors(output_alltime.sectorPrev)
 
             # S3 of lap just completed set (sector 1), or skipped (sector 2 of next lap)
-            if pending is not None and last_sector_idx == sector_idx != 2:
-                pending = None
+            if lap_state.pending is not None and last_sector_idx == sector_idx != 2:
+                lap_state.pending = None
 
 
 def calc_sector_time(

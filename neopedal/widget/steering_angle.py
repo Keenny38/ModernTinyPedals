@@ -20,6 +20,8 @@
 Steering angle Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
@@ -27,9 +29,14 @@ from ..const_common import TEXT_NA
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SteeringAngleConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SteeringAngleConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -195,7 +202,7 @@ class Realtime(Overlay):
         """Update when vehicle on track"""
         # Steering wheel rotation
         if self.wcfg["manual_steering_range"] > 0:
-            steering_range = self.wcfg["manual_steering_range"]
+            steering_range: float = self.wcfg["manual_steering_range"]
         else:
             steering_range = api.read.inputs.steering_range_physical()
 

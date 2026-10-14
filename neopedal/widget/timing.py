@@ -20,15 +20,22 @@
 Timing Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TimingConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "TimingConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -220,9 +227,8 @@ class Realtime(Overlay):
                 if 0 < laptime_best_tmp < self.laptime_sbst:
                     self.laptime_sbst = laptime_best_tmp
 
-            if self.player_index < api.read.vehicle.total_vehicles():
-                self.player_index += 1
-            else:
+            self.player_index += 1  # wrap after last car, never read one past it
+            if self.player_index >= api.read.vehicle.total_vehicles():
                 self.player_index = 0
 
             self.update_laptime(self.bar_sbst, self.laptime_sbst, self.prefix_sbst)

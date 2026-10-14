@@ -78,16 +78,28 @@ public:
     const std::vector<uint8_t>& pixels() const { return pixels_; }
     // True once after pixels changed (consumer uploads them)
     bool take_pixels_changed() {
+        Rect unused;
+        return take_pixels_changed(unused);
+    }
+    // Same, with the atlas part changed since the last take (whole atlas unless the app sent dirty rects)
+    bool take_pixels_changed(Rect& changed_rect) {
         const bool changed = pixels_changed_;
+        changed_rect = changed_whole_ ? Rect{0, 0, info_.width, info_.height} : changed_rect_;
         pixels_changed_ = false;
+        changed_whole_ = false;
+        changed_rect_ = Rect{};
         return changed;
     }
     void reset();
 
 private:
+    void mark_changed(const Rect& rect, bool whole);
+
     bool has_frame_ = false;
     bool alive_ = false;
     bool pixels_changed_ = false;
+    bool changed_whole_ = false;  // pixels changed since last take: whole atlas, else changed_rect_
+    Rect changed_rect_;
     uint64_t last_sequence_ = 0;
     FrameInfo info_;
     std::vector<uint8_t> pixels_;
@@ -130,6 +142,14 @@ uint32_t swapchain_extent(uint32_t image, uint32_t current, uint32_t max);
 // out is reused: resized, image area overwritten, only the rest (border) cleared.
 void convert_pixels(const uint8_t* pixels, uint32_t width, uint32_t height, uint32_t out_width, uint32_t out_height,
                     bool bgra, bool linear, std::vector<uint8_t>& out);
+
+// Only the rect of the image converted again into out (same layout as convert_pixels made it: out_width
+// columns, image at top left), rest of out untouched. False (nothing written) when rect or out do not fit.
+bool convert_rect(const uint8_t* pixels, uint32_t width, uint32_t height, const Rect& rect, uint32_t out_width,
+                  bool bgra, bool linear, std::vector<uint8_t>& out);
+
+// Smallest rect holding both (an empty rect adds nothing)
+Rect union_rect(const Rect& first, const Rect& second);
 
 // Quads of a frame: rectangles of the uploaded image, each shown 1:1 at a canvas position.
 // Not merged: uploaded image is the atlas, one quad per tile. Merged (fewer layer slots than tiles): tiles

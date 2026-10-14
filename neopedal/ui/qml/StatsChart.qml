@@ -44,8 +44,10 @@ Item {
     }
     // Layers: grid & limits, data (painted once per data / size / theme, revealed by a clip), hovered session
     // (guide line & dot items: mouse moves & reveal frames paint nothing).
-    onWidthChanged: paintAll()
-    onHeightChanged: paintAll()
+    // Resize: canvases (chart size) paint again by themselves, width & height of one step asked once; painted by
+    // a canvas thread (window resize never waits for the drawing)
+    onWidthChanged: Qt.callLater(paintAll)
+    onHeightChanged: Qt.callLater(paintAll)
     // Colors painted: canvas painted again when light / dark theme switches (theme copy has no changed signal)
     readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border]
     onPaintColorsChanged: paintAll()
@@ -56,7 +58,7 @@ Item {
         property: "reveal"
         from: 0
         to: 1
-        duration: 520
+        duration: theme.animate ? 520 : 0
         easing.type: Easing.OutCubic
     }
 
@@ -64,6 +66,7 @@ Item {
     Canvas {
         id: gridCanvas
         anchors.fill: parent
+        renderStrategy: Canvas.Threaded
         onPaint: {
             var ctx = getContext("2d")
             ctx.reset()
@@ -111,6 +114,7 @@ Item {
             property int paints: 0  // times painted (tests)
             width: chart.width
             height: chart.height
+            renderStrategy: Canvas.Threaded
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
@@ -216,7 +220,7 @@ Item {
             text: modelData.text
             color: theme.dimText
             horizontalAlignment: Text.AlignRight
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.features: { "tnum": 1 }
         }
     }
@@ -228,7 +232,7 @@ Item {
         text: chart.chartData.top || ""
         color: theme.accent
         horizontalAlignment: Text.AlignRight
-        font.pointSize: theme.fontPoint * 0.85
+        font.pointSize: theme.fontSmall
         font.weight: Font.DemiBold
         font.features: { "tnum": 1 }
     }
@@ -245,13 +249,13 @@ Item {
             color: modelData.color
             ToolTip.visible: limitHover.hovered
             ToolTip.text: modelData.name
-            ToolTip.delay: 400
+            ToolTip.delay: theme.tipDelay
             HoverHandler { id: limitHover }
             Text {
                 anchors.centerIn: parent
                 text: modelData.letter || ""
-                color: "white"
-                font.pointSize: theme.fontPoint * 0.62
+                color: theme.inkOn(modelData.color)  // readable on level color
+                font.pointSize: theme.fontMicro
                 font.weight: Font.Bold
             }
         }
@@ -265,7 +269,7 @@ Item {
             x: Math.max(chart.plotX, Math.min(chart.px(modelData.x) - width / 2, chart.plotX + chart.plotWidth - width))
             text: modelData.text
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.features: { "tnum": 1 }
         }
     }

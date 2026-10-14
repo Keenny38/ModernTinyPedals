@@ -100,7 +100,8 @@ TpPage {
                     spacing: 2
                     interactive: contentHeight > height
                     boundsBehavior: Flickable.StopAtBounds
-                    model: page.categories
+                    // Count, not the list: a new list comes at each edit (key typed), the view would be reset & scrolled up
+                    model: page.categories.length
                     activeFocusOnTab: true
                     currentIndex: -1
                     Keys.onUpPressed: navStep(-1)
@@ -112,19 +113,19 @@ TpPage {
                     }
                     delegate: Rectangle {
                         id: entry
-                        required property var modelData
-                        readonly property bool selected: !backend.searching && backend.category === modelData.key
-                        readonly property bool dimmed: backend.searching && modelData.matches === 0
+                        required property int index
+                        readonly property var info: page.categories[index] || ({})
+                        readonly property bool selected: !backend.searching && backend.category === entry.info.key
+                        readonly property bool dimmed: backend.searching && entry.info.matches === 0
                         width: ListView.view.width
                         height: Math.round(theme.em * 2.4)
-                        radius: theme.em * 0.5
-                        color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.2 : 0.13)
-                             : entryArea.containsMouse ? theme.hover : "transparent"
+                        radius: theme.radiusMd
+                        color: theme.rowColor(entryArea.containsMouse, selected)
                         opacity: dimmed ? 0.45 : 1
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
+                        Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                         Accessible.role: Accessible.PageTab
-                        Accessible.name: modelData.label
+                        Accessible.name: entry.info.label
                         Accessible.selected: selected
 
                         Rectangle {
@@ -139,7 +140,7 @@ TpPage {
                             id: entryIcon
                             x: theme.em * 0.7
                             anchors.verticalCenter: parent.verticalCenter
-                            glyph: entry.modelData.glyph
+                            glyph: entry.info.glyph
                             color: entry.selected ? theme.accent : theme.dimText
                             size: theme.em * 1.0
                         }
@@ -149,14 +150,14 @@ TpPage {
                             anchors.right: badge.left
                             anchors.rightMargin: theme.em * 0.3
                             anchors.verticalCenter: parent.verticalCenter
-                            text: entry.modelData.label
+                            text: entry.info.label
                             color: theme.text
                             font.weight: entry.selected ? Font.DemiBold : Font.Normal
                             elide: Text.ElideRight
                         }
                         Rectangle {
                             id: badge
-                            readonly property int count: backend.searching ? entry.modelData.matches : entry.modelData.changed
+                            readonly property int count: backend.searching ? entry.info.matches : entry.info.changed
                             visible: count > 0
                             anchors.right: parent.right
                             anchors.rightMargin: theme.em * 0.5
@@ -164,14 +165,14 @@ TpPage {
                             height: Math.round(theme.em * 1.3)
                             width: Math.max(height, badgeText.implicitWidth + theme.em * 0.6)
                             radius: height / 2
-                            color: entry.modelData.errors > 0 && !backend.searching ? theme.loss
-                                 : backend.searching ? theme.hover : theme.accent
+                            color: entry.info.errors > 0 && !backend.searching ? theme.lossFill
+                                 : backend.searching ? theme.hover : theme.accentFill
                             Text {
                                 id: badgeText
                                 anchors.centerIn: parent
                                 text: badge.count
                                 color: backend.searching ? theme.text : "white"
-                                font.pointSize: theme.fontPoint * 0.75
+                                font.pointSize: theme.fontCaption
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
                             }
@@ -182,7 +183,7 @@ TpPage {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                backend.selectCategory(entry.modelData.key)
+                                backend.selectCategory(entry.info.key)
                                 search.clear()
                             }
                         }
@@ -195,7 +196,7 @@ TpPage {
                     Layout.topMargin: theme.em * 0.3
                     text: i18n.tr("In the loaded preset")
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.8
+                    font.pointSize: theme.fontCaption
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -210,7 +211,7 @@ TpPage {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: Math.round(theme.em * 2.1)
-                        radius: theme.em * 0.5
+                        radius: theme.radiusMd
                         color: linkArea.containsMouse ? theme.hover : "transparent"
                         Accessible.role: Accessible.Link
                         Accessible.name: modelData.text
@@ -273,8 +274,9 @@ TpPage {
                 spacing: theme.em * 0.5
                 TpCombo {
                     Layout.preferredWidth: theme.em * 13
-                    model: page.categories.map(function(entry) { return entry.label })
-                    currentIndex: page.categories.map(function(entry) { return entry.key }).indexOf(backend.category)
+                    model: page.categories
+                    textRole: "label"
+                    currentIndex: page.categories.findIndex(function(entry) { return entry.key === backend.category })
                     onActivated: function(index) { backend.selectCategory(page.categories[index].key) }
                 }
                 TpSearchField {
@@ -312,7 +314,7 @@ TpPage {
                 Rectangle {
                     Layout.preferredWidth: Math.round(theme.em * 2.6)
                     Layout.preferredHeight: Layout.preferredWidth
-                    radius: theme.em * 0.6
+                    radius: theme.radiusLg
                     color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.18 : 0.12)
                     Icon {
                         anchors.centerIn: parent
@@ -328,7 +330,7 @@ TpPage {
                         Layout.fillWidth: true
                         text: backend.searching ? i18n.tr("Search results") : page.info.label
                         color: theme.text
-                        font.pointSize: theme.fontPoint * 1.45
+                        font.pointSize: theme.fontTitle
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
@@ -387,7 +389,7 @@ TpPage {
                             anchors.margins: theme.em * 0.7
                             spacing: theme.em * 0.4
                             RowLayout {
-                                spacing: theme.em * 0.45
+                                spacing: theme.em * 0.5
                                 Rectangle {
                                     width: Math.round(theme.em * 0.6)
                                     height: width
@@ -443,7 +445,7 @@ TpPage {
                                 Text {
                                     text: page.web.code || ""
                                     color: theme.text
-                                    font.pointSize: theme.fontPoint * 1.2
+                                    font.pointSize: theme.fontHeading
                                     font.weight: Font.DemiBold
                                     font.letterSpacing: 2
                                     font.features: { "tnum": 1 }
@@ -470,8 +472,8 @@ TpPage {
                                 selectByMouse: true
                                 wrapMode: TextEdit.WrapAnywhere
                                 color: theme.text
-                                font.family: "Consolas"
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.family: theme.monoFont
+                                font.pointSize: theme.fontSmall
                             }
                         }
                     }
@@ -489,7 +491,7 @@ TpPage {
                             anchors.margins: theme.em * 0.7
                             spacing: theme.em * 0.3
                             RowLayout {
-                                spacing: theme.em * 0.45
+                                spacing: theme.em * 0.5
                                 Rectangle {
                                     width: Math.round(theme.em * 0.6)
                                     height: width
@@ -512,32 +514,34 @@ TpPage {
                                 wrapMode: Text.WordWrap
                             }
                             Repeater {
+                                // Texts read from page.remote by key: rows kept when the addresses change
                                 model: [
-                                    { "text": page.remote.command || "", "tip": i18n.tr("Command, with its required header") },
-                                    { "text": page.remote.commands || "", "tip": i18n.tr("List of commands (JSON)") },
-                                    { "text": page.remote.stream || "", "tip": i18n.tr("Live telemetry (WebSocket)") },
+                                    { "key": "command", "tip": i18n.tr("Command, with its required header") },
+                                    { "key": "commands", "tip": i18n.tr("List of commands (JSON)") },
+                                    { "key": "stream", "tip": i18n.tr("Live telemetry (WebSocket)") },
                                 ]
                                 RowLayout {
                                     required property var modelData
+                                    readonly property string code: page.remote[modelData.key] || ""
                                     Layout.fillWidth: true
                                     spacing: theme.em * 0.4
                                     Text {
                                         Layout.fillWidth: true
-                                        text: modelData.text
+                                        text: parent.code
                                         color: theme.text
-                                        font.family: "Consolas"
-                                        font.pointSize: theme.fontPoint * 0.9
+                                        font.family: theme.monoFont
+                                        font.pointSize: theme.fontLabel
                                         elide: Text.ElideMiddle
                                         MouseArea { id: codeArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                                         ToolTip.visible: codeArea.containsMouse
                                         ToolTip.text: modelData.tip
-                                        ToolTip.delay: 400
+                                        ToolTip.delay: theme.tipDelay
                                     }
                                     TpButton {
                                         flat: true
                                         text: i18n.tr("Copy")
                                         implicitHeight: Math.round(theme.em * 1.9)
-                                        onClicked: backend.copyText(modelData.text)
+                                        onClicked: backend.copyText(parent.code)
                                     }
                                 }
                             }
@@ -582,7 +586,7 @@ TpPage {
                                 Layout.fillWidth: true
                                 text: i18n.trm("Settings file: " + backend.configFile)
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 elide: Text.ElideMiddle
                             }
                             TpButton {
@@ -606,7 +610,7 @@ TpPage {
                 Layout.preferredHeight: shown ? barRow.implicitHeight + theme.em * 1.0 : 0
                 clip: true
                 color: theme.dark ? Qt.lighter(theme.window, 1.1) : Qt.darker(theme.window, 1.04)
-                Behavior on Layout.preferredHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on Layout.preferredHeight { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
                 Rectangle { width: parent.width; height: 1; color: theme.border }
 
                 RowLayout {

@@ -20,13 +20,21 @@
 Pedal Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..api_control import api
 from ._base import Overlay
 from ._painter import PedalInputBar
+from ._pedal_alert import PedalAlertMixin
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import PedalConfig
 
 
-class Realtime(Overlay):
+class Realtime(PedalAlertMixin, Overlay):
     """Draw widget"""
+
+    wcfg: "PedalConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -118,6 +126,11 @@ class Realtime(Overlay):
                 default=1,
             )
 
+        # Flashing alerts of throttle & brake bars
+        self.alert_bars = tuple(
+            (key, getattr(self, f"bar_{key}")) for key in ("throttle", "brake") if self.wcfg[f"show_{key}"])
+        self.setup_alerts(tuple(key for key, _ in self.alert_bars))
+
         # Last data
         self.max_brake_pres = 0.01
 
@@ -162,6 +175,13 @@ class Realtime(Overlay):
             ffb = abs(api.read.inputs.force_feedback())
             self.update_ffb(self.bar_ffb, ffb)
 
+        # Alerts
+        for (_, bar), alert in zip(self.alert_bars, self.read_alerts()):
+            color = self.wcfg[f"{alert}_color"] if alert else ""
+            if bar.alert_color != color:
+                bar.alert_color = color
+                bar.update()
+
     # GUI update methods
     def update_pedal(self, target, data, raw):
         """Pedal update"""
@@ -185,7 +205,7 @@ class Realtime(Overlay):
 
     def set_pedal_size(self, font_m) -> tuple[
         int, int, tuple[int, int, int, int], tuple[int, int, int, int],
-        tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int],
+        tuple[int, int, int, int], tuple[int, int, int, int], tuple[float, float, int, int],
     ]:
         """Set pedal size"""
         max_gap = max(self.wcfg["inner_gap"], 0)

@@ -25,6 +25,7 @@ Track time of day, time scale, countdown to next sunrise or sunset.
 from __future__ import annotations
 
 from time import gmtime, strftime
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
@@ -36,12 +37,17 @@ from ...module_info import minfo
 from .base import ModernOverlay, clock_samples, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TrackClockConfig
+
 # Sunlight phase index (see module_mapping.set_sunlight_phase) -> label, is night coming
 PHASES = {0: ("Sunrise", False), 1: ("Midday", False), 2: ("Sunset", True), 3: ("Midnight", True)}
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TrackClockConfig
 
     options = (
         "font_size", "layout", "show_track_clock", "enable_track_clock_synchronization",

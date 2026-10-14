@@ -19,19 +19,23 @@
 """
 Modern overlay design: widgets that have one, and options only modern design reads
 
-A widget listed here is drawn by neopedal.widget._modern.<name> while overlay modern style
-is on, unless its "enable_classic_layout" option is set. Plain data only (no Qt import), so
-setting templates & config dialog use it without loading widgets.
+A widget declared with a modern design (registry.OverlaySpec.has_modern) is drawn by
+neopedal.widget._modern.<name> while overlay modern style is on, unless its "enable_classic_layout"
+option is set. Plain data only (no Qt import), so setting templates & config dialog use it without
+loading widgets.
 """
 
 from types import MappingProxyType
 from typing import Any
 
+from .registry import OVERLAYS, OverlaySpec
+
 # Common option of modern design widgets: keep classic layout (with modern colors)
 CLASSIC_LAYOUT_OPTION = "enable_classic_layout"
 
-# Widget name -> options only read by modern design (added to widget default setting)
-MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
+# Widget name -> options only read by modern design (added to widget default setting),
+# widgets of modern design with no such option left out
+MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "relative": {
         "column_position": True,
         "column_class": True,
@@ -43,6 +47,12 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
         "column_pit_status": True,
         "column_pitstop_count": False,
         "column_laptime": True,
+        "show_lap_sectors": True,
+        "show_lap_delta": True,
+        "show_out_and_in_laps": True,
+        "show_invalid_lap_in_red": True,
+        "show_lap_trend": True,
+        "show_running_lap_time": True,
         "column_best_laptime": False,
         "column_average_laptime": False,
         "column_energy_remaining": False,
@@ -65,12 +75,21 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
         "column_pit_status": True,
         "column_pitstop_count": True,
         "column_laptime": True,
+        "show_lap_sectors": True,
+        "show_lap_delta": True,
+        "show_out_and_in_laps": True,
+        "show_invalid_lap_in_red": True,
+        "show_lap_trend": True,
+        "show_running_lap_time": True,
         "column_best_laptime": False,
         "column_average_laptime": False,
         "column_delta_laptime": False,
         "column_energy_remaining": False,
         "column_vehicle_integrity": False,
+        "column_energy_per_lap": False,
+        "show_energy_per_lap_average": False,
         "column_incidents": False,
+        "column_track_limits": False,
         "column_stint_laps": False,
         "column_speed_trap": False,
         "column_lift_and_coast_time": False,
@@ -78,6 +97,7 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
         "column_time_gap": True,
         "show_lap_difference": True,
         "show_class_header": True,
+        "show_column_headers": True,
     },
     "rivals": {
         "column_position": True,
@@ -90,6 +110,12 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
         "column_pit_status": True,
         "column_pitstop_count": True,
         "column_laptime": True,
+        "show_lap_sectors": True,
+        "show_lap_delta": True,
+        "show_out_and_in_laps": True,
+        "show_invalid_lap_in_red": True,
+        "show_lap_trend": True,
+        "show_running_lap_time": True,
         "column_best_laptime": False,
         "column_average_laptime": False,
         "column_delta_laptime": True,
@@ -106,103 +132,41 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
     },
     "timing": {"show_invalid_lap_indicator": True},
     "deltabest": {"show_invalid_lap_indicator": True},
-    "deltabest_extended": {},
-    "speed_delta": {},
-    "driver_rank": {},
-    "sectors": {},
-    "session": {},
-    "track_clock": {},
     "laps_and_position": {"show_invalid_lap_indicator": True},
-    "lap_time_history": {},
-    "stint_history": {},
-    "relative_finish_order": {},
-    "traffic": {},
-    "fuel": {},
-    "virtual_energy": {},
-    "fuel_energy_saver": {},
-    "pit_stop_estimate": {},
     "race_plan": {"show_stint_limit": False, "show_consumption_estimate": False},
     "battery": {"show_state_of_charge": False},  # value scale to check live (LMU), same as battery charge on rF2
     "engine": {"show_game_overheating_warning": True},
-    "electric_motor": {},
     "tyre_temperature": {"enable_heatmap_from_optimal_temperature": False},
-    "brake_temperature": {},
-    "tyre_wear": {},
-    "brake_wear": {},
-    "pedal": {},
     "gear": {"show_speed_limiter_reminder": True},
-    "rpm_led": {},
-    "speedometer": {},
-    "brake_bias": {},
-    "brake_performance": {},
-    "damage": {},
-    "cruise": {},
     "engine_temperature": {"show_game_overheating_warning": True},
-    "force": {},
-    "system_performance": {},
-    "drs": {},
-    "push_to_pass": {},
-    "onboard_setting": {},
-    "damage_stats": {},
-    "differential": {},
     "weather": {"show_wind": True},
-    "rake_angle": {},
-    "roll_angle": {},
-    "weight_distribution": {},
-    "wheel_camber": {},
-    "wheel_toe": {},
-    "acceleration": {},
-    "friction_circle": {},
-    "heading": {},
-    "elevation": {},
-    "trailing": {},
-    "radar": {},
     "track_map": {
         "show_sector_performance": True,
         "show_nearby_vehicle_highlight": True,
         "nearby_vehicle_threshold": 1.0,
     },
-    "navigation": {},
-    "steering_wheel": {},
-    "steering_meter": {},
-    "instrument": {},
-    "weather_forecast": {},
-    "flag": {},
-    "pace_notes": {},
-    "chat": {},
-    "black_box": {},
-    "track_notes": {},
-    "steering_angle": {},
-    "lift_and_coast_led": {},
-    "suspension_travel": {},
     "tyre_inner_layer": {"enable_heatmap_from_optimal_temperature": False},
     "tyre_carcass": {"enable_heatmap_from_optimal_temperature": False},
-    "tyre_pressure": {},
-    "tyre_load": {},
-    "tyre_deflection": {},
-    "brake_pressure": {},
     "ride_height": {"show_axle_ride_height": True},
-    "slip_angle": {},
-    "slip_ratio": {},
-    "suspension_force": {},
-    "suspension_position": {},
-    # Race aids (modern design first, classic layout kept simple)
-    "delta_graph": {},
-    "gap_trend": {},
-    "pit_lane_helper": {},
-    "stint_timer": {},
-    "spotter": {},
-    "race_notifications": {},
-    "tyre_temp_trend": {},
-    "telemetry_compare": {},
 })
 
+
+def modern_design_options(overlays: tuple[OverlaySpec, ...] = OVERLAYS) -> dict[str, dict[str, Any]]:
+    """Widget name -> options only read by modern design, for every widget having a modern design"""
+    unknown = sorted(set(MODERN_ONLY_OPTIONS) - {spec.name for spec in OVERLAYS if spec.has_modern})
+    if unknown:
+        raise RuntimeError(f"modern options of widgets without modern design: {unknown}")
+    return {spec.name: MODERN_ONLY_OPTIONS.get(spec.name, {}) for spec in overlays if spec.has_modern}
+
+
+# Widget name -> options only read by modern design, every widget having a modern design (display order)
+MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(modern_design_options())
 MODERN_DESIGNS = frozenset(MODERN_DESIGN_OPTIONS)
 
 
-def add_modern_options(defaults: dict):
+def add_modern_options(defaults: dict, overlays: tuple[OverlaySpec, ...] = OVERLAYS):
     """Add modern design options to widget default settings (classic layout switch first)"""
-    for name, options in MODERN_DESIGN_OPTIONS.items():
+    for name, options in modern_design_options(overlays).items():
         setting = defaults.get(name)
         if setting is None:
             continue

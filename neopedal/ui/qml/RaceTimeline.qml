@@ -14,7 +14,7 @@ Card {
     readonly property real pad: theme.em * 0.8
     readonly property real labelHeight: metrics.height
     readonly property real barHeight: Math.round(theme.em * 1.6)
-    readonly property color tyreColor: "#F5B342"
+    readonly property color tyreColor: theme.seriesTyre
 
     implicitHeight: column.implicitHeight + pad * 2
     Layout.fillWidth: true
@@ -26,11 +26,11 @@ Card {
         x: card.pad
         y: card.pad
         width: card.width - card.pad * 2
-        spacing: theme.em * 0.35
+        spacing: theme.em * 0.4
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.45
+            spacing: theme.em * 0.5
             Icon { glyph: ""; color: theme.accent; size: theme.em * 0.95 }  // flag
             Text { text: i18n.tr("Strategy"); color: theme.text; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
@@ -46,7 +46,7 @@ Card {
                         color: legendItem.band.color || "transparent"; opacity: 0.6
                         anchors.verticalCenter: parent.verticalCenter
                     }
-                    Text { text: legendItem.band.name || ""; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+                    Text { text: legendItem.band.name || ""; color: theme.dimText; font.pointSize: theme.fontSmall }
                 }
             }
             Row {
@@ -56,7 +56,7 @@ Card {
                     width: 2; height: theme.em * 0.8; color: card.tyreColor
                     anchors.verticalCenter: parent.verticalCenter
                 }
-                Text { text: i18n.tr("Tyres"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: i18n.tr("Tyres"); color: theme.dimText; font.pointSize: theme.fontSmall }
             }
         }
 
@@ -133,7 +133,7 @@ Card {
                 y: area.barTop
                 width: area.barWidth
                 height: card.barHeight
-                radius: theme.em * 0.35
+                radius: theme.radiusSm
                 color: "transparent"
                 border.width: 1
                 border.color: theme.border
@@ -170,17 +170,17 @@ Card {
                                     - (index < count - 1 ? 1 : 0), 1)
                     height: card.barHeight
                     radius: Math.min(height / 2, theme.em * 0.4)
-                    color: stint.color ? stint.color : theme.accent
+                    color: stint.color ? stint.color : theme.accentFill
                     opacity: stint.color ? 0.88 : (index % 2 ? 0.58 : 0.9)
-                    Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                    Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                    Behavior on x { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
                     Text {
                         anchors.centerIn: parent
                         visible: block.width > implicitWidth + 8
                         text: block.stint.laps !== undefined ? block.stint.laps : ""
                         color: "white"
                         font.weight: Font.DemiBold
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                         font.features: { "tnum": 1 }
                     }
                 }
@@ -197,7 +197,7 @@ Card {
                     height: area.barTop - y + card.barHeight
                     color: mark.tyres ? card.tyreColor : theme.text
                     opacity: 0.85
-                    Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                    Behavior on x { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
                 }
             }
             Repeater {
@@ -267,14 +267,27 @@ Card {
             visible: card.ready && card.levels.length > 1
             Layout.fillWidth: true
             implicitHeight: Math.round(theme.em * 3)
+            clip: true  // canvas wider for a moment while the window narrows
+            // Window resized: canvas sized (so drawn again) once the width settles, not at each step
+            onWidthChanged: {
+                if (levelCanvas.paintWidth > 0)
+                    resizePaint.restart()
+                else
+                    levelCanvas.paintWidth = width
+            }
+            Timer { id: resizePaint; interval: 50; onTriggered: levelCanvas.paintWidth = levelArea.width }
             Canvas {
                 id: levelCanvas
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
                 anchors.topMargin: levelLabel.height
+                width: paintWidth
+                renderStrategy: Canvas.Threaded  // drawn off the UI thread
+                property real paintWidth: 0
                 property color line: theme.accent
                 property var points: card.levels
                 onPointsChanged: requestPaint()
-                onWidthChanged: requestPaint()
                 onLineChanged: requestPaint()
                 onPaint: {
                     var context = getContext("2d")
@@ -307,7 +320,7 @@ Card {
                 id: levelLabel
                 text: i18n.tr("Fuel in tank")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 x: area.edge
                 y: 0
             }

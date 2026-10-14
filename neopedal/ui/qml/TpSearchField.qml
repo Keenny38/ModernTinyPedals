@@ -33,7 +33,7 @@ TextField {
     implicitHeight: Math.round(theme.em * 2.3)
     placeholderTextColor: theme.dimText
     color: theme.text
-    selectionColor: theme.accent
+    selectionColor: theme.accentFill
     selectedTextColor: "white"
     selectByMouse: true
     leftPadding: theme.iconFont !== "" ? theme.em * 2.1 : theme.em * 0.7
@@ -42,11 +42,11 @@ TextField {
     Accessible.name: placeholderText
 
     background: Rectangle {
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: theme.base
         border.width: field.activeFocus ? 1.5 : 1
         border.color: field.activeFocus ? theme.accent : field.hovered ? Qt.lighter(theme.border, 1.2) : theme.border
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
     }
     Icon {
         glyph: ""  // search
@@ -64,7 +64,7 @@ TextField {
         tip: i18n.tr("Clear")
         implicitHeight: Math.round(theme.em * 1.8)
         anchors.right: parent.right
-        anchors.rightMargin: theme.em * 0.25
+        anchors.rightMargin: theme.em * 0.3
         anchors.verticalCenter: parent.verticalCenter
         onClicked: { field.clearSearch(); field.forceActiveFocus() }
     }

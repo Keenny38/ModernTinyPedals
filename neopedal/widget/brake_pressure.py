@@ -20,14 +20,21 @@
 Brake pressure Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..api_control import api
 from ..const_common import WHEELS_NA, WHEELS_ZERO
 from ._base import Overlay
 from ._painter import WheelGaugeBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BrakePressureConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "BrakePressureConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

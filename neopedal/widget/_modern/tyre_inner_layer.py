@@ -24,12 +24,19 @@ Same as tyre temperature widget, with inner layer temperature.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...api_control import api
 from .tyre_temperature import Realtime as SurfaceTemperature
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreInnerLayerConfig
 
 
 class Realtime(SurfaceTemperature):
     """Draw widget"""
+
+    wcfg: TyreInnerLayerConfig
 
     def read_temperatures(self) -> tuple:
         if self.ico:

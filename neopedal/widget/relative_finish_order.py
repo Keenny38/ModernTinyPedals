@@ -21,6 +21,7 @@ Relative finish order Widget
 """
 
 from math import ceil
+from typing import TYPE_CHECKING
 
 from .. import calculation as calc
 from .. import units
@@ -33,10 +34,16 @@ from ..const_common import (
 )
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RelativeFinishOrderConfig
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "RelativeFinishOrderConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -234,7 +241,7 @@ class Realtime(Overlay):
         self.leader_pit_time_set[-1] = minfo.vehicles.dataSet[leader_index].pitTimer.elapsed
         self.update_pit_time(self.bars_pit_leader[-1], self.leader_pit_time_set[-1])
 
-        self.player_pit_time_set[-1] = minfo.vehicles.dataSet[player_index].pitTimer.elapsed
+        self.player_pit_time_set[-1] = player_vehicle().pitTimer.elapsed
         self.update_pit_time(self.bars_pit_player[-1], self.player_pit_time_set[-1])
 
         # Get remaining fuel/energy & consumption
@@ -380,8 +387,8 @@ class Realtime(Overlay):
 
     def update_refill(self, target, data, energy_type):
         """Player refill"""
-        if target.last != data:
-            target.last = data
+        if target.last != (data, energy_type):  # fuel unit applied or not with same value too
+            target.last = data, energy_type
             if data > -MAX_SECONDS:
                 if not energy_type:
                     data = self.unit_fuel(data)

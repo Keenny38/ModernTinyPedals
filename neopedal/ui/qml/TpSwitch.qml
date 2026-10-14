@@ -6,14 +6,17 @@ AbstractButton {
     id: control
     checkable: true
     hoverEnabled: true
-    focusPolicy: Qt.NoFocus
+    focusPolicy: Qt.TabFocus  // Tab reaches it, Space toggles
     property string tip: ""
+    Accessible.role: Accessible.CheckBox
+    Accessible.name: text !== "" ? text : tip
+    Accessible.checked: checked
     implicitHeight: Math.round(theme.em * 2.3)
     implicitWidth: track.width + label.implicitWidth + theme.em * 0.6
 
-    ToolTip.visible: tip !== "" && hovered
+    ToolTip.visible: tip !== "" && (hovered || visualFocus)
     ToolTip.text: tip
-    ToolTip.delay: 600
+    ToolTip.delay: theme.tipDelay
 
     contentItem: Item {
         Rectangle {
@@ -22,10 +25,11 @@ AbstractButton {
             height: theme.em * 1.3
             radius: height / 2
             anchors.verticalCenter: parent.verticalCenter
-            color: control.checked ? theme.accent : (control.hovered ? theme.hover : theme.raised)
+            color: control.checked ? theme.accentFill : (control.hovered ? theme.hover : theme.raised)
             border.width: control.checked ? 0 : 1
             border.color: theme.border
-            Behavior on color { ColorAnimation { duration: 150 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
+            FocusRing { visible: control.visualFocus }
             Rectangle {
                 width: parent.height - theme.em * 0.4
                 height: width
@@ -33,7 +37,7 @@ AbstractButton {
                 anchors.verticalCenter: parent.verticalCenter
                 x: control.checked ? parent.width - width - theme.em * 0.2 : theme.em * 0.2
                 color: control.checked ? "white" : theme.dimText
-                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                Behavior on x { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
             }
         }
         Text {

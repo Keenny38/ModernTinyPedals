@@ -19,7 +19,7 @@ Item {
     readonly property var shownLaps: laps
     readonly property string highlightKey: chart ? chart.highlightKey : ""
     // Items shown: read only while tab is shown (hidden tab never builds it again on chart & math changes)
-    readonly property var layout: visible ? backend.dashboardLayout : []
+    readonly property var layout: visible ? backend.dashboard.layout : []
     readonly property bool cardsShown: layout.length > 0 && layout[0].key === "driver"
     readonly property var groups: cardsShown ? layout.slice(1) : layout
     // Main lap: highlighted (lap card or lap chip), else reference lap, else first lap
@@ -101,7 +101,7 @@ Item {
                     Row {
                         id: mainRow
                         visible: root.groups.length > 0 && root.shownLaps.length > 1 && root.mainLap !== null
-                        spacing: theme.em * 0.35
+                        spacing: theme.em * 0.4
                         Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             width: theme.em * 0.55
@@ -113,12 +113,12 @@ Item {
                             width: column.width - theme.em
                             text: i18n.tr("Values of %1, other laps as marks").arg(root.mainLap ? root.mainLap.label : "")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.85
+                            font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
                             HoverHandler { id: mainHover }
                             ToolTip.visible: mainHover.hovered
                             ToolTip.text: i18n.tr("Click a lap card or chip to see its values here")
-                            ToolTip.delay: 500
+                            ToolTip.delay: theme.tipDelay
                         }
                     }
                     Column {
@@ -152,7 +152,7 @@ Item {
 
         readonly property bool pinned: lap !== null && root.chart && root.chart.pinnedKey === lap.lap
 
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: cardArea.containsMouse ? theme.hover : theme.alternate
         border.width: pinned ? 2 : 1
         border.color: lap ? Qt.rgba(Qt.color(lap.color).r, Qt.color(lap.color).g, Qt.color(lap.color).b, pinned ? 1 : 0.45)
@@ -197,7 +197,7 @@ Item {
                 visible: card.lap !== null && card.lap.gear !== ""
                 implicitWidth: Math.max(gearText.implicitWidth + theme.em * 0.6, theme.em * 1.6)
                 implicitHeight: theme.em * 1.5
-                radius: theme.em * 0.35
+                radius: theme.radiusSm
                 color: theme.raised
                 Text {
                     id: gearText
@@ -256,7 +256,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: Math.round(Math.max(gauge.value, 0) * 100)
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
         }
         Rectangle {
@@ -286,7 +286,7 @@ Item {
             text: gauge.label
             color: theme.dimText
             font.bold: true
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
         }
     }
 
@@ -294,6 +294,9 @@ Item {
     // angle over hub (degrees if wheel rotation recorded, else percent of lock)
     component SteeringWheel: Item {
         id: wheel
+        // Multisampled layer while shown: smooth turned spokes & arc (window without MSAA), small texture
+        layer.enabled: pageState.active && visible && width > 0 && height > 0
+        layer.samples: 4
 
         property real steering: 0  // -1 left to 1 right
         property real angle: 0  // degrees
@@ -314,26 +317,12 @@ Item {
             border.width: 1
             border.color: theme.border
         }
-        Canvas {  // rotation from top
-            id: arc
+        ArcItem {  // rotation from top (scene graph geometry: no painting on GUI thread)
             anchors.fill: parent
-            property real turn: Math.round(wheel.turn)  // whole degrees: painted again only once arc grows visibly
-            onTurnChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                if (Math.abs(turn) < 0.5) return
-                var start = -Math.PI / 2
-                var end = start + Math.max(Math.min(turn, 359.9), -359.9) * Math.PI / 180
-                ctx.lineWidth = wheel.arcWidth
-                ctx.lineCap = "round"
-                ctx.strokeStyle = theme.accent
-                ctx.beginPath()
-                ctx.arc(width / 2, height / 2, wheel.arcRadius, start, end, turn < 0)
-                ctx.stroke()
-            }
+            sweep: Math.round(wheel.turn)  // whole degrees: built again only once arc grows visibly
+            radius: wheel.arcRadius
+            thickness: wheel.arcWidth
+            color: theme.accent
         }
         Item {  // wheel shapes, turned
             anchors.centerIn: parent
@@ -383,7 +372,7 @@ Item {
             anchors.centerIn: parent
             width: angleText.implicitWidth + theme.em * 0.6
             height: angleText.implicitHeight + theme.em * 0.2
-            radius: theme.em * 0.3
+            radius: theme.radiusSm
             color: Qt.rgba(theme.base.r, theme.base.g, theme.base.b, 0.9)
             Text {
                 id: angleText
@@ -410,7 +399,7 @@ Item {
         readonly property real cell: (width - pad * 2 - (columns - 1) * flow.spacing) / columns
 
         height: flow.y + flow.height + pad
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: theme.alternate
         border.width: 1
         border.color: theme.dark ? Qt.lighter(theme.alternate, 1.3) : theme.border
@@ -422,7 +411,7 @@ Item {
             text: group.info.title
             color: theme.dimText
             font.weight: Font.DemiBold
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
         }
         Flow {
             id: flow
@@ -504,15 +493,15 @@ Item {
         implicitHeight: plain ? barLabel.height + theme.em * 0.2 : barLabel.height + theme.em * 0.3 + track.height + theme.em * 0.2
         HoverHandler { id: barHover }
         ToolTip.visible: barHover.hovered && bar.entries.length > 1
-        ToolTip.text: bar.lapTexts(function(entry) { return entry.t })
-        ToolTip.delay: 500
+        ToolTip.text: barHover.hovered ? bar.lapTexts(function(entry) { return entry.t }) : ""  // built only while hovered
+        ToolTip.delay: theme.tipDelay
 
         Text {
             id: barLabel
             width: parent.width - barValue.width - theme.em * 0.4
             text: bar.titleText
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             elide: Text.ElideRight
         }
         Text {
@@ -589,7 +578,7 @@ Item {
                 width: Math.min(implicitWidth, light.width - theme.em * 1.5 - others.width)
                 text: light.info.title
                 color: light.main && light.main.on ? theme.text : theme.dimText
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
                 elide: Text.ElideRight
             }
             Row {
@@ -622,15 +611,15 @@ Item {
         implicitHeight: wheelsLabel.height + theme.em * 0.3 + tiles.height
         HoverHandler { id: wheelsHover }
         ToolTip.visible: wheelsHover.hovered && wheels.entries.length > 1
-        ToolTip.text: wheels.lapTexts(function(entry) { return entry.t.join(" · ") })
-        ToolTip.delay: 500
+        ToolTip.text: wheelsHover.hovered ? wheels.lapTexts(function(entry) { return entry.t.join(" · ") }) : ""
+        ToolTip.delay: theme.tipDelay
 
         Text {
             id: wheelsLabel
             width: parent.width
             text: wheels.titleText
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             elide: Text.ElideRight
         }
         Grid {
@@ -648,14 +637,14 @@ Item {
                     readonly property bool hot: wheels.info.heat && at >= 0
                     width: (tiles.width - tiles.spacing) / 2
                     height: theme.em * 2.5
-                    radius: theme.em * 0.4
+                    radius: theme.radiusMd
                     color: hot ? Qt.hsla(0.62 * (1 - at), 0.72, theme.dark ? 0.4 : 0.47, 1) : theme.raised
                     Text {
                         x: theme.em * 0.35
                         y: theme.em * 0.15
                         text: wheels.names[tile.index]
                         color: tile.hot ? Qt.rgba(1, 1, 1, 0.75) : theme.dimText
-                        font.pointSize: theme.fontPoint * 0.7
+                        font.pointSize: theme.fontTiny
                     }
                     Text {
                         anchors.centerIn: parent
@@ -718,7 +707,7 @@ Item {
             width: parent.width - gValue.width
             text: gview.info.title
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             elide: Text.ElideRight
         }
         Text {

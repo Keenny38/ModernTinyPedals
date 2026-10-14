@@ -209,7 +209,7 @@ def executor() -> ThreadPoolExecutor:
     return _executor
 
 
-def stop_loading():
+def stop_loading() -> None:
     """End background thread (overlay closed): check in progress finishes, next check starts a new thread"""
     global _executor
     if _executor is not None:

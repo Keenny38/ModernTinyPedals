@@ -33,6 +33,7 @@ SECTION_ALIAS = {
     "rfactor 2 api": "api_rf2",
     "global font override": "",
     "tyre carcass temperature": "tyre_carcass",
+    "dashboard hud": "black_box",  # shown name of black_box widget
     "hotkey": "",
 }
 _key_line = re.compile(r"^    ([a-z0-9_*]+(?:, [a-z0-9_*]+)*)\s*$")

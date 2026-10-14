@@ -20,6 +20,8 @@
 RPM LED Widget
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QBrush, QPainter, QPen
 
@@ -29,9 +31,14 @@ from ._base import Overlay
 from ._common import warning_flash
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RpmLedConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "RpmLedConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -67,7 +74,7 @@ class Realtime(Overlay):
         if self.wcfg["led_outline_width"] > 0:
             self.pen_led = QPen()
             self.pen_led.setColor(self.wcfg["led_outline_color"])
-            self.pen_led.setWidth(self.wcfg["led_outline_width"])
+            self.pen_led.setWidthF(self.wcfg["led_outline_width"])
         else:
             self.pen_led = QPen(Qt.PenStyle.NoPen)
 
@@ -92,19 +99,17 @@ class Realtime(Overlay):
         self.flicker = False
         self.limiter = 0
         self.rpm_max = 0.0
-        self.rpm_low = 0
-        self.rpm_safe = 0
-        self.rpm_redline = 0
-        self.rpm_critical = 0
-        self.rpm_overrev = 0
+        self.rpm_low: float = 0
+        self.rpm_safe: float = 0
+        self.rpm_redline: float = 0
+        self.rpm_critical: float = 0
+        self.rpm_overrev: float = 0
         self.rpm_scale = 0.0
         self.rpm = -1.0
         self.gear_max = 0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        update_later = False
-
         # RPM reference
         rpm_max = api.read.engine.rpm_max()
         if self.rpm_max != rpm_max:
@@ -120,16 +125,11 @@ class Realtime(Overlay):
             self.gear_max = api.read.engine.gear_max()
 
         # Update RPM
-        rpm = api.read.engine.rpm()
-        if self.rpm != rpm:
-            self.rpm = rpm
-            update_later = True
+        self.rpm = api.read.engine.rpm()
 
         # Update limiter state
         if self.wcfg["show_speed_limiter_flash"]:
             self.limiter = api.read.switch.speed_limiter()
-            if self.limiter:
-                update_later = True
 
         # Update flicker state once per tick, extra paints (expose, capture) keep the blink rate
         if self.wcfg["show_speed_limiter_flash"] and self.limiter:
@@ -142,12 +142,25 @@ class Realtime(Overlay):
             flicker = not self.flicker
         else:
             flicker = False
-        if self.flicker != flicker:
-            self.flicker = flicker
-            update_later = True
+        self.flicker = flicker
 
-        if update_later:
+        # Repaint only if LEDs drawn change (lit count, color zone, flash), not every rpm change
+        if self.changed("leds", self.led_state()):
             self.update()
+
+    def led_state(self) -> tuple:
+        """LEDs as drawn (see draw_rpm_led): limiter flash, full light zone & flicker, or lit LED count"""
+        if self.limiter:
+            return 6, self.flicker
+        rpm = self.rpm - self.rpm_low
+        if rpm >= self.rpm_overrev:
+            return 5, self.flicker
+        if rpm >= self.rpm_critical:
+            return 4, self.flicker
+        if rpm < 0:
+            return 0, False
+        rpm_scaled = rpm * self.rpm_scale
+        return 1, sum(1 for index in range(self.max_led) if index < rpm_scaled), self.rpm_scale
 
     # GUI update methods
     def paintEvent(self, event):

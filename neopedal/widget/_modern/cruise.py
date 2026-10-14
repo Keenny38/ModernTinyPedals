@@ -24,6 +24,8 @@ Compass heading, elevation, odometer, distance into lap.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,9 +36,14 @@ from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import CruiseConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: CruiseConfig
 
     options = (
         "font_size", "layout", "show_compass", "show_elevation", "show_odometer", "odometer_maximum_digits",

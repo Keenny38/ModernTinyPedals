@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
+from functools import partial
 from typing import Any, TypeVar, overload
 
 import shiboken6
-from PySide6.QtCore import QObject, QRectF, QRegularExpression, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRectF, QRegularExpression, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QDoubleValidator,
     QIntValidator,
@@ -45,9 +46,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -111,14 +112,6 @@ def original_filter(file_filter: str, selected: str) -> str:
     return selected
 
 
-def add_vertical_separator() -> QFrame:
-    """Add vertical separator"""
-    separator = QFrame()
-    separator.setFrameShape(QFrame.Shape.VLine)
-    separator.setFrameShadow(QFrame.Shadow.Sunken)
-    return separator
-
-
 def singleton_dialog(dialog_type: str, show_error: bool = True):
     """Singleton dialog decorator"""
 
@@ -180,7 +173,18 @@ class DialogSingleton:
     @classmethod
     def register(cls, dialog_type: str, dialog: QDialog):
         """Register open dialog (window or page), forgotten once deleted"""
-        cls._registered.setdefault(dialog_type, []).append(dialog)
+        registered = cls._registered.setdefault(dialog_type, [])
+        registered[:] = [entry for entry in registered if shiboken6.isValid(entry)]
+        registered.append(dialog)
+        # No closure over the dialog (its wrapper & data would outlive it): id of the registered wrapper
+        dialog.destroyed.connect(partial(cls._forget, dialog_type, id(dialog)))
+
+    @classmethod
+    def _forget(cls, dialog_type: str, dialog_id: int, *_):
+        """Deleted dialog no longer kept (closed page data freed)"""
+        registered = cls._registered.get(dialog_type)
+        if registered:
+            registered[:] = [entry for entry in registered if id(entry) != dialog_id]
 
     @classmethod
     def dialogs(cls, dialog_type: str) -> list[QDialog]:
@@ -297,10 +301,15 @@ class BaseDialog(QDialog):
     # Closed by language change unless opened from a page kept by it (input whose OK calls back the
     # replaced view), see TabView.detach_pages
     CLOSED_ON_LANGUAGE_CHANGE = False
+    # Page reopened at startup kept open while main window stays hidden (follows the live session), unless
+    # disabled by keep_director_and_calculator_running_while_hidden, see TabView.release_tool_pages; page
+    # turned off (keep_when_hidden False) freed like any page
+    KEEP_WHEN_HIDDEN = False
     in_app_page = False  # set when shown as page
     shown_instead: BaseDialog | None = None  # same dialog already open as page, see shown_dialog
     modified_changed = Signal(bool)  # unsaved changes marker shown or cleared, see refresh_modified
     _marked_modified = False
+    _page_released = False
     _save_shortcut: QShortcut | None = None
 
     def __init__(self, parent):
@@ -312,6 +321,10 @@ class BaseDialog(QDialog):
         """Dialog shown by show() or open(): page of same dialog if already open (this copy is
         then deleted, so follow-up calls must go to the returned dialog)"""
         return self.shown_instead or self
+
+    def keep_when_hidden(self) -> bool:
+        """Page follows the live session now (KEEP_WHEN_HIDDEN page turned on): kept while hidden"""
+        return self.KEEP_WHEN_HIDDEN
 
     def has_unsaved_changes(self) -> bool:
         """Changes that closing would ask to save (is_modified of editors & config pages)"""
@@ -328,6 +341,28 @@ class BaseDialog(QDialog):
         if modified != self._marked_modified:
             self._marked_modified = modified
             self.modified_changed.emit(modified)
+
+    def release_page(self):
+        """Free page resources once (closeEvent of dialog, or Esc: since Qt 6.3 QDialog.done()
+        closes & deletes the dialog without calling closeEvent)"""
+        if not self._page_released:
+            self._page_released = True
+            self.free_page()
+
+    def free_page(self):
+        """Resources freed on close, see release_page: Qt Quick view (view attribute) unloaded before the
+        backend it binds to (QML bindings never read a released backend, GPU shapes gone before their vertex
+        data), then backend released (backend attribute with a release method)"""
+        view = getattr(self, "view", None)
+        if isinstance(view, QObject) and view.inherits("QQuickWidget"):
+            view.setSource(QUrl())  # type: ignore[attr-defined]
+        release = getattr(getattr(self, "backend", None), "release", None)
+        if callable(release):
+            release()
+
+    def reject(self):
+        self.release_page()
+        super().reject()
 
     def save_action(self) -> Callable[[], object] | None:
         """Save of Ctrl+S (keeps dialog open), None if dialog has nothing to save"""
@@ -443,6 +478,65 @@ class BaseEditor(BaseDialog):
         button_redo.clicked.connect(self.redo)
         layout.addWidget(button_undo)
         layout.addWidget(button_redo)
+
+    def editor_table(self, headers: Sequence[str], fixed_widths: Mapping[int, float] | None = None) -> QTableWidget:
+        """Table of editor: translated headers, columns stretched except fixed width ones
+
+        Args:
+            headers: column names (English).
+            fixed_widths: column index -> width (UIScaler.size units).
+        """
+        table = QTableWidget(self)
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels([tr(name) for name in headers])
+        table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for column, width in (fixed_widths or {}).items():
+            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            table.setColumnWidth(column, UIScaler.size(width))
+        return table
+
+    def editor_buttons(
+        self, buttons: Sequence[QWidget | tuple[str, Callable]],
+        reset: Callable, apply: Callable) -> QHBoxLayout:
+        """Button row of editor: buttons given (widget or text & action), Reset, Undo, Redo,
+        then Apply, Save & Close
+
+        Args:
+            buttons: leading buttons, widget or (English text, clicked action).
+            reset: Reset button action.
+            apply: Apply button action.
+        """
+        leading = []
+        for button in buttons:
+            if isinstance(button, tuple):
+                text, action = button
+                button = CompactButton(tr(text))
+                button.clicked.connect(action)
+            leading.append(button)
+
+        button_reset = CompactButton(tr("Reset"))
+        button_reset.clicked.connect(reset)
+
+        button_apply = CompactButton(tr("Apply"))
+        button_apply.clicked.connect(apply)
+
+        button_save = CompactButton(tr("Save"))
+        button_save.clicked.connect(self.saving)
+
+        button_close = CompactButton(tr("Close"))
+        button_close.clicked.connect(self.close)
+
+        layout_button = QHBoxLayout()
+        for button in leading:
+            layout_button.addWidget(button)
+        layout_button.addWidget(button_reset)
+        self.add_undo_buttons(layout_button)
+        layout_button.addStretch(1)
+        layout_button.addWidget(button_apply)
+        layout_button.addWidget(button_save)
+        layout_button.addWidget(button_close)
+        return layout_button
 
     def __capture_state(self) -> object:
         """Capture editor state, None if editor is being rebuilt"""
@@ -911,20 +1005,6 @@ class FloatTableItem(QTableWidgetItem):
     def __lt__(self, other):
         """Sort by value"""
         return self.value() < other.value()
-
-
-class NumericTableItem(QTableWidgetItem):
-    """Numeric QTableWidgetItem with sortable text"""
-
-    def __init__(self, value: float, text: str):
-        """Set numeric value & string text"""
-        super().__init__()
-        self.value = value
-        self.setText(text)
-
-    def __lt__(self, other):
-        """Sort by value"""
-        return self.value < other.value
 
 
 class ClockTableItem(QTableWidgetItem):

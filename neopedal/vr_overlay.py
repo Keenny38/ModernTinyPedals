@@ -28,8 +28,10 @@ Visible overlay widgets keep their desktop layout (the canvas: bounding box of a
 - SteamVR overlay: OpenVR games (rFactor 2, Le Mans Ultimate in SteamVR mode...). Requires the "openvr"
   package (bundled in the release, from source: pip install openvr); created once SteamVR runs (never
   starts SteamVR), hidden while the OpenXR layer draws the overlay (OpenXR game on SteamVR runtime).
-  Shows the whole canvas composed into one image. Both placed the same way: fixed in seated space or
-  attached to headset.
+  Shows the whole canvas composed into one image (sent at most ~15 times per second, only when changed). Both
+  placed the same way: fixed in seated space or attached to headset.
+Updates slowed (1 s) while overlays are paused (not driving) & some still visible, stopped when none is (OpenXR layer
+heartbeat kept); back to the update interval when overlays resume, show, hide or are edited.
 - VR mirror window: one desktop window showing the composed image, for window capture overlays such as
   OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+.
 """
@@ -52,7 +54,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
-from . import app_signal, vr_shared
+from . import app_signal, overlay_signal, realtime_state, vr_shared
 from .const_file import ConfigType
 from .setting import cfg
 
@@ -62,7 +64,11 @@ MAX_PIXELS = 1024 * 1024  # setOverlayRaw data size limit, image is scaled down 
 MIRROR_TITLE = "NeoPedal VR"  # window title to select in window capture apps
 STEAMVR_PROCESSES = ("vrserver.exe", "vrserver")  # SteamVR server (Windows, Linux)
 STEAMVR_RETRY_MS = 5000  # SteamVR started after app: overlay created within this delay
+STEAMVR_IDLE_RETRY_MS = 60000  # same while overlays are paused (not driving): checked again at once on resume
+STEAMVR_MIN_INTERVAL_MS = 66  # SteamVR overlay image (whole canvas) sent at most ~15 times per second
 OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per second (copied in game frame)
+PAUSED_GRACE_MS = 1000  # overlays paused: updates kept this long (last paint, fade out), then slowed or stopped
+PAUSED_INTERVAL_MS = 1000  # overlays paused, some still visible or SteamVR connected (quit events): update interval
 OPENXR_MAX_TILES = 8  # tiles (quad layers) at most, room left for the game's layers (runtimes allow 16 or more)
 OPENXR_TILE_GAP = 32  # widgets closer than this (pixels) share a tile
 HEARTBEAT_INTERVAL_MS = 500  # app heartbeat for the OpenXR layer, whatever the update interval (layer timeout 2 s)
@@ -426,6 +432,7 @@ class TileFrame(NamedTuple):
     tiles: tuple[vr_shared.Tile, ...]
     canvas: tuple[int, int]  # width, height (same scale as atlas)
     checksum: int
+    dirty: tuple[int, int, int, int] | None = None  # atlas rect drawn since the previous frame, None: whole
 
 
 def compose_group(widgets: list, origin: QPoint, size: tuple[int, int]) -> QImage:
@@ -556,6 +563,7 @@ class TileComposer:
             tiles.append(vr_shared.Tile(atlas_x, atlas_y, width, height, max(canvas_x, 0), max(canvas_y, 0)))
             drawn.append((atlas_x, atlas_y, width, height, group, group.version, group.rect.getRect()))
         atlas = self._atlas
+        dirty: vr_shared.Rect | None
         if (atlas is None or (atlas.width(), atlas.height()) != (atlas_width, atlas_height)
                 or [item[:4] for item in drawn] != [item[:4] for item in self._drawn]):
             if atlas is None or (atlas.width(), atlas.height()) != (atlas_width, atlas_height):
@@ -563,8 +571,14 @@ class TileComposer:
             atlas.fill(Qt.GlobalColor.transparent)  # padding between tiles transparent
             self._checksum.drawn(0, atlas_height)
             changed = list(range(len(drawn)))
+            dirty = None
         else:  # same places: tiles drawn again where their group changed (drawn whole, source mode)
             changed = [index for index, (new, old) in enumerate(zip(drawn, self._drawn)) if new != old]
+            dirty = (0, 0, 0, 0)  # atlas rect of changed tiles (empty: tiles moved on canvas only)
+            for index in changed:
+                tile_x, tile_y, tile_width, tile_height = drawn[index][:4]
+                part = (tile_x, tile_y, tile_width, tile_height)
+                dirty = part if dirty[2] == 0 else vr_shared.union_rect(dirty, part)
         self._drawn = drawn
         frame = self._frame
         if not changed and frame is not None and frame.tiles == tuple(tiles) and frame.canvas == canvas:
@@ -583,7 +597,8 @@ class TileComposer:
                 self._checksum.drawn(atlas_y, atlas_y + height)
             painter.end()
         layout = repr((tiles, canvas)).encode()
-        frame = self._frame = TileFrame(atlas, tuple(tiles), canvas, self._checksum.value(atlas, zlib.crc32(layout)))
+        frame = self._frame = TileFrame(atlas, tuple(tiles), canvas, self._checksum.value(atlas, zlib.crc32(layout)),
+                                        dirty)
         return frame
 
     def __group(self, widgets: list, geometries: list[QRect], origin: QPoint, size: tuple[int, int]) -> TileGroup:
@@ -676,8 +691,52 @@ def fit_image(image: QImage, max_dimension: int) -> QImage:
         Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 
+def process_names_windows() -> set[str] | None:
+    """Lower case executable names of all processes from one Toolhelp snapshot (Windows: a few ms, no handle
+    opened per process as psutil does), None if unavailable"""
+    if os.name != "nt":
+        return None
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", wintypes.LONG), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", wintypes.WCHAR * 260)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        return None
+    try:
+        entry = ProcessEntry()
+        entry.dwSize = ctypes.sizeof(ProcessEntry)
+        names = set()
+        found = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while found:
+            names.add(entry.szExeFile.lower())
+            found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        return names
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
 def steamvr_running() -> bool:
     """SteamVR server process running (openvr.init would start SteamVR otherwise)"""
+    try:
+        names = process_names_windows()
+        if names is not None:
+            return any(name in names for name in STEAMVR_PROCESSES)
+    except Exception:  # ctypes error: psutil below
+        logger.debug("VR overlay: process snapshot failed", exc_info=True)
     try:
         import psutil
 
@@ -734,6 +793,10 @@ class VROverlay(QObject):
         self._buffer = None  # pixels sent last (ctypes buffer over _buffer_image), kept until next frame
         self._buffer_image: QImage | None = None
         self._checksum: int | None = None
+        self._sent_at: int | None = None  # tick (ms) of last image sent to SteamVR (STEAMVR_MIN_INTERVAL_MS)
+        self._steamvr_dirty = False  # newer image held back by the SteamVR rate limit (sent on a later tick)
+        self._interval = 50  # update interval (ms) while overlays are shown
+        self._paused_since: int | None = None  # tick (ms) overlays were seen paused (not shown, not editing)
         self._visible = False
         self._has_image = False  # last composed image not empty (SteamVR overlay shown unless hidden for OpenXR)
         self._steamvr_wanted = False  # openvr available, waiting for SteamVR or running
@@ -759,6 +822,10 @@ class VROverlay(QObject):
         self._mirror_checksum: int | None = None
         self._mirror_version: int | None = None  # composer version of the mirror's image (partial repaint)
         self._compose_key: tuple | None = None  # overlay windows state of last composed image
+        # Overlays paused (not driving, game closed): updates slowed or stopped, back to normal on these
+        for signal in (overlay_signal.paused, overlay_signal.hidden, overlay_signal.locked, overlay_signal.editing):
+            signal.connect(self.__wake)
+        overlay_signal.context.connect(self.__wake)
 
     @property
     def running(self) -> bool:
@@ -811,8 +878,38 @@ class VROverlay(QObject):
             self.__release_steamvr()
             if vr_shared.WINDOWS:
                 self.__unregister_openxr()
-        if self.running and not self._timer.isActive():
-            self._timer.start(max(int(setting["update_interval"]), 20))
+        self._interval = max(int(setting["update_interval"]), 20)
+        self._paused_since = None
+        if self.running and (not self._timer.isActive() or self._timer.interval() != self._interval):
+            self._timer.start(self._interval)
+
+    def __wake(self, _state: bool = False):
+        """Overlays resumed, shown, hidden, unlocked or edited: normal update interval again (slowed or stopped
+        later by update_overlay if overlays stay paused), SteamVR checked again at once if waited for"""
+        self._paused_since = None
+        if self._steamvr_wanted and self._overlay is None and realtime_state.shown:
+            self._steamvr_retry_at = 0
+        if self.running and (not self._timer.isActive() or self._timer.interval() != self._interval):
+            self._timer.start(self._interval)
+
+    def __pace(self, now: int, widgets: list):
+        """Overlays paused (not shown, not editing) for PAUSED_GRACE_MS: updated every PAUSED_INTERVAL_MS while a
+        widget is visible or SteamVR connected (quit events must be answered), else timer stopped (after this
+        update) until __wake. OpenXR layer heartbeat kept by its own timer."""
+        if realtime_state.shown or realtime_state.editing:
+            self._paused_since = None
+            if self._timer.isActive() and self._timer.interval() != self._interval:
+                self._timer.setInterval(self._interval)
+            return
+        if self._paused_since is None or now < self._paused_since:
+            self._paused_since = now
+            return
+        if now - self._paused_since < PAUSED_GRACE_MS:
+            return
+        if self._system is None and not any(widget.isVisible() and widget.width() > 0 for widget in widgets):
+            self._timer.stop()
+        elif self._timer.isActive() and self._timer.interval() != PAUSED_INTERVAL_MS:
+            self._timer.setInterval(PAUSED_INTERVAL_MS)
 
     # OpenXR layer
 
@@ -1005,7 +1102,8 @@ class VROverlay(QObject):
         atlas = frame.atlas
         view = memoryview(atlas.constBits())[:atlas.sizeInBytes()]  # type: ignore[arg-type]
         try:
-            writer.write_tiles(view, atlas.width(), atlas.height(), atlas.bytesPerLine(), frame.tiles, frame.canvas)
+            writer.write_tiles(view, atlas.width(), atlas.height(), atlas.bytesPerLine(), frame.tiles, frame.canvas,
+                               frame.dirty)
         except (ValueError, TypeError, BufferError) as error:
             self._xr_checksum = None
             logger.warning("VR overlay: OpenXR image not written: %s", error)
@@ -1052,7 +1150,8 @@ class VROverlay(QObject):
         """SteamVR process checked in background every STEAMVR_RETRY_MS (not while the OpenXR layer draws:
         SteamVR overlay would stay hidden), SteamVR overlay started once SteamVR runs (never starts SteamVR)"""
         if self._steamvr_check is None and now >= self._steamvr_retry_at and not self._xr_drawing:
-            self._steamvr_retry_at = now + STEAMVR_RETRY_MS
+            # Overlays paused (not driving): checked rarely, at once when they resume (__wake)
+            self._steamvr_retry_at = now + (STEAMVR_RETRY_MS if realtime_state.shown else STEAMVR_IDLE_RETRY_MS)
             self._steamvr_check = SteamVRCheck()
         check = self._steamvr_check
         if check is None or not check.done():
@@ -1129,7 +1228,8 @@ class VROverlay(QObject):
                 logger.debug("VR overlay: shutdown failed", exc_info=True)
         was_running = self._handle is not None
         self._openvr = self._system = self._overlay = self._handle = self._buffer = self._buffer_image = None
-        self._checksum = None
+        self._checksum = self._sent_at = None
+        self._steamvr_dirty = False
         self._visible = False
         self._hidden_for_openxr = False
         if was_running:
@@ -1178,14 +1278,17 @@ class VROverlay(QObject):
                     self._checksum = None
                     logger.info("VR overlay: SteamVR overlay shown")
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
+        self.__pace(now, widgets)
         xr_checked = self._xr_dirty
         if xr_checked:  # tiles held back by write rate limit
             self.__write_openxr(widgets, now)
         key = compose_key(widgets)
-        if key is not None and key == self._compose_key:
+        unchanged = key is not None and key == self._compose_key
+        if unchanged and not self._steamvr_dirty:
             return  # no overlay window painted, moved, shown or hidden since last update
         self._compose_key = key
-        if not xr_checked:  # already composed from current widgets on this tick (or held back again)
+        self._steamvr_dirty = False
+        if not xr_checked and not unchanged:  # already composed from current widgets on this tick (or held back)
             self.__write_openxr(widgets, now)
         if overlay is not None and self._hidden_for_openxr:
             overlay = None  # hidden for OpenXR: no image sent (~4 MB), sent again once shown
@@ -1216,11 +1319,16 @@ class VROverlay(QObject):
                 return
             self._has_image = True
             if checksum != self._checksum:  # skip unchanged image
-                frame = image_frame(image, checksum)
-                self._checksum = frame.checksum
-                self._buffer, self._buffer_image = frame.buffer, frame.image  # keep reference until next frame
-                overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
-            self.__steamvr_show(not self._hidden_for_openxr)
+                if self._sent_at is not None and 0 <= now - self._sent_at < STEAMVR_MIN_INTERVAL_MS:
+                    self._steamvr_dirty = True  # whole canvas sent at most ~15 times per second: on a later tick
+                else:
+                    frame = image_frame(image, checksum)
+                    self._checksum = frame.checksum
+                    self._buffer, self._buffer_image = frame.buffer, frame.image  # keep reference until next frame
+                    overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
+                    self._sent_at = now
+            # Shown once an image was sent (image held back after hiding: old one never shown meanwhile)
+            self.__steamvr_show(not self._hidden_for_openxr and self._checksum is not None)
         except Exception as error:  # SteamVR closed, or openvr error
             self.__steamvr_stopped(error)
 
@@ -1278,7 +1386,7 @@ class VROverlay(QObject):
         if close_mirror:
             self.disable_mirror()
         self._timer.stop()
-        self._compose_key = None
+        self._compose_key = self._paused_since = None
         self._steamvr_wanted = False
         self._steamvr_check = None  # background check result ignored
         self._has_image = False

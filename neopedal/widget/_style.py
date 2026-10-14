@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import colorsys
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, NamedTuple
@@ -54,20 +55,20 @@ MODERN_PALETTE = MappingProxyType({
     "EEEEEE": "E9ECF1",
     "FFFFFF": "F4F6F9",
     # Red & orange
-    "FF2200": "FF4D4F",
+    "FF2200": "F87171",  # loss: status colors of app pages & stream graphics (setting_status_colors)
     "FF4400": "FF5A36",
     "DD5500": "F06A2B",
     "EE6600": "F2743A",
-    "FF6600": "FF7A45",
+    "FF6600": "FB923C",  # warning (pit)
     # Yellow
     "FFAA00": "FFB020",
     "FFCC00": "FFD43B",
-    "FFFF00": "FDE047",
+    "FFFF00": "FACC15",  # gold (yellow flag, slower sector)
     "CCCC22": "D4D44A",
     # Green
     "009900": "22A052",
     "22AA00": "2FB344",
-    "22CC22": "34C759",
+    "22CC22": "4ADE80",  # gain
     "448800": "3A9D5D",
     "44FF00": "4ADE80",
     "66EE00": "52D273",
@@ -91,7 +92,7 @@ MODERN_PALETTE = MappingProxyType({
     "2266CC": "3570C8", "CC7700": "D08526", "0000FF": "3B5BF0", "22FFFF": "5CE8F0",
     "FFFF22": "F8E45A", "22EE22": "45D86A", "EE7700": "F08A2E", "4444FF": "5B5BF5",
     "44AA00": "4FA84A", "FF8800": "FF9530", "22FF00": "4EE36B", "00BBDD": "22B0D6",
-    "EE0000": "E53E3E", "9900FF": "9150F0", "0099FF": "2E98F2", "0055FF": "3565F2",
+    "EE0000": "E53E3E", "9900FF": "C084FC", "0099FF": "2E98F2", "0055FF": "3565F2",
     "0066CC": "2A6EC2", "BBAA00": "C2B236", "887700": "8A7E2E", "880088": "8A3A8F",
     "008888": "2A8A8A", "DD2200": "E0452F", "CC00CC": "C23BC9", "FF2222": "F44848",
     "CC44CC": "C257C7", "44DDFF": "5AD2F7", "88FF88": "8FE8A0", "FFFF88": "F9EE95",
@@ -309,7 +310,7 @@ def option_role(key: str, options: dict) -> str:
     return FOREGROUND
 
 
-def theme_overrides(wcfg: dict, default: dict, style: dict) -> dict:
+def theme_overrides(wcfg: Mapping[str, Any], default: dict, style: dict) -> dict:
     """Get overlay theme overrides for options that still use default value
 
     Colors follow theme (modern palette, light & colorblind variants), modern design also sets
@@ -371,7 +372,7 @@ def is_scaled_option(widget_name: str, key: str, value: Any) -> bool:
     return SCALED_OPTION.search(key) is not None
 
 
-def scale_overrides(wcfg: dict, scale: float, widget_name: str = "") -> dict:
+def scale_overrides(wcfg: Mapping[str, Any], scale: float, widget_name: str = "") -> dict:
     """Pixel size options multiplied by global overlay scale
 
     Args:
@@ -405,7 +406,7 @@ class StyledConfig(dict):
 
     __slots__ = ("_source",)
 
-    def __init__(self, source: dict, overrides: dict):
+    def __init__(self, source: Any, overrides: dict):  # user setting dict (typed widget setting)
         super().__init__(source)
         super().update(overrides)
         self._source = source

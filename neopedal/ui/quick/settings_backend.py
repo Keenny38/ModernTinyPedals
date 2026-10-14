@@ -54,11 +54,11 @@ from .option_kinds import (
     OptionKind,
     check_value,
     choice_label,
+    choice_values,
     decimals,
     display_text,
-    font_families,
+    display_value,
     number_range,
-    number_text,
     parse_path,
     value_kind,
 )
@@ -101,7 +101,7 @@ CATEGORIES = (
         )),
         ("Startup & Window", (
             "show_at_startup", "minimize_to_tray", "remember_position", "remember_size", "remember_open_pages",
-            "show_setup_wizard_at_startup",
+            "keep_director_and_calculator_running_while_hidden", "show_setup_wizard_at_startup",
         )),
         ("Updates", ("check_for_updates_on_startup", "number_of_hours_between_update_checks", "update_repository")),
         ("Presets & Backups", (
@@ -133,6 +133,8 @@ CATEGORIES = (
         ("Auto Backup Car Setup Enabled", (
             "notify_auto_backup_car_setup", "font_color_auto_backup_car_setup",
             "background_color_auto_backup_car_setup")),
+        ("Broadcast Director On", (
+            "notify_broadcast_director", "font_color_broadcast_director", "background_color_broadcast_director")),
     )),
     Category("compatibility", "Compatibility", "\ue7f8", "Window manager, transparency & positions on some systems"),
     Category("remote_control", "Remote Control", "\ue704", "Run hotkey commands from a Stream Deck or a script"),
@@ -230,7 +232,6 @@ class SettingsBackend(QObject):
         self._highlight = ""
         # Navigation entries (read several times per change by the page): made again once state changes
         self._categories: tuple[str, list[dict]] | None = None  # (language, entries)
-        self.stateChanged.connect(self._drop_categories)  # before page bindings: connected first
         app_signal.addresses.connect(self.infoChanged)  # LAN addresses found in background
         app_signal.servers.connect(self.infoChanged)  # server listening once its port is available again
         self.load_options()
@@ -332,16 +333,18 @@ class SettingsBackend(QObject):
     def changed(self):
         """Pending edits changed: rows, counts & page marker"""
         self.update_rows()
-        self.stateChanged.emit()
+        self.notify_state()
 
     # Properties
     @Property(QObject, constant=True)
     def options(self) -> QObject:
         return self.model
 
-    @Slot()
-    def _drop_categories(self):
+    def notify_state(self):
+        """State changed: navigation entries made again (dropped before the signal, as QML bindings
+        notified by it may read them before any other connected slot runs)"""
         self._categories = None
+        self.stateChanged.emit()
 
     @Property(list, notify=stateChanged)
     def categories(self) -> list[dict]:
@@ -490,7 +493,7 @@ class SettingsBackend(QObject):
             self._category = key
             self.categoryChanged.emit()
         self.update_rows()
-        self.stateChanged.emit()
+        self.notify_state()
 
     @Slot(str)
     def setSearch(self, text: str):
@@ -499,7 +502,7 @@ class SettingsBackend(QObject):
         if words != self._words:
             self._words = words
             self.update_rows()
-            self.stateChanged.emit()  # category match counts
+            self.notify_state()  # category match counts
         self.filterChanged.emit()
 
     def focus_option(self, section: str, key: str):
@@ -783,17 +786,6 @@ class SettingsBackend(QObject):
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(text)
-
-
-def choice_values(kind: OptionKind) -> tuple[str, ...]:
-    return font_families() if kind.kind == KIND_FONT else kind.choices
-
-
-def display_value(kind: OptionKind, value: Any) -> str:
-    """Editable text of value (text fields)"""
-    if kind.kind in NUMBER_KINDS:
-        return number_text(value)
-    return str(value)
 
 
 def text_reason(info: OptionInfo, text: str) -> str:

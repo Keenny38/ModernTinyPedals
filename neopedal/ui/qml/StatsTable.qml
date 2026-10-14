@@ -5,7 +5,7 @@ import QtQuick.Controls.Basic
 // (key, cells of shown columns). Click: select, right click: row menu, double click or Enter: open row,
 // Delete: remove row, Backspace: back to All Tracks, Menu key: row menu.
 // Rows of the same track are moved in place when sorted or reloaded (animated, scroll kept); a cell is a
-// single text, level pill or letter badge loaded only where shown.
+// single text, its logo, level pill or letter badge made only in columns having any (backend column "extras").
 FocusScope {
     id: table
 
@@ -71,6 +71,39 @@ FocusScope {
             boxHeight: theme.em * 1.25
         }
     }
+    // Decorations of a cell (columns with extras only): game logo before text, level pill behind it or letter
+    // badge after it. Parent: loader inside cell text.
+    Component {
+        id: cellExtras
+        Item {
+            id: extrasItem
+            readonly property Item cellText: parent ? parent.parent : null
+            readonly property var cell: cellText ? cellText.cell : ({})
+            readonly property bool logoShown: logo.item !== null && logo.item.shown === true
+            Loader {  // car brand or circuit logo of game: vehicle & track cells only
+                id: logo
+                readonly property string logoUrl: extrasItem.cell.logo || ""
+                active: logoUrl !== ""
+                x: extrasItem.cellText ? -extrasItem.cellText.logoRoom + (theme.em * 2.2 - width) / 2 : 0
+                y: extrasItem.cellText ? (extrasItem.cellText.height - height) / 2 : 0
+                sourceComponent: logoImage
+            }
+            Loader {
+                id: decoration
+                readonly property bool pill: extrasItem.cell.pill === true
+                property color tint: extrasItem.cell.color || theme.border
+                readonly property string letter: extrasItem.cell.badge || ""
+                readonly property real textWidth: extrasItem.cellText ? extrasItem.cellText.width : 0
+                active: pill || letter !== ""
+                z: -1
+                x: pill ? -theme.em * 0.55 : textWidth + theme.em * 0.35
+                width: pill ? textWidth + theme.em * 1.1 : theme.em * 1.25
+                height: pill ? Math.round(theme.em * 1.5) : theme.em * 1.25
+                y: extrasItem.cellText ? (extrasItem.cellText.height - height) / 2 : 0
+                sourceComponent: pill ? pillShape : badgeShape
+            }
+        }
+    }
     Component {
         id: badgeShape
         Rectangle {
@@ -79,8 +112,8 @@ FocusScope {
             Text {
                 anchors.centerIn: parent
                 text: parent.parent.letter
-                color: "white"
-                font.pointSize: theme.fontPoint * 0.72
+                color: theme.inkOn(parent.color)  // readable on level color
+                font.pointSize: theme.fontTiny
                 font.weight: Font.Bold
             }
         }
@@ -117,11 +150,28 @@ FocusScope {
         Keys.onEnterPressed: backend.openRow(table.selectedKey)
 
         // Rows sorted again: slide to their new place; other track: rows fade in
-        move: Transition { NumberAnimation { property: "y"; duration: 240; easing.type: Easing.OutCubic } }
-        moveDisplaced: Transition { NumberAnimation { property: "y"; duration: 240; easing.type: Easing.OutCubic } }
-        displaced: Transition { NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic } }
-        add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180 } }
-        populate: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+        move: Transition { NumberAnimation { property: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+        moveDisplaced: Transition { NumberAnimation { property: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+        displaced: Transition { NumberAnimation { property: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
+        add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
+        populate: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
+        // Other track with mostly the same vehicles: rows changed in place (delegates kept), shown from the top
+        // with a short fade instead of being made again
+        NumberAnimation {
+            id: switchFade
+            target: list.contentItem
+            property: "opacity"
+            from: 0.35
+            to: 1
+            duration: theme.motionBase
+        }
+        Connections {
+            target: backend
+            function onRowsSwitched() {
+                list.positionViewAtBeginning()
+                switchFade.restart()
+            }
+        }
 
         header: Rectangle {
             z: 3
@@ -141,19 +191,19 @@ FocusScope {
                     height: table.rowHeight
                     ToolTip.visible: headerArea.containsMouse && modelData.tip !== ""
                     ToolTip.text: modelData.tip
-                    ToolTip.delay: 600
+                    ToolTip.delay: theme.tipDelay
                     Text {
                         anchors.fill: parent
                         anchors.leftMargin: theme.em * 0.7
                         anchors.rightMargin: theme.em * 1.1
                         text: headerCell.modelData.label
                         color: headerCell.sorted ? theme.accent : headerArea.containsMouse ? theme.text : theme.dimText
-                        font.pointSize: theme.fontPoint * 0.92
+                        font.pointSize: theme.fontLabel
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                         horizontalAlignment: headerCell.alignedLeft ? Text.AlignLeft : Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
                     }
                     Icon {
                         visible: headerCell.sorted
@@ -161,7 +211,7 @@ FocusScope {
                         size: theme.em * 0.6
                         color: theme.accent
                         anchors.right: parent.right
-                        anchors.rightMargin: theme.em * 0.45
+                        anchors.rightMargin: theme.em * 0.5
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     MouseArea {
@@ -231,17 +281,16 @@ FocusScope {
             ListView.onPooled: hoveredColumn = -1  // kept for another row (reuseItems)
             ToolTip.visible: rowArea.containsMouse && tip !== ""
             ToolTip.text: tip
-            ToolTip.delay: 500
+            ToolTip.delay: theme.tipDelay
 
             Rectangle {  // selected, hovered, alternate rows
                 anchors.fill: parent
                 anchors.topMargin: 1
                 anchors.bottomMargin: 1
-                radius: theme.em * 0.35
-                color: rowItem.selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.18 : 0.12)
-                     : rowArea.containsMouse ? theme.hover
+                radius: theme.radiusSm
+                color: rowItem.selected || rowArea.containsMouse ? theme.rowColor(rowArea.containsMouse, rowItem.selected)
                      : rowItem.index % 2 ? (theme.dark ? Qt.lighter(theme.base, 1.1) : Qt.darker(theme.base, 1.025)) : "transparent"
-                Behavior on color { ColorAnimation { duration: 110 } }
+                Behavior on color { ColorAnimation { duration: theme.motionFast } }
             }
             Rectangle {  // selected marker
                 x: 2
@@ -251,7 +300,7 @@ FocusScope {
                 anchors.verticalCenter: parent.verticalCenter
                 color: theme.accent
                 opacity: rowItem.selected ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 150 } }
+                Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
             }
             Repeater {
                 model: table.columns.length
@@ -259,14 +308,16 @@ FocusScope {
                     id: cellText
                     required property int index
                     readonly property var cell: rowItem.cells[index] || ({})
-                    readonly property bool alignedLeft: table.columns[index] !== undefined && table.columns[index].align === "left"
+                    readonly property var column: table.columns[index]
+                    readonly property bool alignedLeft: column !== undefined && column.align === "left"
                     readonly property real columnWidth: table.widthOf(index)
                     readonly property real columnX: table.edges[index] || 0
-                    readonly property real extra: decoration.active && !decoration.pill ? theme.em * 1.6 : 0  // badge
-                    readonly property real logoRoom: logo.shown ? theme.em * 2.6 : 0  // game logo before text
+                    readonly property bool pill: cell.pill === true
+                    readonly property real extra: !pill && (cell.badge || "") !== "" ? theme.em * 1.6 : 0  // badge
+                    readonly property real logoRoom: extras.item !== null && extras.item.logoShown ? theme.em * 2.6 : 0  // game logo
                     x: alignedLeft ? columnX + theme.em * 0.7 + logoRoom
                        : columnX + Math.max((columnWidth - width - extra + logoRoom) / 2, theme.em * 0.3)
-                    width: Math.max(0, Math.min(implicitWidth, columnWidth - theme.em * (decoration.pill ? 1.8 : 1.2) - extra - logoRoom))
+                    width: Math.max(0, Math.min(implicitWidth, columnWidth - theme.em * (pill ? 1.8 : 1.2) - extra - logoRoom))
                     height: rowItem.height
                     verticalAlignment: Text.AlignVCenter
                     text: cell.text || ""
@@ -274,27 +325,11 @@ FocusScope {
                     font.weight: cell.bold ? Font.DemiBold : Font.Normal
                     font.features: { "tnum": 1 }
                     elide: Text.ElideRight
-                    Loader {  // car brand or circuit logo of game: vehicle & track cells only
-                        id: logo
-                        readonly property string logoUrl: cellText.cell.logo || ""
-                        readonly property bool shown: item !== null && item.shown === true
-                        active: logoUrl !== ""
-                        x: -cellText.logoRoom + (theme.em * 2.2 - width) / 2
-                        y: (cellText.height - height) / 2
-                        sourceComponent: logoImage
-                    }
-                    Loader {
-                        id: decoration
-                        readonly property bool pill: cellText.cell.pill === true
-                        property color tint: cellText.cell.color || theme.border
-                        readonly property string letter: cellText.cell.badge || ""
-                        active: pill || letter !== ""
+                    Loader {  // logo, pill or letter badge: made only in columns having any (most cells: text only)
+                        id: extras
+                        active: cellText.column !== undefined && cellText.column.extras === true
                         z: -1
-                        x: pill ? -theme.em * 0.55 : cellText.width + theme.em * 0.35
-                        width: pill ? cellText.width + theme.em * 1.1 : theme.em * 1.25
-                        height: pill ? Math.round(theme.em * 1.5) : theme.em * 1.25
-                        y: (cellText.height - height) / 2
-                        sourceComponent: pill ? pillShape : badgeShape
+                        sourceComponent: cellExtras
                     }
                 }
             }

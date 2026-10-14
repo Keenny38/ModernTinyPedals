@@ -23,7 +23,10 @@ Overlay base window, events.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, overload
+from functools import wraps
+from math import ceil, inf
+from time import monotonic
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
 
 from PySide6.QtCore import QBasicTimer, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, Slot
 from PySide6.QtGui import QActionGroup, QFont, QFontMetrics, QGuiApplication, QPalette, QPixmap
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import QGridLayout, QLayout, QMenu, QWidget
 
 from .. import app_signal, overlay_signal, realtime_state
 from ..const_app import APP_NAME
+from ..context import AppContext, app_context
 from ..i18n import tr
 from ..i18n.options import module_label
 from ..perf_monitor import timed_event
@@ -45,9 +49,13 @@ from ._snapping import centered, fit_on_screens, step_on_grid
 from ._snapping import move_to_screen as place_on_screen
 from ._style import StyledConfig, overlay_theme, scale_overrides, theme_overrides
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import WidgetConfig
+
 logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
 FADE_MS = 250
+MAX_TIMER_ERRORS = 50  # consecutive update errors before overlay update stopped
 ARROW_KEYS = {
     Qt.Key.Key_Left: (-1, 0),
     Qt.Key.Key_Right: (1, 0),
@@ -112,16 +120,23 @@ class Base(QWidget):
     # Started as live overlay: never for overlay pictures (Overlays page, options), which may draw samples
     # before first update; a live overlay waiting for game data must not show them
     overlay_started = False
+    # Update stopped after repeated errors (see guarded_timer_event), not restarted until reload
+    timer_failed = False
+    # Widget setting, typed per widget class (see template.widget_config_types)
+    wcfg: WidgetConfig
 
-    def __init__(self, config: Setting, widget_name: str):
+    def __init__(self, config: Setting, widget_name: str, ctx: AppContext | None = None):
         super().__init__()
         self.widget_name = widget_name
+        # App objects (game data API, module data, controls): new code reads them here, tests hand fakes;
+        # per frame readers may keep module globals or bind ctx values to locals
+        self.ctx = ctx if ctx is not None else app_context()
 
         # Base config
         self.cfg = config
 
         # Widget config
-        self.wcfg = validate_option(self.cfg.user.setting[widget_name])
+        self.wcfg = cast("WidgetConfig", validate_option(self.cfg.user.setting[widget_name]))
 
         # Overlay style
         style = self.cfg.user.config["overlay_style"]
@@ -135,15 +150,15 @@ class Base(QWidget):
         # Theme colors (also legacy light & colorblind variants), modern font
         themed = theme_overrides(self.wcfg, self.cfg.default.setting[widget_name], style)
         if themed or self.modern_style:
-            self.wcfg = StyledConfig(self.wcfg, themed)
+            self.wcfg = cast("WidgetConfig", StyledConfig(self.wcfg, themed))
         # Modern design restyle of classic drawing (see widget._modern.restyle)
         design = self.design_overrides(style)
         if design:
-            self.wcfg = StyledConfig(self.wcfg, design)
+            self.wcfg = cast("WidgetConfig", StyledConfig(self.wcfg, design))
         # Global overlay scale
         scaled = scale_overrides(self.wcfg, style.get("overlay_scale", 1.0), widget_name)
         if scaled:
-            self.wcfg = StyledConfig(self.wcfg, scaled)
+            self.wcfg = cast("WidgetConfig", StyledConfig(self.wcfg, scaled))
 
         # Base setting
         self.setWindowTitle(f"{APP_NAME} - {widget_name.capitalize()}")
@@ -293,6 +308,8 @@ class Base(QWidget):
     @Slot(bool)  # type: ignore[operator]
     def __toggle_lock(self, locked: bool):
         """Toggle widget lock state"""
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         hidden = self.__set_input_transparent(locked)
         # Visual edit mode while unlocked
         self._edit_frame.set_visible(not locked)
@@ -303,6 +320,8 @@ class Base(QWidget):
     @Slot(bool)  # type: ignore[operator]
     def __set_editing(self, editing: bool):
         """Edit mode started or ended: outline always shown, overlay shown even if hidden"""
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         self._edit_frame.set_editing(editing and not self.cfg.overlay["fixed_position"])
         self.__refresh_visibility()
 
@@ -314,6 +333,8 @@ class Base(QWidget):
     @Slot(bool)  # type: ignore[operator]
     def __toggle_vr_compat(self, enabled: bool):
         """Toggle widget VR compatibility"""
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         self.setWindowFlag(Qt.WindowType.Tool, not enabled)
         # Need re-check
         self.__refresh_visibility(animate=False)
@@ -321,9 +342,13 @@ class Base(QWidget):
     @Slot(bool)  # type: ignore[operator]
     def __toggle_timer(self, paused: bool):
         """Toggle widget timer state"""
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         if paused:
             self._update_timer.stop()
             self.post_update()
+        elif self.timer_failed:
+            return
         elif self.update_while_hidden or not self.should_hide():  # hidden widget resumes when shown
             self._update_timer.start(self._update_interval, self)
 
@@ -349,10 +374,14 @@ class Base(QWidget):
 
     @Slot(bool)  # type: ignore[operator]
     def __set_hidden(self, _hidden: bool):
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         self.__refresh_visibility()
 
     @Slot()  # type: ignore[operator]
     def __context_changed(self):
+        if not self.__dict__:  # stopped meanwhile: signal queued by overlay control thread before
+            return
         self.__refresh_visibility()
 
     def __refresh_visibility(self, animate: bool = True):
@@ -363,7 +392,7 @@ class Base(QWidget):
         if realtime_state.shown:
             if hide and not self.update_while_hidden:
                 self._update_timer.stop()
-            elif not self._update_timer.isActive():
+            elif not (self.timer_failed or self._update_timer.isActive()):
                 self._update_timer.start(self._update_interval, self)
         self._fade.stop()
         if not (animate and self._fade_enabled) or opacity <= 0:  # nothing to fade on screen (stream only)
@@ -627,6 +656,10 @@ class Base(QWidget):
 class Overlay(Base):
     """Inherit base window, add common GUI methods"""
 
+    # Repaint rate governor: most whole widget repaints per second by request_update (0: no limit), for overlays
+    # whose picture moves at every update (maps): each repaint uploads the whole layered window
+    max_repaint_rate: ClassVar[float] = 0
+
     def __init_subclass__(cls, **kwargs):
         """Record update & paint time of each widget class (only while performance monitor is enabled)"""
         super().__init_subclass__(**kwargs)
@@ -638,8 +671,47 @@ class Overlay(Base):
                 method = klass.__dict__.get(method_name)
                 if method is not None:
                     if not getattr(method, "timed", False):  # not wrapped by a parent widget already
-                        setattr(cls, method_name, timed_event(method, event))
+                        wrapped = timed_event(method, event)
+                        if method_name == "timerEvent":
+                            wrapped = guarded_timer_event(wrapped)
+                        setattr(cls, method_name, wrapped)
                     break
+
+    def changed(self, key: str, value: Any) -> bool:
+        """True if value of key (what it draws, as visible: rounded values, texts) changed since last call, value
+        kept: repaint only then (changes too small to see never repaint), as ModernOverlay.refresh_keyed"""
+        drawn = self.__dict__.setdefault("_drawn_keys", {})
+        if key in drawn and drawn[key] == value:
+            return False
+        drawn[key] = value
+        return True
+
+    def request_update(self):
+        """Repaint widget (update), at most max_repaint_rate times per second: a request sooner than that schedules
+        one deferred repaint instead (latest state still drawn, never lost)"""
+        rate = self.max_repaint_rate
+        if rate <= 0:
+            self.update()
+            return
+        now = monotonic()
+        wait = self.__dict__.get("_repaint_time", -inf) + 1 / rate - now
+        if wait <= 0:
+            self._repaint_time = now
+            self.update()
+            return
+        timer = self.__dict__.get("_repaint_timer")
+        if timer is None:
+            timer = self._repaint_timer = QTimer(self)  # child: deleted with widget
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._deferred_repaint)
+        if not timer.isActive():
+            timer.start(max(ceil(wait * 1000 - 1e-6), 1))  # (float error never adds a millisecond)
+
+    def _deferred_repaint(self):
+        """Repaint deferred by request_update"""
+        if self.__dict__:  # not unloaded (stopped)
+            self._repaint_time = monotonic()
+            self.update()
 
     def config_font(self, name: str = "", size: float = 1, weight: str = "") -> QFont:
         """Config font
@@ -703,7 +775,7 @@ class Overlay(Base):
         Returns:
             Calculated font offset in pixel.
         """
-        if self.wcfg["enable_auto_font_offset"]:
+        if self.wcfg["enable_auto_font_offset"]:  # type: ignore[typeddict-item]  # widgets with font options
             if self.modern_style:  # center capital letters, independent of font leading
                 return round(metrics.height() / 2 - metrics.ascent() + metrics.capHeight() / 2)
             return (
@@ -712,7 +784,7 @@ class Overlay(Base):
                 + metrics.leading() * 2
                 - metrics.height()
             )
-        return self.wcfg["font_offset_vertical"]
+        return self.wcfg["font_offset_vertical"]  # type: ignore[typeddict-item]  # widgets with font options
 
     @staticmethod
     def set_padding(size: int, scale: float, side: int = 2) -> int:
@@ -984,7 +1056,7 @@ class Overlay(Base):
         """
         layout = self.layout()
         assert isinstance(layout, QGridLayout)
-        if self.wcfg.get(option, 0) == default:
+        if self.wcfg.get(option, 0) == default:  # type: ignore[typeddict-item]  # None: no layout option
             order = column, row  # Vertical layout
         else:
             order = row, column  # Horizontal layout
@@ -992,6 +1064,34 @@ class Overlay(Base):
             layout.addWidget(target, *order)
         else:
             layout.addLayout(target, *order)
+
+
+def guarded_timer_event(func):
+    """Wrap overlay timerEvent: stop update after repeated consecutive errors (MAX_TIMER_ERRORS),
+    instead of raising (& logging) at every update for whole session; error still raised (logged)"""
+
+    @wraps(func)
+    def wrapper(self, qt_event):
+        try:
+            result = func(self, qt_event)
+        except Exception:
+            errors = self.__dict__.get("_timer_errors", 0) + 1
+            self._timer_errors = errors
+            if errors >= MAX_TIMER_ERRORS and not self.timer_failed:
+                self.timer_failed = True
+                self._update_timer.stop()
+                logger.error("ERROR: overlay %s stopped after repeated errors", self.widget_name)
+                app_signal.error.emit(
+                    f"{module_label(self.widget_name)} stopped after repeated errors, see log for details."
+                )
+            raise
+        if self.__dict__.get("_timer_errors"):
+            self._timer_errors = 0
+        return result
+
+    wrapper.timed = True  # type: ignore[attr-defined]
+    wrapper.__wrapped__ = getattr(func, "__wrapped__", func)  # type: ignore[attr-defined]  # widget own method
+    return wrapper
 
 
 def validate_option(config: dict) -> dict:

@@ -33,7 +33,7 @@ import re
 from collections import OrderedDict
 from collections.abc import Iterable
 from functools import lru_cache
-from math import ceil
+from math import ceil, isfinite
 from time import gmtime, strftime
 from typing import Any, ClassVar
 
@@ -151,6 +151,8 @@ def clock_samples(clock_format: str) -> tuple[str, ...]:
 class ModernOverlay(Overlay):
     """Modern design widget base"""
 
+    wcfg: Any  # options of any modern widget read by name (each widget class sets its typed setting)
+
     # Widget options read by modern design, shown in config dialog (common options always shown)
     options: ClassVar[tuple[str, ...]] = ()
 
@@ -183,6 +185,7 @@ class ModernOverlay(Overlay):
         self._caps_roles: set[str] = set()
         self._static_layer: QPixmap | None = None
         self.state: Any = None
+        self.state_key: Any = None  # what decides a repaint, see refresh_keyed
         self.dirty_region = DirtyRegion()  # parts to repaint, see TableMixin.refresh_rows
         self.paint_region: QRegion | None = None  # region painted now, None: whole widget
         self.add_font("value", 1.0, "semibold")
@@ -400,7 +403,26 @@ class ModernOverlay(Overlay):
         """Repaint if state changed"""
         if state != self.state:
             self.state = state
-            self.update()
+            self.request_update()
+
+    def refresh_keyed(self, state: Any, key: Any):
+        """Repaint if key (what state draws, as visible: texts, lengths in device pixels) changed; state
+        drawn kept until then (changes too small to see never repaint)"""
+        if key != self.state_key or self.state is None:
+            self.state_key = key
+            self.state = state
+            self.request_update()
+
+    def pixel_steps(self, value: float, length: float) -> int:
+        """Fraction value of length, in device pixels (0 if not finite): key of a drawn length or position"""
+        scaled = value * length * self.devicePixelRatioF()
+        return round(scaled) if isfinite(scaled) else 0
+
+    def pixel_key(self, items: Iterable, lengths: Iterable[float], *fields: str) -> tuple:
+        """items (NamedTuples) with fraction fields (bar, level...) as device pixels of their drawn length: key of
+        refresh_keyed, texts & colors as drawn"""
+        return tuple(item._replace(**{field: self.pixel_steps(getattr(item, field), length) for field in fields})
+                     for item, length in zip(items, lengths))
 
     def redraw_static(self):
         """Background parts changed (rarely changing data drawn in static layer): draw it again"""
@@ -430,11 +452,12 @@ class ModernOverlay(Overlay):
         self._texts_drawn = self._values_drawn = 0
         region = event.region() if event is not None else None
         whole = region is None or QRegion(self.rect()).subtracted(region).isEmpty()
+        layer = self.static_layer()  # built before region set: whole layer drawn even in a partial paint
         self.paint_region = None if whole else region
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        painter.drawPixmap(0, 0, self.static_layer())
+        painter.drawPixmap(0, 0, layer)
         if self.state is not None:
             self.paint(painter)
         painter.end()

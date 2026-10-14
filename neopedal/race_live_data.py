@@ -50,6 +50,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
 
+from . import calculation as calc
 from .api_control import api
 from .fuel_strategy import MAX_DRIVERS, estimate_pace, history_laps, representative_laps
 from .module_info import ConsumptionDataSet, minfo
@@ -271,8 +272,8 @@ def clock_minutes(minutes: float) -> str:
 
 
 def laptime_text(seconds: float) -> str:
-    milliseconds = round(max(seconds, 0) * 1000)
-    return f"{milliseconds // 60000}:{milliseconds // 1000 % 60:02d}.{milliseconds % 1000:03d}"
+    """Lap time as m:ss.mmm (same format as every lap time)"""
+    return calc.sec2laptime_full(max(seconds, 0.0))
 
 
 def _amount(value: float, decimals: int, unit: str) -> str:
@@ -453,13 +454,19 @@ def collect(history: Sequence[ConsumptionDataSet], garage: GarageData, unit_fuel
     add("maximum_tyre", "tyres", "Maximum Tyres", allowed if allowed > 0 else None,
         (f"{allowed}" + (f" ({garage.new_tyres_left} new left)" if garage.new_tyres_left >= 0 else ""))
         if allowed > 0 else "", "Tyre allocation (LMU)" if allowed > 0 else "Tyre allocation (LMU, while driving)")
-    chances = garage.rain or tuple(node.rain_chance for node in read.session.weather_forecast() if node.sky_type >= 0)
+    values.append(collect_rain(garage, plan_laps))
+    return values
+
+
+def collect_rain(garage: GarageData, plan_laps: int) -> LiveValue:
+    """Rain forecast value (last of collect): wet laps of a race plan of plan_laps"""
+    chances = garage.rain or tuple(node.rain_chance for node in api.read.session.weather_forecast()
+                                   if node.sky_type >= 0)
     period = rain_period(chances, plan_laps)
     if period is None:
-        add("rain", "weather", "Rain Forecast", None, "", "Weather Forecast" if chances else "No forecast")
-    else:
-        first, count_wet = period
-        text = "No Rain" if not count_wet else f"Laps {first}-{first + count_wet - 1}"
-        add("rain", "weather", "Rain Forecast", (count_wet > 0, first, count_wet), text, "Weather Forecast",
-            tip=" · ".join(f"{chance:.0%}" for chance in chances))
-    return values
+        return LiveValue("rain", "weather", "Rain Forecast", None, "-", "Weather Forecast" if chances else "No forecast",
+                         True, "")
+    first, count_wet = period
+    text = "No Rain" if not count_wet else f"Laps {first}-{first + count_wet - 1}"
+    return LiveValue("rain", "weather", "Rain Forecast", (count_wet > 0, first, count_wet), text, "Weather Forecast",
+                     True, " · ".join(f"{chance:.0%}" for chance in chances))

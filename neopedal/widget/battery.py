@@ -20,13 +20,20 @@
 Battery Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..module_info import minfo
 from ._base import Overlay
 from ._common import warning_flash
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BatteryConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "BatteryConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

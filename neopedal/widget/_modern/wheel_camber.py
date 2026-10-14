@@ -24,6 +24,8 @@ Camber angle per wheel (positive camber highlighted), camber difference per axle
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -31,9 +33,14 @@ from ...module_info import minfo
 from .base import ModernOverlay
 from .quad import QuadMixin, Section, Tile
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import WheelCamberConfig
+
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: WheelCamberConfig
 
     options = (
         "font_size", "decimal_places_camber", "camber_smoothing_samples", "positive_camber_threshold",

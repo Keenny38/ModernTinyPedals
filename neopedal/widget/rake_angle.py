@@ -20,13 +20,20 @@
 Rake angle Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..api_control import api
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RakeAngleConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "RakeAngleConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

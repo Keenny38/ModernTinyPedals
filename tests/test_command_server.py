@@ -443,6 +443,7 @@ def test_reload_applies_remote_control_setting(monkeypatch):
         assert control.running
         with urllib.request.urlopen(f"http://127.0.0.1:{new_port}/commands", timeout=5) as response:
             assert response.status == 200
+        assert command_server.wait_servers_stopped()  # old server closed by a worker thread
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", PORT), timeout=2).close()
         setting["enable_remote_control"] = False

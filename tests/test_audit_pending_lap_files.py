@@ -13,7 +13,7 @@ import pytest
 from neopedal import realtime_state, validator
 from neopedal.api_control import api
 from neopedal.const_common import DELTA_DEFAULT, MAX_SECONDS
-from neopedal.module import _base, module_fuel, module_sectors, module_stats, module_stint
+from neopedal.module import _base, _lap_state, module_fuel, module_sectors, module_stats, module_stint
 from neopedal.module._base import MODULE_STOP, PENDING_CHECK, PENDING_WAIT, PendingLap
 from neopedal.module_info import (
     ConsumptionDataSet,
@@ -349,7 +349,7 @@ def test_sectors_saved_while_driving(tele, tmp_path, monkeypatch):
     from tests.test_module_timing import drive_sectors
 
     now = {"now": 0.0}
-    monkeypatch.setattr(module_sectors, "monotonic", lambda: now["now"])
+    monkeypatch.setattr(_lap_state, "monotonic", lambda: now["now"])  # checkpoint clock of sectors
     gen = module_sectors.record_sectors(SectorData(), SectorData(), f"{tmp_path}/")
     drive_sectors(tele, gen, [(30.0, 40.0, 20.0), (29.0, 41.0, 19.5)])
     assert not (tmp_path / "SimTrack - SimCar.sector").exists()  # not due yet
@@ -378,9 +378,8 @@ def test_consumption_history_saved_while_driving(history_env, tmp_path, monkeypa
 
 def test_fuel_reference_saved_while_driving(fuel_sim, tmp_path, clock, monkeypatch):
     sim = fuel_sim
-    monkeypatch.setattr(module_fuel, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(_lap_state, "monotonic", lambda: clock["now"])  # checkpoint clock of fuel
     monkeypatch.setattr(_base, "CHECKPOINT_INTERVAL", 100.0)
-    monkeypatch.setattr(module_fuel, "CHECKPOINT_INTERVAL", 100.0)
     gen = module_fuel.calc_consumption(FuelInfo(), False, f"{tmp_path}/", ".fuel", 5, 0.75)
     loop = ModuleLoop(gen)
     while not sim.finished:  # still on track, never reset

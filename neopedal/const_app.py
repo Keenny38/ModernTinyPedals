@@ -42,6 +42,10 @@ EXECUTABLE = f"{APP_ID.lower()}.exe"  # Windows executable
 LEGACY_NAME = "TinyPedal"
 LEGACY_PACKAGE = LEGACY_NAME.lower()  # plugins import app modules by this package name
 LEGACY_EXECUTABLE = f"{LEGACY_PACKAGE}.exe"
+# Fork name of versions until 0.23.0: VR layer copy folder (removed), file formats (still read)
+LEGACY_FORK_NAME = "ModernTinyPedals"
+LEGACY_FORMAT_PREFIX = "modern-tiny-pedals"
+FORMAT_PREFIX = APP_ID.lower()  # format of language packs, race plans & exported histories
 CONFIG_ID = "NeoPedal"  # user config & data folders
 DESKTOP_FILE_NAME = "NeoPedal"  # Linux desktop entry (NeoPedal.desktop)
 RESTART_ENVIRONMENT = "NEOPEDAL_RESTART"  # set by restart, skips single instance check

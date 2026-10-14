@@ -10,7 +10,7 @@ Item {
     id: root
 
     readonly property bool searching: searchField.activeFocus
-    readonly property var folderInfo: backend.folderInfo  // read once per change (sizes of every file)
+    readonly property var folderInfo: replays.folderInfo  // read once per change (sizes of every file)
     readonly property var sorts: [
         { "key": "date", "text": i18n.tr("Newest First") },
         { "key": "size", "text": i18n.tr("Largest First") },
@@ -22,7 +22,7 @@ Item {
              : session === "PRACTICE" ? theme.accent : theme.dimText
     }
     function showSelected() {
-        var index = backend.replayIndex(backend.selectedReplay)
+        var index = replays.replayIndex(replays.selectedReplay)
         if (index >= 0) list.positionViewAtIndex(index, ListView.Contain)
     }
     property string menuKey: ""
@@ -33,33 +33,38 @@ Item {
         id: rowMenu
         Action {
             text: i18n.tr("Watch in Game")
-            enabled: backend.gameState !== "offline" && !root.menuMany
-            onTriggered: backend.watchReplay(root.menuKey)
+            enabled: replays.gameState !== "offline" && !root.menuMany
+            onTriggered: replays.watchReplay(root.menuKey)
+        }
+        Action {  // results file of replay's session (results & replays page)
+            text: i18n.tr("Show Results")
+            enabled: !root.menuMany && replays.resultsOf(root.menuKey) !== ""
+            onTriggered: backend.showResults(replays.resultsOf(root.menuKey))
         }
         Action {
             text: i18n.tr("Show in Folder")
-            enabled: backend.replayFolder !== "" && !root.menuMany
-            onTriggered: backend.showInFolder(root.menuKey)
+            enabled: replays.replayFolder !== "" && !root.menuMany
+            onTriggered: replays.showInFolder(root.menuKey)
         }
         Action {
-            text: root.menuMany ? i18n.tr("Export %1 Replays...").arg(backend.checkedCount) : i18n.tr("Export Replay...")
-            enabled: backend.replayFolder !== "" && !backend.copying
-            onTriggered: backend.exportReplays(root.menuKey)
+            text: root.menuMany ? i18n.tr("Export %1 Replays...").arg(replays.checkedCount) : i18n.tr("Export Replay...")
+            enabled: replays.replayFolder !== "" && !replays.copying
+            onTriggered: replays.exportReplays(root.menuKey)
         }
         Action {
             text: i18n.tr("Rename Replay...")
-            enabled: backend.replayFolder !== "" && !root.menuMany
-            onTriggered: backend.renameReplay(root.menuKey)
+            enabled: replays.replayFolder !== "" && !root.menuMany
+            onTriggered: replays.renameReplay(root.menuKey)
         }
         Action {
             text: root.menuProtected ? i18n.tr("Unprotect") : i18n.tr("Protect From Deletion")
-            onTriggered: backend.toggleProtected(root.menuKey)
+            onTriggered: replays.toggleProtected(root.menuKey)
         }
         MenuSeparator {}
         Action {
-            text: root.menuMany ? i18n.tr("Delete %1 Replays...").arg(backend.checkedCount) : i18n.tr("Delete Replay...")
-            enabled: backend.replayFolder !== "" && (root.menuMany || !root.menuProtected)
-            onTriggered: backend.deleteReplays(root.menuKey)
+            text: root.menuMany ? i18n.tr("Delete %1 Replays...").arg(replays.checkedCount) : i18n.tr("Delete Replay...")
+            enabled: replays.replayFolder !== "" && (root.menuMany || !root.menuProtected)
+            onTriggered: replays.deleteReplays(root.menuKey)
         }
     }
 
@@ -67,30 +72,30 @@ Item {
     TpMenu {
         id: moreMenu
         Action {
-            text: backend.checkedCount > 1 ? i18n.tr("Export %1 Replays...").arg(backend.checkedCount) : i18n.tr("Export Replay...")
-            enabled: backend.replayFolder !== "" && backend.selectedReplay !== "" && !backend.copying
-            onTriggered: backend.exportReplays(backend.selectedReplay)
+            text: replays.checkedCount > 1 ? i18n.tr("Export %1 Replays...").arg(replays.checkedCount) : i18n.tr("Export Replay...")
+            enabled: replays.replayFolder !== "" && replays.selectedReplay !== "" && !replays.copying
+            onTriggered: replays.exportReplays(replays.selectedReplay)
         }
         Action {
-            text: backend.selectedProtected ? i18n.tr("Unprotect") : i18n.tr("Protect From Deletion")
-            enabled: backend.selectedReplay !== ""
-            onTriggered: backend.toggleProtected(backend.selectedReplay)
+            text: replays.selectedProtected ? i18n.tr("Unprotect") : i18n.tr("Protect From Deletion")
+            enabled: replays.selectedReplay !== ""
+            onTriggered: replays.toggleProtected(replays.selectedReplay)
         }
         MenuSeparator {}
         Action {
             text: i18n.tr("Delete Replays Older Than...")
-            enabled: backend.replayFolder !== "" && backend.replayCount > 0
-            onTriggered: backend.deleteOlderThan()
+            enabled: replays.replayFolder !== "" && replays.replayCount > 0
+            onTriggered: replays.deleteOlderThan()
         }
         Action {
             text: i18n.tr("Keep Only Latest Replays...")
-            enabled: backend.replayFolder !== "" && backend.replayCount > 0
-            onTriggered: backend.keepLatest()
+            enabled: replays.replayFolder !== "" && replays.replayCount > 0
+            onTriggered: replays.keepLatest()
         }
         Action {
             text: i18n.tr("Delete Temporary Files (%1, %2)").arg(root.folderInfo.temp).arg(root.folderInfo.tempSize)
-            enabled: backend.replayFolder !== "" && root.folderInfo.temp > 0
-            onTriggered: backend.deleteTempFiles()
+            enabled: replays.replayFolder !== "" && root.folderInfo.temp > 0
+            onTriggered: replays.deleteTempFiles()
         }
         MenuSeparator {}
         Action {
@@ -114,10 +119,10 @@ Item {
                 text: i18n.tr("Replays")
                 color: theme.text
                 font.weight: Font.DemiBold
-                font.pointSize: theme.fontPoint * 1.1
+                font.pointSize: theme.fontSubtitle
             }
             Rectangle {
-                visible: backend.replayCount > 0
+                visible: replays.replayCount > 0
                 implicitHeight: summaryText.implicitHeight + theme.em * 0.3
                 implicitWidth: summaryText.implicitWidth + theme.em * 1.0
                 radius: height / 2
@@ -125,9 +130,9 @@ Item {
                 Text {
                     id: summaryText
                     anchors.centerIn: parent
-                    text: backend.replaysSummary
+                    text: replays.replaysSummary
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
                 }
             }
@@ -135,19 +140,19 @@ Item {
             TpButton {
                 glyph: ""  // add
                 text: root.width > theme.em * 36 ? i18n.tr("Add") : ""
-                tip: backend.replayFolder !== "" ? i18n.tr("Add replay files (.Vcr) to the game replay folder, or drop them on the page")
+                tip: replays.replayFolder !== "" ? i18n.tr("Add replay files (.Vcr) to the game replay folder, or drop them on the page")
                                                  : i18n.tr("Replay folder unknown: start LMU once so the page lists its replays.")
-                enabled: backend.replayFolder !== "" && !backend.copying
+                enabled: replays.replayFolder !== "" && !replays.copying
                 flat: true
-                onClicked: backend.addReplays()
+                onClicked: replays.addReplays()
             }
             TpButton {
                 glyph: ""  // delete
-                tip: (backend.checkedCount > 1 ? i18n.tr("Move selected replays to the recycle bin")
+                tip: (replays.checkedCount > 1 ? i18n.tr("Move selected replays to the recycle bin")
                                                : i18n.tr("Move replay to the recycle bin")) + " (" + i18n.tr("Delete") + ")"
-                enabled: backend.replayFolder !== "" && backend.selectedReplay !== ""
+                enabled: replays.replayFolder !== "" && replays.selectedReplay !== ""
                 flat: true
-                onClicked: backend.deleteReplays(backend.selectedReplay)
+                onClicked: replays.deleteReplays(replays.selectedReplay)
             }
             TpButton {
                 id: moreButton
@@ -160,7 +165,7 @@ Item {
             TpButton {
                 id: sortButton
                 glyph: ""  // sort
-                text: root.width > theme.em * 30 ? root.sorts.find(function(sort) { return sort.key === backend.sortKey }).text : ""
+                text: root.width > theme.em * 30 ? root.sorts.find(function(sort) { return sort.key === replays.sortKey }).text : ""
                 tip: i18n.tr("Sort")
                 flat: true
                 checked: sortMenu.visible
@@ -173,8 +178,8 @@ Item {
                             required property var modelData
                             text: modelData.text
                             checkable: true
-                            checked: backend.sortKey === modelData.key
-                            onTriggered: backend.setSort(modelData.key)
+                            checked: replays.sortKey === modelData.key
+                            onTriggered: replays.setSort(modelData.key)
                         }
                         onObjectAdded: function(index, object) { sortMenu.insertAction(index, object) }
                         onObjectRemoved: function(index, object) { sortMenu.removeAction(object) }
@@ -186,31 +191,31 @@ Item {
         // Replays being copied to game folder
         Rectangle {
             Layout.fillWidth: true
-            visible: backend.copying
+            visible: replays.copying
             implicitHeight: Math.round(theme.em * 2.0)
-            radius: theme.em * 0.5
+            radius: theme.radiusMd
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.1)
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: theme.em * 0.7
                 anchors.rightMargin: theme.em * 0.7
                 spacing: theme.em * 0.6
-                Text { text: backend.copyKind === "export" ? i18n.tr("Exporting replays...") : i18n.tr("Copying replays..."); color: theme.text }
+                Text { text: replays.copyKind === "export" ? i18n.tr("Exporting replays...") : i18n.tr("Copying replays..."); color: theme.text }
                 Rectangle {
                     Layout.fillWidth: true
                     implicitHeight: Math.round(theme.em * 0.35)
                     radius: height / 2
                     color: theme.hover
                     Rectangle {
-                        width: parent.width * backend.copyProgress
+                        width: parent.width * replays.copyProgress
                         height: parent.height
                         radius: parent.radius
                         color: theme.accent
-                        Behavior on width { NumberAnimation { duration: 150 } }
+                        Behavior on width { NumberAnimation { duration: theme.motionBase } }
                     }
                 }
                 Text {
-                    text: Math.round(backend.copyProgress * 100) + " %"
+                    text: Math.round(replays.copyProgress * 100) + " %"
                     color: theme.dimText
                     font.features: { "tnum": 1 }
                 }
@@ -218,7 +223,7 @@ Item {
                     text: i18n.tr("Stop Copy")
                     flat: true
                     implicitHeight: Math.round(theme.em * 1.7)
-                    onClicked: backend.cancelCopy()
+                    onClicked: replays.cancelCopy()
                 }
             }
         }
@@ -227,69 +232,32 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: theme.em * 0.5
-            TextField {
+            TpSearchField {
                 id: searchField
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 8
-                implicitHeight: Math.round(theme.em * 2.3)
-                leftPadding: theme.em * 2
-                rightPadding: theme.em * 2
+                searchDelay: 200
                 placeholderText: i18n.tr("Search replays: track, event...")
-                color: theme.text
-                placeholderTextColor: theme.dimText
-                onTextEdited: searchTimer.restart()
-                Keys.onEscapePressed: { text = ""; backend.setSearch(""); list.forceActiveFocus() }
-                Keys.onReturnPressed: { backend.setSearch(text); list.forceActiveFocus() }
-                Keys.onEnterPressed: { backend.setSearch(text); list.forceActiveFocus() }
-                Keys.onDownPressed: list.forceActiveFocus()
-                Timer { id: searchTimer; interval: 200; onTriggered: backend.setSearch(searchField.text) }
-                background: Rectangle {
-                    radius: theme.em * 0.5
-                    color: theme.base
-                    border.width: 1
-                    border.color: searchField.activeFocus ? theme.accent : theme.border
-                    Behavior on border.color { ColorAnimation { duration: 120 } }
-                }
-                Icon {
-                    anchors.left: parent.left
-                    anchors.leftMargin: theme.em * 0.65
-                    anchors.verticalCenter: parent.verticalCenter
-                    glyph: ""  // search
-                    size: theme.em * 0.85
-                    color: theme.dimText
-                }
-                Text {
-                    visible: searchField.text !== ""
-                    anchors.right: parent.right
-                    anchors.rightMargin: theme.em * 0.7
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "×"
-                    color: clearArea.containsMouse ? theme.text : theme.dimText
-                    font.weight: Font.Bold
-                    MouseArea {
-                        id: clearArea
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: { searchField.text = ""; backend.setSearch("") }
-                    }
-                }
+                onSearchChanged: function(text) { replays.setSearch(text) }
+                onExitField: list.forceActiveFocus()
+                Keys.onEscapePressed: { clearSearch(); list.forceActiveFocus() }
+                Keys.onReturnPressed: list.forceActiveFocus()
+                Keys.onEnterPressed: list.forceActiveFocus()
             }
             TpSegmented {
                 options: [i18n.tr("All"), i18n.tr("Practice"), i18n.tr("Qualify"), i18n.tr("Race")]
-                currentIndex: backend.sessionFilter
+                currentIndex: replays.sessionFilter
                 maxWidth: root.width * 0.58
-                onActivated: function(index) { backend.setSessionFilter(index) }
+                onActivated: function(index) { replays.setSessionFilter(index) }
             }
         }
 
         // Several replays selected
         Rectangle {
             Layout.fillWidth: true
-            visible: backend.checkedCount > 1
+            visible: replays.checkedCount > 1
             implicitHeight: Math.round(theme.em * 2.3)
-            radius: theme.em * 0.5
+            radius: theme.radiusMd
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.12)
             RowLayout {
                 anchors.fill: parent
@@ -298,7 +266,7 @@ Item {
                 spacing: theme.em * 0.4
                 Text {
                     Layout.fillWidth: true
-                    text: i18n.tr("Selected") + "  " + backend.checkedSummary
+                    text: i18n.tr("Selected") + "  " + replays.checkedSummary
                     color: theme.text
                     font.weight: Font.DemiBold
                     font.features: { "tnum": 1 }
@@ -309,14 +277,14 @@ Item {
                     text: i18n.tr("Delete")
                     flat: true
                     implicitHeight: Math.round(theme.em * 1.9)
-                    onClicked: backend.deleteReplays(backend.selectedReplay)
+                    onClicked: replays.deleteReplays(replays.selectedReplay)
                 }
                 TpButton {
                     glyph: ""  // cancel
                     flat: true
                     tip: i18n.tr("Clear selection (Escape)")
                     implicitHeight: Math.round(theme.em * 1.9)
-                    onClicked: backend.selectReplay(backend.selectedReplay)
+                    onClicked: replays.selectReplay(replays.selectedReplay)
                 }
             }
         }
@@ -328,22 +296,22 @@ Item {
             clip: true
             focus: true
             activeFocusOnTab: true
-            model: backend.replayRows
+            model: replays.replayRows
             boundsBehavior: Flickable.StopAtBounds
             reuseItems: true  // rows scrolled out fed again with other replays (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            Keys.onUpPressed: { backend.moveReplaySelection(-1); root.showSelected() }
-            Keys.onDownPressed: { backend.moveReplaySelection(1); root.showSelected() }
-            Keys.onReturnPressed: backend.watchReplay(backend.selectedReplay)
-            Keys.onEnterPressed: backend.watchReplay(backend.selectedReplay)
-            Keys.onDeletePressed: backend.deleteReplays(backend.selectedReplay)
-            Keys.onEscapePressed: backend.selectReplay(backend.selectedReplay)
+            Keys.onUpPressed: { replays.moveReplaySelection(-1); root.showSelected() }
+            Keys.onDownPressed: { replays.moveReplaySelection(1); root.showSelected() }
+            Keys.onReturnPressed: replays.watchReplay(replays.selectedReplay)
+            Keys.onEnterPressed: replays.watchReplay(replays.selectedReplay)
+            Keys.onDeletePressed: replays.deleteReplays(replays.selectedReplay)
+            Keys.onEscapePressed: replays.selectReplay(replays.selectedReplay)
             Keys.onPressed: function(event) {
-                if (event.matches(StandardKey.SelectAll)) { backend.selectAllReplays(); event.accepted = true }
+                if (event.matches(StandardKey.SelectAll)) { replays.selectAllReplays(); event.accepted = true }
             }
 
-            displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
-            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180 } }
+            displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
+            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
 
             // Day (or track) sections, current one kept at top
             section.property: "section"
@@ -361,7 +329,7 @@ Item {
                     text: parent.section
                     color: theme.dimText
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                 }
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: theme.border; opacity: 0.6 }
             }
@@ -382,10 +350,11 @@ Item {
                 required property bool checked
                 required property bool isProtected
                 required property string trackLogo
-                readonly property bool selected: key === backend.selectedReplay
+                required property bool hasResults
+                readonly property bool selected: key === replays.selectedReplay
                 readonly property color tone: root.sessionColor(session)
                 readonly property bool watchHovered: watchLoader.item !== null && watchLoader.item.hovered
-                readonly property bool hot: (selected && backend.checkedCount <= 1) || rowArea.containsMouse || watchHovered
+                readonly property bool hot: (selected && replays.checkedCount <= 1) || rowArea.containsMouse || watchHovered
                 // Reused row: fed other replay values at once, no color animation from the old replay
                 property bool live: true
                 ListView.onPooled: { live = false; opacity = 1 }  // add transition may have been running
@@ -393,15 +362,14 @@ Item {
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 3.4)
-                radius: theme.em * 0.5
-                color: checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
-                     : rowArea.containsMouse ? theme.hover : "transparent"
-                border.width: selected && backend.checkedCount > 1 ? 1 : 0
+                radius: theme.radiusMd
+                color: theme.rowColor(rowArea.containsMouse, checked)
+                border.width: selected && replays.checkedCount > 1 ? 1 : 0
                 border.color: theme.accent
-                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
+                Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
                 ToolTip.visible: rowArea.containsMouse && !watchHovered && row.tip !== ""
                 ToolTip.text: rowArea.containsMouse ? row.tip : ""
-                ToolTip.delay: 900
+                ToolTip.delay: theme.tipDelay
 
                 MouseArea {
                     id: rowArea
@@ -410,25 +378,25 @@ Item {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onPressed: function(mouse) {
                         list.forceActiveFocus()
-                        if (mouse.button === Qt.LeftButton) backend.clickReplay(row.key, mouse.modifiers)
-                        else if (!row.checked) backend.selectReplay(row.key)
+                        if (mouse.button === Qt.LeftButton) replays.clickReplay(row.key, mouse.modifiers)
+                        else if (!row.checked) replays.selectReplay(row.key)
                     }
                     onClicked: function(mouse) {
                         if (mouse.button !== Qt.RightButton) return
                         root.menuKey = row.key
                         root.menuProtected = row.isProtected
-                        root.menuMany = row.checked && backend.checkedCount > 1
+                        root.menuMany = row.checked && replays.checkedCount > 1
                         rowMenu.popup(rowArea, mouse.x, mouse.y)
                     }
                     onDoubleClicked: function(mouse) {
                         if (mouse.button === Qt.LeftButton && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
-                            backend.watchReplay(row.key)
+                            replays.watchReplay(row.key)
                     }
                 }
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: theme.em * 0.45
+                    anchors.leftMargin: theme.em * 0.5
                     anchors.rightMargin: theme.em * 0.5
                     spacing: theme.em * 0.6
 
@@ -448,26 +416,26 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.toggleProtected(row.key)
+                            onClicked: replays.toggleProtected(row.key)
                             ToolTip.visible: containsMouse
                             ToolTip.text: !containsMouse ? ""
                                 : row.isProtected ? i18n.tr("Protected from deletion & clean up (click: unprotect)")
                                 : i18n.tr("Protect From Deletion")
-                            ToolTip.delay: 500
+                            ToolTip.delay: theme.tipDelay
                         }
                     }
                     // Session of game name (P1, Q1, R1), session color
                     Rectangle {
                         Layout.preferredWidth: Math.round(theme.em * 2.6)
                         Layout.preferredHeight: Math.round(theme.em * 2.3)
-                        radius: theme.em * 0.45
+                        radius: theme.radiusMd
                         color: Qt.rgba(row.tone.r, row.tone.g, row.tone.b, theme.dark ? 0.2 : 0.14)
                         Text {
                             anchors.centerIn: parent
                             text: row.code !== "" ? row.code.split(" ")[0] : (row.session.charAt(0) || "?")
                             color: row.tone
                             font.weight: Font.Bold
-                            font.pointSize: theme.fontPoint * 0.95
+                            font.pointSize: theme.fontLabel
                         }
                     }
                     GameLogo {  // circuit logo of game
@@ -489,9 +457,19 @@ Item {
                             Layout.fillWidth: true
                             text: [row.event, row.eventType, row.sessionLabel].filter(function(part) { return part !== "" }).join("  ·  ")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.88
+                            font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
                         }
+                    }
+                    Icon {  // results file of this session found: shown on the right when picked
+                        visible: row.hasResults
+                        glyph: ""  // flag
+                        size: theme.em * 0.85
+                        color: theme.dimText
+                        ToolTip.visible: resultsArea.containsMouse
+                        ToolTip.text: i18n.tr("Results of this session found")
+                        ToolTip.delay: theme.tipDelay
+                        MouseArea { id: resultsArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                     }
                     ColumnLayout {
                         spacing: 1
@@ -506,7 +484,7 @@ Item {
                             Layout.alignment: Qt.AlignRight
                             text: row.size
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.88
+                            font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
                         }
                     }
@@ -519,9 +497,9 @@ Item {
                             glyph: ""  // play
                             text: root.width > theme.em * 30 ? i18n.tr("Watch") : ""
                             tip: hovered ? i18n.tr("Open replay in the game (double click)") : ""
-                            enabled: backend.gameState !== "offline"
+                            enabled: replays.gameState !== "offline"
                             implicitHeight: Math.round(theme.em * 2.1)
-                            onClicked: backend.watchReplay(row.key)
+                            onClicked: replays.watchReplay(row.key)
                         }
                     }
                 }
@@ -536,20 +514,20 @@ Item {
                 Icon {
                     id: emptyIcon
                     anchors.horizontalCenter: parent.horizontalCenter
-                    glyph: backend.loading ? "" : backend.replayCount > 0 ? "" : ""
+                    glyph: replays.loading ? "" : replays.replayCount > 0 ? "" : ""
                     size: theme.em * 2.6
                     color: theme.dimText
                     RotationAnimation on rotation {  // asking game: refresh icon turns
-                        running: backend.loading && backend.replayCount === 0 && pageState.active
+                        running: replays.loading && replays.replayCount === 0 && pageState.active && theme.animate
                         from: 0; to: 360; duration: 1000; loops: Animation.Infinite
                         onRunningChanged: if (!running) emptyIcon.rotation = 0
                     }
                 }
                 Text {
                     width: parent.width
-                    text: backend.loading && backend.replayCount === 0 ? i18n.tr("Asking game...")
-                        : backend.replayCount > 0 ? i18n.tr("No replay matches the search or filter.")
-                        : backend.gameState === "offline" ? i18n.tr("Start LMU to list the replays it saved.")
+                    text: replays.loading && replays.replayCount === 0 ? i18n.tr("Asking game...")
+                        : replays.replayCount > 0 ? i18n.tr("No replay matches the search or filter.")
+                        : replays.gameState === "offline" ? i18n.tr("Start LMU to list the replays it saved.")
                         : i18n.tr("No replay saved by the game yet.")
                     color: theme.dimText
                     wrapMode: Text.WordWrap

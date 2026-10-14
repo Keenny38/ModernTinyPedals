@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from ..penalty_info import Penalty
 from ..process.weather import WeatherNode
 
 # Game index of sector 1, 2, 3 (game sector index 0 = sector 3)
@@ -555,6 +556,11 @@ class Switch(ABC):
         """Rear anti-roll bar level"""
 
     @abstractmethod
+    def level_maximum(self, name: str = "", index: int | None = None) -> int:
+        """Highest level of a driver setting (tc, tc_slip, tc_cut, abs, motor_map, brake_migration, front_arb,
+        rear_arb), -1 if unknown"""
+
+    @abstractmethod
     def wipers(self, index: int | None = None) -> int:
         """Wipers state, 0 = off, 1 = auto, 2 = slow, 3 = fast"""
 
@@ -838,6 +844,10 @@ class Vehicle(ABC):
     @abstractmethod
     def number_penalties(self, index: int | None = None) -> int:
         """Number of penalties"""
+
+    @abstractmethod
+    def penalty(self, index: int | None = None) -> Penalty:
+        """Penalties of game results stream: to serve (first one's kind & time), time added, disqualified"""
 
     @abstractmethod
     def pit_request(self, index: int | None = None) -> bool:

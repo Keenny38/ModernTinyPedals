@@ -53,6 +53,8 @@ Item {
         viewState = [nextZoom, nextPanX, nextPanY]
     }
     readonly property real mapScale: baseScale * viewState[0]
+    // Zoom easing: scale changes every frame (items placed by scale can wait for its end, moves keep easing)
+    readonly property bool zooming: easing.running && viewState[0] !== targetZoom
     readonly property real ySign: flipY ? -1 : 1
     readonly property real tx: width / 2 - centerX * (baseScale * viewState[0]) + viewState[1]
     readonly property real ty: height / 2 - ySign * centerY * (baseScale * viewState[0]) + viewState[2]
@@ -256,7 +258,7 @@ Item {
             text: (canvas.feet ? (scaleBar.value >= 2640 ? (scaleBar.value / 5280) + " mi" : scaleBar.value + " ft")
                    : (scaleBar.value >= 1000 ? (scaleBar.value / 1000) + " km" : scaleBar.value + " m")).replace(".", theme.decimalPoint)
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
         }
     }
 

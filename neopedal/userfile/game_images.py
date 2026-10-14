@@ -20,7 +20,7 @@
 Car brand & circuit pictures of LMU, fetched from the game running on this computer, cached
 
 Pictures (paths: process.game_images) are never shipped with the app: they are asked to the game
-web server (Rest API address, see ui.game_rest) in background, saved in the game image folder
+web server (Rest API address, see game_rest) in background, saved in the game image folder
 (cfg.path.game_image) and shown from there, also while the game does not run. Game lists (cars with
 their brand & picture file, circuit names) are kept in catalog.json of the same folder.
 
@@ -45,6 +45,7 @@ from urllib.parse import quote
 
 from ..process import game_images as gi
 from ..setting import cfg
+from . import atomic_replace, read_json, write_json
 
 CATALOG_FILE = "catalog.json"
 MAX_PICTURE_BYTES = 8_000_000
@@ -60,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 def fetch_from_game(resource: str) -> tuple[int, bytes]:
     """Status & body of game web server answer, (0, b"") if game does not answer"""
-    from ..ui.game_rest import GameConnection  # Qt core only, imported when first needed
+    from ..game_rest import GameConnection  # imported when first needed
 
     with GameConnection() as connection:
         return connection.request("GET", resource)
@@ -74,7 +75,7 @@ def safe_name(key: str) -> str:
 class GameImages:
     """Cache of game pictures & lists, fetched in background"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.RLock()
         self._jobs: queue.SimpleQueue[tuple[str, str] | None] = queue.SimpleQueue()
         self._queued: set[tuple[str, str]] = set()
@@ -102,7 +103,7 @@ class GameImages:
         """Cache file of picture (may not exist)"""
         return os.path.join(self.folder, kind, safe_name(key) + gi.image_extension(kind, key))
 
-    def load_catalog(self):
+    def load_catalog(self) -> None:
         """Game lists saved by an earlier run (once per game image folder)"""
         folder = self.folder
         with self._lock:
@@ -113,12 +114,8 @@ class GameImages:
             self.brands.clear()
             self.tracks.clear()
             self.missing.clear()
-        try:
-            with open(os.path.join(folder, CATALOG_FILE), encoding="utf-8") as file:
-                data = json.load(file)
-        except (OSError, ValueError):
-            return
-        if not isinstance(data, dict):
+        data = read_json(os.path.join(folder, CATALOG_FILE), strict=False, dict_only=True)
+        if data is None:
             return
         vehicles = [gi.VehicleInfo(*item[:4]) for item in data.get("vehicles", ())
                     if isinstance(item, list) and len(item) >= 4 and all(isinstance(value, str) for value in item[:4])]
@@ -132,7 +129,7 @@ class GameImages:
                 self.missing.update((str(path), float(stamp)) for path, stamp in missing.items()
                                     if isinstance(stamp, (int, float)))
 
-    def save_catalog(self):
+    def save_catalog(self) -> None:
         """Game lists & pictures game does not have, for next runs"""
         with self._lock:
             data = {
@@ -143,13 +140,11 @@ class GameImages:
         path = os.path.join(self.folder, CATALOG_FILE)
         try:
             os.makedirs(self.folder, exist_ok=True)
-            with open(f"{path}.tmp", "w", encoding="utf-8") as file:
-                json.dump(data, file, ensure_ascii=False, indent=1)
-            os.replace(f"{path}.tmp", path)
+            write_json(path, data, indent=1, raise_error=True, ensure_ascii=False)
         except OSError:
             logger.warning("GAME IMAGES: catalog not saved in %s", self.folder)
 
-    def set_vehicles(self, vehicles: list[gi.VehicleInfo]):
+    def set_vehicles(self, vehicles: list[gi.VehicleInfo]) -> None:
         """Cars of game lists (later names replace earlier ones, picture file kept if new one has none)"""
         with self._lock:
             for car in vehicles:
@@ -224,29 +219,24 @@ class GameImages:
         return self.file(gi.CAR_PICTURE if large else gi.CAR_THUMBNAIL, car.file)
 
     # Listeners
-    def add_listener(self, callback: Callable[[], None]):
+    def add_listener(self, callback: Callable[[], None]) -> None:
         """Called (on fetch thread) after a picture is saved or game lists are read"""
         with self._lock:
             if callback not in self._listeners:
                 self._listeners.append(callback)
 
-    def remove_listener(self, callback: Callable[[], None]):
+    def remove_listener(self, callback: Callable[[], None]) -> None:
         with self._lock:
             if callback in self._listeners:
                 self._listeners.remove(callback)
 
-    def add_file_listener(self, callback: Callable[[str, str], None]):
+    def add_file_listener(self, callback: Callable[[str, str], None]) -> None:
         """Called (on fetch thread) with kind & file of each picture saved, ("", "") after game lists are read"""
         with self._lock:
             if callback not in self._file_listeners:
                 self._file_listeners.append(callback)
 
-    def remove_file_listener(self, callback: Callable[[str, str], None]):
-        with self._lock:
-            if callback in self._file_listeners:
-                self._file_listeners.remove(callback)
-
-    def changed(self, kind: str = "", path: str = ""):
+    def changed(self, kind: str = "", path: str = "") -> None:
         """Picture of kind saved in path, or game lists read (no kind)"""
         with self._lock:
             self.version += 1
@@ -268,7 +258,7 @@ class GameImages:
                 logger.exception("GAME IMAGES: listener failed")
 
     # Background fetch
-    def start(self):
+    def start(self) -> None:
         """Saved lists loaded & fetch thread running (first lookup starts it)"""
         if self._loaded_folder != self.folder:
             self.load_catalog()
@@ -297,7 +287,7 @@ class GameImages:
                 self._thread = None
         return True
 
-    def request(self, kind: str, key: str):
+    def request(self, kind: str, key: str) -> None:
         """Fetch picture in background, unless queued, game has none or game did not answer lately"""
         path = gi.image_path(kind, key)
         now = time.time()
@@ -309,7 +299,7 @@ class GameImages:
             self._queued.add((kind, key))
         self._jobs.put((kind, key))
 
-    def _run(self):
+    def _run(self) -> None:
         while True:
             try:
                 job = self._jobs.get(timeout=QUEUE_WAIT)
@@ -394,9 +384,7 @@ class GameImages:
             return False
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(f"{target}.tmp", "wb") as file:
-                file.write(body)
-            os.replace(f"{target}.tmp", target)
+            atomic_replace(target, body, fsync=False)  # cache: downloaded again if lost
         except OSError:
             logger.warning("GAME IMAGES: picture not saved: %s", target)
             return False

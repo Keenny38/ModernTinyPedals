@@ -3,27 +3,167 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
-## 0.23.1 (2026-10-11)
+## 0.24.0 (2026-10-14)
 
-### NeoPedal everywhere
+Your Driver Rank and Safety Rank everywhere, Standings like a timing tower, the Black box renamed **Dashboard HUD** with a setting pop-up, Results & Replays in one page, one look per meaning in every overlay and page, and a lighter app.
 
-- **NeoPedal and the original TinyPedal run together**: NeoPedal could refuse to start ("NeoPedal is already running") while TinyPedal was open, or stop TinyPedal from starting: when copying the `TinyPedal` settings folder failed, NeoPedal used that folder and shared its `pid.log`, the file each app checks to run only once. NeoPedal now only uses its own folders, and `pid.log` carries the app name: a PID written by another app is never taken for a running NeoPedal.
-- **New `Config` > `Import Settings...`**: copies the global settings of another copy of the app from the folder you choose (options, shortcuts, driver stats, language packs, Black box incidents), after a restart, your current settings set aside in a backup folder. It replaces the automatic copy of the `TinyPedal` folder at first start and the `Config` > `TinyPedal Settings` menu: settings already imported by 0.23.0 stay in `%APPDATA%\NeoPedal`, and when updating straight from 0.22 or older, choose `%APPDATA%\TinyPedal` there to bring your settings (presets next to the executable are kept).
-- **Windows: executable renamed `neopedal.exe`**. The update removes the old executable and points the Start menu and desktop shortcuts to `neopedal.exe`: a shortcut you pinned yourself (taskbar) has to be pinned again.
-- **Linux: own install paths**: `install.sh` installs in `/usr/local/share/NeoPedal`, with a `NeoPedal` command, `NeoPedal.sh` and `NeoPedal.desktop`, and removes an older install made under the former name (an install of TinyPedal is kept). Windows are no longer grouped with TinyPedal's in the task bar. Launcher arguments go in `NEOPEDAL_RUN_ARGS`.
-- **New name in every file and message**: Python package `neopedal`, log files `neopedal.log` and `neopedal-errors.log`, bug report `neopedal-bug-report-….zip`, options of the `System Performance` overlay (`show_neopedal_performance`..., renamed in your presets, default prefix `NP `), VR overlay layer (`NeoPedalXrLayer`, the old registration is replaced), notes, preset packages, track maps, web dashboard certificate and documentation. Older plugins, preset packages and remote control tools keep working.
+### New
 
-### Driver Rank & Safety Rank
+#### Driver Rank & Safety Rank (Le Mans Ultimate)
 
-- **New `Driver Rank` overlay** (Le Mans Ultimate, off by default, `Timing` category): your Driver Rank (DR) and Safety Rank (SR) as the game menu shows them (`Silver 2`, progress to next tier `40%`), and your track limits points against the session limit (`1.25/5`). Ranks are read from the game folder (`coherent_local_storage.json`, written by the game menu, only read: nothing is sent anywhere, no sign-in), updated once the game menu shows new ones after an online race.
-- **`Driver Stats Viewer`: ranks on the driver card**, each in its color with the progress to the next tier and the change since your previous rank (`▲ +10%`). Every change is kept in `driver_ranks.history` of the global config folder.
-- **`Broadcast Director`: DR and SR on the driver card** of you and your team members (the drivers whose ranks the game menu knows).
+- **New `Driver Rank` overlay** (off by default, `Timing` category): your Driver Rank (DR) and Safety Rank (SR) as the game menu shows them (`Silver 2`, progress to the next tier `40%`), and your track limits points against the session limit (`1.25/5`).
+- **On your driver cards**: `Driver Stats Viewer`, the Home page and the `Broadcast Director` (you and your teammates, those of the events you registered for included). Each rank in its color, with the progress to the next tier and the change since your previous rank (`▲ +10%`), and your **badge** with its icon, name and description as in the game menu.
+- **Last ranks kept**: when the game rewrites its menu file without your ranks (it did with its update of October 13), your last ranks are shown with their date instead of nothing. Every change is kept in `driver_ranks.history`.
+- **Several Steam accounts on one computer**: ranks and badge are kept per account, the account signed in to Steam is followed live, and your other accounts are shown below your driver card. The ranks of one account are never shown as those of another.
+- Ranks are only read from the game folder (`coherent_local_storage.json`): nothing is sent anywhere, no sign-in.
 
 ![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
 
-### Track limits in every session
+![Driver Stats: ranks on the driver card](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-card-ranks.png)
 
-- **`Laps & Position`: track limits points with the session limit in practice and qualifying too** (`show_track_limits_points`), not only in races: `1.25/5` when the game gives a limit for the session, a dash otherwise. Both designs show the points the same way (`1.25`, `1.5`, `3`), the classic design no longer pads them (`1.250`).
+#### Home: driver card
+
+- **New `Driver` card on the Home page**: your name, ranks, badge, country, team and number, and your race record from the game results files (races, wins, podiums, average finish, clean races). Click it to open `Driver Stats Viewer`.
+
+![Home: driver card](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-home-driver-card.png)
+
+#### Standings, Relative and Rivals like a timing tower
+
+- **Time column like on TV** (modern design, each part can be turned off): the running lap time, then the completed lap with its colors and the gap to the driver's best (`+0.345`), `OUT` / `IN` laps, invalid lap in red and a trend arrow. Three **sector bars** under the time, colored like the game live timing: purple best of the class, green personal best, orange slower.
+- **Real penalties** (Le Mans Ultimate, both designs): `DT` drive through, `SG10` stop & go, `+10s` time penalty, `SG×2` several to serve, `DQ` disqualified, instead of `PEN` or `-1`.
+- **Pit status and pit stops in one column**: the `PIT`, `GAR`, `SLOW`, `FIN` pill, then the stops count or the penalty.
+- **Column labels** above the cars (`Pos`, `Driver`, `Tyres`, `Pit`, `Time`, `Gap`...), on by default.
+- **New `Energy per Lap` column** (Le Mans Ultimate, off by default): virtual energy each driver used in the last lap, or the average of the last 5 laps.
+- **New `Track limits` column** (Le Mans Ultimate, off by default): track limits points of each driver, amber once any, red one point before the penalty.
+- Race gap with its sign (`+12.3`, `+1L`), last lap in green when it is the driver's personal best.
+
+![Standings: lap time like a timing tower, pit & stops column, real penalties](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-standings-timing.png)
+
+![Standings: column labels, track limits column, race gap sign](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-standings-column-labels.png)
+
+![Relative & Rivals: lap time like a timing tower, pit stops, real penalties, compound badges](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-relative-rivals-timing.png)
+
+#### Dashboard HUD (formerly Black box): setting pop-up, new readings, your own profiles
+
+- **The Black box overlay is now called `Dashboard HUD`** everywhere in the app. Your settings, presets and incidents are kept.
+- **Setting change pop-up** (on by default): change TC, ABS, brake bias, brake migration, engine map or an anti-roll bar in the car and the center column shows it for 2 seconds (`TC 4/9 ▲`), green going up, red going down. Pit limiter, headlights and wipers too (`LIM ON`). Position, duration and colors can be set.
+- **New readings** (Le Mans Ultimate, off by default): track limits points (`LIMITS 1.25/5`), gap to the car ahead and behind (`GAP 1.2 | 3.0`), a lift & coast bar, and a **wipers icon** next to the headlights.
+- **Tyre compound and wear together**: the compound badge is drawn next to the wear (`[M] 91%`), so turning on `show_tyre_compound` no longer hides the wear, or the compound, for lack of room.
+- **Your own display profiles**: `User 1`, `User 2` and `User 3`, saved with `Save as Profile...`. Changing an option of a profile now switches it to `Custom` instead of locking the option.
+- **Overlay Options**: click a part of the Dashboard HUD picture (tyre, center column, damage, trace...) to jump to its options. Simple mode shows the main items only (46 options instead of 89).
+
+![Dashboard HUD: setting change pop-up](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-black-box-setting-popup.png)
+
+![Dashboard HUD: track limits points, gaps, lift & coast bar and wipers icon](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-black-box-new-items.png)
+
+![Dashboard HUD: Overlay Options with Save as Profile and live preview](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-dashboard-hud-options.png)
+
+![Dashboard HUD: tyre compound badge next to wear](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-dashboard-hud-compound-wear.png)
+
+#### Results & Replays: one page
+
+- **`Race Results` and `Game Replays` are now one page**, `Results & Replays` (`Results` in the navigation bar). The switch at the top of the list shows the sessions of the results files or the replays saved by Le Mans Ultimate; the `Replay` tab has everything the replays page had.
+- **Each replay is linked to its results**: a flag on replays that have a results file, `Show Results` in their menu, and the replay of a session picked with it.
+- **Watch an event or a lap**: the play button of an event (contact, penalty, track limits) opens the replay a few seconds before it, camera on the car concerned; the play button of a lap opens the replay at the start of that lap.
+
+![Results & Replays: replays linked to their results](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-results-replays.png)
+
+#### On / off switch for the Broadcast Director and the Race Calculator
+
+- **Switch at the top left of both pages** (on by default, remembered): off, the page asks the game nothing, cuts no camera, and is freed after 10 minutes hidden. Turn it back on with the switch or the button in the page.
+- **Dot on their navigation bar entry**: green on, grey off. New `director_toggle` and `race_calculator_toggle` hotkeys (remote control too) and command palette entries (`Ctrl+K`). New `Broadcast Director On` notice at the bottom of the main window.
+
+![On / off switch: Broadcast Director & Race Calculator](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-director-calculator-switch.png)
+
+#### Broadcast Director: standings tower carousel and game HUD
+
+- **Standings tower carousel**: up to 70 cars (was 30), the tower slides page after page every 10 seconds, class after class if you want, with a bar showing which part of the field is on screen.
+- **Game HUD menu on the camera desk**: hide the whole game UI for clean pictures (`middle click`), or each part (chat, MFD, car HUD, timing, track map).
+
+#### Trailing: pedal bars
+
+- **Pedal bars beside the plots** (off by default): throttle, brake, clutch and force feedback, raw and filtered side by side, with peak marker and optional readings.
+
+![Trailing: pedal bars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-trailing-pedal-bars.png)
+
+#### Share overlay settings
+
+- **Share the settings of one overlay or of several you pick**, as a `.zip` file: `Share` > `Export Overlay Settings...` on the `Overlays` and `Overlay Options` pages (or `Export Settings...` in the menu of an overlay card), tick the overlays, save. Only options changed from default are written, so your friend gets exactly your look.
+- **Import** with `Share` > `Import Overlay Settings...` or by dropping the file on the window: untick the overlays you do not want, `Keep my positions` is ticked by default (else positions are scaled to your screen). Settings are applied as pending changes of `Overlay Options`, kept with `Apply`, undone with `Ctrl+Z`.
+
+![Share overlay settings](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-share-overlay-settings.png)
+
+#### Import Settings
+
+- **New `Config` > `Import Settings...`**: copies the global settings of another copy of the app (options, hotkeys, driver stats, language packs, Dashboard HUD incidents) from the folder you choose, after a restart. Your current settings are set aside in a backup folder. Coming straight from 0.22 or older, choose `%APPDATA%\TinyPedal` there.
+
+### Improvements
+
+#### One look per meaning, everywhere
+
+- **Same status colors in overlays, app pages and stream sources**: purple best, green gain or personal best, red loss or penalty, orange pit, yellow slower sector, gray garage. The OBS standings tower shows `GAR`, `DNF` and `DQ` too.
+- **Tyre compound badges like the Standings** (letter on a square of the compound color): modern `Stint History`, Dashboard HUD tyres and the app pages. Classic overlays keep their colored letters.
+- **Same compound colors everywhere**: soft white, medium yellow, hard red, wet blue, intermediate green. Compounds still at the former default colors change once; colors you chose are kept.
+- **Class badges, short driver names (`L. Hartmann`) and race gaps (`+1 lap`)** written the same way on every page, in the language of the app.
+
+![Same status colors everywhere](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-status-colors.png)
+
+![Modern overlays: one palette for best, gain, loss and warning](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-overlay-status-palette.png)
+
+![Tyre compound badges](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-tyre-compound-badges.png)
+
+![Tyre compound colors](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-compound-colors.png)
+
+#### Track map and track limits
+
+- **Track map sectors colored like the game live timing**: purple best of your class in the session, green your best, orange slower, same as the Standings sector bars.
+- **Track limits points shown the same way everywhere** (`1.25`, `1.5`, `3`): `Laps & Position` in both designs, Driver Rank, Standings and Dashboard HUD. The limit (`1.25/5`) is shown in races only, as practice and qualifying have no penalty.
+
+![Track map: sector colors like the game live timing](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-track-map-sector-colors.png)
+
+#### Driver Stats Viewer
+
+- **Opens on `All Tracks`**, and goes back to it after 2 minutes away.
+- **About three times faster** to switch tracks, holding an arrow key in the table no longer stutters, and `Stints & Consistency` no longer reloads every lap while you drive.
+- **Levels match the community lap time sheet**: `Good` covers 102 and 103 %, `Midpack` 104 and 105 %, `Tail-ender` 106 %, `Offline` 107 % and slower.
+- Numbers in the language of the app (`101,50 %` in French), readable level letters, `% Ref.` and `Level` columns hidden while the comparison is off, `Live` badge following the game within 5 seconds, units and classification changes shown at once.
+
+#### App pages
+
+- **Keyboard**: `Tab` reaches every button and switch with a blue focus outline (`Space` or `Enter` presses it), arrow keys, `Home` and `End` change segmented choices.
+- **Easier to read**: darker secondary text in light themes, darker blue and red behind white text, visible button hover in Modern Dark.
+- **Same look on every page**: one scale of text sizes, corners and spacing, one search box (`Esc` clears then leaves), one list row style, same chart colors.
+- **Asks first** before removing a championship or a math channel. Pages no longer animate when Windows animation effects are off.
+
+#### Lighter on memory, CPU and GPU
+
+- **Pages**: tool pages hidden for 10 minutes are closed and give their memory back, smoothing is applied only where needed, and slow work (files, game answers) never runs on the window thread.
+- **Overlays**: an overlay repaints only when what it shows moves by a pixel (tables cell by cell, track map up to 25 times a second, Dashboard HUD recording drawn in 1 ms instead of 9.5 ms), background modules sleep until the game sends new data, and modules, chat and incidents run only while an overlay needs them.
+- **Broadcast Director hidden**: the game is asked every 5 seconds instead of every second when nothing needs fresh answers.
+- **VR and stream**: SteamVR overlay at most 15 times a second and slowed down off track, OpenXR layer uploads only the changed part, OBS capture only while a source is watched.
+
+#### NeoPedal name everywhere
+
+- **Windows**: executable renamed `neopedal.exe` (Start menu and desktop shortcuts follow, pin a taskbar shortcut again), `NeoPedal` as publisher, old `ModernPedal` and `Modern Tiny Pedals` shortcuts removed.
+- **Linux**: `install.sh` installs in `/usr/local/share/NeoPedal` with a `NeoPedal` command, and windows are no longer grouped with TinyPedal's.
+- **Files**: `neopedal.log`, `neopedal-errors.log`, `neopedal-bug-report-….zip`, VR layer `NeoPedalXrLayer`. Older plugins, preset packages, language packs and remote control tools keep working.
+
+### Fixes
+
+- **NeoPedal and the original TinyPedal run together**: NeoPedal could refuse to start ("NeoPedal is already running") or stop TinyPedal from starting.
+- **Gaps in class**: timed like a timing screen in races (they came from a game estimate, a few percent off for cars much slower or faster), and measured within the class with `enable_single_class_exclusive_mode` too.
+- **Interval in practice and qualifying**: best lap difference to the car ahead, instead of a meaningless distance on track.
+- **Dashboard HUD**: a new incident was not shown once 10 were kept, the previous incident's speed line could run out of the trace, an option of a display profile could look unchangeable.
+- **Driver Stats**: Qatar (`Losail International Circuit`) compared again with the community times; a lap equal to a level limit counted in the level below.
+- **Race Calculator**: with no race length, the formation lap was planned as a 1 lap race.
+- **OBS standings tower**: soft and hard tyres were swapped.
+- An overlay turned off or reloaded just as the game paused could log an error; `Ctrl+C` in the console now quits cleanly.
+- **About 60 more fixes** found by reviewing the whole app: `Esc` closes every page cleanly, page shortcuts no longer fire while another page is shown, damaged settings files are refused cleanly, errors of the app are written to `neopedal-errors.log`, and many small display fixes.
+
+### Removed
+
+- **Share codes**: presets and overlay settings are shared as `.zip` files only (`Presets` page: `Export Package...`, and `Import` > `Preset Package (.zip)...` or the file dropped on the window). Text codes of presets (`MTP1:`) and race plans (`TPRP1:`) are no longer read.
+- **`column_pitstop_count`** of Relative, Standings and Rivals: `column_pit_status` shows the pit status and the stops.
 
 ## 0.23.0 (2026-10-11)
 

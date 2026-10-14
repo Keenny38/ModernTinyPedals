@@ -150,7 +150,7 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
     try:
         from tests.test_lap_viewer import wait_loaded
 
-        backend.addFiles()
+        backend.exports.addFiles()
         assert backend.loading and viewer.is_loading()  # log read by worker process: page stays responsive
         wait_loaded(viewer)  # log imported, then 3 laps read in background
         imported = [entry for entry in backend.external if entry.info.get("source") == "MoTeC"]
@@ -165,7 +165,7 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
         bad = tmp_path / "bad.ld"
         bad.write_bytes(b"x" * 10)
         monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([str(bad)], ""))
-        backend.addFiles()
+        backend.exports.addFiles()
         assert "MoTeC" in backend.status
     finally:
         viewer.close()

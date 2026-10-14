@@ -27,7 +27,7 @@ RowLayout {
         HoverHandler { id: labelHover; enabled: row.tip !== "" }
         ToolTip.visible: labelHover.hovered
         ToolTip.text: row.tip
-        ToolTip.delay: 500
+        ToolTip.delay: theme.tipDelay
     }
     NumberField {
         id: field

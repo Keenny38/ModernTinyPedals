@@ -2,20 +2,27 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Race results page: sessions written by the game (results files) on the left, session picked on the right:
-// header, key figures of player, then classification, positions lap by lap (races), laps of a car and
-// session events. Click a car: its laps, highlighted on positions chart. F5: read files again.
+// Results & replays page: on the left, sessions written by the game (results files) or replays saved by the game
+// (LMU); on the right, session picked: header, key figures of player, then classification, positions lap by lap
+// (races), laps of a car, session events, and the replay tab (game replay or live session: playback, camera,
+// incidents, standings, map). Session with a replay: watch it, or an event or a lap of it, in the game.
+// Replay picked: results of its session shown. F5: read files & ask game again.
 TpPage {
     id: page
 
-    readonly property bool wide: width > theme.em * 70
+    readonly property bool wide: width > theme.bpWide
     readonly property var header: backend.sessionHeader
-    // Tabs shown: positions only for races (tab keys of backend: 0 classification, 1 positions, 2 laps, 3 events)
-    readonly property var tabKeys: backend.isRace ? [0, 1, 2, 3] : [0, 2, 3]
-    readonly property var tabTexts: backend.isRace
-        ? [i18n.tr("Classification"), i18n.tr("Positions"), i18n.tr("Laps"), i18n.tr("Events")]
-        : [i18n.tr("Classification"), i18n.tr("Laps"), i18n.tr("Events")]
-    readonly property int tab: tabKeys.indexOf(backend.tabIndex) >= 0 ? backend.tabIndex : 0
+    readonly property int replayTab: 4
+    // Tabs shown: positions only for races, replay always (tab keys of backend: 0 classification, 1 positions,
+    // 2 laps, 3 events, 4 replay); no session: replay tab only
+    readonly property var tabKeys: !backend.hasSession ? [4] : backend.isRace ? [0, 1, 2, 3, 4] : [0, 2, 3, 4]
+    readonly property var tabTexts: !backend.hasSession ? [i18n.tr("Replay")] : backend.isRace
+        ? [i18n.tr("Classification"), i18n.tr("Positions"), i18n.tr("Laps"), i18n.tr("Events"), i18n.tr("Replay")]
+        : [i18n.tr("Classification"), i18n.tr("Laps"), i18n.tr("Events"), i18n.tr("Replay")]
+    // No session: replay tab if chosen (or replays listed), else why there is no session (-1)
+    readonly property int tab: !backend.hasSession
+        ? (backend.tabIndex === replayTab || backend.listMode === 1 ? replayTab : -1)
+        : tabKeys.indexOf(backend.tabIndex) >= 0 ? backend.tabIndex : 0
 
     function toneColor(tone) {
         return tone === "gold" ? theme.gold : tone === "gain" ? theme.gain : tone === "loss" ? theme.loss
@@ -30,16 +37,39 @@ TpPage {
         columnSpacing: theme.em * 0.6
         rowSpacing: theme.em * 0.6
 
-        // Sessions of results files
+        // Sessions of results files, or replays saved by the game
         Card {
             Layout.fillHeight: page.wide
             Layout.fillWidth: !page.wide
             Layout.preferredWidth: page.wide ? Math.min(Math.max(page.width * 0.3, theme.em * 24), theme.em * 34) : -1
             Layout.preferredHeight: page.wide ? -1 : page.height * 0.34
-            ResultsSessionList { anchors.fill: parent }
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+                TpSegmented {
+                    objectName: "listMode"
+                    Layout.topMargin: theme.em * 0.6
+                    Layout.leftMargin: theme.em * 0.6
+                    Layout.rightMargin: theme.em * 0.6
+                    options: [i18n.tr("Sessions") + (backend.sessionCount > 0 ? "  " + backend.sessionCount : ""),
+                              i18n.tr("Replays") + (replays.replayCount > 0 ? "  " + replays.replayCount : "")]
+                    currentIndex: backend.listMode
+                    onActivated: function(index) { backend.setListMode(index) }
+                }
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: backend.listMode
+                    ResultsSessionList {}
+                    Loader {  // built when first shown, then kept
+                        active: backend.listMode === 1 || item !== null
+                        sourceComponent: ReplayList {}
+                    }
+                }
+            }
         }
 
-        // Session picked (or why there is none)
+        // Session picked (or why there is none), or replay of game
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -47,11 +77,12 @@ TpPage {
             ColumnLayout {
                 anchors.fill: parent
                 spacing: theme.em * 0.6
-                visible: backend.hasSession
+                visible: backend.hasSession || page.tab === page.replayTab
 
                 // Header: kind, track, date, settings
                 RowLayout {
                     Layout.fillWidth: true
+                    visible: backend.hasSession
                     spacing: theme.em * 0.7
                     ResultsBadge {
                         code: page.header.code || ""
@@ -74,7 +105,7 @@ TpPage {
                                 text: page.header.title || ""
                                 color: theme.text
                                 font.weight: Font.DemiBold
-                                font.pointSize: theme.fontPoint * 1.3
+                                font.pointSize: theme.fontHeading
                                 elide: Text.ElideRight
                             }
                             Text {
@@ -90,14 +121,14 @@ TpPage {
                                 color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.16)
                                 ToolTip.visible: partialArea.containsMouse
                                 ToolTip.text: i18n.tr("No car had finished when this file was written (race left before its end): classification and gaps of that moment.")
-                                ToolTip.delay: 400
+                                ToolTip.delay: theme.tipDelay
                                 MouseArea { id: partialArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                                 Text {
                                     id: partialText
                                     anchors.centerIn: parent
                                     text: i18n.tr("Unfinished")
                                     color: theme.warning
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     font.weight: Font.DemiBold
                                 }
                             }
@@ -113,11 +144,11 @@ TpPage {
                             text: [page.header.subtitle || "", page.header.details || ""]
                                   .filter(function(part) { return part !== "" }).join(" · ")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.92
+                            font.pointSize: theme.fontLabel
                             elide: Text.ElideRight
                             ToolTip.visible: headerArea.containsMouse
                             ToolTip.text: (page.header.file || "") + (page.header.game ? "  (" + page.header.game + ")" : "")
-                            ToolTip.delay: 700
+                            ToolTip.delay: theme.tipDelay
                             MouseArea { id: headerArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                         }
                     }
@@ -138,6 +169,7 @@ TpPage {
                 // Key figures of player (winner & fastest lap if player not in session)
                 Flow {
                     Layout.fillWidth: true
+                    visible: backend.hasSession && page.tab !== page.replayTab
                     spacing: theme.em * 0.5
                     Repeater {
                         model: backend.summaryTiles
@@ -148,12 +180,12 @@ TpPage {
                             readonly property color tone: page.toneColor(modelData.tone)
                             width: Math.max(tileColumn.implicitWidth + theme.em * 1.6, theme.em * 7.5)
                             height: tileColumn.implicitHeight + theme.em * 0.9
-                            radius: theme.em * 0.6
+                            radius: theme.radiusLg
                             color: toned ? Qt.rgba(tone.r, tone.g, tone.b, theme.dark ? 0.1 : 0.08) : theme.base
                             border.width: 1
                             border.color: toned ? Qt.rgba(tone.r, tone.g, tone.b, 0.35)
                                                 : (theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border)
-                            Behavior on color { ColorAnimation { duration: 200 } }
+                            Behavior on color { ColorAnimation { duration: theme.motionBase } }
                             Column {
                                 id: tileColumn
                                 anchors.left: parent.left
@@ -163,7 +195,7 @@ TpPage {
                                 Text {
                                     text: tileBox.modelData.label
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.78
+                                    font.pointSize: theme.fontCaption
                                     font.capitalization: Font.AllUppercase
                                     font.letterSpacing: 0.4
                                 }
@@ -171,7 +203,7 @@ TpPage {
                                     text: tileBox.modelData.value
                                     color: tileBox.modelData.tone !== "" ? tileBox.tone : theme.text
                                     font.weight: Font.Bold
-                                    font.pointSize: theme.fontPoint * 1.25
+                                    font.pointSize: theme.fontHeading
                                     font.features: { "tnum": 1 }
                                     width: Math.min(implicitWidth, theme.em * 14)
                                     elide: Text.ElideRight
@@ -180,7 +212,7 @@ TpPage {
                                     visible: tileBox.modelData.detail !== ""
                                     text: tileBox.modelData.detail
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     font.features: { "tnum": 1 }
                                     width: Math.min(implicitWidth, theme.em * 14)
                                     elide: Text.ElideRight
@@ -195,13 +227,15 @@ TpPage {
                     Layout.fillWidth: true
                     spacing: theme.em * 0.6
                     TpSegmented {
+                        objectName: "resultTabs"
                         options: page.tabTexts
-                        currentIndex: Math.max(page.tabKeys.indexOf(page.tab), 0)
-                        maxWidth: page.wide ? page.width * 0.4 : page.width * 0.6
+                        currentIndex: page.tabKeys.indexOf(page.tab)
+                        maxWidth: page.wide ? page.width * 0.45 : page.width * 0.7
                         onActivated: function(index) { backend.setTab(page.tabKeys[index]) }
                     }
                     Flickable {
                         Layout.fillWidth: true
+                        visible: page.tab !== page.replayTab
                         implicitHeight: classRow.implicitHeight
                         contentWidth: classRow.implicitWidth
                         clip: true
@@ -209,7 +243,7 @@ TpPage {
                         interactive: contentWidth > width
                         Row {
                             id: classRow
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Repeater {
                                 model: backend.classChips.length > 0
                                        ? [{ "name": "", "color": "", "count": 0 }].concat(backend.classChips) : []
@@ -230,7 +264,7 @@ TpPage {
                                              : chip.hovered ? theme.hover : "transparent"
                                         border.width: chip.current ? 0 : 1
                                         border.color: theme.border
-                                        Behavior on color { ColorAnimation { duration: 120 } }
+                                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
                                     }
                                     contentItem: Item {
                                         Row {
@@ -256,7 +290,7 @@ TpPage {
                                                 visible: chip.modelData.count > 0
                                                 text: chip.modelData.count
                                                 color: theme.dimText
-                                                font.pointSize: theme.fontPoint * 0.85
+                                                font.pointSize: theme.fontSmall
                                                 font.features: { "tnum": 1 }
                                                 anchors.verticalCenter: parent.verticalCenter
                                             }
@@ -297,19 +331,28 @@ TpPage {
                             active: page.tab === 3 || item !== null
                             sourceComponent: ResultsEvents {}
                         }
+                        Loader {
+                            active: page.tab === page.replayTab || item !== null
+                            sourceComponent: ReplayView {}
+                        }
                     }
                 }
             }
 
             // Nothing to show: reading, no results found, or no session matching filters
+            TpLoadingState {
+                visible: !backend.hasSession && page.tab !== page.replayTab && backend.busy && !backend.loaded
+                anchors.centerIn: parent
+                text: i18n.tr("Reading results files...")
+            }
             Column {
-                visible: !backend.hasSession
+                visible: !backend.hasSession && page.tab !== page.replayTab && !(backend.busy && !backend.loaded)
                 anchors.centerIn: parent
                 width: Math.min(parent.width - theme.em * 2, theme.em * 30)
                 spacing: theme.em * 0.6
                 Icon {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    glyph: backend.busy ? "" : ""  // stopwatch, flag
+                    glyph: ""  // flag
                     size: theme.em * 2.6
                     color: theme.dimText
                 }
@@ -317,13 +360,12 @@ TpPage {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    text: backend.busy && !backend.loaded ? i18n.tr("Reading results files...")
-                        : backend.folderText === "" ? i18n.tr("No results folder found")
+                    text: backend.folderText === "" ? i18n.tr("No results folder found")
                         : backend.sessionCount === 0 ? i18n.tr("No session results yet")
                         : i18n.tr("No session matches the filters")
                     color: theme.text
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 1.1
+                    font.pointSize: theme.fontSubtitle
                 }
                 Text {
                     width: parent.width
@@ -343,6 +385,51 @@ TpPage {
                     onClicked: backend.chooseFolder()
                 }
             }
+        }
+    }
+
+    // Replay files dropped on page: copied to replay folder of game
+    DropArea {
+        id: dropArea
+        anchors.fill: parent
+        onEntered: function(drag) { drag.accepted = drag.hasUrls }
+        onDropped: function(drop) {
+            if (!drop.hasUrls) return
+            replays.addFiles(drop.urls)
+            drop.acceptProposedAction()
+        }
+    }
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: theme.em * 0.4
+        visible: dropArea.containsDrag
+        radius: theme.radiusXl
+        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.12)
+        border.width: 2
+        border.color: theme.accent
+        Column {
+            anchors.centerIn: parent
+            spacing: theme.em * 0.6
+            Icon { anchors.horizontalCenter: parent.horizontalCenter; glyph: "\uE896"; size: theme.em * 3; color: theme.accent }  // download
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: i18n.tr("Drop replays (.Vcr) to add them to the game")
+                color: theme.text
+                font.weight: Font.DemiBold
+                font.pointSize: theme.fontHeading
+            }
+        }
+    }
+
+    // Message of last replay file operation or refused game command, a few seconds
+    TpToast {
+        id: toast
+        text: replays.noticeText
+        error: replays.noticeError
+        duration: 6000
+        Connections {
+            target: replays
+            function onNoticeChanged() { toast.show() }
         }
     }
 }

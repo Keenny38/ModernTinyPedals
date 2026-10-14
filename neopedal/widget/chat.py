@@ -27,12 +27,17 @@ messages highlighted a moment.
 from __future__ import annotations
 
 import textwrap
+from functools import lru_cache
 from time import localtime, strftime, time
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
 
 from ..api_control import api
 from ._base import Overlay
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import ChatConfig
 
 MAX_LINES = 20
 EXPIRE_MS = 250  # messages hidden at end of display duration checked at this interval while updates are paused
@@ -68,15 +73,22 @@ def chat_lines(messages, now: float, line_width: int, line_count: int, max_durat
         age = now - sent
         if 0 < max_duration < age:
             break  # older messages are older still
-        if show_time:
-            text = f"{strftime('%H:%M', localtime(sent))} {text}"
-        wrapped = textwrap.wrap(text, line_width) or [""]
+        wrapped = message_lines(sent, text, line_width, show_time)
         is_new = age < new_duration
         blocks.append([(line, is_new) for line in wrapped])
         total += len(wrapped)
         if total >= line_count:
             break
     return stack_blocks(blocks, line_count, newest_at_top)
+
+
+@lru_cache(maxsize=256)
+def message_lines(sent: float, text: str, line_width: int, show_time: bool) -> tuple[str, ...]:
+    """Wrapped lines of message (time before text if show_time), cached: messages shown are read again
+    every update"""
+    if show_time:
+        text = f"{strftime('%H:%M', localtime(sent))} {text}"
+    return tuple(textwrap.wrap(text, line_width)) or ("",)
 
 
 def stack_blocks(blocks: list[list], line_count: int, newest_at_top: bool) -> tuple:
@@ -90,6 +102,8 @@ def stack_blocks(blocks: list[list], line_count: int, newest_at_top: bool) -> tu
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: ChatConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

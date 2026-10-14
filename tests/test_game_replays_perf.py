@@ -83,7 +83,7 @@ def test_lists_reuse_rows(replays_page):  # noqa: F811
         pump(20)
         lists = [item for item in items_of(replays_page.view.rootObject())
                  if item.metaObject().className().startswith("QQuickListView") and item.property("reuseItems")]
-        assert len(lists) == 3  # replays, incidents, standings
+        assert len(lists) == 4  # results sessions, replays, incidents, standings
         assert len(buttons(text="Watch")) == 1  # selected replay row only
     finally:
         qInstallMessageHandler(previous)

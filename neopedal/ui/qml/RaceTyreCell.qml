@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// Race calculator tyre plan wheel: tyre fitted (compound dot, name dimmed once used before), tread at
+// Race calculator tyre plan wheel: tyre fitted (compound badge, name dimmed once used before), tread at
 // stint start & end (bar & text in tread color), tyre of stock dropped on it, click: pick or take off
 Rectangle {
     id: cell
@@ -9,12 +9,11 @@ Rectangle {
     property int corner: 0
     property var info: ({})  // name, text, color, fraction, endFraction, dim, compound
     property var menu: null  // tyres of stock to pick (shared by the cells), see RaceTyreTab wheelMenu
-    property var compoundColor: function(name) { return theme.dimText }
     readonly property bool fitted: info.name !== undefined && info.name !== ""
 
     implicitHeight: Math.round(theme.em * 2.7)
     implicitWidth: theme.em * 7
-    radius: theme.em * 0.4
+    radius: theme.radiusMd
     color: drop.containsDrag ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.22)
          : area.containsMouse || activeFocus ? theme.hover
          : theme.dark ? Qt.darker(theme.base, 1.2) : Qt.darker(theme.base, 1.02)
@@ -23,7 +22,7 @@ Rectangle {
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: fitted ? info.name + " " + info.text : i18n.tr("Empty")
-    Behavior on color { ColorAnimation { duration: 120 } }
+    Behavior on color { ColorAnimation { duration: theme.motionFast } }
     Keys.onDeletePressed: if (fitted) backend.clearTyre(row, corner)
     Keys.onSpacePressed: if (menu) menu.openFor(cell)
 
@@ -33,30 +32,29 @@ Rectangle {
         y: theme.em * 0.3
         width: cell.width - theme.em * 0.9
         spacing: theme.em * 0.3
-        Rectangle {
-            width: Math.round(theme.em * 0.55); height: width; radius: width / 2
-            color: cell.fitted ? cell.compoundColor(cell.info.name) : "transparent"
-            border.width: 1
-            border.color: Qt.rgba(0, 0, 0, 0.25)
+        TpCompound {
+            name: cell.fitted ? cell.info.name : ""
+            opacity: cell.info.dim ? 0.6 : 1  // used before
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
             text: cell.info.name || ""
             color: cell.info.dim ? theme.dimText : theme.text
             font.weight: cell.info.dim ? Font.Normal : Font.DemiBold
-            font.pointSize: theme.fontPoint * 0.9
+            font.pointSize: theme.fontLabel
             elide: Text.ElideRight
-            width: parent.width - theme.em
+            width: parent.width - theme.em * 1.4
+            anchors.verticalCenter: parent.verticalCenter
         }
     }
     Text {
         visible: cell.fitted
         anchors.right: parent.right
-        anchors.rightMargin: theme.em * 0.45
+        anchors.rightMargin: theme.em * 0.5
         y: cell.height - height - theme.em * 0.4
         text: cell.info.text || ""
         color: cell.info.color || theme.text
-        font.pointSize: theme.fontPoint * 0.82
+        font.pointSize: theme.fontSmall
         font.weight: Font.DemiBold
         font.features: { "tnum": 1 }
     }
@@ -74,14 +72,14 @@ Rectangle {
             radius: 1.5
             color: cell.info.color || theme.accent
             opacity: 0.45
-            Behavior on width { NumberAnimation { duration: 200 } }
+            Behavior on width { NumberAnimation { duration: theme.motionBase } }
         }
         Rectangle {
             width: parent.width * (cell.info.endFraction || 0)
             height: parent.height
             radius: 1.5
             color: cell.info.color || theme.accent
-            Behavior on width { NumberAnimation { duration: 200 } }
+            Behavior on width { NumberAnimation { duration: theme.motionBase } }
         }
     }
     Text {
@@ -89,7 +87,7 @@ Rectangle {
         anchors.centerIn: parent
         text: drop.containsDrag ? i18n.tr("Drop") : "+"
         color: theme.dimText
-        font.pointSize: theme.fontPoint * (drop.containsDrag ? 0.9 : 1.2)
+        font.pointSize: (drop.containsDrag ? theme.fontLabel : theme.fontHeading)
     }
 
     MouseArea {

@@ -41,7 +41,7 @@ Item {
             y: 0
             text: modelData.text
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.78
+            font.pointSize: theme.fontCaption
         }
     }
     // Monday, Wednesday & Friday names
@@ -56,18 +56,21 @@ Item {
             text: modelData
             color: theme.dimText
             horizontalAlignment: Text.AlignRight
-            font.pointSize: theme.fontPoint * 0.72
+            font.pointSize: theme.fontTiny
             elide: Text.ElideRight
         }
     }
-    // Days: painted at once (a year of days), hovered day outlined
-    onDaysChanged: dayCanvas.requestPaint()
-    onShownWeeksChanged: dayCanvas.requestPaint()
-    onCellChanged: dayCanvas.requestPaint()
+    // Days: painted at once (a year of days) by a canvas thread, hovered day outlined. Changes of one step
+    // (resize: weeks shown & day size) painted once
+    function paintDays() { dayCanvas.requestPaint() }
+    onDaysChanged: Qt.callLater(paintDays)
+    onShownWeeksChanged: Qt.callLater(paintDays)
+    onCellChanged: Qt.callLater(paintDays)
     readonly property var paintColors: [theme.accent, theme.base, theme.dark]  // theme switched: painted again
-    onPaintColorsChanged: dayCanvas.requestPaint()
+    onPaintColorsChanged: Qt.callLater(paintDays)
     Canvas {
         id: dayCanvas
+        renderStrategy: Canvas.Threaded
         x: activity.labelWidth
         y: activity.monthHeight
         width: activity.shownWeeks * activity.step
@@ -131,11 +134,11 @@ Item {
         Text {
             text: activity.activityData.summary || ""
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             elide: Text.ElideRight
             Layout.fillWidth: true
         }
-        Text { text: i18n.tr("Less"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.78 }
+        Text { text: i18n.tr("Less"); color: theme.dimText; font.pointSize: theme.fontCaption }
         Repeater {
             model: 5
             Rectangle {
@@ -146,6 +149,6 @@ Item {
                 color: activity.dayColor(index)
             }
         }
-        Text { text: i18n.tr("More"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.78 }
+        Text { text: i18n.tr("More"); color: theme.dimText; font.pointSize: theme.fontCaption }
     }
 }

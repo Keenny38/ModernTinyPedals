@@ -22,11 +22,17 @@ Brands preset function
 
 from __future__ import annotations
 
+from collections import OrderedDict
+
 from ..api_control import api
 from ..const_file import ConfigType
 from ..demo_state import demo_reader
 from ..regex_pattern import rex_lmu_brand_extract
 from ..setting import cfg
+
+# Vehicle name & model whose brand was not found: not searched again at every update (bounded, oldest dropped)
+NO_BRAND_SIZE = 512
+_no_brand: OrderedDict[tuple[str, str], None] = OrderedDict()
 
 
 def extract_lmu_brand_name(value: str, default: str) -> str:
@@ -40,10 +46,11 @@ def extract_lmu_brand_name(value: str, default: str) -> str:
     """
     try:
         match_obj = rex_lmu_brand_extract.search(value)
-        assert match_obj is not None
-        return match_obj.group().strip()
-    except (AssertionError, AttributeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return default
+    if match_obj is None:
+        return default
+    return match_obj.group().strip()
 
 
 def select_brand_name(index: int | None = None, vehicle_name: str = "") -> str:
@@ -51,8 +58,17 @@ def select_brand_name(index: int | None = None, vehicle_name: str = "") -> str:
     brand_name = cfg.user.brands.get(vehicle_name)
     if brand_name is None:
         demo = demo_reader()  # overlay picture on simulated race: its car, never saved
-        brand_name = extract_lmu_brand_name((api.read if demo is None else demo).vehicle.vehicle_model(index), "")
-        if brand_name and demo is None:  # save brand name if valid
-            cfg.user.brands[vehicle_name] = brand_name
-            cfg.save(config_type=ConfigType.BRANDS)
+        model = (api.read if demo is None else demo).vehicle.vehicle_model(index)
+        key = (vehicle_name, model if isinstance(model, str) else "")
+        if demo is None and key in _no_brand:  # searched before, model unchanged
+            return ""
+        brand_name = extract_lmu_brand_name(model, "")
+        if demo is None:
+            if brand_name:  # save brand name if valid
+                cfg.user.brands[vehicle_name] = brand_name
+                cfg.save(config_type=ConfigType.BRANDS)
+            else:
+                _no_brand[key] = None
+                if len(_no_brand) > NO_BRAND_SIZE:
+                    _no_brand.popitem(last=False)
     return brand_name

@@ -20,15 +20,22 @@
 Force Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import units
 from ..const_common import TEXT_NA
 from ..module_info import minfo
 from ..validator import infnan_to_zero as rmnan
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import ForceConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "ForceConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

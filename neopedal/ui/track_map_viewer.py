@@ -22,7 +22,6 @@ Track map viewer: track map file with position along track, curve & slope at pos
 Qt Quick page (ui/qml/TrackMapViewer.qml), state in quick/track_map_backend.py.
 """
 
-from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QVBoxLayout
 
 from ..i18n import tr
@@ -48,8 +47,7 @@ class TrackMapViewer(BaseDialog):
             self.backend.load_map(filepath, filename)
 
     def closeEvent(self, event):
-        # QML gone before the backend it binds to (deleted first: created first),
+        # BaseDialog.free_page: QML gone before the backend it binds to (deleted first: created first),
         # and GpuShapes gone before their vertex data is released
-        self.view.setSource(QUrl())
-        self.backend.release()
+        self.release_page()
         super().closeEvent(event)

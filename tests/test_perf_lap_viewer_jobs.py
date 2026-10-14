@@ -124,10 +124,10 @@ def test_simple_view_series_warmed_in_background(backend, monkeypatch):  # noqa:
     page = backend
     show_all(page)
     monkeypatch.setattr(lap_viewer, "BACKGROUND_CHART_SAMPLES", 1)
-    assert page.dashboard_columns() == []  # simple view never opened
+    assert page.dashboard.columns() == []  # simple view never opened
     page.setSimpleView(True)
     page.wait_jobs()
-    columns = page.dashboard_columns()
+    columns = page.dashboard.columns()
     assert "throttle" in columns and "clutch" in columns  # pedal cards read clutch, not charted
     page.setSmoothing(2)
     page.wait_jobs()
@@ -290,13 +290,14 @@ def test_session_state_built_once(backend, monkeypatch):  # noqa: F811
     page = backend
     show_all(page)
     calls: list[int] = []
-    original = page.session_groups
-    monkeypatch.setattr(page, "session_groups", lambda: (calls.append(1), original())[1])
-    state = page.sessionState
-    assert page.sessions is state["sessions"] and page.sessionKey == state["key"] and page.sessionData is state["data"]
+    session = page.session
+    original = session.session_groups
+    monkeypatch.setattr(session, "session_groups", lambda: (calls.append(1), original())[1])
+    state = session.state
+    assert session.sessions is state["sessions"] and session.key == state["key"] and session.values is state["data"]
     assert len(calls) == 1
-    page.sessionChanged.emit()
-    assert page.sessionState is not state and len(calls) == 2
+    session.changed.emit()
+    assert session.state is not state and len(calls) == 2
 
 
 def test_pictures_update_logos_in_place(backend, monkeypatch):  # noqa: F811
@@ -329,20 +330,20 @@ def test_consistency_file_times_asked_once(backend, monkeypatch):  # noqa: F811
 def test_axis_labels_same_as_ticks(backend):  # noqa: F811
     page = backend
     for column, low, high in (("speed_kph", 52.3, 87.9), ("throttle", 0.1, 0.4), ("accel_lat", -1.2, 0.3)):
-        ticks = page.axisTicks(column, low, high)
-        assert page.axisLabels(column, [tick["value"] for tick in ticks], high - low) == [tick["text"] for tick in ticks]
+        ticks = page.charts.axisTicks(column, low, high)
+        assert page.charts.axisLabels(column, [tick["value"] for tick in ticks], high - low) == [tick["text"] for tick in ticks]
 
 
 def test_corner_model_follows_corners(backend):  # noqa: F811
     page = backend
     show_all(page)
-    rows = page.corners
-    assert page.corner_model.rowCount() == len(rows) and page.cornerCount == len(page._corner_rows)
-    assert [row["label"] for row in page.corner_model.rows] == [row["label"] for row in rows]
-    if page._corner_rows:
-        assert page.cornerPosition(0) == next(number for number, row in enumerate(rows)
+    rows = page.cornerTable.items
+    assert page.cornerTable.row_model.rowCount() == len(rows) and page.cornerTable.count == len(page.cornerTable.rows)
+    assert [row["label"] for row in page.cornerTable.row_model.rows] == [row["label"] for row in rows]
+    if page.cornerTable.rows:
+        assert page.cornerTable.position(0) == next(number for number, row in enumerate(rows)
                                               if row["kind"] == "corner" and row["index"] == 0)
-        assert page.cornerMaxDelta >= 0.05
+        assert page.cornerTable.maxDelta >= 0.05
 
 
 # --- QML: side tabs open without warnings, hidden tabs never read backend
@@ -363,17 +364,17 @@ def test_side_tabs_open_without_warnings(opener, warnings):  # noqa: F811
     page.setSideTab(0)  # session tab hidden: not read again until shown
     wait(0.3)
     reads: list[int] = []
-    original = type(page).session_state
+    original = type(page.session).session_state
     try:
-        type(page).session_state = lambda self: (reads.append(1), original(self))[1]
-        page.sessionChanged.emit()
+        type(page.session).session_state = lambda self: (reads.append(1), original(self))[1]
+        page.session.changed.emit()
         wait(0.2)
         assert not reads and sessions[0].property("stale")
         page.setSideTab(4)
         wait(0.5)
         assert reads and not sessions[0].property("stale")
     finally:
-        type(page).session_state = original
+        type(page.session).session_state = original
     simple = find(view, lambda item: item.property("cardsShown") is not None)
     page.setSideTab(5)  # XY: zoomed axis labels asked once per tick set
     wait(0.5)

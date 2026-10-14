@@ -35,6 +35,7 @@ REAR_MAX_STEER = 10.0  # degrees, rear wheels drawn turned at most this much (to
 CENTER_ITEMS = (
     "locking", "delta", "laptime",
     "pit_limiter", "gear", "speed", "rpm", "pedals", "brake_heat",
+    "track_limits", "gaps", "lift_coast",
 )
 
 FONT_CACHE_SIZE = 1024  # fitted fonts kept per widget, cleared when full

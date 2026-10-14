@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from collections.abc import Callable, Collection, Mapping
+from typing import NamedTuple
 
 from ...template.widget.black_box_ui import (  # noqa: F401  re-exported for widget & tests
     COMPACT_HIDDEN,
@@ -33,6 +35,7 @@ from ...template.widget.black_box_ui import (  # noqa: F401  re-exported for wid
     parse_class_targets,
     parse_compound_targets,
     pressure_target_kpa,
+    profile_overrides,
 )
 
 # Tyre readings, in priority order: the lowest-numbered one is dropped first when the tyre
@@ -86,7 +89,7 @@ class WheelState:
 
     __slots__ = (
         "steer", "tread", "tread_end", "tread_end_known", "tyre_temp", "ico_colors", "brake_temp",
-        "brake_wear", "brake_wear_known", "pressure", "compound",
+        "brake_wear", "brake_wear_known", "pressure", "compound", "compound_color", "compound_ink",
         "tyre_color", "brake_color", "warning", "status",
         "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
         "brake_pressure", "temp_trend", "pressure_trend", "brake_trend", "load", "susp_travel", "susp_static", "susp_velocity",
@@ -104,6 +107,8 @@ class WheelState:
         self.brake_wear = 100.0  # remaining brake thickness (percent)
         self.brake_wear_known = False  # brake thickness needs Wheels module data
         self.compound = ""  # tyre compound symbol
+        self.compound_color = ""  # compound badge color (compound preset)
+        self.compound_ink = ""  # symbol color readable on compound badge
         self.tyre_temp = 0.0
         self.ico_colors = (NEUTRAL_COLOR,) * 3  # left to right bands
         self.brake_temp = 0.0
@@ -162,11 +167,18 @@ def fit_readings(lines: list, usable: float, line_height: float) -> list:
     where they can be read at a glance, which is worse than showing fewer of them.
     """
     min_height = line_height * MIN_READING_SCALE
-    while len(lines) > 1:
-        total = sum(line[3] for line in lines)
-        if usable * min(line[3] for line in lines) / total >= min_height:
+    if len(lines) <= 1:
+        return lines
+    # Dropped lowest priority first (first of equal ones), totals kept instead of summed again each time
+    kept = list(range(len(lines)))
+    total = sum(line[3] for line in lines)
+    for drop in sorted(kept, key=lambda index: lines[index][0]):  # stable: first of equal priorities
+        if len(kept) <= 1 or usable * min(lines[index][3] for index in kept) / total >= min_height:
             break
-        lines.pop(min(range(len(lines)), key=lambda index: lines[index][0]))
+        kept.remove(drop)
+        total -= lines[drop][3]
+    if len(kept) < len(lines):
+        lines[:] = [lines[index] for index in kept]
     return lines
 
 
@@ -596,3 +608,103 @@ def impact_arrow(raw_angle: float) -> str:
         return ""
     arrows = "→↗↑↖←↙↓↘"
     return arrows[round(((raw_angle - 90) % 360) / 45) % 8]
+
+
+
+class SettingChange(NamedTuple):
+    """Driver setting changed: from old to new text, direction 1 up, -1 down, 0 unknown"""
+
+    name: str
+    old: str
+    new: str
+    direction: int
+    since: float
+    maximum: str = ""  # highest level of setting, "" if unknown
+    event: bool = False  # driving event (limiter, lights...): new state only
+
+
+def change_direction(old: str, new: str) -> int:
+    """1 if new value is higher, -1 if lower, 0 if not numbers"""
+    try:
+        difference = float(new) - float(old)
+    except ValueError:
+        return 0
+    return (difference > 0) - (difference < 0)
+
+
+SETTING_POPUP_LINES = 2  # changes shown at once (TC & TC slip changed together...)
+FADE_IN_SECONDS = 0.12
+FADE_OUT_SECONDS = 0.35
+
+
+class SettingChanges:
+    """Driver settings changed in the car (TC, ABS, brake bias, motor map...): last changes shown a while
+
+    Readings are texts as displayed (a float wobbling below shown precision is no change), None
+    while the car has no such setting. First readings of a car, and changes in the garage (setup
+    edited), are taken as they are: only a setting changed from one known value to another shows.
+    A setting changed again while shown keeps its first old value (3 > 5); back to it, the last step shows
+    (3 > 4 > 3: 4 > 3): a change is always shown, never hidden by the one before.
+    """
+
+    __slots__ = ("duration", "values", "vehicle", "changes", "appeared")
+
+    def __init__(self, duration: float):
+        self.duration = max(duration, 0.0)
+        self.values: dict[str, str | None] = {}
+        self.vehicle: str | None = None
+        self.changes: list[SettingChange] = []  # oldest first
+        self.appeared = 0.0  # pop-up shown since (fades in once, not on each change)
+
+    def update(self, vehicle: str, readings: Mapping[str, str | None], now: float, quiet: bool = False,
+               maximum: Callable[[str], str] | None = None, events: Collection[str] = ()):
+        """Readings of this update
+
+        Args:
+            quiet: changes taken without showing them (garage).
+            maximum: highest level text of a setting ("" if unknown), asked on change only.
+            events: readings that are driving events (limiter, lights...): new state shown, no direction.
+        """
+        if vehicle != self.vehicle:  # new car: its settings are no change
+            self.vehicle = vehicle
+            self.values = dict(readings)
+            self.changes = []
+            return
+        values = self.values
+        for name, text in readings.items():
+            old = values.get(name)
+            values[name] = text
+            if quiet or text is None or old is None or text == old:
+                continue
+            shown = self.current(now)
+            if not shown:
+                self.appeared = now
+            first = next((change.old for change in shown if change.name == name), old)
+            if text == first:  # back to the value before: last step shown
+                first = old
+            changes = [change for change in reversed(shown) if change.name != name]
+            event = name in events
+            changes.append(SettingChange(
+                name, first, text, 0 if event else change_direction(first, text), now,
+                "" if event or maximum is None else maximum(name), event))
+            self.changes = changes[-SETTING_POPUP_LINES:]
+
+    def current(self, now: float) -> tuple[SettingChange, ...]:
+        """Changes shown now, newest first (empty once their time is over)"""
+        duration = self.duration
+        return tuple(change for change in reversed(self.changes) if now - change.since < duration)
+
+    def opacity(self, now: float) -> float:
+        """Pop-up opacity: fades in when it appears, out before the last change ends"""
+        shown = self.current(now)
+        if not shown:
+            return 0.0
+        fade_in = min(FADE_IN_SECONDS, self.duration / 4)
+        fade_out = min(FADE_OUT_SECONDS, self.duration / 3)
+        remaining = self.duration - (now - shown[0].since)
+        level = 1.0
+        if fade_in > 0:
+            level = min(level, (now - self.appeared) / fade_in)
+        if fade_out > 0:
+            level = min(level, remaining / fade_out)
+        return min(max(level, 0.0), 1.0)

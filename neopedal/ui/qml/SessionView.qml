@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import NeoPedal
 
 // Session of current track: every lap time (shown laps in their color, best in gold, invalid hollow),
 // fuel & tyre wear used each lap, off tracks & track limits. Click a lap: show or hide it in charts.
@@ -14,13 +15,14 @@ Item {
     function refresh() {
         if (!visible) { stale = true; return }
         stale = false
-        sessionState = backend.sessionState
+        hoverIndex = -1  // hovered lap of former laps: none until mouse moves again
+        sessionState = backend.session.state
     }
     onVisibleChanged: if (visible && stale) refresh()
     Component.onCompleted: refresh()
     Connections {
-        target: backend
-        function onSessionChanged() { root.refresh() }
+        target: backend.session
+        function onChanged() { root.refresh() }
     }
     readonly property var sessions: sessionState.sessions || []
     readonly property var session: sessionState.data || ({})
@@ -31,20 +33,8 @@ Item {
     function num(value, decimals) { return Number(value).toFixed(decimals).replace(".", theme.decimalPoint) }
     function signedText(value, decimals) { return (value >= 0 ? "+" : "−") + num(Math.abs(value), decimals) }
 
-    function lapsWith(name) {
-        return laps.filter(function(lap) { return lap[name] !== undefined && lap[name] !== null && lap[name] >= 0 })
-    }
-    readonly property var stats: {
-        var valid = laps.filter(function(lap) { return lap.valid && lap.time > 0 })
-        var sum = 0, fuel = 0, fuelCount = 0
-        for (var i = 0; i < valid.length; i++) sum += valid[i].time
-        var mean = valid.length ? sum / valid.length : 0
-        var deviation = 0
-        for (var j = 0; j < valid.length; j++) deviation += Math.pow(valid[j].time - mean, 2)
-        deviation = valid.length > 1 ? Math.sqrt(deviation / (valid.length - 1)) : 0
-        for (var k = 0; k < laps.length; k++) if (laps[k].fuel >= 0) { fuel += laps[k].fuel; fuelCount++ }
-        return {"count": valid.length, "mean": mean, "deviation": deviation, "fuel": fuel, "fuelCount": fuelCount}
-    }
+    // Valid laps: count, mean, consistency, fuel used (worked out by backend)
+    readonly property var stats: session.stats || ({"count": 0, "mean": 0, "deviation": 0, "fuel": 0, "fuelCount": 0})
     // Lap point of chart: shown laps in their color, best lap gold, invalid hollow
     component LapPoint: Item {
         property var lap: ({})
@@ -87,11 +77,12 @@ Item {
             }
             Layout.fillWidth: true
             implicitHeight: Math.round(theme.em * 2.2)
-            model: root.sessions.map(function(item) { return item.title })
-            currentIndex: root.sessions.map(function(item) { return item.key }).indexOf(root.sessionState.key)
-            onActivated: function(index) { backend.setSession(root.sessions[index].key) }
+            model: root.sessions
+            textRole: "title"
+            currentIndex: root.sessions.findIndex(function(item) { return item.key === root.sessionState.key })
+            onActivated: function(index) { backend.session.choose(root.sessions[index].key) }
             background: Rectangle {
-                radius: theme.em * 0.5
+                radius: theme.radiusMd
                 color: sessionBox.hovered ? theme.hover : theme.raised
                 border.width: 1
                 border.color: theme.border
@@ -126,7 +117,7 @@ Item {
                 color: theme.text
                 font.features: { "tnum": 1 }
             }
-            BusyIndicator { running: root.session.busy === true; visible: running; implicitWidth: theme.em * 1.2; implicitHeight: implicitWidth }
+            BusyIndicator { running: root.session.busy === true && pageState.active; visible: running; implicitWidth: theme.em * 1.2; implicitHeight: implicitWidth }
         }
         // Long run: clean laps without outliers
         Flow {
@@ -171,16 +162,8 @@ Item {
                 readonly property real timeHeight: height * 0.62
                 readonly property real stripGap: theme.em * 0.8
                 readonly property real stripHeight: Math.max((height - timeHeight - stripGap * 2) / 2, 0)
-                readonly property var range: {
-                    var times = root.laps.filter(function(lap) { return lap.time > 0 && lap.kind === "lap" }).map(function(lap) { return lap.time })
-                    if (times.length === 0) return [0, 1]
-                    var sorted = times.slice().sort(function(a, b) { return a - b })
-                    var low = sorted[0]
-                    // Slowest laps (spins, traffic) clipped: scale follows normal laps
-                    var high = Math.min(sorted[sorted.length - 1], sorted[Math.floor((sorted.length - 1) * 0.9)] * 1.03)
-                    if (high - low < 0.5) { low -= 0.25; high += 0.25 }
-                    return [low - (high - low) * 0.08, high + (high - low) * 0.08]
-                }
+                // Lap time scale (backend): slowest laps (spins, traffic) clipped, scale follows normal laps
+                readonly property var range: root.session.range || [0, 1]
                 function xAt(index) {
                     var count = Math.max(root.laps.length, 1)
                     return padLeft + (index + 0.5) / count * (width - padLeft - padRight)
@@ -189,10 +172,57 @@ Item {
                     var top = theme.em * 0.6, bottom = timeHeight - theme.em * 0.4
                     return bottom - (Math.min(time, range[1]) - range[0]) / (range[1] - range[0]) * (bottom - top)
                 }
-                function stripMax(name) {
-                    var high = 0
-                    for (var i = 0; i < root.laps.length; i++) high = Math.max(high, root.laps[i][name] || 0)
-                    return high
+                function stripMax(name) { return root.session.stripMax ? root.session.stripMax[name] || 0 : 0 }
+                // Lines, lap points & bars drawn by the GPU (GpuShape), built by backend in chart pixels once the
+                // chart size settles or laps change (not one item per lap): resize only scales them meanwhile
+                property real builtWidth: 0
+                property real builtHeight: 0
+                property var shapeKeys: ({})
+                readonly property var shapeMatrix: {
+                    var plot = width - padLeft - padRight, built = builtWidth - padLeft - padRight
+                    var scaleX = builtWidth > 0 && built > 0 ? plot / built : 1
+                    var scaleY = builtHeight > 0 ? height / builtHeight : 1
+                    return Qt.matrix4x4(scaleX, 0, 0, padLeft * (1 - scaleX), 0, scaleY, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+                }
+                readonly property string shapeStyle: [theme.em, theme.window, theme.text, theme.gold].join("|")
+                // Laps with track limits or off tracks: count over their point (few laps: items)
+                readonly property var marked: {
+                    var found = []
+                    for (var i = 0; i < root.laps.length; i++) {
+                        var lap = root.laps[i]
+                        if (lap.time > 0 && (lap.limits > 0 || lap.offtrack > 0)) found.push(i)
+                    }
+                    return found
+                }
+                function sendShapes() {
+                    if (!root.visible || width < 1 || height < 1) return
+                    shapeKeys = backend.session.setChart({
+                        "laps": root.laps, "width": width, "padLeft": padLeft, "padRight": padRight,
+                        "top": theme.em * 0.6, "bottom": timeHeight - theme.em * 0.4, "low": range[0], "high": range[1],
+                        "stripTops": [timeHeight + stripGap, timeHeight + stripGap * 2 + stripHeight],
+                        "stripHeight": stripHeight, "em": theme.em, "best": root.session.best || 0,
+                        "window": "" + theme.window, "text": "" + theme.text, "gold": "" + theme.gold,
+                        "fuelColor": "" + theme.seriesFuel, "wearColor": "" + theme.seriesWear
+                    })
+                    builtWidth = width
+                    builtHeight = height
+                }
+                function sizeChanged() {
+                    if (builtWidth <= 0) Qt.callLater(sendShapes)  // first shapes at once
+                    else shapeTimer.restart()
+                }
+                onWidthChanged: sizeChanged()
+                onHeightChanged: sizeChanged()
+                onRangeChanged: Qt.callLater(sendShapes)  // laps changed (range follows them)
+                onShapeStyleChanged: Qt.callLater(sendShapes)
+                Connections {
+                    target: root
+                    function onVisibleChanged() { if (root.visible) Qt.callLater(chartCanvas.sendShapes) }
+                }
+                Timer {
+                    id: shapeTimer
+                    interval: 150
+                    onTriggered: chartCanvas.sendShapes()
                 }
 
                 // Time grid
@@ -207,7 +237,7 @@ Item {
                             y: -height / 2
                             text: root.timeText(parent.value).replace(/(\.\d)\d+$/, "$1")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.7
+                            font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
                         }
                     }
@@ -222,62 +252,54 @@ Item {
                     color: theme.gold
                     opacity: 0.7
                 }
-                // Long run trend line (clean laps without outliers)
-                Rectangle {
-                    readonly property real x0: chartCanvas.xAt(root.trend.x0 || 0)
-                    readonly property real y0: chartCanvas.yAt(root.trend.y0 || 0)
-                    readonly property real x1: chartCanvas.xAt(root.trend.x1 || 0)
-                    readonly property real y1: chartCanvas.yAt(root.trend.y1 || 0)
-                    visible: root.trend.slope !== undefined
-                    x: x0
-                    y: y0
-                    width: Math.hypot(x1 - x0, y1 - y0)
-                    height: 2
-                    transformOrigin: Item.Left
-                    rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
-                    color: theme.purple
-                    opacity: 0.75
-                }
-                // Valid laps joined
-                Repeater {
-                    model: root.laps.length
+                // Trend line & GPU shapes in a multisampled layer while shown (smooth edges, window without MSAA)
+                Item {
+                    width: chartCanvas.width
+                    height: chartCanvas.height
+                    layer.enabled: pageState.active && root.visible && root.laps.length > 0
+                    layer.samples: 4
+                    // Long run trend line (clean laps without outliers)
                     Rectangle {
-                        readonly property var lap: root.laps[index]
-                        readonly property var previous: index > 0 ? root.laps[index - 1] : null
-                        readonly property bool joined: previous !== null && lap.valid && previous.valid && lap.time > 0 && previous.time > 0
-                        readonly property real x0: chartCanvas.xAt(index - 1)
-                        readonly property real y0: previous ? chartCanvas.yAt(previous.time) : 0
-                        readonly property real x1: chartCanvas.xAt(index)
-                        readonly property real y1: chartCanvas.yAt(lap.time)
-                        visible: joined
+                        readonly property real x0: chartCanvas.xAt(root.trend.x0 || 0)
+                        readonly property real y0: chartCanvas.yAt(root.trend.y0 || 0)
+                        readonly property real x1: chartCanvas.xAt(root.trend.x1 || 0)
+                        readonly property real y1: chartCanvas.yAt(root.trend.y1 || 0)
+                        visible: root.trend.slope !== undefined
                         x: x0
                         y: y0
                         width: Math.hypot(x1 - x0, y1 - y0)
-                        height: 1.5
+                        height: 2
                         transformOrigin: Item.Left
                         rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
+                        color: theme.purple
+                        opacity: 0.75
+                    }
+                    // Valid laps joined, lap points (shown laps in their color, best lap gold, invalid hollow) & fuel /
+                    // tyre wear bars: GPU shapes (hovered point drawn larger on top by an item)
+                    Item {
+                        objectName: "sessionShapes"
+                        transform: Matrix4x4 { matrix: chartCanvas.shapeMatrix }
+                        GpuShape {
+                            key: chartCanvas.shapeKeys.segments || ""
+                            color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
+                        }
+                        GpuShape { key: chartCanvas.shapeKeys.points || "" }
+                        GpuShape { key: chartCanvas.shapeKeys.bars || "" }
                     }
                 }
-                // Lap points: shown laps in their color, best lap gold, invalid hollow (hovered one drawn larger on top)
+                // Track limits / off track count over lap points: made only for laps with some
                 Repeater {
-                    model: root.laps.length
-                    LapPoint {
-                        id: point
-                        lap: root.laps[index]
-                        best: root.session.best || 0
-                        x: chartCanvas.xAt(index)
-                        y: chartCanvas.yAt(lap.time)
-                        Loader {  // track limits / off track count: made only for laps with some
-                            active: point.lap.limits > 0 || point.lap.offtrack > 0
-                            sourceComponent: Text {
-                                x: -width / 2
-                                y: -point.size / 2 - height
-                                text: point.lap.limits > 0 ? "✕" + point.lap.limits : "◇" + point.lap.offtrack
-                                color: point.lap.limits > 0 ? theme.warning : theme.dimText
-                                font.pointSize: theme.fontPoint * 0.68
-                            }
-                        }
+                    model: chartCanvas.marked
+                    Text {
+                        required property var modelData
+                        readonly property var lap: root.laps[modelData] || ({})
+                        readonly property real size: theme.em * (lap.shown ? 0.85 : 0.6)
+                        x: chartCanvas.xAt(modelData) - width / 2
+                        y: chartCanvas.yAt(lap.time || 0) - size / 2 - height
+                        opacity: lap.outlier ? 0.4 : 1
+                        text: lap.limits > 0 ? "✕" + lap.limits : "◇" + lap.offtrack
+                        color: lap.limits > 0 ? theme.warning : theme.dimText
+                        font.pointSize: theme.fontTiny
                     }
                 }
                 LapPoint {  // hovered lap: one item follows hover (lap points never bound to it)
@@ -291,7 +313,7 @@ Item {
                 }
                 // Fuel & tyre wear used each lap
                 Repeater {
-                    model: [["fuel", i18n.tr("Fuel"), "#3B82F6"], ["wear", i18n.tr("Tyre wear"), "#F59E0B"]]
+                    model: [["fuel", i18n.tr("Fuel"), theme.seriesFuel], ["wear", i18n.tr("Tyre wear"), theme.seriesWear]]
                     Item {
                         id: strip
                         readonly property string name: modelData[0]
@@ -301,29 +323,14 @@ Item {
                         width: chartCanvas.width
                         height: chartCanvas.stripHeight
                         visible: high > 0
-                        Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontPoint * 0.7 }
+                        Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontTiny }
                         Text {
                             anchors.bottom: parent.bottom
                             text: strip.name === "fuel" ? root.num(strip.high * (root.session.fuelScale || 1), 2) + " " + (root.session.fuelUnit || "")
                                                         : root.num(strip.high, 1) + " %"
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.7
+                            font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
-                        }
-                        Repeater {
-                            model: root.laps.length
-                            Rectangle {
-                                readonly property real value: root.laps[index][strip.name]
-                                readonly property real barWidth: Math.max((chartCanvas.width - chartCanvas.padLeft - chartCanvas.padRight) / Math.max(root.laps.length, 1) * 0.6, 2)
-                                visible: value >= 0 && strip.high > 0
-                                x: chartCanvas.xAt(index) - barWidth / 2
-                                width: barWidth
-                                height: visible ? value / strip.high * (strip.height - theme.em * 0.2) : 0
-                                y: strip.height - height
-                                radius: 1
-                                color: strip.tone
-                                opacity: root.laps[index].valid ? 0.85 : 0.35
-                            }
                         }
                     }
                 }
@@ -352,13 +359,13 @@ Item {
             }
             // Hovered lap details
             Rectangle {
-                readonly property var lap: root.hoverIndex >= 0 ? root.laps[root.hoverIndex] : null
+                readonly property var lap: root.hoverIndex >= 0 ? root.laps[root.hoverIndex] || null : null
                 visible: lap !== null
                 x: Math.max(0, Math.min(chartCanvas.xAt(root.hoverIndex) + theme.em, parent.width - width))
                 y: theme.em * 0.3
                 width: lapText.implicitWidth + theme.em
                 height: lapText.implicitHeight + theme.em * 0.5
-                radius: theme.em * 0.35
+                radius: theme.radiusSm
                 color: theme.raised
                 border.width: 1
                 border.color: lap && lap.color ? lap.color : theme.border
@@ -366,7 +373,7 @@ Item {
                     id: lapText
                     anchors.centerIn: parent
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.82
+                    font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
                     text: {
                         var lap = parent.lap

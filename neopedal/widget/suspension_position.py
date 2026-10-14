@@ -21,6 +21,7 @@ Suspension position Widget
 """
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from ..api_control import api
 from ..const_common import WHEELS_NA
@@ -28,9 +29,14 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import WheelGaugeBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SuspensionPositionConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SuspensionPositionConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

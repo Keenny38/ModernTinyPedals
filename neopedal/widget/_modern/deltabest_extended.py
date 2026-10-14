@@ -26,6 +26,8 @@ while there is no reference lap yet (stint best before first lap of stint) or no
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,9 +36,14 @@ from .._common import delta_shown, game_deltabest, lap_delta_shown
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DeltabestExtendedConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: DeltabestExtendedConfig
 
     options = (
         "font_size", "layout", "decimal_places", "delta_display_range", "freeze_duration",

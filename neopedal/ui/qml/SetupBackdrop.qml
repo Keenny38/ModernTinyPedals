@@ -9,7 +9,7 @@ Rectangle {
     property int sourceHeight: 0
     property bool loading: false
     property real dim: 1  // picture opacity
-    radius: theme.em * 0.45
+    radius: theme.radiusMd
     clip: true
     gradient: Gradient {
         GradientStop { position: 0; color: "#566070" }
@@ -23,10 +23,15 @@ Rectangle {
         height: Math.min(backdrop.sourceHeight, backdrop.height - theme.em * 0.8)
         source: backdrop.source
         fillMode: Image.PreserveAspectFit
+        // Decoded off the UI thread, scaled once by the provider to the size shown (32 px steps on resize)
+        asynchronous: true
+        retainWhileLoading: true
+        cache: true
+        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
+        sourceSize.height: Math.ceil(height * Screen.devicePixelRatio / 32) * 32
         smooth: true
-        mipmap: true
         opacity: backdrop.dim
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
     }
     Rectangle {
         anchors.centerIn: parent
@@ -36,7 +41,7 @@ Rectangle {
         radius: height / 2
         color: Qt.rgba(1, 1, 1, 0.12)
         SequentialAnimation on opacity {
-            running: backdrop.loading && pageState.active
+            running: backdrop.loading && pageState.active && theme.animate
             loops: Animation.Infinite
             NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
             NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }

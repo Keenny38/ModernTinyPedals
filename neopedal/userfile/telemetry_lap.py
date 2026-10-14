@@ -40,11 +40,13 @@ import zlib
 from array import array
 from bisect import bisect_left, bisect_right
 from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from itertools import pairwise
 from typing import IO, NamedTuple, TypeVar
+
+from . import read_json, replace_retry
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +128,10 @@ def group_sessions(
     return groups
 
 
-def same_session(previous, entry, filename: Callable, info: Callable) -> bool:
+def same_session(
+    previous: EntryType, entry: EntryType, filename: Callable[[EntryType], str],
+    info: Callable[[EntryType], dict],
+) -> bool:
     """Whether lap was driven in same session as previous lap"""
     start_a, start_b = info(previous).get("session_start"), info(entry).get("session_start")
     if isinstance(start_a, (int, float)) and isinstance(start_b, (int, float)):
@@ -227,12 +232,8 @@ def lap_folder_name(combo_name: str) -> str:
 
 def viewer_reference_name(filepath: str, track: str) -> str:
     """File name of lap set as reference in lap viewer for track folder (last selection), empty if none"""
-    try:
-        with open(os.path.join(filepath, VIEWER_SETTING), encoding="utf-8") as file:
-            setting = json.load(file)
-    except (OSError, ValueError):
-        return ""
-    selections = setting.get("selections") if isinstance(setting, dict) else None
+    setting = read_json(os.path.join(filepath, VIEWER_SETTING), strict=False, default={}, dict_only=True)
+    selections = setting.get("selections")
     selection = selections.get(track) if isinstance(selections, dict) else None
     name = selection.get("reference") if isinstance(selection, dict) else None
     return name if isinstance(name, str) else ""
@@ -409,7 +410,7 @@ def median_sector_bounds(laps: Sequence[LapData]) -> list[float]:
             for values in zip(*bounds)]
 
 
-def _chain(first: str, rest):
+def _chain(first: str, rest: Iterable[str]) -> Iterator[str]:
     yield first
     yield from rest
 
@@ -430,6 +431,12 @@ def interpolate(xs: Sequence[float], ys: Sequence[float], x: float) -> float:
 INCREASING_CACHE = 64  # distance columns whose increasing samples are remembered
 _increasing: OrderedDict[int, tuple[Column, int, array | None, Column]] = OrderedDict()
 _increasing_lock = threading.Lock()
+
+
+def forget_increasing() -> None:
+    """Forget increasing samples of every distance column (cache keeps its columns: laps released stay in memory)"""
+    with _increasing_lock:
+        _increasing.clear()
 
 
 def increasing_indexes(distances: Column) -> list[int] | None:
@@ -739,7 +746,9 @@ def decimate_minmax(
     return points
 
 
-def _bucket_points(xs, ys, low_index, high_index):
+def _bucket_points(
+    xs: Sequence[float], ys: Sequence[float], low_index: int, high_index: int,
+) -> tuple[tuple[float, float], ...]:
     if low_index == high_index:
         return ((xs[low_index], ys[low_index]),)
     if low_index < high_index:
@@ -800,7 +809,7 @@ def write_lap_csv(filename: str, header: list[str], grid: list[float], columns: 
                 writer.writerow([csv_number(distance, decimal), *(
                     "" if column[index] is None else csv_number(column[index], decimal)  # type: ignore[arg-type]
                     for column in columns)])
-        os.replace(temporary, filename)
+        replace_retry(temporary, filename)
     except OSError as error:
         logger.error("LAP CSV: unable to export %s: %s", filename, error)
         with suppress(OSError):

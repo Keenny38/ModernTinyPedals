@@ -17,12 +17,16 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Lap viewer page state shared by its parts (lap_backend & mixins: map, corners, session, export): helpers & attributes
+Lap viewer page parts: base of composed parts (children of LapViewerBackend, QML backend.<part>), helpers, page state
+used by the track map mixin
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import weakref
+from typing import TYPE_CHECKING, TypeVar
+
+from PySide6.QtCore import QObject
 
 from ..lap_viewer import PERCENT_RANGES, Channel, format_value, signed
 
@@ -32,21 +36,26 @@ if TYPE_CHECKING:
     from typing import Any
 
     from PySide6.QtCore import QTimer, SignalInstance
-    from PySide6.QtWidgets import QWidget
 
     from ...userfile import track_geometry
-    from ...userfile.corner_analysis import CornerComparison, CornerStats, IdealLap, ResampledLap
+    from ...userfile.corner_analysis import CornerComparison, CornerStats, ResampledLap
     from ...userfile.telemetry_lap import LapData
-    from ...userfile.track_corners import TrackCorner
-    from ..lap_viewer import LapEntry, PlotLap
+    from ..lap_viewer import PlotLap
     from . import lap_map
+    from .lap_corners import CornerTable
     from .lines import Vertices
-    from .math_channels import MathChannel
     from .models import DictListModel
     from .trace_data import TraceData
 
 COLOR_GAIN = "gain"  # theme color names (QML theme.gain / theme.loss: readable on light & dark themes)
 COLOR_LOSS = "loss"
+HostType = TypeVar("HostType")
+
+
+def weak_host(page: HostType) -> HostType:
+    """Page seen by a part through a weak proxy: page keeps its parts, a part never keeps its page (no reference
+    cycle: a closed page is freed at once, even one alive at a gc.freeze, see loader)"""
+    return weakref.proxy(page)
 
 
 def format_diff(channel: Channel, value: float) -> str:
@@ -57,6 +66,12 @@ def format_diff(channel: Channel, value: float) -> str:
         return signed(value, 0)
     text = format_value(abs(value))
     return ("+" if value >= 0 else chr(0x2212)) + text
+
+
+def int_setting(setting: dict, name: str, default: int) -> int:
+    """Whole number of viewer setting, default if missing or not a number"""
+    value = setting.get(name, default)
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else default
 
 
 def keys_match(old: tuple | None, new: tuple) -> bool:
@@ -78,52 +93,48 @@ def keys_match(old: tuple | None, new: tuple) -> bool:
     return True
 
 
-class BackendBase:
-    """Base of lap viewer page parts (mixins of LapViewerBackend, see lap_backend): page state & methods they use
+class PagePart(QObject):
+    """Part of lap viewer page: child QObject of LapViewerBackend with its own state, slots & properties (QML
+    backend.<part>.<member>), page reached through an explicit host (Protocol of what the part uses, set as _page: weak_host)
 
-    Declared for type checking only: state is set & methods defined by LapViewerBackend & its other parts.
+    Created by the page (its parent: deleted with it), released when the page closes (see release).
+    """
+
+    def release(self):
+        """Page closed: results kept by part forgotten (page jobs & timers stopped by page)"""
+
+
+class BackendBase:
+    """Base of track map mixin of LapViewerBackend (see lap_map_view): page state & methods it uses
+
+    Declared for type checking only: state is set & methods defined by LapViewerBackend & its parts.
     """
 
     if TYPE_CHECKING:
         # Page state (set by LapViewerBackend.__init__)
-        _align_apex: float
+        _corner_table: CornerTable
         _arrows: tuple
-        _autoscale: set[str]
         _band_cache: OrderedDict[float, dict[str, object]]
         _band_cache_applied: bool
         _band_generation: int
         _base: lap_map.MapLine
         _base_official: bool
         _circuit_shapes: dict[float, tuple]
-        _coaching: list[dict]
         _color_lines: tuple
         _colored_shown: Vertices | None
         _colored_steps: dict[float, Vertices]
-        _compare_key: str
         _consistency: dict
         _consistency_scope: str
-        _corner_key: tuple
-        _corner_marks: list[dict]
-        _corner_rows: list[CornerComparison]
-        _corner_sort: str
-        _corners: list[dict]
         _edge_normals: tuple
         _edges: tuple[list[float], list[float]]
         _edges_cache: tuple
         _events: dict[str, tuple[tuple, list[tuple[float, str]]]]
-        _exports: int
         _geometry: track_geometry.TrackGeometry | None
         _grids: dict[str, lap_map.LineGrid]
-        _hysteresis: int
-        _ideal: IdealLap | None
-        _imports: int
-        _lap_cache: dict[str, LapData | None]
-        _lap_corners: dict[str, tuple[tuple, ResampledLap, list[CornerStats | None]]]
         _lap_offsets: dict[str, tuple[tuple, lap_map.MapLine, list[float], list[int]]]
         _lap_mtimes: tuple[int, dict[str, float | None]]
         _lap_shapes: dict[tuple, tuple]
         _line_boxes: tuple
-        _legend: list[dict]
         _list_revision: int
         _limits: lap_map.TrackLimits | None
         _limits_source: str
@@ -145,16 +156,11 @@ class BackendBase:
         _map_slip: bool
         _map_view: tuple[float, float, float]
         _trail_state: tuple[dict, float, list[float]] | None
-        _math: list[MathChannel]
         _mini_busy: bool
         _mini_times: dict[str, tuple[float, tuple, list[float]]]
         _normals: dict[str, tuple]
         _official_line: tuple
-        _official: list[TrackCorner]
-        _official_key: tuple | None
-        _official_numbered: bool
         _outline_cache: dict[str, list[tuple[float, float]]]
-        _panels: list[dict]
         _pit: list[lap_map.MapLine]
         _placements: dict[str, tuple[tuple, tuple]]
         _placing: int
@@ -163,86 +169,35 @@ class BackendBase:
         _prefetch_timer: QTimer
         _prefetching: set[tuple[int, float]]
         _preview_step: float
-        _resampled: dict[str, ResampledLap]
         _road: lap_map.MapLine
         _selected_corner: int
-        _session_busy: bool
-        _session_extra: dict[str, tuple[float, dict]]
-        _session_key: str
-        _session_state: dict | None
-        _side_tab: int
-        _simple_view: bool
-        _similar_tolerance: int
         _slips: dict[str, tuple[LapData, list]]
         _speed_range: tuple[float, float]
-        _track: str
-        _trackouts: dict[str, tuple[tuple, dict[int, float]]]
         _trail_revision: int
         _turned: dict[str, tuple]
-        _weights: dict[str, float]
-        _window: QWidget
         _yaw: dict[str, tuple[LapData, float, float]]
         _zones: dict[str, tuple[LapData, tuple]]
         chartChanged: SignalInstance
-        cornersChanged: SignalInstance
-        dashboardChanged: SignalInstance
         mapDataChanged: SignalInstance
-        mapCornersChanged: SignalInstance
-        corner_model: DictListModel
-        panelsChanged: SignalInstance
-        checked: set[str]
         data: TraceData
-        entries: list[LapEntry]
-        external: list[LapEntry]
         folder: str
-        legend_model: DictListModel
         mapChanged: SignalInstance
         map_lap_model: DictListModel
-        mathChanged: SignalInstance
-        optionsChanged: SignalInstance
         pinChanged: SignalInstance
         prefix: str
         reference_key: str
-        sessionChanged: SignalInstance
         trailChanged: SignalInstance
-        visible: list[str]
 
         # Methods of LapViewerBackend & its other parts
-        def add_external(self, lap_paths: list[str], reference_from: list[str] | None=None,
-                         checked: list[str] | None=None): ...
-        def all_entries(self) -> list[LapEntry]: ...
-        def build_colored_line(self, meters_per_pixel: float): ...
-        def build_map_bands(self): ...
-        def build_panels(self): ...
         def bump_revision(self): ...
         def cursorState(self, x: float) -> dict: ...
-        def channels_updated(self, save: bool=True): ...
         def compared_lap(self) -> PlotLap | None: ...
-        def drop_unused_vertices(self): ...
-        def fill_list(self): ...
         def lap_corner_stats(self, lap: PlotLap) -> tuple[ResampledLap, list[CornerStats | None]]: ...
-        def lap_line(self, lap: PlotLap) -> lap_map.MapLine | None: ...
-        def lap_offsets(self, lap: PlotLap) -> tuple[lap_map.MapLine, list[float], list[int]] | None: ...
-        def lap_placement(self, lap: PlotLap, distance: float) -> tuple[float, float, float] | None: ...
-        def load_laps(self): ...
-        def lap_trackouts(self, lap: PlotLap, stats: list[CornerStats | None], turns: dict[int, float], reference_line: lap_map.MapLine) -> dict[int, float]: ...
-        def map_corner_points(self) -> list[dict]: ...
-        def map_driving_points(self) -> list[dict]: ...
-        def map_sector_labels(self) -> list[dict]: ...
         def official_base(self, length: float=0.0) -> lap_map.MapLine | None: ...
-        def official_in(self, row: CornerComparison) -> list[TrackCorner]: ...
-        def official_text(self, label: str) -> str: ...
-        def ordered_checked(self) -> list[str]: ...
-        def read_lap(self, path: str) -> LapData | None: ...
         def rebuild_chart(self): ...
-        def reference_map_line(self) -> lap_map.MapLine | None: ...
-        def resampled(self, lap: PlotLap) -> ResampledLap: ...
         def row_label(self, row: CornerComparison) -> str: ...
+        def corner_rows(self) -> list[CornerComparison]: ...
         def run_job(self, name: str, work: Callable[[], Any], done: Callable[[Any], None]): ...
         def run_process_job(self, name: str, done: Callable[[Any], None], function: Callable, *args): ...
-        def session_row(self, group: list[LapEntry], is_added: bool) -> dict: ...
-        def set_status(self, text: str, transient: bool=True): ...
         def short_label(self, key: str) -> str: ...
-        def store_lap(self, path: str, lap: LapData | None): ...
-        def track_name(self) -> str: ...
         def track_sessions(self) -> list: ...

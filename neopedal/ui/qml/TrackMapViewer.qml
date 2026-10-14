@@ -35,21 +35,30 @@ TpPage {
         function onCurrentChanged() { if (page.follow) page.centerOnPosition(false) }
         function onMapChanged() { page.playing = false; canvas.reset(false) }
     }
-    FrameAnimation {  // play: one step per rendered frame, none while page hidden or window minimized
+    Timer {  // play: about 30 steps a second (not every vsync), moved by wall clock time, none while page hidden
+        property double lastTick: 0  // Date.now() of last step, 0: first step
+        interval: 33
+        repeat: true
         running: page.playing && page.loaded && pageState.active
+        onRunningChanged: lastTick = running ? Date.now() : 0
         onTriggered: {
-            var next = backend.position + page.playSpeed * Math.min(frameTime, 0.1)
+            var now = Date.now()
+            var elapsed = lastTick > 0 ? (now - lastTick) / 1000 : 0
+            lastTick = now
+            var next = backend.position + page.playSpeed * Math.min(elapsed, 0.1)
             backend.setPosition(next >= backend.length ? 0 : next)
         }
     }
     focus: true
     // + / - zoom, up & down move map, Shift+left / right move map (left / right alone: position)
+    // (no onLeftPressed / onRightPressed: they run first and would take Shift+left / right too)
     Keys.onPressed: function(event) {
         var sideways = event.key === Qt.Key_Left || event.key === Qt.Key_Right
-        if ((!sideways || (event.modifiers & Qt.ShiftModifier)) && canvas.handleKey(event.key)) event.accepted = true
+        if (sideways && !(event.modifiers & Qt.ShiftModifier)) {
+            step(event.key === Qt.Key_Left ? -1 : 1)
+            event.accepted = true
+        } else if (canvas.handleKey(event.key)) event.accepted = true
     }
-    Keys.onLeftPressed: step(-1)
-    Keys.onRightPressed: step(1)
     Keys.onSpacePressed: playing = !playing
 
     ColumnLayout {
@@ -66,7 +75,7 @@ TpPage {
                 visible: page.loaded
                 implicitHeight: Math.round(theme.em * 2.3)
                 implicitWidth: nameRow.implicitWidth + theme.em * 1.4
-                radius: theme.em * 0.55
+                radius: theme.radiusLg
                 color: theme.raised
                 border.width: 1
                 border.color: theme.border
@@ -157,47 +166,55 @@ TpPage {
                         if (distance >= 0) backend.setPosition(distance)
                     }
 
-                    // Map shapes: one transform for all of them (one update per zoom or move frame, not one per shape)
+                    // Map shapes in a multisampled layer while shown (smooth edges, window without MSAA): position
+                    // markers & labels outside
                     Item {
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                        GpuShape {
-                            key: page.view.edge || ""
-                            color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
-                        }
-                        GpuShape {
-                            key: page.view.road || ""
-                            color: theme.dark ? Qt.lighter(theme.base, 1.5) : Qt.darker(theme.base, 1.08)
-                        }
-                        GpuShape {
-                            key: page.view.sectors || ""
-                            opacity: 0.85
-                        }
-                        GpuShape {
-                            key: page.view.start || ""
-                            color: page.colors.start_line_color || "#FF4400"
-                        }
-                        GpuShape {
-                            key: page.view.sectorLines || ""
-                            color: page.colors.sector_line_color || "#00AAFF"
-                        }
+                        objectName: "mapLines"
+                        anchors.fill: parent
+                        layer.enabled: pageState.active && page.loaded
+                        layer.samples: 4
+                        // Map shapes: one transform for all of them (one update per zoom or move frame, not one per shape)
+                        Item {
+                            transform: Matrix4x4 { matrix: canvas.matrix }
+                            GpuShape {
+                                key: page.view.edge || ""
+                                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
+                            }
+                            GpuShape {
+                                key: page.view.road || ""
+                                color: theme.dark ? Qt.lighter(theme.base, 1.5) : Qt.darker(theme.base, 1.08)
+                            }
+                            GpuShape {
+                                key: page.view.sectors || ""
+                                opacity: 0.85
+                            }
+                            GpuShape {
+                                key: page.view.start || ""
+                                color: page.colors.start_line_color || "#FF4400"
+                            }
+                            GpuShape {
+                                key: page.view.sectorLines || ""
+                                color: page.colors.sector_line_color || "#00AAFF"
+                            }
 
-                        // Curve at position
-                        GpuShape {
-                            key: page.view.circle || ""
-                            visible: page.overlays.show_osculating_circle
-                            color: page.colors.osculating_circle_color || "#00AAFF"
-                            opacity: 0.8
-                        }
-                        GpuShape {
-                            key: page.view.radius || ""
-                            visible: page.overlays.show_osculating_circle
-                            color: page.colors.osculating_circle_color || "#00AAFF"
-                            opacity: 0.6
-                        }
-                        GpuShape {
-                            key: page.view.section || ""
-                            visible: page.overlays.show_curve_section
-                            color: page.colors.curve_section_color || "#FF4400"
+                            // Curve at position
+                            GpuShape {
+                                key: page.view.circle || ""
+                                visible: page.overlays.show_osculating_circle
+                                color: page.colors.osculating_circle_color || "#00AAFF"
+                                opacity: 0.8
+                            }
+                            GpuShape {
+                                key: page.view.radius || ""
+                                visible: page.overlays.show_osculating_circle
+                                color: page.colors.osculating_circle_color || "#00AAFF"
+                                opacity: 0.6
+                            }
+                            GpuShape {
+                                key: page.view.section || ""
+                                visible: page.overlays.show_curve_section
+                                color: page.colors.curve_section_color || "#FF4400"
+                            }
                         }
                     }
 
@@ -225,8 +242,8 @@ TpPage {
                         y: canvas.screenY(page.current.y || 0)
                         rotation: page.current.yaw || 0
                         readonly property real size: page.settings.centerMark || 1000
-                        Rectangle { x: -parent.size; y: -0.5; width: parent.size * 2; height: 1; color: page.colors.center_mark_color || "#808080"; opacity: 0.6 }
-                        Rectangle { x: -0.5; y: -parent.size; width: 1; height: parent.size * 2; color: page.colors.center_mark_color || "#808080"; opacity: 0.6 }
+                        Rectangle { x: -parent.size; y: -0.5; width: parent.size * 2; height: 1; color: page.colors.center_mark_color || "#808080"; opacity: 0.6; antialiasing: true }
+                        Rectangle { x: -0.5; y: -parent.size; width: 1; height: parent.size * 2; color: page.colors.center_mark_color || "#808080"; opacity: 0.6; antialiasing: true }
                     }
 
                     // Official corners: click to move position there
@@ -240,17 +257,17 @@ TpPage {
                             height: cornerText.implicitHeight + 4
                             radius: height / 2
                             readonly property bool current: page.current.corner === modelData.label
-                            color: current ? theme.accent : cornerArea.containsMouse ? theme.raised
+                            color: current ? theme.accentFill : cornerArea.containsMouse ? theme.raised
                                  : Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
                             border.width: 1
                             border.color: cornerArea.containsMouse ? theme.accent : Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.15)
-                            Behavior on color { ColorAnimation { duration: 150 } }
+                            Behavior on color { ColorAnimation { duration: theme.motionBase } }
                             Text {
                                 id: cornerText
                                 anchors.centerIn: parent
                                 text: modelData.label
                                 color: parent.current ? "white" : theme.text
-                                font.pointSize: theme.fontPoint * 0.78
+                                font.pointSize: theme.fontCaption
                                 font.weight: Font.Bold
                             }
                             MouseArea {
@@ -271,7 +288,7 @@ TpPage {
                         y: canvas.screenY(page.current.y || 0) - size / 2
                         width: size
                         height: size
-                        radius: theme.em * 0.2
+                        radius: theme.radiusXs
                         rotation: page.current.yaw || 0
                         color: "transparent"
                         border.width: 3
@@ -306,7 +323,7 @@ TpPage {
                             Text {
                                 text: "S" + (index + 1) + "  " + page.distance(modelData, 0)
                                 color: theme.text
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 font.weight: page.current.sector === index + 1 ? Font.DemiBold : Font.Normal
                                 font.features: { "tnum": 1 }
                             }
@@ -371,6 +388,7 @@ TpPage {
                         }
                         Slider {
                             Layout.fillWidth: true
+                            focusPolicy: Qt.NoFocus  // left / right keys stay on page (position)
                             from: 3; to: 80; stepSize: 1
                             value: backend.curveNodes
                             onMoved: backend.setCurveNodes(value)
@@ -415,19 +433,25 @@ TpPage {
                             opacity: 0.06
                         }
                     }
-                    Item {  // elevation area & line: one transform
-                        transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
-                        GpuShape {
-                            key: page.view.elevation || ""
-                            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
-                        }
-                        GpuShape {
-                            key: page.view.elevationLine || ""
-                            color: theme.accent
+                    Item {  // multisampled layer while shown (smooth line, window without MSAA), position marker outside
+                        width: profile.width
+                        height: profile.height
+                        layer.enabled: pageState.active && profile.visible && page.loaded
+                        layer.samples: 4
+                        Item {  // elevation area & line: one transform
+                            transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
+                            GpuShape {
+                                key: page.view.elevation || ""
+                                color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
+                            }
+                            GpuShape {
+                                key: page.view.elevationLine || ""
+                                color: theme.accent
+                            }
                         }
                     }
-                    Text { x: 4; y: 2; text: page.distance(profile.maxZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
-                    Text { x: 4; anchors.bottom: parent.bottom; text: page.distance(profile.minZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
+                    Text { x: 4; y: 2; text: page.distance(profile.maxZ, 1); color: theme.dimText; font.pointSize: theme.fontCaption }
+                    Text { x: 4; anchors.bottom: parent.bottom; text: page.distance(profile.minZ, 1); color: theme.dimText; font.pointSize: theme.fontCaption }
                     Rectangle {  // position
                         x: backend.position * profile.sx
                         width: 2
@@ -453,6 +477,7 @@ TpPage {
                     TpButton { glyph: ""; flat: true; onClicked: page.step(-1) }  // chevron left
                     Slider {
                         Layout.fillWidth: true
+                        focusPolicy: Qt.NoFocus  // left / right keys stay on page (position)
                         from: 0
                         to: Math.max(backend.length, 1)
                         stepSize: page.settings.step || 5

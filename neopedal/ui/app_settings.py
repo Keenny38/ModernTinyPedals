@@ -38,7 +38,7 @@ from PySide6.QtWidgets import QColorDialog, QFileDialog, QMessageBox, QVBoxLayou
 from .. import app_signal, loader
 from ..const_file import FileFilter
 from ..i18n import current_language, tr, trm
-from ._common import BaseDialog, UIScaler, run_after_saving, translate_filter
+from ._common import BaseDialog, UIScaler, page_host, run_after_saving, translate_filter
 from .toast import show_toast
 
 TITLE = "Config"
@@ -46,9 +46,15 @@ TITLE = "Config"
 
 def open_app_settings(parent, section: str = "", key: str = "") -> AppSettings:
     """Open settings page (shown again if open) at category of config section, option flashed if set"""
-    dialog = AppSettings(parent)
-    dialog.open()
-    shown = dialog.shown_dialog()  # same page already open: shown instead, this copy deleted
+    host = page_host(parent, AppSettings)
+    page = host.find_dialog_page(AppSettings.__name__) if host is not None else None
+    if page is not None and isinstance(page.dialog, AppSettings):  # already open: shown, no copy built
+        host.show_page_widget(page)
+        shown: BaseDialog = page.dialog
+    else:
+        dialog = AppSettings(parent)
+        dialog.open()
+        shown = dialog.shown_dialog()  # same page already open: shown instead, this copy deleted
     if isinstance(shown, AppSettings):
         if key:
             shown.backend.focus_option(section, key)
@@ -154,6 +160,9 @@ class AppSettings(BaseDialog):
         view, self.view = self.view, None  # type: ignore[assignment]
         if view is not None:  # closed twice (nested event loop while asking to save)
             view.setSource(QUrl())  # QML gone before the backend it binds to
+        from ..i18n.options import clear_help_cache
+
+        clear_help_cache()  # option help texts (several MB) read again by next page needing them
 
     def reject(self):
         """Esc: close, asking to save pending changes"""

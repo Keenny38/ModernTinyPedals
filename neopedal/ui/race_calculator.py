@@ -34,7 +34,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QUrl
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout
 
 from ..i18n import tr
 from ..userfile.tyre_strategy import DEFAULT_TYRE_SET
@@ -47,6 +47,8 @@ MIN_PAGE = 46  # narrowest page width (in lines): race setup & key figures on tw
 
 class RaceCalculator(BaseEditor):
     """Race calculator (fuel & tyres)"""
+
+    KEEP_WHEN_HIDDEN = True  # live race followed while window hidden
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -90,17 +92,34 @@ class RaceCalculator(BaseEditor):
         """Save tyre plan to a file (Ctrl+S, asked before closing)"""
         self.backend.saveTyrePlan()
 
+    def keep_when_hidden(self) -> bool:
+        """Calculator off: freed while hidden like any page"""
+        return self.backend.game_data
+
+    def undo(self):
+        """Ctrl+Z: calculator off shows nothing, nothing undone"""
+        if self.backend.game_data:
+            super().undo()
+
+    def redo(self):
+        if self.backend.game_data:
+            super().redo()
+
     def confirm_discard(self) -> bool:
         """Tyre plan kept automatically between sessions: nothing to lose"""
         return True
 
-    def closeEvent(self, event):
-        self.backend.release()
-        super().closeEvent(event)
-        if event.isAccepted() and self.view is not None:  # QML gone before the backend it binds to
+    def free_page(self):
+        if self.view is not None:  # QML gone before the backend it binds to
             view, self.view = self.view, None
             view.setSource(QUrl())
             view.deleteLater()
+        self.backend.release()
+
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if event.isAccepted():  # Esc closes too (BaseEditor.reject), page released once
+            self.release_page()
 
     # Race host: dialogs & toasts of the backend
     def warn(self, text: str):
@@ -117,9 +136,6 @@ class RaceCalculator(BaseEditor):
 
     def save_file(self, directory: str, file_filter: str) -> str:
         return QFileDialog.getSaveFileName(self, dir=directory, filter=file_filter)[0]
-
-    def ask_text(self, title: str, label: str, text: str) -> tuple[str, bool]:
-        return QInputDialog.getText(self, title, label, text=text)
 
     def open_compound_config(self, name: str, user_setting: dict, reload: Callable):
         """Starting tread & wear per stint of a compound"""

@@ -205,7 +205,7 @@ def test_official_circuit_from_game(viewer, monkeypatch):  # noqa: F811
     assert xs and max(abs(value) for value in ys) < 15
     placement = backend.placementAt(500.0, "")
     assert "m" in placement["text"] and placement["color"]
-    card = backend.cornerCard(0)
+    card = backend.cornerTable.card(0)
     assert card["widthTitle"] and "→" in card["laps"][0]["width"]
     assert "Braking points spread" in card["spread"] or card["spread"] == ""
     assert len(backend._pit) == 2  # pit lane parts not joined
@@ -229,12 +229,12 @@ def test_viewer_frames_passage_minisectors_session(viewer, laps):  # noqa: F811
     assert sum(row["count"] for row in legend["mini"]) == legend["sectors"] == 10 and legend["ideal"]
     backend.setMapMode("laps")
     assert all("slip" in point for point in backend.mapCursor(500.0))
-    session = backend.sessionData
-    assert len(session["laps"]) == 4 and backend.sessions and session["best"] == pytest.approx(70.0)
+    session = backend.session.values
+    assert len(session["laps"]) == 4 and backend.session.sessions and session["best"] == pytest.approx(70.0)
     assert any(lap["shown"] for lap in session["laps"])
     backend.setSideTab(4)  # values read from lap files in background
     backend.wait_jobs()
-    assert backend.sessionData["laps"][0]["wear"] is not None
+    assert backend.session.values["laps"][0]["wear"] is not None
     backend.setSideTab(0)
 
 
@@ -279,6 +279,6 @@ def test_long_series_reduced_copy(viewer, monkeypatch):  # noqa: F811
 def test_passage_csv_export(viewer, tmp_path):  # noqa: F811
     backend = viewer.backend
     target = tmp_path / "passage.csv"
-    assert backend.write_csv(str(target), ".", 500.0, 600.0)
+    assert backend.exports.write_csv(str(target), ".", 500.0, 600.0)
     rows = target.read_text(encoding="utf-8-sig").splitlines()
     assert len(rows) == 102 and rows[1].startswith("500") and rows[-1].startswith("600")

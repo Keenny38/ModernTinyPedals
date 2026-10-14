@@ -92,10 +92,37 @@ bool app_alive(const uint8_t* base, size_t size, uint64_t now_ms) {
     return header_compatible(base, size) && heartbeat_recent(load_u64(base, offsetof(TpvrHeader, app_heartbeat_ms)), now_ms);
 }
 
+Rect union_rect(const Rect& first, const Rect& second) {
+    if (first.width == 0 || first.height == 0) {
+        return second;
+    }
+    if (second.width == 0 || second.height == 0) {
+        return first;
+    }
+    const uint32_t left = std::min(first.x, second.x);
+    const uint32_t top = std::min(first.y, second.y);
+    const uint64_t right = std::max<uint64_t>(static_cast<uint64_t>(first.x) + first.width,
+                                              static_cast<uint64_t>(second.x) + second.width);
+    const uint64_t bottom = std::max<uint64_t>(static_cast<uint64_t>(first.y) + first.height,
+                                               static_cast<uint64_t>(second.y) + second.height);
+    return Rect{left, top, static_cast<uint32_t>(right - left), static_cast<uint32_t>(bottom - top)};
+}
+
+void FrameReader::mark_changed(const Rect& rect, bool whole) {
+    if (whole || changed_whole_) {
+        changed_whole_ = true;
+    } else {
+        changed_rect_ = pixels_changed_ ? union_rect(changed_rect_, rect) : rect;
+    }
+    pixels_changed_ = true;
+}
+
 void FrameReader::reset() {
     has_frame_ = false;
     alive_ = false;
     pixels_changed_ = false;
+    changed_whole_ = false;
+    changed_rect_ = Rect{};
     last_sequence_ = 0;
     info_ = FrameInfo{};
     pixels_.clear();
@@ -152,6 +179,8 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
                  finite_in(info.vertical_offset_meters, -100.0f, 100.0f) &&
                  finite_in(info.horizontal_offset_meters, -100.0f, 100.0f);
     bool copy_pixels = false;
+    bool partial = false;  // only dirty rect copied (in scratch_, rect rows tightly packed)
+    Rect dirty;
     if (valid && visible) {
         valid = tiles_valid(header, tiles, info);
     }
@@ -168,7 +197,24 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
                 static_cast<uint64_t>(header.stride) * (header.height - 1u) + row_bytes <= data_capacity;
         copy_pixels = valid && (!has_frame_ || pixels_.empty() || header.image_serial != info_.image_serial ||
                                 header.width != info_.width || header.height != info_.height);
-        if (valid && copy_pixels) {
+        // Only the dirty rect copied when the app says the rest is the atlas held here (same serial base & size)
+        const uint64_t dirty_right = static_cast<uint64_t>(header.dirty_x) + header.dirty_width;
+        const uint64_t dirty_bottom = static_cast<uint64_t>(header.dirty_y) + header.dirty_height;
+        partial = copy_pixels && has_frame_ && (header.dirty_flags & TPVR_DIRTY_RECT) != 0 &&
+                  header.dirty_base_serial == info_.image_serial && header.width == info_.width &&
+                  header.height == info_.height && pixels_.size() == static_cast<size_t>(row_bytes) * header.height &&
+                  dirty_right <= header.width && dirty_bottom <= header.height;
+        if (partial) {
+            dirty = Rect{header.dirty_x, header.dirty_y, header.dirty_width, header.dirty_height};
+            const size_t rect_row = static_cast<size_t>(dirty.width) * 4u;
+            scratch_.resize(rect_row * dirty.height);
+            const uint8_t* source = base + data_offset;
+            for (uint32_t row = 0; row < dirty.height && rect_row != 0; ++row) {
+                std::memcpy(scratch_.data() + rect_row * row,
+                            source + static_cast<size_t>(header.stride) * (dirty.y + row) + static_cast<size_t>(dirty.x) * 4u,
+                            rect_row);
+            }
+        } else if (valid && copy_pixels) {
             const size_t packed_row = static_cast<size_t>(row_bytes);
             scratch_.resize(packed_row * header.height);
             const uint8_t* source = base + data_offset;
@@ -190,9 +236,19 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
         info_ = FrameInfo{};
         return ReadResult::Invalid;
     }
-    if (copy_pixels) {
+    if (partial) {
+        const size_t rect_row = static_cast<size_t>(dirty.width) * 4u;
+        const size_t atlas_row = static_cast<size_t>(info.width) * 4u;
+        for (uint32_t row = 0; row < dirty.height && rect_row != 0; ++row) {
+            std::memcpy(pixels_.data() + atlas_row * (dirty.y + row) + static_cast<size_t>(dirty.x) * 4u,
+                        scratch_.data() + rect_row * row, rect_row);
+        }
+        if (dirty.width != 0 && dirty.height != 0) {
+            mark_changed(dirty, false);
+        }
+    } else if (copy_pixels) {
         pixels_.swap(scratch_);
-        pixels_changed_ = true;
+        mark_changed(Rect{}, true);
     }
     if (!visible) {
         // Pixels kept: shown again as is when made visible with same serial
@@ -309,6 +365,43 @@ void convert_pixels(const uint8_t* pixels, uint32_t width, uint32_t height, uint
     if (out_height > height) {
         std::memset(out.data() + out_row * height, 0, out_row * (out_height - height));  // bottom border
     }
+}
+
+bool convert_rect(const uint8_t* pixels, uint32_t width, uint32_t height, const Rect& rect, uint32_t out_width,
+                  bool bgra, bool linear, std::vector<uint8_t>& out) {
+    static const LinearTable table;
+    const uint64_t right = static_cast<uint64_t>(rect.x) + rect.width;
+    const uint64_t bottom = static_cast<uint64_t>(rect.y) + rect.height;
+    const size_t out_row = static_cast<size_t>(out_width) * 4u;
+    if (pixels == nullptr || width > out_width || right > width || bottom > height ||
+        out.size() < out_row * static_cast<size_t>(bottom)) {
+        return false;
+    }
+    const size_t in_row = static_cast<size_t>(width) * 4u;
+    const size_t left = static_cast<size_t>(rect.x) * 4u;
+    for (uint32_t row = rect.y; row < bottom; ++row) {
+        const uint8_t* source = pixels + in_row * row + left;
+        uint8_t* target = out.data() + out_row * row + left;
+        if (!bgra && !linear) {
+            std::memcpy(target, source, static_cast<size_t>(rect.width) * 4u);
+            continue;
+        }
+        for (uint32_t column = 0; column < rect.width; ++column, source += 4, target += 4) {
+            uint8_t red = source[0];
+            uint8_t green = source[1];
+            uint8_t blue = source[2];
+            if (linear) {
+                red = table.values[red];
+                green = table.values[green];
+                blue = table.values[blue];
+            }
+            target[0] = bgra ? blue : red;
+            target[1] = green;
+            target[2] = bgra ? red : blue;
+            target[3] = source[3];
+        }
+    }
+    return true;
 }
 
 bool operator==(const Rect& left, const Rect& right) {

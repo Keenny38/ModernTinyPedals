@@ -6,8 +6,27 @@ Flow {
     id: filter
 
     property var hidden: ({})  // lap key: true while hidden in this view
+    // Chip tooltips translated once (not per chip), made while hovered
+    readonly property string hideHint: i18n.tr("Click: hide in this view")
+    readonly property string showHint: i18n.tr("Click: show in this view")
 
-    function shown(lapKey) { return hidden[lapKey] !== true }
+    // Lap alone: always shown (no chips to show it again)
+    function shown(lapKey) { return backend.legend.length <= 1 || hidden[lapKey] !== true }
+    // Hidden laps no longer compared forgotten (a lap compared again is shown), all of them once a lap is
+    // alone (still shown when another lap is added)
+    function forgetRemoved() {
+        var keys = Object.keys(hidden)
+        if (!keys.length) return
+        var legend = backend.legend, kept = {}, changed = false
+        if (legend.length <= 1) { hidden = {}; return }
+        var present = {}
+        for (var i = 0; i < legend.length; i++) present[legend[i].key] = true
+        for (var k = 0; k < keys.length; k++) {
+            if (present[keys[k]]) kept[keys[k]] = true
+            else changed = true
+        }
+        if (changed) hidden = kept
+    }
     function toggle(lapKey) {
         var next = Object.assign({}, hidden)
         if (next[lapKey] === true) delete next[lapKey]
@@ -15,8 +34,13 @@ Flow {
         hidden = next
     }
 
+    Connections {
+        target: backend
+        function onChartChanged() { filter.forgetRemoved() }
+    }
+
     visible: backend.legend.length > 1
-    spacing: theme.em * 0.25
+    spacing: theme.em * 0.3
     Repeater {
         model: backend.legendModel
         Rectangle {
@@ -30,8 +54,8 @@ Flow {
             border.color: lapShown ? model.color : theme.border
             opacity: lapShown ? 1 : 0.55
             ToolTip.visible: chipArea.containsMouse
-            ToolTip.text: model.full + "\n" + (lapShown ? i18n.tr("Click: hide in this view") : i18n.tr("Click: show in this view"))
-            ToolTip.delay: 600
+            ToolTip.text: chipArea.containsMouse ? model.full + "\n" + (lapShown ? filter.hideHint : filter.showHint) : ""
+            ToolTip.delay: theme.tipDelay
             Row {
                 id: chipRow
                 anchors.centerIn: parent
@@ -40,7 +64,7 @@ Flow {
                 Text {
                     text: model.label
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.75
+                    font.pointSize: theme.fontCaption
                     font.strikeout: !parent.parent.lapShown
                     anchors.verticalCenter: parent.verticalCenter
                 }

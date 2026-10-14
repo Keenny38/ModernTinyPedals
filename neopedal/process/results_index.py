@@ -281,7 +281,7 @@ def parse_file(path: str, stamp: FileStamp, names: tuple[str, ...]
     """Results file read: parsed file, full results (None if unreadable), whether kept (not when unreadable
     now: locked or being written, read again next time)"""
     try:
-        result = rf.read_results(path, names)
+        result = rf.read_results(path, names, keep=False)  # bulk scan: page keeps the newest itself
         parsed = ParsedFile(stamp, names, session_info(result, names), summarize(result, stamp.modified, names))
     except OSError as error:  # being written or locked
         logger.debug("RESULTS INDEX: %s not read: %s", path, error)
@@ -334,6 +334,32 @@ def scan_results(folders: Sequence[str], keep_full: int = 0) -> ScanResult:
                 del _files[path]  # removed from its folder
     full = {path: (stamp, result) for _, path, stamp, result in sorted(newest, key=lambda item: item[:2])}
     return ScanResult(files, full)
+
+
+class RaceRecord(NamedTuple):
+    """Player race record of results files: class positions of finished races, races without contact & penalty"""
+
+    races: int
+    wins: int
+    podiums: int
+    average_finish: float  # class position, 0 if no race finished
+    clean: int
+    contacts: int
+
+
+def race_record(summaries: Iterable[ResultSummary]) -> RaceRecord:
+    """Race record of player sessions (other session kinds left out)"""
+    races = [summary for summary in summaries if summary.kind == "Race"]
+    placed = [summary.class_position for summary in races
+              if summary.status == rf.FINISHED and summary.class_position > 0]
+    return RaceRecord(
+        len(races),
+        sum(place == 1 for place in placed),
+        sum(place <= 3 for place in placed),
+        sum(placed) / len(placed) if placed else 0.0,
+        sum(summary.contacts == 0 and summary.penalties == 0 for summary in races),
+        sum(summary.contacts for summary in races),
+    )
 
 
 def read_summaries(folders: Sequence[str]) -> list[ResultSummary]:

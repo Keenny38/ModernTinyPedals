@@ -24,12 +24,19 @@ Vertical deflection per tyre with gauge, warning when tyre lifts off.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...api_control import api
 from .gauge_quad import GaugeQuad
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreDeflectionConfig
 
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: TyreDeflectionConfig
 
     options = (*GaugeQuad.common_options, "deflection_maximum_range", "lift_off_threshold")
     label = "Deflection"

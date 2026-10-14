@@ -55,14 +55,14 @@ def english():
 def test_graphics_train_tower_onboard_map_replay(director_page, english, monkeypatch):  # noqa: F811
     page, backend = director_page, director_page.backend
     for key in ("onboard", "map", "train"):
-        backend.setGraphic(key, True)
+        backend.graphics.setGraphic(key, True)
     cars = [car(1, 1, distance=1100.0, best=90.0, last=91.0, penalties=1, grid=3),
             car(2, 2, distance=1080.0, grid=1), car(3, 3, distance=1060.0, grid=2), car(4, 4, distance=200.0)]
     answers = race_answers(100.0, *cars, focus=2)
     answers["/rest/watch/standings"][0]["carPosition"] = {"x": 10.0, "y": 0.0, "z": -20.0}
     poll(page, answers)
     backend.set_on_air(2, dr.BATTLE)
-    state = backend.graphics_state()
+    state = backend.graphics.graphics_state()
     assert [item["number"] for item in state["train"]["cars"]] == ["1", "2", "3"]
     assert [item["air"] for item in state["train"]["cars"]] == [False, True, False]
     first = state["tower"][0]
@@ -71,21 +71,21 @@ def test_graphics_train_tower_onboard_map_replay(director_page, english, monkeyp
     assert state["map"]["cars"]["1"][:2] == [10.0, 20.0] and state["map"]["cars"]["2"][4] is True
     assert state["quali"] is None and state["grid"] is None and state["labels"]["pen"] == "PEN"
     # Live feed: game data of the last answer when shared memory has none (speed in app unit)
-    monkeypatch.setattr(type(backend), "reader", staticmethod(lambda: None))
-    live = backend.live_state()
+    monkeypatch.setattr(type(backend.graphics), "reader", staticmethod(lambda: None))
+    live = backend.graphics.live_state()
     assert live["onboard"]["speed"] == 180.0 and live["onboard"]["gear"] is None
     cars = live["cars"]  # flat: slot, x, y of each car
     assert cars[cars.index(1):cars.index(1) + 3] == [1, 10, 20] and len(cars) == 12
     # Instant replay of a contact: both cars, banners held by the source
     backend.add_events([dr.Event("contact|t", dr.CONTACT, 99.0, (1, 2), ("Driver 1", "Driver 2"), "GT3")])
     backend.replayEvent("contact|t")
-    info = backend.graphics_state()["replayInfo"]
+    info = backend.graphics.graphics_state()["replayInfo"]
     assert info["mode"] == "duel" and info["ahead"]["number"] == "1" and info["behind"]["number"] == "2"
     backend.backToLive()
-    assert backend.graphics_state()["replayInfo"] is None
+    assert backend.graphics.graphics_state()["replayInfo"] is None
     backend.add_events([dr.Event("stopped|t", dr.STOPPED, 99.5, (3,), ("Driver 3",), "GT3")])
     backend.replayEvent("stopped|t")
-    info = backend.graphics_state()["replayInfo"]
+    info = backend.graphics.graphics_state()["replayInfo"]
     assert info["mode"] == "driver" and info["car"]["number"] == "3" and info["kind"] == "Stopped Car"
     stats = dict(info["car"]["stats"])
     assert stats["DR"] == "" and stats["SR"] == ""  # ranks unknown (not player nor team member)
@@ -98,7 +98,7 @@ def test_graphics_train_tower_onboard_map_replay(director_page, english, monkeyp
     monkeypatch.setattr(rank_info.ranks, "drivers", [
         ranks.DriverRanks("Driver 3", "", "x", "FR", ranks.Rank("Silver", 2, 40), ranks.Rank("Gold", 1, 5))])
     backend.replayEvent("stopped|t")
-    stats = dict(backend.graphics_state()["replayInfo"]["car"]["stats"])
+    stats = dict(backend.graphics.graphics_state()["replayInfo"]["car"]["stats"])
     assert stats["DR"] == "S2" and stats["SR"] == "G1"
     backend.backToLive()
 
@@ -109,98 +109,100 @@ def test_qualifying_lap_graphic(director_page, english):  # noqa: F811
             car(2, 2, best=91.0, current_sector1=29.8, sector=2)]
     poll(page, race_answers(200.0, *cars, focus=2, info={"session": "QUALIFY1"}))
     backend.set_on_air(2, dr.MANUAL)
-    lap = backend.graphics_state()["quali"]
+    lap = backend.graphics.graphics_state()["quali"]
     assert (lap["position"], lap["delta"], lap["deltaTone"], lap["target"]) == ("P2", "-0.200", "gain", "1:30.000")
     assert lap["sectors"][0]["text"] == "29.800" and lap["running"] and lap["lapStart"] == 199.0
-    backend.setGraphic("quali", False)
-    assert backend.graphics_state()["quali"] is None
+    backend.graphics.setGraphic("quali", False)
+    assert backend.graphics.graphics_state()["quali"] is None
 
 
 def test_on_demand_grid_event_results_championship(director_page, english, tmp_path):  # noqa: F811
     page, backend = director_page, director_page.backend
     cars = [car(1, 1, grid=3, best=90.0), car(2, 2, grid=1), car(3, 3, grid=0, finish="FSTAT_DNF"), car(4, 4, grid=2)]
     poll(page, race_answers(300.0, *cars, info={"endEventTime": 3900.0}))
-    backend.showOnDemand("grid")
-    state = backend.graphics_state()
+    backend.graphics.showOnDemand("grid")
+    state = backend.graphics.graphics_state()
     assert [item["number"] for item in state["grid"]["cars"]] == ["2", "4", "1", "3"]
-    assert state["event"] is None and backend.onDemand == "grid"
-    backend.showOnDemand("event")
-    event = backend.graphics_state()["event"]
+    assert state["event"] is None and backend.graphics.onDemand == "grid"
+    backend.graphics.showOnDemand("event")
+    event = backend.graphics.graphics_state()["event"]
     assert event["track"] == "Test Ring" and ["Cars", "4"] in event["schedule"]
     assert ["Remaining", "1:00:00"] in event["schedule"]
-    backend.showOnDemand("event")  # same again: hidden
-    assert backend.onDemand == "" and backend.graphics_state()["event"] is None
-    backend.captureResults()
-    results = backend.graphics_state()["results"]
-    assert backend.onDemand == "results" and results["rows"][0]["gap"] == "Leader"
-    assert results["rows"][2]["status"] == "Retired" and backend.captureText == results["subtitle"]
-    backend.clearResults()
-    assert backend.onDemand == "" and backend.captureText == ""
+    backend.graphics.showOnDemand("event")  # same again: hidden
+    assert backend.graphics.onDemand == "" and backend.graphics.graphics_state()["event"] is None
+    backend.graphics.captureResults()
+    results = backend.graphics.graphics_state()["results"]
+    assert backend.graphics.onDemand == "results" and results["rows"][0]["gap"] == "Leader"
+    assert results["rows"][2]["status"] == "Retired" and backend.graphics.captureText == results["subtitle"]
+    backend.graphics.clearResults()
+    assert backend.graphics.onDemand == "" and backend.graphics.captureText == ""
     # Championship from a CSV file, kept between sessions
     path = tmp_path / "Endurance Cup.csv"
     path.write_text("Driver;Class;Points\nA;Hyper;50\nB;Hyper;80\nC;GT3;20\n", encoding="utf-8")
-    assert backend.import_championship(str(path))
-    assert backend.championshipNames == ["Endurance Cup"] and backend.championshipClasses == ["Hyper", "GT3"]
-    backend.setChampionshipClass("Hyper")
-    backend.showOnDemand("champ")
-    standings = backend.graphics_state()["champ"]
+    assert backend.graphics.import_championship(str(path))
+    assert backend.graphics.championshipNames == ["Endurance Cup"] and backend.graphics.championshipClasses == ["Hyper", "GT3"]
+    backend.graphics.setChampionshipClass("Hyper")
+    backend.graphics.showOnDemand("champ")
+    standings = backend.graphics.graphics_state()["champ"]
     assert standings["title"] == "Endurance Cup" and standings["subtitle"] == "Hyper"
     assert [(row["name"], row["points"], row["medal"]) for row in standings["rows"]] == [("B", "80", 1), ("A", "50", 2)]
-    from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
-    assert [item["name"] for item in db.load_championships()] == ["Endurance Cup"]
+    assert [item["name"] for item in ds.load_championships()] == ["Endurance Cup"]
     bad = tmp_path / "empty.csv"
     bad.write_text("nothing here", encoding="utf-8")
-    assert not backend.import_championship(str(bad)) and backend.noticeError
-    backend.removeChampionship()
-    assert backend.championshipNames == [] and backend.onDemand == ""
+    assert not backend.graphics.import_championship(str(bad)) and backend.noticeError
+    backend.graphics.removeChampionship()
+    assert backend.graphics.championshipNames == [] and backend.graphics.onDemand == ""
 
 
 def test_graphics_settings_choices_and_limits(director_page):  # noqa: F811
     backend = director_page.backend
-    backend.setGraphic("onboardStyle", "helmet")
-    backend.setGraphic("temperatureUnit", "fahrenheit")
-    backend.setGraphic("opacity", 5)
-    backend.setGraphic("onboardStyle", "nonsense")
-    settings = backend.graphicsSettings
+    backend.graphics.setGraphic("onboardStyle", "helmet")
+    backend.graphics.setGraphic("temperatureUnit", "fahrenheit")
+    backend.graphics.setGraphic("opacity", 5)
+    backend.graphics.setGraphic("onboardStyle", "nonsense")
+    settings = backend.graphics.graphicsSettings
     assert (settings["onboardStyle"], settings["temperatureUnit"], settings["opacity"]) == ("helmet", "fahrenheit", 30)
     from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
     assert db.temperature_text(20.0, "fahrenheit") == "68°F" and db.temperature_text(20.0, "celsius") == "20°C"
-    kept = db.graphics_setting({"opacity": 250, "towerMode": "bad", "onboard": "yes"})
+    kept = ds.graphics_setting({"opacity": 250, "towerMode": "bad", "onboard": "yes"})
     assert kept["opacity"] == 100 and kept["towerMode"] == "class" and kept["onboard"] is False
 
 
 def test_timing_table_views_and_columns(director_page, english):  # noqa: F811
     page, backend = director_page, director_page.backend
     poll(page, race_answers(100.0, car(1, 1, distance=1040.0, best=90.0), car(2, 2, distance=1000.0, pitstops=1)))
-    backend.setTimingOpen(True)
-    model = backend.timingRows
+    backend.timing.setTimingOpen(True)
+    model = backend.timing.timingRows
     assert model.rowCount() == 2
     row = model.rows[1]
     from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
-    assert set(db.TIMING_COLUMNS) <= set(row) and row["interval"] == "+0.8" and row["battle"]
+    assert set(ds.TIMING_COLUMNS) <= set(row) and row["interval"] == "+0.8" and row["battle"]
     assert row["pits"] == "1" and model.rows[0]["bestTone"] == "fastest"
-    columns = [column["key"] for column in backend.timingColumns]
-    assert columns == list(db.TIMING_VIEWS["race"])
-    backend.moveTimingColumn(0, 2)
-    assert [column["key"] for column in backend.timingColumns][:3] == ["classPos", "change", "pos"]
-    backend.toggleTimingColumn("team")
-    backend.toggleTimingColumn("pos")
-    shown = [column["key"] for column in backend.timingColumns]
+    columns = [column["key"] for column in backend.timing.timingColumns]
+    assert columns == list(ds.TIMING_VIEWS["race"])
+    backend.timing.moveTimingColumn(0, 2)
+    assert [column["key"] for column in backend.timing.timingColumns][:3] == ["classPos", "change", "pos"]
+    backend.timing.toggleTimingColumn("team")
+    backend.timing.toggleTimingColumn("pos")
+    shown = [column["key"] for column in backend.timing.timingColumns]
     assert "team" in shown and "pos" not in shown
-    assert next(item for item in backend.timingChoices if item["key"] == "team")["shown"]
-    backend.setTimingView(1)
-    assert backend.timingViewIndex == 1 and [column["key"] for column in backend.timingColumns] == list(
-        db.TIMING_VIEWS["qualifying"])
-    backend.setTimingView(0)
-    backend.resetTimingColumns()
-    assert [column["key"] for column in backend.timingColumns] == list(db.TIMING_VIEWS["race"])
+    assert next(item for item in backend.timing.timingChoices if item["key"] == "team")["shown"]
+    backend.timing.setTimingView(1)
+    assert backend.timing.timingViewIndex == 1 and [column["key"] for column in backend.timing.timingColumns] == list(
+        ds.TIMING_VIEWS["qualifying"])
+    backend.timing.setTimingView(0)
+    backend.timing.resetTimingColumns()
+    assert [column["key"] for column in backend.timing.timingColumns] == list(ds.TIMING_VIEWS["race"])
     saved = db.load_page_settings()
-    assert saved["timing_view"] == "race" and db.timing_setting({"race": ["bogus", "driver", "driver"]})["race"] == [
+    assert saved["timing_view"] == "race" and ds.timing_setting({"race": ["bogus", "driver", "driver"]})["race"] == [
         "driver"]
-    backend.setTimingOpen(False)
+    backend.timing.setTimingOpen(False)
 
 
 def test_graphics_panels_load_without_warnings(director_page):  # noqa: F811
@@ -221,7 +223,7 @@ def test_graphics_panels_load_without_warnings(director_page):  # noqa: F811
         timing.setProperty("visible", True)
         poll(page, race_answers(100.0, car(1, 1, distance=1040.0), car(2, 2, distance=1000.0)))
         QCoreApplication.processEvents()
-        assert page.backend.timing_open
+        assert page.backend.timing.timing_open
         timing.setProperty("visible", False)
         QCoreApplication.processEvents()
     finally:
@@ -322,22 +324,22 @@ def test_layout_presets_and_partial_sources(server, director_page, monkeypatch):
     assert sd.director_layout.get("race") == {"tower": [0.5, 0.5, 1.0]} and sd.director_layout.get("") == {}
     _status, body, _ = get(server.url("/api/director", "v=0"))
     assert json.loads(body)["layout"] == {} and json.loads(body)["preset"] == ""
-    backend.setLayoutPreset("race")  # sources without their own preset follow
-    assert backend.layoutPreset == "race" and sd.director_layout.active() == "race"
+    backend.graphics.setLayoutPreset("race")  # sources without their own preset follow
+    assert backend.graphics.layoutPreset == "race" and sd.director_layout.active() == "race"
     _, body, _ = get(server.url("/api/director", "v=0"))
     assert json.loads(body)["layout"] == {"tower": [0.5, 0.5, 1.0]}
     _, body, _ = get(server.url("/api/director", "v=0&preset="))  # source with the default preset
     assert json.loads(body)["layout"] == {}
-    backend.nextLayoutPreset()
-    assert backend.layoutPreset == "post"
+    backend.graphics.nextLayoutPreset()
+    assert backend.graphics.layoutPreset == "post"
     with open(f"{sd.director_layout.folder()}broadcast_layout.json", encoding="utf-8") as file:
         assert json.load(file)["__active__"] == "post"
     monkeypatch.setattr(so, "streamoverlay", server)
-    backend.copyPartialUrl(["tower", "map", "bogus"], "race")
+    backend.graphics.copyPartialUrl(["tower", "map", "bogus"], "race")
     copied = QGuiApplication.clipboard().text()
     assert copied.startswith(server.url("/director")) and copied.endswith("&only=tower,map&preset=race")
-    assert {item["key"] for item in backend.graphicNames} == set(sd.GRAPHIC_IDS)
-    backend.setLayoutPreset("")
+    assert {item["key"] for item in backend.graphics.graphicNames} == set(sd.GRAPHIC_IDS)
+    backend.graphics.setLayoutPreset("")
 
 
 def test_league_branding_files(server, director_page, tmp_path):  # noqa: F811
@@ -348,7 +350,7 @@ def test_league_branding_files(server, director_page, tmp_path):  # noqa: F811
     backend = director_page.backend
     picture = tmp_path / "league.png"
     picture.write_bytes(b"\x89PNG fake")
-    assert backend.set_logo(str(picture))
+    assert backend.graphics.set_logo(str(picture))
     sponsors = os.path.join(sd.brand_folder(), "sponsors")
     os.makedirs(sponsors, exist_ok=True)
     with open(os.path.join(sponsors, "b sponsor.png"), "wb") as file:
@@ -361,16 +363,16 @@ def test_league_branding_files(server, director_page, tmp_path):  # noqa: F811
     assert status == 200 and body == b"\x89PNG b" and headers["Content-Type"] == "image/png"
     assert get(server.url("/api/director/brand/../config.json"))[0] == 404
     assert get(server.url("/api/director/brand/sponsors/notes.txt"))[0] == 404
-    backend.setGraphic("brandName", "  Endurance Cup " + "x" * 80)
-    backend.setGraphic("accent", "#12AB34")
-    backend.setGraphic("accent", "red")  # not a color: kept
-    state = backend.graphics_state()
+    backend.graphics.setGraphic("brandName", "  Endurance Cup " + "x" * 80)
+    backend.graphics.setGraphic("accent", "#12AB34")
+    backend.graphics.setGraphic("accent", "red")  # not a color: kept
+    state = backend.graphics.graphics_state()
     assert state["brand"]["name"].startswith("Endurance Cup") and len(state["brand"]["name"]) == 60
     assert state["graphics"]["accent"] == "#12AB34" and state["brand"]["logo"].startswith("/api/director/brand/logo")
     notes = tmp_path / "notes.txt"
     notes.write_text("x", encoding="utf-8")
-    assert not backend.set_logo(str(notes))
-    backend.clearLogo()
+    assert not backend.graphics.set_logo(str(notes))
+    backend.graphics.clearLogo()
     assert sd.brand_pictures()[0] == ""
 
 
@@ -378,60 +380,60 @@ def test_message_countdown_and_automatic_graphics(director_page, english):  # no
     import time
 
     page, backend = director_page, director_page.backend
-    backend.showMessage("Race control", "  Red   flag ")
-    assert backend.graphics_state()["message"] == {"id": 1, "title": "Race control", "text": "Red flag"}
-    backend.hideMessage()
-    assert backend.graphics_state()["message"] is None and backend.messageText == ""
-    backend.startCountdown(2.0, "Start in")
-    countdown = backend.graphics_state()["countdown"]
+    backend.graphics.showMessage("Race control", "  Red   flag ")
+    assert backend.graphics.graphics_state()["message"] == {"id": 1, "title": "Race control", "text": "Red flag"}
+    backend.graphics.hideMessage()
+    assert backend.graphics.graphics_state()["message"] is None and backend.graphics.messageText == ""
+    backend.graphics.startCountdown(2.0, "Start in")
+    countdown = backend.graphics.graphics_state()["countdown"]
     assert countdown["label"] == "Start in" and 115_000 < countdown["endsAt"] - time.time() * 1000 <= 120_001
-    assert backend.countdownRunning
-    backend.stopCountdown()
-    assert backend.graphics_state()["countdown"] is None
+    assert backend.graphics.countdownRunning
+    backend.graphics.stopCountdown()
+    assert backend.graphics.graphics_state()["countdown"] is None
     # Formation lap: starting grid by itself, hidden once the race is green
     cars = [car(1, 1, grid=2), car(2, 2, grid=1)]
     poll(page, race_answers(10.0, *cars, info={"gamePhase": 3}))
-    assert backend.onDemand == "grid" and backend.auto_shown == "grid"
+    assert backend.graphics.onDemand == "grid" and backend.graphics.auto_shown == "grid"
     poll(page, race_answers(11.0, *cars, info={"gamePhase": 5}))
-    assert backend.onDemand == ""
+    assert backend.graphics.onDemand == ""
     poll(page, race_answers(12.0, *cars, info={"gamePhase": 3}))  # once a session
-    assert backend.onDemand == ""
+    assert backend.graphics.onDemand == ""
     # Winner: classification captured & shown, kept up to date while shown by the director
-    backend.auto_graphics([dr.Event("winner|1", dr.WINNER, 12.0, (1,), ("Driver 1",), "GT3")])
-    assert backend.onDemand == "results" and backend.captured is not None
-    backend.showOnDemand("event")  # operator takes over
-    assert backend.auto_shown == "" and backend.onDemand == "event"
+    backend.graphics.auto_graphics([dr.Event("winner|1", dr.WINNER, 12.0, (1,), ("Driver 1",), "GT3")])
+    assert backend.graphics.onDemand == "results" and backend.graphics.captured is not None
+    backend.graphics.showOnDemand("event")  # operator takes over
+    assert backend.graphics.auto_shown == "" and backend.graphics.onDemand == "event"
 
 
 def test_tower_onboard_map_details(director_page, english):  # noqa: F811
     page, backend = director_page, director_page.backend
-    backend.setGraphic("map", True)
-    backend.setGraphic("onboard", True)
+    backend.graphics.setGraphic("map", True)
+    backend.graphics.setGraphic("onboard", True)
     cars = [car(1, 1, distance=1300.0, best=90.0, pitstops=2, sector=1), car(2, 2, distance=1280.0, sector=2),
             car(3, 3, distance=2900.0, car_class="Hyper", in_pit=True, sector=2)]
     poll(page, race_answers(20.0, *cars, focus=2, info={"sectorFlag": ["UNKNOWN", "YELLOW", "UNKNOWN"]}))
     backend.set_on_air(2, dr.MANUAL)
-    state = backend.graphics_state()
+    state = backend.graphics.graphics_state()
     first, second = state["tower"][0], state["tower"][1]
     assert first["fastest"] and first["stops"] == 2 and first["gapLeader"] == "" and second["gapLeader"] == "+0.4"
     assert state["onboard"]["ahead"] == "#1 +0.4"
     assert state["map"]["cars"]["3"][5] is True and state["map"]["yellowSectors"] == [False, True, False]
     assert state["map"]["sectors"] == []  # sector 2 seen in the pit lane only: not known yet
     poll(page, race_answers(21.0, *[cars[0], cars[1]._replace(distance=2700.0), cars[2]], focus=2))
-    assert backend.graphics_state()["map"]["sectors"] == [0.325, 0.675]
+    assert backend.graphics.graphics_state()["map"]["sectors"] == [0.325, 0.675]
 
 
 def test_graphics_settings_new_choices(director_page):  # noqa: F811
     backend = director_page.backend
     for name, value in (("mapRotation", 90), ("mapRotation", 45), ("towerGap", "leader"), ("towerGap", "x"),
                         ("mapDots", 900), ("sponsorSeconds", 1)):
-        backend.setGraphic(name, value)
-    settings = backend.graphicsSettings
+        backend.graphics.setGraphic(name, value)
+    settings = backend.graphics.graphicsSettings
     assert (settings["mapRotation"], settings["towerGap"], settings["mapDots"], settings["sponsorSeconds"]) == (
         90, "leader", 200, 3)
-    from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
-    kept = db.graphics_setting({"mapRotation": 33, "accent": "#zz0000", "brandName": "a" * 99})
+    kept = ds.graphics_setting({"mapRotation": 33, "accent": "#zz0000", "brandName": "a" * 99})
     assert kept["mapRotation"] == 0 and kept["accent"] == "#e5383b" and len(kept["brandName"]) == 60
 
 
@@ -441,19 +443,19 @@ def test_hotkeys_of_graphics(director_page):  # noqa: F811
 
     backend = director_page.backend
     command.hotkey_director_starting_grid()
-    assert backend.onDemand == "grid"
+    assert backend.graphics.onDemand == "grid"
     command.hotkey_director_event_card()
-    assert backend.onDemand == "event"
+    assert backend.graphics.onDemand == "event"
     command.hotkey_director_classification()
-    assert backend.onDemand == "results" and backend.captured is not None
+    assert backend.graphics.onDemand == "results" and backend.graphics.captured is not None
     command.hotkey_director_classification()  # shown: hidden
-    assert backend.onDemand == ""
+    assert backend.graphics.onDemand == ""
     command.hotkey_director_hide_graphics()
-    assert backend.graphicsSettings["hidden"]
+    assert backend.graphics.graphicsSettings["hidden"]
     command.hotkey_director_hide_graphics()
     command.hotkey_director_next_layout()
-    assert backend.layoutPreset == "pre"
-    backend.setLayoutPreset("")
+    assert backend.graphics.layoutPreset == "pre"
+    backend.graphics.setLayoutPreset("")
     assert "director_next_layout" in SHORTCUTS_GENERAL and "director_championship" in SHORTCUTS_GENERAL
 
 
@@ -497,7 +499,7 @@ def test_driver_history_from_race_files(tmp_path, monkeypatch):
     for name in races:
         (tmp_path / name).write_text("x", encoding="utf-8")
 
-    def read(path, names=()):
+    def read(path, names=(), keep=True):
         track, entries = races[path.replace("\\", "/").rsplit("/", 1)[-1]]
         return rf.SessionResult(path, "LMU", "", "", float(len(path)), "Race", "Race", track, track, "", 4000.0, "",
                                 60, 0, 10, tuple(entries), ())
@@ -519,7 +521,7 @@ def test_onboard_reads_shared_memory_of_car_on_air(director_page, english, monke
     from neopedal.adapter import _reader
 
     page, backend = director_page, director_page.backend
-    backend.setGraphic("onboard", True)
+    backend.graphics.setGraphic("onboard", True)
     poll(page, race_answers(100.0, car(1, 1), car(7, 2, distance=600.0), focus=7))
 
     class Group:
@@ -540,10 +542,10 @@ def test_onboard_reads_shared_memory_of_car_on_air(director_page, english, monke
     for group, base in groups.items():
         for name in vars(getattr(Reader, group)):
             assert hasattr(base, name), (group, name)
-    monkeypatch.setattr(type(backend), "reader", staticmethod(lambda: Reader()))
-    onboard = backend.live_state()["onboard"]
+    monkeypatch.setattr(type(backend.graphics), "reader", staticmethod(lambda: Reader()))
+    onboard = backend.graphics.live_state()["onboard"]
     assert (onboard["speed"], onboard["gear"], onboard["rpm"], onboard["throttle"]) == (180.0, 4, 7200, 0.8)
     assert "battery" not in onboard  # no battery on the onboard graphic
-    from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
-    assert db.LIVE_MS <= 100
+    assert ds.LIVE_MS <= 100

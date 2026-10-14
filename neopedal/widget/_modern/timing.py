@@ -26,6 +26,8 @@ while game invalidated it (track limits).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -35,11 +37,16 @@ from ...module_info import minfo
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TimingConfig
+
 SAMPLE = "8:88.888"
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TimingConfig
 
     options = (
         "font_size", "layout",
@@ -118,9 +125,8 @@ class Realtime(StatsMixin, ModernOverlay):
             best = api.read.timing.best_laptime(self.player_index)
             if 0 < best < self.laptime_session_best:
                 self.laptime_session_best = best
-        if self.player_index < api.read.vehicle.total_vehicles():
-            self.player_index += 1
-        else:
+        self.player_index += 1  # wrap after last car, never read one past it
+        if self.player_index >= api.read.vehicle.total_vehicles():
             self.player_index = 0
         return self.laptime_session_best
 

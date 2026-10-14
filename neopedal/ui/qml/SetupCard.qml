@@ -19,15 +19,15 @@ Rectangle {
 
     implicitWidth: theme.em * 14
     implicitHeight: column.implicitHeight + padding * 2
-    radius: theme.em * 0.75
+    radius: theme.radiusXl
     color: area.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.18) : Qt.darker(theme.base, 1.025)) : theme.base
     border.width: checked ? 2 : 1
     border.color: checked ? theme.accent : (theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border)
     scale: area.pressed ? 0.985 : 1
     activeFocusOnTab: true
-    Behavior on color { ColorAnimation { duration: 120 } }
-    Behavior on border.color { ColorAnimation { duration: 150 } }
-    Behavior on scale { NumberAnimation { duration: 90 } }
+    Behavior on color { ColorAnimation { duration: theme.motionFast } }
+    Behavior on border.color { ColorAnimation { duration: theme.motionBase } }
+    Behavior on scale { NumberAnimation { duration: theme.motionFast } }
     Accessible.role: multi ? Accessible.CheckBox : Accessible.RadioButton
     Accessible.name: title
     Accessible.description: text
@@ -59,16 +59,16 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.75
+            spacing: theme.em * 0.8
 
             Rectangle {
                 visible: (card.glyph !== "" && theme.iconFont !== "") || card.tileText !== ""
                 Layout.preferredWidth: Math.round(theme.em * 2.4)
                 Layout.preferredHeight: Math.round(theme.em * 2.4)
                 Layout.alignment: Qt.AlignTop
-                radius: theme.em * 0.55
+                radius: theme.radiusLg
                 color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, card.checked ? 0.22 : (theme.dark ? 0.12 : 0.08))
-                Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on color { ColorAnimation { duration: theme.motionBase } }
                 Icon {
                     anchors.centerIn: parent
                     glyph: card.glyph
@@ -81,14 +81,14 @@ Rectangle {
                     text: card.tileText
                     color: card.checked ? theme.accent : theme.text
                     font.weight: Font.Bold
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                 }
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.alignment: card.text !== "" ? Qt.AlignTop : Qt.AlignVCenter
-                spacing: theme.em * 0.15
+                spacing: theme.em * 0.2
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: theme.em * 0.5
@@ -97,7 +97,7 @@ Rectangle {
                         text: card.title
                         color: theme.text
                         font.weight: Font.DemiBold
-                        font.pointSize: theme.fontPoint * 1.05
+                        font.pointSize: theme.fontSubtitle
                         elide: Text.ElideRight
                     }
                     Pill {
@@ -112,7 +112,7 @@ Rectangle {
                     text: card.text
                     color: theme.dimText
                     wrapMode: Text.WordWrap
-                    font.pointSize: theme.fontPoint * 0.92
+                    font.pointSize: theme.fontLabel
                 }
             }
 
@@ -122,10 +122,10 @@ Rectangle {
                 implicitWidth: Math.round(theme.em * 1.25)
                 implicitHeight: implicitWidth
                 radius: card.multi ? theme.em * 0.3 : width / 2
-                color: card.checked ? theme.accent : "transparent"
+                color: card.checked ? theme.accentFill : "transparent"
                 border.width: card.checked ? 0 : 1.5
                 border.color: theme.border
-                Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on color { ColorAnimation { duration: theme.motionBase } }
                 Icon {
                     anchors.centerIn: parent
                     visible: card.checked && card.multi

@@ -39,7 +39,7 @@ from collections.abc import Mapping
 from importlib import import_module
 from typing import Any
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QObject, QRect, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 
 from ..setting import Setting
@@ -90,6 +90,27 @@ def render_widget(config: Setting, widget_name: str, widget_setting: dict, scale
         widget_setting: widget options drawn.
         scale: size multiplier (zoom), applied as global overlay scale (limited to its range).
     """
+    return _with_preview_widget(config, widget_name, widget_setting, scale, lambda widget: widget.grab())
+
+
+def widget_part_rects(config: Setting, widget_name: str, widget_setting: dict,
+                      scale: float = 1.0) -> tuple[QSize, dict[str, QRect]] | None:
+    """Size & rects of the parts of widget as drawn in its picture (black box regions), None if it has none"""
+    from ..widget._painter import OverlayStyle
+
+    def part_rects(widget):
+        rects = getattr(widget, "part_rects", None)
+        return None if rects is None else (widget.size(), dict(rects()))
+
+    shared = OverlayStyle.corner_scale, OverlayStyle.depth_effects  # set by widget: running overlays keep theirs
+    try:
+        return _with_preview_widget(config, widget_name, widget_setting, scale, part_rects)
+    finally:
+        OverlayStyle.corner_scale, OverlayStyle.depth_effects = shared
+
+
+def _with_preview_widget(config: Setting, widget_name: str, widget_setting: dict, scale: float, use):
+    """use(widget) with widget built on simulated race data, deleted after"""
     from ..demo_data import SAMPLE_WIDGETS, demo_globals, demo_session, update_widget
     from ..widget._modern import modern_module, uses_modern_design
 
@@ -109,7 +130,7 @@ def render_widget(config: Setting, widget_name: str, widget_setting: dict, scale
             elif widget_name not in SAMPLE_WIDGETS:
                 update_widget(widget, widget_name, session)
             widget.adjustSize()
-            return widget.grab()
+            return use(widget)
         finally:
             widget.deleteLater()
 

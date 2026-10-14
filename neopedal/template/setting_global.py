@@ -24,6 +24,61 @@ from ..const_api import API_DEFAULT_NAME
 from ..const_app import PLATFORM
 from ..userfile import set_default_config_path, set_default_data_path
 from ..version import SETTING_VERSION
+from .page_registry import default_rail
+
+# Race calculator inputs kept in config "fuel_calculator": key, default (see ui/quick/race_model.SAVED_INPUTS)
+FUEL_CALCULATOR_INPUTS = {
+    "input_lap_time": 0.0,
+    "input_fuel_per_lap": 0.0,
+    "input_energy_per_lap": 0.0,
+    "input_tank_capacity": 0.0,
+    "enable_lap_race": False,
+    "input_race_minutes": 0,
+    "input_race_laps": 0,
+    "input_formation_laps": 0.0,
+    "input_pit_seconds": 0.0,
+    "input_safety_margin": 0.0,
+    "input_fuel_start": 0.0,
+    "input_energy_start": 0.0,
+    "input_tread_start": 100.0,
+    "input_wear_per_lap": 0.0,
+    "input_minimum_tread": 0.0,
+    "input_refuel_rate": 0.0,
+    "input_energy_rate": 0.0,
+    "enable_tyres_during_refuel": False,
+    "enable_driver_change_during_refuel": False,
+    "input_driver_change_seconds": 0.0,
+    "input_minimum_stops": 0,
+    "input_max_stint_minutes": 0.0,
+    "input_drivers": 1,
+    "input_fuel_effect": 0.0,
+    "input_track_evolution": 0.0,
+    "input_target_stint_laps": 0,
+    "input_safety_margin_kind": 0,  # see fuel_strategy.MARGIN_UNITS
+    "enable_balanced_stints": False,
+    "input_stints_per_driver": 1,
+    "input_driver_table": "",  # pace:min:max of each driver, see fuel_strategy.parse_driver_table
+    "input_saving_cost": 0.0,
+    "input_race_start_minutes": -1,
+    "enable_safety_car": False,
+    "input_sc_lap": 1,
+    "input_sc_laps": 3,
+    "input_sc_consumption": 50.0,
+    "input_sc_laptime": 150.0,
+    "enable_sc_pit": False,
+    "input_sc_pit_saving": 50.0,
+    "input_sc_wear": 50.0,
+    "enable_rain": False,
+    "input_rain_lap": 1,
+    "input_rain_laps": 0,
+    "input_rain_consumption": 100.0,
+    "input_rain_laptime": 110.0,
+    "enable_rain_tyres": True,
+    "input_pit_lap_consumption": 100.0,
+    "enable_leader_finish": False,
+    "input_tyre_set_laps": 0,
+    "enable_tyre_life_stints": False,
+}
 
 GLOBAL_DEFAULT = {
     "preset": {
@@ -35,6 +90,9 @@ GLOBAL_DEFAULT = {
         "remember_position": True,
         "remember_size": True,
         "remember_open_pages": True,
+        # Window hidden or minimized a while: tool pages reopened at startup are closed (memory freed), except
+        # Broadcast Director & Race Calculator while enabled (they follow the session), see app.release_tool_pages
+        "keep_director_and_calculator_running_while_hidden": True,
         "enable_high_dpi_scaling": True,
         "enable_auto_load_preset": False,
         "enable_global_hotkey": False,
@@ -68,15 +126,12 @@ GLOBAL_DEFAULT = {
         "show_setup_wizard_at_startup": True,
         "last_page_index": 0,
         # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
-        "rail_items": (
-            "home,widget,driver_stats_viewer,race_results_viewer,game_replays,"
-            "broadcast_director,lap_viewer,race_calculator,preset"
-        ),
+        "rail_items": default_rail(),  # see page_registry.PageSpec.rail
         # Home page quick access buttons in order: tool dialog module names, page keys & actions,
         # see ui.home_view.quick_access_entries
         "home_quick_access": (
             "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,"
-            "game_replays,widget,module,preset,spectate,"
+            "race_results_viewer,widget,module,preset,spectate,"
             "hotkey,tools,app_settings,bug_report,check_updates"
         ),
         "enable_layout_per_screen_setup": True,
@@ -172,6 +227,9 @@ GLOBAL_DEFAULT = {
         "notify_auto_backup_car_setup": True,
         "font_color_auto_backup_car_setup": "#FFFFFF",
         "background_color_auto_backup_car_setup": "#334499",
+        "notify_broadcast_director": True,
+        "font_color_broadcast_director": "#FFFFFF",
+        "background_color_broadcast_director": "#AA2233",
     },
     "fuel_calculator": {
         "show_consumption_history": True,
@@ -181,55 +239,7 @@ GLOBAL_DEFAULT = {
         "show_column_battery_net_change": True,
         "show_column_tyre_wear": True,
         "show_column_tank_capacity": True,
-        # Inputs of last time
-        "input_lap_time": 0.0,
-        "input_fuel_per_lap": 0.0,
-        "input_energy_per_lap": 0.0,
-        "input_tank_capacity": 0.0,
-        "enable_lap_race": False,
-        "input_race_minutes": 0,
-        "input_race_laps": 0,
-        "input_formation_laps": 0.0,
-        "input_pit_seconds": 0.0,
-        "input_safety_margin": 0.0,
-        "input_fuel_start": 0.0,
-        "input_energy_start": 0.0,
-        "input_tread_start": 100.0,
-        "input_wear_per_lap": 0.0,
-        "input_minimum_tread": 0.0,
-        "input_refuel_rate": 0.0,
-        "input_energy_rate": 0.0,
-        "enable_tyres_during_refuel": False,
-        "enable_driver_change_during_refuel": False,
-        "input_driver_change_seconds": 0.0,
-        "input_minimum_stops": 0,
-        "input_max_stint_minutes": 0.0,
-        "input_drivers": 1,
-        "input_fuel_effect": 0.0,
-        "input_track_evolution": 0.0,
-        "input_target_stint_laps": 0,
-        "input_safety_margin_kind": 0,
-        "enable_balanced_stints": False,
-        "input_stints_per_driver": 1,
-        "input_driver_table": "",
-        "input_saving_cost": 0.0,
-        "input_race_start_minutes": -1,
-        "enable_safety_car": False,
-        "input_sc_lap": 1,
-        "input_sc_laps": 3,
-        "input_sc_consumption": 50.0,
-        "input_sc_laptime": 150.0,
-        "enable_sc_pit": False,
-        "input_sc_pit_saving": 50.0,
-        "input_sc_wear": 50.0,
-        "enable_rain": False,
-        "input_rain_lap": 1,
-        "input_rain_laps": 0,
-        "input_rain_consumption": 100.0,
-        "input_rain_laptime": 110.0,
-        "enable_rain_tyres": True,
-        "input_pit_lap_consumption": 100.0,
-        "enable_leader_finish": False,
+        **FUEL_CALCULATOR_INPUTS,  # inputs of last time
         "input_measured_compound": 3,
         "enable_follow_live": False,
         "enable_valid_laps_only": False,
@@ -240,6 +250,7 @@ GLOBAL_DEFAULT = {
         "collapsed_sections": "",
         "race_tab": 0,
         "live_unfollowed": "",
+        "enable_game_data": True,
     },
     "driver_stats_viewer": {
         "enable_lap_reference": True,

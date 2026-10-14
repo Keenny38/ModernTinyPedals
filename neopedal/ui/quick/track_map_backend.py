@@ -31,7 +31,7 @@ import os
 from bisect import bisect_right
 from dataclasses import dataclass
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QWidget
 
@@ -43,7 +43,6 @@ from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
 from ..lap_viewer import distance_unit
 from ..track_map_geometry import config_grades, curve_at, curve_description, node_at
-from .background import BackgroundJobs
 from .game_pictures import notifier, track_logo_url
 from .lines import (
     VertexStore,
@@ -57,6 +56,7 @@ from .lines import (
     normals,
     segments,
 )
+from .page_backend import PageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def scaled_lines(geometry: MapGeometry, widths: dict[str, float], meters_per_pix
     }
 
 
-class TrackMapBackend(QObject):
+class TrackMapBackend(PageBackend):
     """Track Map Viewer page state (QML context property "backend")
 
     Shapes are drawn again when their vertices change (VertexStore tells them): no global revision.
@@ -182,11 +182,10 @@ class TrackMapBackend(QObject):
     loadingChanged = Signal()
 
     def __init__(self, parent: QWidget):
-        super().__init__(parent)
+        super().__init__(parent, "Track map viewer")
         notifier().changed.connect(self.logoChanged)
         self.mapChanged.connect(self.logoChanged)
         self._window = parent
-        self.jobs = BackgroundJobs(self, "Track map viewer")
         self.prefix = f"track_map_{id(self)}|"
         self.geometry: MapGeometry | None = None
         self.raw_coords: list[tuple[float, float]] = []
@@ -206,7 +205,7 @@ class TrackMapBackend(QObject):
         self.ecfg = cfg.user.config["track_map_viewer"]
         self.grades = config_grades(self.ecfg)
 
-    def release(self):
+    def release_resources(self):
         self._released = True  # jobs still running: their result dropped
         self.geometry = None
         VertexStore.remove_prefix(self.prefix)
@@ -334,7 +333,8 @@ class TrackMapBackend(QObject):
 
         def work() -> tuple:
             geometry = read_geometry(filepath, filename)
-            return filepath, filename, geometry, scaled_lines(geometry, widths, scale) if geometry else {}
+            lines = scaled_lines(geometry, widths, scale) if geometry else {}
+            return filepath, filename, geometry, lines, (widths, scale)
 
         self.set_loading(True)
         self.jobs.run("read map", work, self.map_read, self.map_failed, key="map")
@@ -347,7 +347,7 @@ class TrackMapBackend(QObject):
 
     def map_failed(self, error: BaseException):
         logger.error("Track map viewer: unable to read map", exc_info=(type(error), error, error.__traceback__))
-        self.map_read(("", self.map_name, None, {}))
+        self.map_read(("", self.map_name, None, {}, None))
 
     def map_read(self, result: tuple):
         """Map read in background: shown (or warned if invalid)"""
@@ -356,7 +356,7 @@ class TrackMapBackend(QObject):
         if self._released:
             return
         self.set_loading(False)
-        filepath, filename, geometry, lines = result
+        filepath, filename, geometry, lines, built_for = result
         if geometry is None:
             self.geometry = None
             self.raw_coords, self.raw_dists, self.map_name, self.map_length = [], [], "", 0.0
@@ -375,6 +375,8 @@ class TrackMapBackend(QObject):
         VertexStore.set(self.key("elevation"), geometry.elevation)
         VertexStore.set(self.key("elevation_line"), geometry.elevation_line)
         self.store_lines(lines)
+        if built_for != (self.scaled_widths(), self._meters_per_pixel):  # zoomed or config changed while loading
+            self.build_scaled()
         self._position = 0.0
         self._shown = None
         self.update_position()

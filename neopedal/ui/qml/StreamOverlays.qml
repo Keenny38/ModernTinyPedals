@@ -8,7 +8,7 @@ import QtQuick.Layouts
 TpPage {
     id: page
 
-    readonly property bool wide: width > theme.em * 66
+    readonly property bool wide: width > theme.em * 66  // content-tuned: button texts
     readonly property bool on: backend.enabled && backend.running
 
     // Address of a source: title, detail, live mark, copy & open buttons
@@ -25,7 +25,7 @@ TpPage {
         Rectangle {
             implicitWidth: Math.round(theme.em * 2.4)
             implicitHeight: implicitWidth
-            radius: theme.em * 0.5
+            radius: theme.radiusMd
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.14)
             Icon { anchors.centerIn: parent; glyph: source.glyph; color: theme.accent }
         }
@@ -41,7 +41,7 @@ TpPage {
                 Layout.fillWidth: true
                 text: source.detail
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
                 wrapMode: Text.WordWrap
             }
         }
@@ -66,22 +66,14 @@ TpPage {
         implicitWidth: liveText.implicitWidth + theme.em * 1.6
         radius: height / 2
         color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.16)
-        Rectangle {
+        TpPulseDot {
             id: liveDot
             x: theme.em * 0.45
             anchors.verticalCenter: parent.verticalCenter
             width: theme.em * 0.45
-            height: width
-            radius: width / 2
             color: theme.loss
-            SequentialAnimation on opacity {
-                // A few pulses when state starts or page shows again, then still: no endless redraw
-                running: liveDot.visible && pageState.active
-                loops: 3
-                onRunningChanged: if (!running) liveDot.opacity = 1
-                NumberAnimation { to: 0.3; duration: 700; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-            }
+            pulsing: liveDot.visible
+            low: 0.3
         }
         Text {
             id: liveText
@@ -90,18 +82,18 @@ TpPage {
             anchors.verticalCenter: parent.verticalCenter
             text: i18n.tr("LIVE")
             color: theme.loss
-            font.pointSize: theme.fontPoint * 0.72
+            font.pointSize: theme.fontTiny
             font.weight: Font.Bold
         }
     }
     component SectionTitle: Text {
         color: theme.text
         font.weight: Font.DemiBold
-        font.pointSize: theme.fontPoint * 1.05
+        font.pointSize: theme.fontSubtitle
     }
     component OptionLabel: Text {
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.9
+        font.pointSize: theme.fontLabel
     }
 
     ColumnLayout {
@@ -118,7 +110,7 @@ TpPage {
                 text: i18n.tr("Stream Overlays")
                 color: theme.text
                 font.weight: Font.DemiBold
-                font.pointSize: theme.fontPoint * 1.25
+                font.pointSize: theme.fontHeading
             }
             Rectangle {
                 id: statusPill
@@ -130,28 +122,19 @@ TpPage {
                 color: Qt.rgba(tone.r, tone.g, tone.b, 0.12)
                 border.width: 1
                 border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.4)
-                Behavior on color { ColorAnimation { duration: 250 } }
-                Rectangle {
+                Behavior on color { ColorAnimation { duration: theme.motionSlow } }
+                TpPulseDot {
                     id: statusDot
                     x: theme.em * 0.75
                     anchors.verticalCenter: parent.verticalCenter
                     width: theme.em * 0.55
-                    height: width
-                    radius: width / 2
                     color: statusPill.tone
-                    SequentialAnimation on opacity {
-                        // A few pulses when state starts or page shows again, then still: no endless redraw
-                        running: backend.watchingCount > 0 && pageState.active
-                        loops: 3
-                        onRunningChanged: if (!running) statusDot.opacity = 1
-                        NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-                    }
+                    pulsing: backend.watchingCount > 0
                 }
                 Text {
                     id: statusText
                     anchors.left: statusDot.right
-                    anchors.leftMargin: theme.em * 0.45
+                    anchors.leftMargin: theme.em * 0.5
                     anchors.verticalCenter: parent.verticalCenter
                     text: backend.statusText
                     color: theme.text
@@ -192,14 +175,14 @@ TpPage {
                 width: scroll.availableWidth
                 spacing: theme.em * 0.6
                 opacity: backend.enabled ? 1 : 0.55
-                Behavior on opacity { NumberAnimation { duration: 200 } }
+                Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
 
                 // Sources empty now: no overlay shown (auto hide outside sessions...), and why
                 Rectangle {
                     Layout.fillWidth: true
                     visible: backend.hiddenText !== ""
                     implicitHeight: hiddenLabel.implicitHeight + theme.em * 1.2
-                    radius: theme.em * 0.5
+                    radius: theme.radiusMd
                     color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.12)
                     border.width: 1
                     border.color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.4)
@@ -346,7 +329,7 @@ TpPage {
                                 Layout.maximumWidth: page.width * 0.5
                                 text: i18n.tr("Stream only: hidden on your screen while overlays are locked.")
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.88
+                                font.pointSize: theme.fontSmall
                                 elide: Text.ElideRight
                             }
                         }
@@ -368,7 +351,7 @@ TpPage {
                                 required property bool shown
                                 Layout.fillWidth: true
                                 implicitHeight: Math.round(theme.em * 2.8)
-                                radius: theme.em * 0.45
+                                radius: theme.radiusMd
                                 color: rowArea.containsMouse ? theme.hover
                                      : index % 2 ? Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.025 : 0.03)
                                      : "transparent"
@@ -390,7 +373,7 @@ TpPage {
                                         horizontalAlignment: Text.AlignRight
                                         text: row.sizeText
                                         color: theme.dimText
-                                        font.pointSize: theme.fontPoint * 0.88
+                                        font.pointSize: theme.fontSmall
                                         font.features: { "tnum": 1 }
                                     }
                                     TpSegmented {
@@ -489,43 +472,13 @@ TpPage {
     }
 
     // Copied address, new token, port unavailable: a few seconds
-    Rectangle {
+    TpToast {
         id: toast
-        property bool shown: false
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: shown ? parent.height - height - theme.em * 1.2 : parent.height + theme.em
-        width: Math.min(toastRow.implicitWidth + theme.em * 2.4, page.width - theme.em * 4)
-        height: toastRow.implicitHeight + theme.em * 1.1
-        radius: theme.em * 0.8
-        color: theme.raised
-        border.width: 1
-        border.color: theme.border
-        opacity: shown ? 1 : 0
-        visible: opacity > 0
-        Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Behavior on opacity { NumberAnimation { duration: 220 } }
-        Timer { id: toastTimer; interval: 4000; onTriggered: toast.shown = false }
+        text: backend.noticeText
+        duration: 4000
         Connections {
             target: backend
-            function onNoticeChanged() { toast.shown = true; toastTimer.restart() }
-        }
-        MouseArea { anchors.fill: parent; onClicked: toast.shown = false }
-        Row {
-            id: toastRow
-            anchors.centerIn: parent
-            spacing: theme.em * 0.6
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                glyph: ""  // check
-                color: theme.gain
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, page.width - theme.em * 7)
-                text: backend.noticeText
-                color: theme.text
-                wrapMode: Text.WordWrap
-            }
+            function onNoticeChanged() { toast.show() }
         }
     }
 }

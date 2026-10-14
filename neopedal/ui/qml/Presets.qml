@@ -35,9 +35,6 @@ TpPage {
         page.menuInfo = backend.selected
         rowMenu.popup(item, x, y)
     }
-    function popupBelow(menu, button) {
-        menu.visible ? menu.close() : menu.popup(button, 0, button.height + 4)
-    }
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_N && (event.modifiers & Qt.ControlModifier)) {
@@ -53,44 +50,14 @@ TpPage {
         spacing: theme.em * 0.6
 
         // Title & create
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.em * 0.6
-            Text {
-                text: i18n.tr("Preset")
-                color: theme.text
-                font.pointSize: theme.fontPoint * 1.5
-                font.weight: Font.DemiBold
-            }
-            Rectangle {
-                Layout.alignment: Qt.AlignVCenter
-                implicitHeight: Math.round(theme.em * 1.6)
-                implicitWidth: countText.implicitWidth + theme.em * 1.1
-                radius: height / 2
-                color: theme.hover
-                Text {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: backend.presetCount
-                    color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
-                    font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
-                }
-            }
-            Item { Layout.fillWidth: true }
+        TpPageHeader {
+            title: i18n.tr("Preset")
+            count: "" + backend.presetCount
             TpButton {
-                id: importButton
                 glyph: ""  // import
                 text: i18n.tr("Import")
-                tip: i18n.tr("Import preset package (.zip) or share code")
-                checked: importMenu.visible
-                onClicked: page.popupBelow(importMenu, importButton)
-                TpMenu {
-                    id: importMenu
-                    Action { text: i18n.tr("Preset Package (.zip)..."); onTriggered: backend.importPackage() }
-                    Action { text: i18n.tr("Share Code..."); onTriggered: backend.importShareCode() }
-                }
+                tip: i18n.tr("Import preset package (.zip)")
+                onClicked: backend.importPackage()
             }
             TpButton {
                 accent: true
@@ -116,7 +83,7 @@ TpPage {
                     Layout.preferredWidth: Math.round(theme.em * 2.8)
                     Layout.preferredHeight: Layout.preferredWidth
                     Layout.alignment: Qt.AlignVCenter
-                    radius: theme.em * 0.7
+                    radius: theme.radiusXl
                     color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.2 : 0.13)
                     Icon {
                         anchors.centerIn: parent
@@ -131,7 +98,7 @@ TpPage {
                     Text {
                         text: i18n.tr("Loaded preset")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -141,7 +108,7 @@ TpPage {
                             Layout.fillWidth: true
                             text: page.loadedInfo.name || ""
                             color: theme.text
-                            font.pointSize: theme.fontPoint * 1.35
+                            font.pointSize: theme.fontLarge
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
@@ -161,7 +128,7 @@ TpPage {
                             : (page.loadedInfo.changedText || "") + "  ·  " + i18n.trm((page.loadedInfo.overlays || 0) + " overlays")
                               + "  ·  " + i18n.trm((page.loadedInfo.modules || 0) + " modules")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         elide: Text.ElideRight
                     }
                 }
@@ -186,7 +153,7 @@ TpPage {
                         horizontalAlignment: page.roomy ? Text.AlignRight : Text.AlignLeft
                         text: i18n.tr("On track: primary preset of the track, else of the car class")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.8
+                        font.pointSize: theme.fontCaption
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -246,19 +213,19 @@ TpPage {
                     onCurrentItemChanged: if (currentItem && activeFocus) backend.select(currentItem.key)
 
                     add: Transition {
-                        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 }
-                        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 160; easing.type: Easing.OutCubic }
+                        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase }
+                        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: theme.motionBase; easing.type: Easing.OutCubic }
                     }
                     remove: Transition {
-                        NumberAnimation { property: "opacity"; to: 0; duration: 130 }
+                        NumberAnimation { property: "opacity"; to: 0; duration: theme.motionFast }
                     }
                     displaced: Transition {
-                        NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
-                        NumberAnimation { property: "opacity"; to: 1; duration: 220 }
-                        NumberAnimation { property: "scale"; to: 1; duration: 220 }
+                        NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
+                        NumberAnimation { property: "opacity"; to: 1; duration: theme.motionSlow }
+                        NumberAnimation { property: "scale"; to: 1; duration: theme.motionSlow }
                     }
                     move: Transition {
-                        NumberAnimation { properties: "y"; duration: 240; easing.type: Easing.OutCubic }
+                        NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
                     }
 
                     Keys.onReturnPressed: if (currentItem) backend.load(currentItem.key)
@@ -397,7 +364,6 @@ TpPage {
         Action { text: i18n.tr("Backup Preset"); onTriggered: backend.backup(page.menuKey) }
         MenuSeparator {}
         Action { text: i18n.tr("Export Package..."); onTriggered: backend.exportPackage(page.menuKey) }
-        Action { text: i18n.tr("Copy Share Code"); onTriggered: backend.copyShareCode(page.menuKey) }
         Action {
             text: i18n.tr("Compare with Loaded Preset")
             enabled: page.menuInfo.loaded !== true
@@ -445,7 +411,9 @@ TpPage {
             enabled: page.menuInfo.loaded !== true && page.menuInfo.locked !== true
             onTriggered: backend.remove(page.menuKey)
         }
-        onClosed: presets.forceActiveFocus()
+        // Closed after its exit transition: name dialog opened by Duplicate / Rename keeps focus (Enter there,
+        // never loading the preset of the list)
+        onClosed: if (!nameDialog.visible) presets.forceActiveFocus()
     }
     TpMenu {
         id: classMenu

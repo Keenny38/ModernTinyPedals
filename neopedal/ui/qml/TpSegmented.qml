@@ -17,6 +17,25 @@ Rectangle {
         : theme.em * 1.6
     signal activated(int index)
 
+    // Option picked: caller stores it (backend or own property), currentIndex follows through its binding
+    // (never set here: that would replace the caller's binding)
+    function choose(index) {
+        if (index < 0 || index >= options.length)
+            return
+        activated(index)
+    }
+
+    // Tab reaches it, arrows / Home / End choose (like a tab bar)
+    activeFocusOnTab: true
+    Keys.onLeftPressed: choose(currentIndex - 1)
+    Keys.onRightPressed: choose(currentIndex + 1)
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Home) { choose(0); event.accepted = true }
+        else if (event.key === Qt.Key_End) { choose(options.length - 1); event.accepted = true }
+    }
+    Accessible.role: Accessible.PageTabList
+    Accessible.name: options[currentIndex] || ""
+
     function measure() {
         var sum = 0
         for (var i = 0; i < options.length; i++) {
@@ -31,10 +50,12 @@ Rectangle {
 
     implicitHeight: Math.round(theme.em * 2.3)
     implicitWidth: row.implicitWidth + 6
-    radius: theme.em * 0.6
+    radius: theme.radiusLg
     color: theme.dark ? Qt.darker(theme.base, 1.25) : Qt.darker(theme.window, 1.04)
     border.width: 1
     border.color: theme.border
+
+    FocusRing { visible: control.activeFocus }
 
     Rectangle {
         id: highlight
@@ -43,12 +64,12 @@ Rectangle {
         width: target ? target.width : 0
         y: 3
         height: parent.height - 6
-        radius: theme.em * 0.45
+        radius: theme.radiusMd
         color: theme.raised
         border.width: theme.dark ? 0 : 1
         border.color: theme.border
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
     }
 
     Row {
@@ -65,14 +86,29 @@ Rectangle {
                     anchors.centerIn: parent
                     text: modelData
                     font.pointSize: theme.fontPoint * control.fontScale
-                    color: index === control.currentIndex ? theme.text : theme.dimText
+                    color: index === control.currentIndex || optionArea.containsMouse ? theme.text : theme.dimText
                     font.weight: index === control.currentIndex ? Font.DemiBold : Font.Normal
-                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on color { ColorAnimation { duration: theme.motionBase } }
+                }
+                Accessible.role: Accessible.PageTab
+                Accessible.name: modelData
+                Accessible.selected: index === control.currentIndex
+                Rectangle {  // hover, under text
+                    z: -1
+                    anchors.fill: parent
+                    anchors.topMargin: 3
+                    anchors.bottomMargin: 3
+                    radius: theme.radiusMd
+                    color: theme.hover
+                    opacity: optionArea.containsMouse && index !== control.currentIndex ? 0.6 : 0
+                    Behavior on opacity { NumberAnimation { duration: theme.motionFast } }
                 }
                 MouseArea {
+                    id: optionArea
                     anchors.fill: parent
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { control.currentIndex = index; control.activated(index) }
+                    onClicked: control.choose(index)
                 }
             }
         }

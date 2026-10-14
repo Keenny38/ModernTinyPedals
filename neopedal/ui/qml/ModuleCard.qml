@@ -68,7 +68,7 @@ Item {
         id: surface
         anchors.fill: parent
         anchors.margins: Math.round(theme.em * 0.3)
-        radius: theme.em * 0.7
+        radius: theme.radiusXl
         color: card.active ? Qt.tint(theme.base, Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.06))
              : area.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.12) : Qt.darker(theme.base, 1.02))
              : theme.base
@@ -76,8 +76,8 @@ Item {
         border.color: card.needed || card.failed || card.active ? card.edge
                     : area.containsMouse ? Qt.lighter(theme.border, 1.3)
                     : theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border
-        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
-        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
+        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
 
         // Card background click (buttons above get their own clicks)
         MouseArea {
@@ -102,22 +102,22 @@ Item {
             y: card.pad
             width: Math.round(theme.em * 2.7)
             height: width
-            radius: theme.em * 0.6
+            radius: theme.radiusLg
             color: card.active ? Qt.rgba(card.edge.r, card.edge.g, card.edge.b, theme.dark ? 0.22 : 0.14)
                  : theme.dark ? Qt.lighter(theme.base, 1.25) : Qt.darker(theme.base, 1.05)
-            Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+            Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
             Icon {
                 anchors.centerIn: parent
                 glyph: card.glyph
                 size: theme.em * 1.3
                 color: card.active ? card.edge : theme.dimText
-                Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+                Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
             }
             Text {  // no icon font: first letter
                 anchors.centerIn: parent
                 visible: theme.iconFont === ""
                 text: card.label.charAt(0)
-                font.pointSize: theme.fontPoint * 1.3
+                font.pointSize: theme.fontHeading
                 font.weight: Font.DemiBold
                 color: card.active ? card.edge : theme.dimText
             }
@@ -137,7 +137,7 @@ Item {
                 width: parent.width
                 text: card.label
                 color: theme.text
-                font.pointSize: theme.fontPoint * 1.08
+                font.pointSize: theme.fontSubtitle
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
@@ -154,7 +154,7 @@ Item {
                     visible: card.interval > 0
                     text: card.interval + " ms"
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.82
+                    font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
                     MouseArea {
                         id: intervalArea
@@ -165,7 +165,7 @@ Item {
                     ToolTip.visible: intervalArea.containsMouse
                     ToolTip.text: intervalArea.containsMouse  // built only while hovered
                         ? i18n.trm("Updated every " + card.interval + " ms (" + card.idleInterval + " ms when not driving)") : ""
-                    ToolTip.delay: 400
+                    ToolTip.delay: theme.tipDelay
                 }
             }
         }
@@ -175,7 +175,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: card.pad - theme.em * 0.2
             anchors.verticalCenter: tile.verticalCenter
-            spacing: theme.em * 0.15
+            spacing: theme.em * 0.2
             TpButton {
                 flat: true
                 glyph: ""  // settings
@@ -211,7 +211,7 @@ Item {
             anchors.top: tile.bottom
             anchors.leftMargin: card.pad
             anchors.rightMargin: card.pad
-            anchors.topMargin: theme.em * 0.55
+            anchors.topMargin: theme.em * 0.6
             text: card.description
             color: theme.dimText
             wrapMode: Text.WordWrap
@@ -226,7 +226,7 @@ Item {
             }
             ToolTip.visible: truncated && descriptionArea.containsMouse
             ToolTip.text: card.description
-            ToolTip.delay: 500
+            ToolTip.delay: theme.tipDelay
         }
 
         // Overlays & modules using its data
@@ -238,7 +238,7 @@ Item {
             anchors.leftMargin: card.pad
             anchors.rightMargin: card.pad
             anchors.bottomMargin: card.pad - theme.em * 0.15
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             visible: usersLabel.text !== ""
             readonly property bool warn: card.needed || card.needs.length > 0
             Icon {
@@ -253,7 +253,7 @@ Item {
                 width: Math.min(implicitWidth, usersRow.width - theme.em * 1.3)
                 text: card.usersText()
                 color: usersRow.warn ? theme.warning : theme.dimText
-                font.pointSize: theme.fontPoint * 0.88
+                font.pointSize: theme.fontSmall
                 font.weight: usersRow.warn ? Font.DemiBold : Font.Normal
                 elide: Text.ElideRight
                 MouseArea {
@@ -265,7 +265,7 @@ Item {
                 readonly property string tip: usersArea.containsMouse ? card.usersTip() : ""  // built only while hovered
                 ToolTip.visible: tip !== ""
                 ToolTip.text: tip
-                ToolTip.delay: 300
+                ToolTip.delay: theme.tipDelay
             }
         }
     }

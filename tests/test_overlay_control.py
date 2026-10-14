@@ -36,7 +36,7 @@ def overlay(ui_env, monkeypatch):
         monkeypatch.setattr(realtime_state, name, getattr(realtime_state, name))
     game = {"active": True, "paused": False, "resets": 3, "session_type": 4, "in_pits": False,
             "track": "Spa", "class": "GT3", "vehicles": 20, "on_air": False}
-    monkeypatch.setattr(overlay_control, "streamoverlay", SimpleNamespace(on_air=lambda: game["on_air"]))
+    monkeypatch.setattr(overlay_control, "stream_on_air", lambda: game["on_air"])
     monkeypatch.setattr(api.read.vehicle, "total_vehicles", lambda: game["vehicles"], raising=False)
     monkeypatch.setattr(api.read.state, "active", lambda: game["active"], raising=False)
     monkeypatch.setattr(api.read.state, "paused", lambda: game["paused"], raising=False)
@@ -210,3 +210,16 @@ def test_enable_after_stuck_thread_starts_new_thread(overlay, monkeypatch):
     old_thread.join(5)
     control._thread.join(5)
     assert control._stopped()
+
+
+def test_stream_on_air_never_imports_stream_overlay(monkeypatch):
+    import sys
+
+    monkeypatch.delitem(sys.modules, "neopedal.stream_overlay", raising=False)
+    assert not overlay_control.stream_on_air() and "neopedal.stream_overlay" not in sys.modules  # never started
+    on_air = {"value": True}
+    monkeypatch.setitem(sys.modules, "neopedal.stream_overlay", SimpleNamespace(
+        streamoverlay=SimpleNamespace(on_air=lambda: on_air["value"])))
+    assert overlay_control.stream_on_air()
+    on_air["value"] = False
+    assert not overlay_control.stream_on_air()

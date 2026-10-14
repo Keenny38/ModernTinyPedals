@@ -25,17 +25,25 @@ compound badges between left and right tyres.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import units
 from ...api_control import api
+from .._data import temperature_text
 from .base import DASH, ModernOverlay
 from .quad import QuadMixin, Section, Tile, heat_color
 from .wheels import TyreCompounds
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreInnerLayerConfig, TyreTemperatureConfig
+
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TyreTemperatureConfig | TyreInnerLayerConfig  # base of tyre_inner_layer
 
     options = (
         "font_size", "show_inner_center_outer", "show_degree_sign", "leading_zero",
@@ -79,9 +87,7 @@ class Realtime(QuadMixin, ModernOverlay):
 
     def text(self, value: float) -> str:
         """Temperature text"""
-        if value < -100:
-            return DASH
-        return f"{self.unit_temp(value):0{self.leading_zero}.0f}{self.sign}"
+        return temperature_text(value, self.unit_temp, self.leading_zero, self.sign, DASH)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

@@ -241,9 +241,12 @@ def test_setup_diff_shows_official_lap_times(ui_env):
 
     laps = [PlotLap("a", "a", make_lap(5, 70.495, 1000.0, 990.0, dict(TRACK)), QColor("red")),  # last sample 0.7 s
             PlotLap("b", "b", make_lap(6, 71.2, 1000.0, 990.0, dict(TRACK)), QColor("blue"))]  # before the line
-    page = types.SimpleNamespace(data=types.SimpleNamespace(laps=laps, reference=laps[0]), all_entries=list,
-                                 short_label=lambda key: key)
-    result = LapConditions.setupDiff(page, "a", "b")
+    class Page(types.SimpleNamespace):  # weak referenceable stand-in (parts see their page through a weak proxy)
+        pass
+
+    page = Page(data=types.SimpleNamespace(laps=laps, reference=laps[0]), all_entries=list,
+                short_label=lambda key: key, optionsChanged=types.SimpleNamespace(connect=lambda slot: None))
+    result = LapConditions(page, {}).setupDiff("a", "b")  # type: ignore[arg-type]  (page stand-in)
     assert (result["timeA"], result["timeB"]) == ("1:10.495", "1:11.200")
 
 
@@ -277,12 +280,11 @@ def test_tyre_wear_unknown_when_tyres_changed_during_lap(ui_env, tmp_path):
              {**TRACK, "wear_start": [60.0] * 4, "wear_end": [99.5] * 4}]
     group = [LapEntry(LapFile(f"{lap_name(number, 70.0)}.csv", f"p{number}", True, 70.0), info)
              for number, info in enumerate(infos, 1)]
-    page = types.SimpleNamespace(
+    tab = types.SimpleNamespace(  # session tab part stand-in
         session_key=lambda groups=None: "s", session_groups=lambda: [("s", "Session", group)],
-        data=types.SimpleNamespace(laps=[]),
-        _session_extra={"p2": (1.0, {"wear": -39.5})}, reference_key="", _session_busy=False,
-        session_trend=SessionTab.session_trend)
-    rows = SessionTab.session_data(page)["laps"]
+        _page=types.SimpleNamespace(data=types.SimpleNamespace(laps=[]), reference_key=""),
+        _extra={"p2": (1.0, {"wear": -39.5})}, _busy=False, session_trend=SessionTab.session_trend)
+    rows = SessionTab.session_data(tab)["laps"]
     assert rows[0]["wear"] == pytest.approx(1.0) and rows[1]["wear"] == -1.0
 
 

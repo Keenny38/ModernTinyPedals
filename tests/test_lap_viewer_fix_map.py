@@ -255,12 +255,12 @@ def test_official_corner_won_by_corner_covering_it(viewer):  # noqa: F811
     from neopedal.userfile.track_corners import TrackCorner
 
     backend = viewer.backend
-    backend._official = [TrackCorner("1", 300.0, 0.0, 0.0), TrackCorner("2", 1000.0, 10.0, 10.0)]
-    backend._official_numbered = True
+    backend.cornerTable.official = [TrackCorner("1", 300.0, 0.0, 0.0), TrackCorner("2", 1000.0, 10.0, 10.0)]
+    backend.cornerTable.official_numbered = True
     near = Row(Corner(1, 380.0, 460.0, 420.0), 0.10)  # only near official corner 1, found first
     covering = Row(Corner(2, 250.0, 350.0, 300.0), -0.20)  # covers official corner 1
     far = Row(Corner(3, 1500.0, 1560.0, 1530.0), 0.05)  # no official corner within 200 m
-    backend._corner_rows = [near, covering, far]
+    backend.cornerTable.rows = [near, covering, far]
     points = backend.official_points()
     first = points[0]
     assert first["delta"] == signed(-0.20, 2) and first["row"] == 1  # covering corner wins
@@ -307,10 +307,10 @@ def test_reference_without_positions(viewer, monkeypatch):  # noqa: F811
     backend._line_cache[reference.key] = (reference.data, None)
     backend.rebuild_chart()
     line = backend.reference_map_line()
-    assert line is backend._road and backend._corner_rows
+    assert line is backend._road and backend.cornerTable.rows
     assert backend.mapPick(line.xs[40], line.ys[40], 20.0) == pytest.approx(backend.data.x_at_distance(
         line.distances[40]), abs=1.0)
-    assert len(backend.map_corner_points()) == len(backend._corner_rows)
+    assert len(backend.map_corner_points()) == len(backend.cornerTable.rows)
     assert colored_count(backend) > 0  # speed of reference lap along circuit
     assert backend.mapPin
     backend.clearPinned()
@@ -351,16 +351,16 @@ def test_corner_table_sums_and_ideal_gap(viewer, monkeypatch):  # noqa: F811
     backend = viewer.backend
     reference = backend.data.reference.data
     compared = backend.compared_lap().data
-    assert backend._corner_rows and any(row["kind"] == "total" for row in backend._corners)
-    assert backend.sums_comparable(reference, compared)
-    assert not backend.sums_comparable(reference, LapData("stub", {"distance": [0.0, 150.0]}))  # stub lap
+    assert backend.cornerTable.rows and any(row["kind"] == "total" for row in backend.cornerTable.items)
+    assert backend.cornerTable.sums_comparable(reference, compared)
+    assert not backend.cornerTable.sums_comparable(reference, LapData("stub", {"distance": [0.0, 150.0]}))  # stub lap
     monkeypatch.setattr(lap_corners, "total_lap_time", lambda lap: 100.0)  # game timed lap time
-    backend._corner_rows = [row._replace(compared=None) for row in backend._corner_rows]  # no compared stats
-    backend.build_corners()
-    kinds = [row["kind"] for row in backend._corners]
+    backend.cornerTable.rows = [row._replace(compared=None) for row in backend.cornerTable.rows]  # no compared stats
+    backend.cornerTable.build_corners()
+    kinds = [row["kind"] for row in backend.cornerTable.items]
     assert "sum" not in kinds and "total" not in kinds
-    ideal = next(row for row in backend._corners if row["kind"] == "ideal")
-    assert ideal["bar"] == pytest.approx(backend._ideal.time - 100.0)  # same lap time as ideal lap & Total row
+    ideal = next(row for row in backend.cornerTable.items if row["kind"] == "ideal")
+    assert ideal["bar"] == pytest.approx(backend.cornerTable.ideal.time - 100.0)  # same lap time as ideal lap & Total row
 
 
 def test_compared_lap_change_recolors_corner_mode(viewer, monkeypatch):  # noqa: F811
@@ -368,7 +368,7 @@ def test_compared_lap_change_recolors_corner_mode(viewer, monkeypatch):  # noqa:
     backend.setMapMode("corners")
     built = []
     monkeypatch.setattr(backend, "build_colored_line", lambda scale: built.append(scale))
-    backend.setCompareKey("another lap")
+    backend.cornerTable.setCompareKey("another lap")
     assert built
     monkeypatch.undo()
     backend.setMapMode("laps")

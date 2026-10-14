@@ -26,7 +26,7 @@ import ctypes
 import logging
 import os
 from abc import ABC, abstractmethod
-from functools import partial
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from pyLMUSharedMemory import lmu_data
@@ -47,7 +47,7 @@ from .adapter import (
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
 from .process.garage import reset_rf2_setup_parts
 from .replay import ReplayPlayer, replay, replay_mismatch, rest_snapshot
-from .validator import bytes_to_str
+from .validator import cached_bytes_to_str
 
 if TYPE_CHECKING:
     from .adapter.restapi_connector import EndpointStatus
@@ -74,11 +74,30 @@ class ConnectorHealth(NamedTuple):
 
 
 class Connector(ABC):
-    """API Connector"""
+    """API Connector
 
-    __slots__ = ()
+    Attributes:
+        _tostr: text decoder of game bytes (character encoding) given to data readers.
+        _reader: last data reader made, None if none.
+    """
+
+    __slots__ = ("_tostr", "_reader")
     NAME: ClassVar[str]
     LEGACY: ClassVar[bool]
+
+    def __init__(self):
+        self._tostr: Callable[[Any], str] = cached_bytes_to_str()
+        self._reader: APIDataReader | None = None
+
+    def set_encoding(self, encoding: str) -> None:
+        """Character encoding of game text, applied to data readers already made
+
+        Decoder of each reader replaced (one attribute, never changed), as threads keep reading data.
+        """
+        tostr = self._tostr = cached_bytes_to_str(encoding.lower())
+        if self._reader is not None:
+            for data_reader in self._reader:
+                data_reader.tostr = tostr  # type: ignore[union-attr]  # adapter DataAdapter attribute
 
     @abstractmethod
     def start(self):
@@ -157,6 +176,7 @@ class SimLMU(Connector):
     LEGACY = False
 
     def __init__(self):
+        super().__init__()
         self._shmmapi = lmu_connector.LMUInfo()
         self._replaying = False
         self._restapi_dataset = lmu_restapi.RestAPIData()
@@ -198,20 +218,22 @@ class SimLMU(Connector):
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi
         rest = self._restapi_dataset
-        return APIDataReader(
-            lmu_reader.State(shmm, rest),
-            lmu_reader.Brake(shmm, rest),
-            lmu_reader.ElectricMotor(shmm, rest),
-            lmu_reader.Engine(shmm, rest),
-            lmu_reader.Inputs(shmm, rest),
-            lmu_reader.Lap(shmm, rest),
-            lmu_reader.Session(shmm, rest),
-            lmu_reader.Switch(shmm, rest),
-            lmu_reader.Timing(shmm, rest),
-            lmu_reader.Tyre(shmm, rest),
-            lmu_reader.Vehicle(shmm, rest),
-            lmu_reader.Wheel(shmm, rest),
+        tostr = self._tostr
+        self._reader = APIDataReader(
+            lmu_reader.State(shmm, rest, tostr),
+            lmu_reader.Brake(shmm, rest, tostr),
+            lmu_reader.ElectricMotor(shmm, rest, tostr),
+            lmu_reader.Engine(shmm, rest, tostr),
+            lmu_reader.Inputs(shmm, rest, tostr),
+            lmu_reader.Lap(shmm, rest, tostr),
+            lmu_reader.Session(shmm, rest, tostr),
+            lmu_reader.Switch(shmm, rest, tostr),
+            lmu_reader.Timing(shmm, rest, tostr),
+            lmu_reader.Tyre(shmm, rest, tostr),
+            lmu_reader.Vehicle(shmm, rest, tostr),
+            lmu_reader.Wheel(shmm, rest, tostr),
         )
+        return self._reader
 
     def setup(self, config: dict):
         self._shmmapi.setMode(config["access_mode"])
@@ -220,7 +242,7 @@ class SimLMU(Connector):
         self._shmmapi.setPlayerOverride(config["enable_player_index_override"])
         self._shmmapi.setPlayerIndex(config["player_index"])
         self._restapi.setConnection(config.copy())
-        lmu_reader.tostr = partial(bytes_to_str, char_encoding=config["character_encoding"].lower())
+        self.set_encoding(config["character_encoding"])
 
 
 class SimRF2(Connector):
@@ -238,6 +260,7 @@ class SimRF2(Connector):
     LEGACY = False
 
     def __init__(self):
+        super().__init__()
         self._shmmapi = rf2_connector.RF2Info()
         self._replaying = False
         self._restapi_dataset = rf2_restapi.RestAPIData()
@@ -285,20 +308,22 @@ class SimRF2(Connector):
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi
         rest = self._restapi_dataset
-        return APIDataReader(
-            rf2_reader.State(shmm, rest),
-            rf2_reader.Brake(shmm, rest),
-            rf2_reader.ElectricMotor(shmm, rest),
-            rf2_reader.Engine(shmm, rest),
-            rf2_reader.Inputs(shmm, rest),
-            rf2_reader.Lap(shmm, rest),
-            rf2_reader.Session(shmm, rest),
-            rf2_reader.Switch(shmm, rest),
-            rf2_reader.Timing(shmm, rest),
-            rf2_reader.Tyre(shmm, rest),
-            rf2_reader.Vehicle(shmm, rest),
-            rf2_reader.Wheel(shmm, rest),
+        tostr = self._tostr
+        self._reader = APIDataReader(
+            rf2_reader.State(shmm, rest, tostr),
+            rf2_reader.Brake(shmm, rest, tostr),
+            rf2_reader.ElectricMotor(shmm, rest, tostr),
+            rf2_reader.Engine(shmm, rest, tostr),
+            rf2_reader.Inputs(shmm, rest, tostr),
+            rf2_reader.Lap(shmm, rest, tostr),
+            rf2_reader.Session(shmm, rest, tostr),
+            rf2_reader.Switch(shmm, rest, tostr),
+            rf2_reader.Timing(shmm, rest, tostr),
+            rf2_reader.Tyre(shmm, rest, tostr),
+            rf2_reader.Vehicle(shmm, rest, tostr),
+            rf2_reader.Wheel(shmm, rest, tostr),
         )
+        return self._reader
 
     def setup(self, config: dict):
         if self.NAME == API_RF2_NAME:
@@ -309,7 +334,7 @@ class SimRF2(Connector):
         self._shmmapi.setPlayerOverride(config["enable_player_index_override"])
         self._shmmapi.setPlayerIndex(config["player_index"])
         self._restapi.setConnection(config.copy())
-        rf2_reader.tostr = partial(bytes_to_str, char_encoding=config["character_encoding"].lower())
+        self.set_encoding(config["character_encoding"])
 
 
 class SimLMULegacy(SimRF2):

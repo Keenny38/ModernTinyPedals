@@ -26,6 +26,8 @@ their zone color (zones readable before they light up), lit LEDs glow with a lig
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QPainter
 
@@ -35,6 +37,9 @@ from .._common import warning_flash
 from .base import ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RpmLedConfig
+
 OFF, LOW, SAFE, REDLINE, CRITICAL, OVER_REV, LIMITER = range(7)
 GLOW_ALPHA = 60  # soft glow around lit LED
 ZONE_ALPHA = 46  # zone color tint of unlit LED
@@ -43,6 +48,8 @@ SHINE = QColor(255, 255, 255, 45)  # highlight on top of lit LED
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: RpmLedConfig
 
     options = (
         "enable_double_side_led", "number_of_led", "led_width", "led_height", "inner_gap", "show_background",

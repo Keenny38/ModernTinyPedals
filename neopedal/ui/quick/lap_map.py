@@ -28,7 +28,9 @@ from __future__ import annotations
 import bisect
 import math
 from array import array
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from functools import lru_cache
+from typing import overload
 
 from PySide6.QtGui import QColor
 
@@ -84,6 +86,7 @@ from .lines import (
     band_part,
     colored_band,
     merge_strips,
+    normals,
     range_indexes,
 )
 
@@ -391,12 +394,41 @@ def slip_events(lap: LapData) -> list[tuple[float, str]]:
 
 
 def rotate_line(line: MapLine, angle: float) -> MapLine:
-    """Driving line turned around origin (radians, counterclockwise)"""
+    """Driving line turned around origin (radians, counterclockwise), turned positions packed (single precision:
+    mm on any track, drawn as single precision vertices), distances shared with line"""
     if not angle:
         return line
     cos, sin = math.cos(angle), math.sin(angle)
-    return MapLine(line.distances, [x * cos - y * sin for x, y in zip(line.xs, line.ys)],
-                   [x * sin + y * cos for x, y in zip(line.xs, line.ys)])
+    return MapLine(line.distances, array("f", [x * cos - y * sin for x, y in zip(line.xs, line.ys)]),
+                   array("f", [x * sin + y * cos for x, y in zip(line.xs, line.ys)]))
+
+
+class PackedNormals(Sequence[tuple[float, float]]):
+    """Unit normal at each point of a line (see lines.normals) packed in two single precision arrays: 8 bytes a
+    point instead of a tuple of two float objects"""
+
+    __slots__ = ("nx", "ny")
+
+    def __init__(self, xs: Sequence[float], ys: Sequence[float]):
+        pairs = normals(xs, ys)
+        self.nx = array("f", [pair[0] for pair in pairs])
+        self.ny = array("f", [pair[1] for pair in pairs])
+
+    def __len__(self) -> int:
+        return len(self.nx)
+
+    @overload
+    def __getitem__(self, index: int) -> tuple[float, float]: ...
+    @overload
+    def __getitem__(self, index: slice) -> list[tuple[float, float]]: ...
+
+    def __getitem__(self, index: int | slice) -> tuple[float, float] | list[tuple[float, float]]:
+        if isinstance(index, slice):
+            return list(zip(self.nx[index], self.ny[index]))
+        return self.nx[index], self.ny[index]
+
+    def __iter__(self) -> Iterator[tuple[float, float]]:
+        return zip(self.nx, self.ny)
 
 
 def principal_angle(xs: Sequence[float], ys: Sequence[float]) -> float:
@@ -638,9 +670,13 @@ class LineGrid:
     def __init__(self, line: MapLine, cell: float = GRID_CELL):
         self.line = line
         self.cell = cell
-        self.cells: dict[tuple[int, int], list[int]] = {}
+        self.cells: dict[tuple[int, int], array] = {}  # packed point indexes (4 bytes each, kept with the line)
         for index, (x, y) in enumerate(zip(line.xs, line.ys)):
-            self.cells.setdefault((int(x // cell), int(y // cell)), []).append(index)
+            key = (int(x // cell), int(y // cell))
+            indexes = self.cells.get(key)
+            if indexes is None:
+                indexes = self.cells[key] = array("i")
+            indexes.append(index)
         columns, rows = [key[0] for key in self.cells], [key[1] for key in self.cells]
         self.bounds = (min(columns), max(columns), min(rows), max(rows)) if self.cells else (0, -1, 0, -1)
 
@@ -779,6 +815,14 @@ def trail(line: MapLine, start: float, end: float) -> tuple[list[float], list[fl
     return xs, ys, [((distance - start) / span) ** 1.5 for distance in distances]
 
 
+@lru_cache(maxsize=64)
+def trail_colors(rgb: tuple[int, int, int]) -> tuple[int, ...]:
+    """Premultiplied color as one 32 bit word (r, g, b, a bytes) at each alpha step of a trail (once per lap color)"""
+    red, green, blue = rgb
+    return tuple(round(red * alpha) | round(green * alpha) << 8 | round(blue * alpha) << 16 | round(255 * alpha) << 24
+                 for alpha in (step / TRAIL_ALPHA_STEPS for step in range(TRAIL_ALPHA_STEPS + 1)))
+
+
 def trail_band(line: MapLine, line_normals: Sequence[tuple[float, float]], start: float, end: float,
                rgb: tuple[int, int, int], half_width: float, min_gap: float = 0.0) -> Vertices:
     """Cursor trail as thick line of one color fading in toward end (same as trail): line between distances, points
@@ -790,10 +834,7 @@ def trail_band(line: MapLine, line_normals: Sequence[tuple[float, float]], start
     distances, xs, ys = line.distances, line.xs, line.ys
     first = bisect.bisect_right(distances, start)
     last = bisect.bisect_left(distances, end, lo=first)  # points strictly between start & end
-    red, green, blue = rgb
-    # Premultiplied color as one 32 bit word (r, g, b, a bytes) at each alpha step
-    colors = [round(red * alpha) | round(green * alpha) << 8 | round(blue * alpha) << 16 | round(255 * alpha) << 24
-              for alpha in (step / TRAIL_ALPHA_STEPS for step in range(TRAIL_ALPHA_STEPS + 1))]
+    colors = trail_colors(rgb)
     start_x, start_y = point_at(line, start)
     end_x, end_y = point_at(line, end)
     spacing = (distances[last - 1] - distances[first]) / (last - 1 - first) if last - 1 > first else 0.0

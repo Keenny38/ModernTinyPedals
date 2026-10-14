@@ -25,6 +25,8 @@ regen this lap, estimated net change, motor activation timer.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
@@ -34,9 +36,14 @@ from .base import DASH, ModernOverlay
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BatteryConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: BatteryConfig
 
     options = (
         "font_size", "layout", "show_battery_charge", "high_battery_threshold", "low_battery_threshold",
@@ -127,4 +134,5 @@ class Realtime(StatsMixin, ModernOverlay):
                 values.append(Value(f"{net:+.2f}", theme.positive if net > 0 else (theme.negative if net < 0 else None)))
             elif key == "timer":
                 values.append(Value(f"{hybrid.motorActiveTimer:.2f}s", theme.text_dim))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

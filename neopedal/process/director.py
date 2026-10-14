@@ -31,7 +31,9 @@ a shot lasts on screen, whatever the replay speed.
 
 from __future__ import annotations
 
+from array import array
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import NamedTuple
@@ -177,6 +179,53 @@ class LapRecord(NamedTuple):
     position: int  # class place at lap end
 
 
+class LapHistory:
+    """Laps of a car seen by the watcher, oldest first, at most LAP_LIMIT (packed: about 50 bytes a lap), read as
+    LapRecord"""
+
+    __slots__ = ("_lap", "_time", "_sectors", "_pit", "_energy", "_position")
+
+    def __init__(self) -> None:
+        self._lap = array("i")
+        self._time = array("d")
+        self._sectors = array("d")  # 3 per lap
+        self._pit = bytearray()
+        self._energy = array("d")
+        self._position = array("i")
+
+    def __len__(self) -> int:
+        return len(self._lap)
+
+    def __getitem__(self, index: int) -> LapRecord:
+        count = len(self._lap)
+        if index < 0:
+            index += count
+        if not 0 <= index < count:
+            raise IndexError("lap index out of range")
+        sectors = self._sectors
+        return LapRecord(self._lap[index], self._time[index],
+                         (sectors[index * 3], sectors[index * 3 + 1], sectors[index * 3 + 2]),
+                         bool(self._pit[index]), self._energy[index], self._position[index])
+
+    def __iter__(self) -> Iterator[LapRecord]:
+        return (self[index] for index in range(len(self._lap)))
+
+    def __reversed__(self) -> Iterator[LapRecord]:
+        return (self[index] for index in range(len(self._lap) - 1, -1, -1))
+
+    def append(self, record: LapRecord) -> None:
+        self._lap.append(record.lap)
+        self._time.append(record.time)
+        self._sectors.extend(record.sectors)
+        self._pit.append(1 if record.pit else 0)
+        self._energy.append(record.energy)
+        self._position.append(record.position)
+        if len(self._lap) > LAP_LIMIT:
+            for column in (self._lap, self._time, self._pit, self._energy, self._position):
+                del column[0]
+            del self._sectors[:3]
+
+
 class CarState:
     """What the watcher remembers of a car between answers"""
 
@@ -299,7 +348,7 @@ class RaceWatcher:
         self.battle_gap = battle_gap
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         """Another session, or session time jumped: watched again from next answer, nothing told"""
         self.now = -1.0
         self.cars: dict[int, CarState] = {}
@@ -309,7 +358,7 @@ class RaceWatcher:
         self.pit_stops: dict[int, list[PitStop]] = {}
         self.finished_classes: set[str] = set()
         self.track_length = 0.0
-        self.laps: dict[int, list[LapRecord]] = {}
+        self.laps: dict[int, LapHistory] = {}
         self.sector_best: dict[int, list[float]] = {}  # slot: best time of each sector (laps seen, best lap)
         self.contacts_seen: tuple[Contact, ...] | None = None  # contacts list last merged
         self.contacts_ahead = False  # incidents of that list not happened yet (replay): merged again
@@ -387,7 +436,7 @@ class RaceWatcher:
         return events
 
     # Contact severity
-    def keep_speeds(self, cars: list[Standing], now: float):
+    def keep_speeds(self, cars: list[Standing], now: float) -> None:
         for car in cars:
             state = self.cars.get(car.slot)
             if state is None:
@@ -396,7 +445,7 @@ class RaceWatcher:
             while state.speeds and now - state.speeds[0][0] > SPEED_HISTORY:
                 state.speeds.popleft()
 
-    def measure_contacts(self, events: list[Event], now: float):
+    def measure_contacts(self, events: list[Event], now: float) -> None:
         """Speed lost by the cars of recent contacts: highest speed before, lowest after (a car that stops
         or crawls after a contact: heavy)"""
         followed = {slot for event in events if event.kind in (STOPPED, SLOW) for slot in event.slots}
@@ -416,6 +465,8 @@ class RaceWatcher:
             if lost >= 0 and self.severity.get(event.key) != round(lost, 2):
                 self.severity[event.key] = round(min(max(lost, 0.0), 1.0), 2)
                 self.severity_version += 1
+                if len(self.severity) > FEED_LIMIT:  # contacts of the feed only (oldest measured first)
+                    del self.severity[next(iter(self.severity))]
             if now - event.time < AFTER_CONTACT + 1.0:
                 measuring.append(event)
         self.measuring = measuring
@@ -495,22 +546,23 @@ class RaceWatcher:
                     events.append(self.event(LEAD if place == 1 else OVERTAKE, now, (car, passed), place))
         return events
 
-    def record_lap(self, car: Standing, state: CarState, place: int):
+    def record_lap(self, car: Standing, state: CarState, place: int) -> None:
         """Lap just completed: time, sectors, pit lane visit, energy used"""
         energy = level(car)
         used = state.lap_energy - energy if state.lap_energy >= 0 and 0 <= energy <= state.lap_energy else -1.0
-        laps = self.laps.setdefault(car.slot, [])
         if car.laps == state.laps + 1:  # one lap (several at once: replay seek, joined late)
+            laps = self.laps.get(car.slot)
+            if laps is None:
+                laps = self.laps[car.slot] = LapHistory()
             record = LapRecord(car.laps, car.last, last_sectors(car), state.lap_pit, used, place)
             laps.append(record)
-            del laps[:-LAP_LIMIT]
             self.note_sectors(car.slot, record.sectors)
         state.laps = car.laps
         state.lap_pit = car.in_pit
         state.lap_energy = energy
 
     # Slow cars
-    def learn_speeds(self, cars: list[Standing]):
+    def learn_speeds(self, cars: list[Standing]) -> None:
         """Usual speed of each part of the lap, from every car running there"""
         if self.track_length <= 0:
             return
@@ -527,7 +579,7 @@ class RaceWatcher:
         usual, samples = self.usual_speed.get(int(car.distance // SPEED_BIN), (0.0, 0))
         return usual if samples >= SPEED_SAMPLES else 0.0
 
-    def check_slow(self, car: Standing, state: CarState, now: float, watched: bool, events: list[Event]):
+    def check_slow(self, car: Standing, state: CarState, now: float, watched: bool, events: list[Event]) -> None:
         """Car going much slower than usual at that place of the track (not stopped: told apart)"""
         usual = self.usual_speed_at(car)
         if not watched or usual <= 0 or not running(car) or car.laps < 1:
@@ -569,7 +621,7 @@ class RaceWatcher:
         return events
 
     # Laps & sectors
-    def note_sectors(self, slot: int, sectors: tuple[float, float, float]):
+    def note_sectors(self, slot: int, sectors: tuple[float, float, float]) -> None:
         """Sector times of a lap of a car: its best sectors kept"""
         best = self.sector_best.setdefault(slot, [-1.0, -1.0, -1.0])
         for index, value in enumerate(sectors):
@@ -619,7 +671,7 @@ class RaceWatcher:
                 return other
         return None
 
-    def note_best(self, car: Standing):
+    def note_best(self, car: Standing) -> None:
         if car.best > 0:
             best = self.class_best.get(car.car_class, 0.0)
             if best <= 0 or car.best < best:
@@ -634,8 +686,10 @@ class RaceWatcher:
             return events  # long races list hundreds of contacts: merged again only when the list changes
         self.contacts_seen, self.contacts_ahead = contacts, False
         slots = {car.driver: car for car in cars}
+        listed: set[tuple[float, str, str]] = set()
         for incident in merge_contacts(contacts):
             key = (incident.time, incident.driver, incident.other)
+            listed.add(key)
             if key in self.seen_incidents:
                 continue
             if incident.time > now + 1.0:  # replay: not happened yet
@@ -656,6 +710,8 @@ class RaceWatcher:
                 value=float(incident.contacts),
                 live=live and driver is not None,
             ))
+        if listed and len(self.seen_incidents) > 2 * len(listed) + 100:  # game list cut: gone ones never listed again
+            self.seen_incidents &= listed
         return events
 
     # Battles
@@ -893,11 +949,11 @@ class Director:
         self.hold_until = clock + self.settings.manual_hold
         return self.shot
 
-    def leave(self, clock: float):
+    def leave(self, clock: float) -> None:
         if self.shot is not None:
             self.shown[self.shot.slot] = clock
 
-    def reset(self):
+    def reset(self) -> None:
         self.shot = None
         self.hold_until = 0.0
         self.shown.clear()

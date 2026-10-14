@@ -27,6 +27,7 @@ Header with current elevation and chart scale.
 from __future__ import annotations
 
 from bisect import bisect_left
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF
@@ -39,12 +40,17 @@ from ...module_info import minfo
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import ElevationConfig
+
 AREA_ALPHA = (40, 10)  # profile area (text color), top & bottom of chart
 PROGRESS_ALPHA = (110, 24)  # driven part area (accent)
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: ElevationConfig
 
     options = (
         "font_size", "display_width", "display_height", "display_margin_top", "display_margin_bottom",

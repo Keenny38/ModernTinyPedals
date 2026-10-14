@@ -104,6 +104,12 @@ def _help_translations(code: str) -> dict[str, str]:
     return dict(language_pack(code).get("option_help", {}))
 
 
+def clear_help_cache():
+    """Option help texts freed (several MB), read again when next needed: call once option pages closed"""
+    _help.cache_clear()
+    _help_translations.cache_clear()
+
+
 def option_help(section: str, key: str) -> str:
     """Option description in current language (English if not translated), empty if not documented"""
     text = option_help_english(section, key)

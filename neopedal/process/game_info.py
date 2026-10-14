@@ -152,18 +152,64 @@ def parse_chat(data: Any, default: tuple) -> tuple[ChatMessage, ...]:
     return tuple(messages)
 
 
-def parse_contacts(data: Any, default: tuple) -> tuple[Contact, ...]:
-    """Contacts between cars (or with track objects), oldest first"""
-    if not isinstance(data, list):
-        return default
+def _contacts_of(entries: list) -> list[Contact]:
+    """Contacts of incident list entries, invalid entries left out (list order)"""
     contacts = []
-    for entry in data:
+    for entry in entries:
         try:
             contacts.append(Contact(_finite(entry["et"]), str(entry["player"]), str(entry["contactWith"])))
         except (KeyError, OverflowError, TypeError, ValueError):
             continue
-    contacts.sort(key=lambda contact: contact.time)
+    return contacts
+
+
+def _contact_time(contact: Contact) -> float:
+    return contact.time
+
+
+def parse_contacts(data: Any, default: tuple) -> tuple[Contact, ...]:
+    """Contacts between cars (or with track objects), oldest first"""
+    if not isinstance(data, list):
+        return default
+    contacts = _contacts_of(data)
+    contacts.sort(key=_contact_time)
     return tuple(contacts)
+
+
+class ContactsParser:
+    """parse_contacts of a growing incident list (game appends new incidents): entries parsed before kept,
+    only entries appended since last list parsed, same result & order as parse_contacts
+
+    A list not starting with the entries parsed before (new session) is parsed again in full.
+    """
+
+    __slots__ = ("_last",)
+
+    def __init__(self) -> None:
+        # (entries parsed, first entry, last entry, contacts), replaced at once
+        self._last: tuple[int, Any, Any, tuple[Contact, ...]] = (0, None, None, ())
+
+    def __call__(self, data: Any, default: tuple) -> tuple[Contact, ...]:
+        if not isinstance(data, list):
+            self._last = (0, None, None, ())
+            return default
+        count, first, last, contacts = self._last
+        total = len(data)
+        if 0 < count <= total and data[0] == first and data[count - 1] == last:
+            added = _contacts_of(data[count:])
+            if added:
+                added.sort(key=_contact_time)
+                if contacts and added[0].time < contacts[-1].time:  # older entry appended: stable sort as before
+                    merged = list(contacts)
+                    merged.extend(added)
+                    merged.sort(key=_contact_time)
+                    contacts = tuple(merged)
+                else:
+                    contacts += tuple(added)
+        else:
+            contacts = parse_contacts(data, ())
+        self._last = (total, data[0], data[-1], contacts) if total else (0, None, None, ())
+        return contacts
 
 
 def parse_setup_name(value: Any, default: str) -> str:

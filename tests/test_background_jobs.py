@@ -9,7 +9,7 @@ from functools import partial
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QObject
 
-from neopedal.ui.quick import background
+from neopedal import jobs as job_module  # job primitives (worker threads) in core jobs module
 from neopedal.ui.quick.background import MAX_WORKERS, WORKER_NAME, BackgroundJobs, JobCancelled, JobToken
 
 
@@ -249,9 +249,9 @@ def test_result_dropped_when_jobs_object_deleted_meanwhile():
 
 
 def test_slow_job_logged(caplog, monkeypatch):
-    monkeypatch.setattr(background, "SLOW_JOB", 0.0)
+    monkeypatch.setattr(job_module, "SLOW_JOB", 0.0)
     jobs = BackgroundJobs(label="Test page")
-    with caplog.at_level(logging.INFO, logger=background.__name__):
+    with caplog.at_level(logging.INFO, logger=job_module.__name__):
         jobs.run("slow", lambda: time.sleep(0.01))
         wait_for(lambda: jobs.running == 0)
     assert "Test page: slow took" in caplog.text

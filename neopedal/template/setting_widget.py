@@ -19,32 +19,32 @@
 """
 Default widget setting template
 
-Widget default options are grouped by category in "widget" package, plugins are added here.
+Widget default options are grouped by category in "widget" package, every built-in widget is
+declared in widget.registry.OVERLAYS (display order), plugins are added here.
 Widget key name must match corresponding file name in 'widget' folder
 """
 
+from __future__ import annotations
+
 from ..plugin_loader import load_plugin_defaults
-from .widget import WIDGET_CATEGORIES, WIDGET_DISPLAY_ORDER
 from .widget.modern import add_modern_options
+from .widget.registry import OVERLAYS, OverlaySpec
 
-# Merge categories in display order
-_widgets = {}
-for _category in WIDGET_CATEGORIES:
-    _widgets.update(_category)
-WIDGET_DEFAULT = {_name: _widgets.pop(_name) for _name in WIDGET_DISPLAY_ORDER}
-if _widgets:  # widget added to a category but missing from display order
-    raise RuntimeError(f"widget missing from WIDGET_DISPLAY_ORDER: {sorted(_widgets)}")
 
-# Modern design switch & options of widgets that have a modern design
-add_modern_options(WIDGET_DEFAULT)
+def widget_defaults(overlays: tuple[OverlaySpec, ...], plugins: dict[str, dict]) -> dict[str, dict]:
+    """Default setting of every widget in display order, plugins last (template dicts updated in place)"""
+    defaults = {spec.name: spec.defaults for spec in overlays}
+    # Modern design switch & options of widgets that have a modern design
+    add_modern_options(defaults, overlays)
+    # Add widget plugins ("plugins" folder)
+    defaults.update(plugins)
+    # Visibility context (common option): when widget is shown while driving, see widget._base
+    # Stream visibility (common option): shown on screen and/or on stream (browser sources), see stream_overlay
+    for widget_setting in defaults.values():
+        widget_setting.setdefault("visibility_context", "Always")
+        widget_setting.setdefault("stream_visibility", "Screen & Stream")
+    return defaults
 
-# Add widget plugins ("plugins" folder)
-WIDGET_DEFAULT.update(load_plugin_defaults())
 
-# Visibility context (common option): when widget is shown while driving, see widget._base
-# Stream visibility (common option): shown on screen and/or on stream (browser sources), see stream_overlay
-for _widget_setting in WIDGET_DEFAULT.values():
-    _widget_setting.setdefault("visibility_context", "Always")
-    _widget_setting.setdefault("stream_visibility", "Screen & Stream")
-
+WIDGET_DEFAULT = widget_defaults(OVERLAYS, load_plugin_defaults())
 WIDGET_FILENAME = tuple(WIDGET_DEFAULT)

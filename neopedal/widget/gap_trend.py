@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections import deque
 from math import nan
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QPolygonF
@@ -37,6 +37,9 @@ from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import LEFT, ClassicCells, finite, line_polygons, option_colors, scale_y, value_range
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import GapTrendConfig
 
 DASH = chr(0x2013)
 GAP_LIMIT = 999.9  # gap shown at most (seconds)
@@ -93,7 +96,7 @@ class GapRow(NamedTuple):
 class GapTrendMixin:
     """Gap readings & per lap history, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: GapTrendConfig
 
     def setup_gaps(self):
         """Options, history"""
@@ -221,6 +224,8 @@ def trend_chart(values: list[float], rect: QRectF, laps: int) -> TrendChart:
 
 class Realtime(GapTrendMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: GapTrendConfig
 
     update_while_hidden = True  # gap history kept while hidden
 

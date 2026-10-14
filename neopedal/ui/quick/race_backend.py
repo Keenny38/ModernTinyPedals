@@ -22,7 +22,7 @@ Race calculator page state & actions for QML (qml/RaceCalculator.qml)
 Inputs (saved in config "fuel_calculator"), fuel strategy & tyre plan linked (tyre change time of
 each stop added to that stop, one tyre plan row per stint), results, consumption history, team
 stints read from the game, live game data (every input the game gives, see race_live_data), live
-race (plan of the rest of the race), race plan files & share code.
+race (plan of the rest of the race) & race plan files.
 
 Every input change calculates at once (one calculation per change, see batch), scenarios
 (saving target, strategy comparison, safety car & rain against none) once quick changes settle.
@@ -35,16 +35,18 @@ import json
 import logging
 import os
 import time
+import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, replace
+from functools import partial
 from typing import Any, Protocol
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
+from ... import app_signal, game_rest, units
 from ... import calculation as calc
-from ... import units
 from ...api_control import api
 from ...const_file import ConfigType, FileExt, FileFilter
 from ...fuel_strategy import (
@@ -66,6 +68,7 @@ from ...fuel_strategy import (
     saving_target,
     strategy_input_from_values,
 )
+from ...game_rest import GameRequest
 from ...i18n import tr, trm
 from ...module_info import ConsumptionDataSet, minfo
 from ...process.team_usage import StintUsage, combine_usage, driver_usage, parse_usage, stint_usage, tank_capacity
@@ -73,7 +76,7 @@ from ...process.team_usage import tyre_allocation as game_tyre_allocation
 from ...race_live import RivalTracker, StopCounter
 from ...race_live import clock as race_clock
 from ...race_live import read_race_state as read_live
-from ...race_live_data import GARAGE_RESOURCES, GarageData, LiveValue, parse_garage
+from ...race_live_data import GARAGE_RESOURCES, GarageData, LiveValue, collect_rain, parse_garage
 from ...race_live_data import collect as collect_live
 from ...setting import cfg
 from ...userfile import atomic_write, write_text_file
@@ -86,16 +89,18 @@ from ...userfile.tyre_strategy import (
     save_tyre_strategy_file,
     validate_tyre_strategy,
 )
-from ..game_rest import GameRequest
 from . import race_results as results
+from .formatting import clock_seconds
 from .game_pictures import LogoCache, notifier
 from .models import DictListModel
+from .page_backend import PageBackend
 from .race_model import DRIVER_SPECS as DRIVER_INPUT_SPECS
 from .race_model import (
     INPUT_SPECS,
     INVALID_COLOR,
     PLAN_FILE,
     RACE_PLAN_FORMAT,
+    RACE_PLAN_FORMATS,
     RACE_PLAN_VERSION,
     RACE_SESSION,
     SAVED_INPUTS,
@@ -105,9 +110,7 @@ from .race_model import (
     clock_text,
     convert_fuel_inputs,
     day_time_text,
-    decode_share_code,
     driver_rows,
-    encode_share_code,
     input_spec,
     laptime_text,
     live_race_length,
@@ -170,6 +173,9 @@ COLUMN_OPTION_TITLES = {  # history column menu (option name made readable, as b
 TEAM_COLUMNS = ("Driver", "Stint", "Laps", "Laps counted", "Fuel", "Energy", "Tyre")
 HISTORY_ROLES = ("serial", "valid", "cells", "selected")
 TEAM_ROLES = ("key", "number", "enabled", "cells", "selected")  # number: of stint in team_stints
+LIVE_ROLES = ("key", "header", "title", "game", "calc", "source", "tip", "known", "auto", "followed", "differs")
+LIVE_PART_SIGNALS = {"status": "liveDataStatusChanged", "busy": "liveBusyChanged", "differing": "liveDifferingChanged",
+                     "tyres": "liveTyresChanged", "race": "liveRaceChanged"}
 
 
 class RaceHost(Protocol):
@@ -180,7 +186,6 @@ class RaceHost(Protocol):
     def confirm(self, text: str) -> bool: ...
     def open_file(self, directory: str, file_filter: str) -> str: ...
     def save_file(self, directory: str, file_filter: str) -> str: ...
-    def ask_text(self, title: str, label: str, text: str) -> tuple[str, bool]: ...
     def open_compound_config(self, name: str, user_setting: dict, reload) -> None: ...
     def record_change(self) -> None: ...
     def set_modified(self) -> None: ...
@@ -220,7 +225,30 @@ def history_signature(dataset: Sequence[ConsumptionDataSet]) -> tuple:
     return (len(dataset), dataset[0] if dataset else None)
 
 
-class RaceBackend(QObject):
+_active: weakref.ReferenceType | None = None  # backend of the open Race Calculator page (hotkey, palette, rail)
+
+
+def race_page() -> RaceBackend | None:
+    """Backend of the Race Calculator page if open"""
+    return _active() if _active is not None else None
+
+
+def race_status() -> str:
+    """"on" (page open, calculator on), "off" (page open, calculator off), "" (page closed): rail dot"""
+    backend = race_page()
+    return "" if backend is None else "on" if backend.game_data else "off"
+
+
+def read_team_usage(resources: Sequence[str]) -> tuple[list[StintUsage] | None, float]:
+    """Team request work (background thread): stints of strategy usage (None if no answer) & tank capacity
+    (liters) of repair & refuel screen, parsed off the UI thread (whole race of every driver late in a 24 h race)"""
+    usage, refuel = (game_rest.request_game(resource) for resource in resources)
+    if usage is None:
+        return None, 0.0
+    return stint_usage(parse_usage(usage)), tank_capacity(refuel)
+
+
+class RaceBackend(PageBackend):
     """Race calculator state for QML, see module docstring"""
 
     inputsChanged = Signal()
@@ -247,17 +275,23 @@ class RaceBackend(QObject):
     headerChanged = Signal()
     liveChanged = Signal()  # live race status & tip (apart from header: tip changes at each live refresh)
     rivalsChanged = Signal()
-    liveDataChanged = Signal()
+    liveDataChanged = Signal()  # anything of the live tab (Python callers: QML reads the parts below)
+    liveRaceChanged = Signal()
+    liveTyresChanged = Signal()
+    liveDataStatusChanged = Signal()
+    liveBusyChanged = Signal()
+    liveDifferingChanged = Signal()
 
     def __init__(self, parent: QObject, host: RaceHost):
-        super().__init__(parent)
+        global _active
+        super().__init__(parent, "Race calculator")
         self.host = host
         self.logos = LogoCache()
         notifier().changed.connect(self.headerChanged)  # circuit logo fetched from game meanwhile
         config = cfg.user.config["fuel_calculator"]
         # Fuel unit of the page (frozen while open)
         self.is_gallon = cfg.units["fuel_unit"] == "Gallon"
-        self.fuel_unit = "Gallon" if self.is_gallon else "Liter"  # of fuel inputs (race plan, share code)
+        self.fuel_unit = "Gallon" if self.is_gallon else "Liter"  # of fuel inputs (race plan)
         self.unit_fuel = units.set_unit_fuel(cfg.units["fuel_unit"])
         self.symbol_fuel = units.set_symbol_fuel(cfg.units["fuel_unit"])
 
@@ -325,7 +359,11 @@ class RaceBackend(QObject):
         self.garage_request = GameRequest(self, GARAGE_RESOURCES, self.received_garage, self.garage_request_failed)
         self._apply_garage = False  # Load Live asked: garage values filled in once answered
         self.live_values: list[LiveValue] = []
-        self._live_view: dict = {}
+        self._dry_plan: tuple[StrategyInput | None, int] = (None, 0)  # input of dry plan, its race laps
+        # Live tab: rows synced in place (group titles as rows), each other part notified only when changed
+        self.live_model = DictListModel(LIVE_ROLES, self)
+        self._live_rows: list[dict] = []
+        self._live_parts: dict = {"status": "", "busy": False, "differing": 0, "tyres": {}, "race": []}
 
         # Live race
         self.stop_counter = StopCounter()
@@ -340,27 +378,23 @@ class RaceBackend(QObject):
         self.tab = tab if isinstance(tab, int) and not isinstance(tab, bool) and 0 <= tab < len(TABS) else 0
         self.active = False  # page shown
 
-        self._scenario_timer = self._timer(self.update_scenarios, single=True)
-        self._plan_file_timer = self._timer(self.write_plan_file, SAVE_DELAY_MS, single=True)
-        self._autosave_timer = self._timer(self.autosave_tyres, SAVE_DELAY_MS, single=True)
-        self._live_timer = self._timer(self.refresh_live, LIVE_REFRESH_MS)
-        self._team_timer = self._timer(self.refresh_team, TEAM_REFRESH_MS)
-        self._garage_timer = self._timer(self.refresh_garage, GARAGE_REFRESH_MS)
+        self._scenario_timer = self.page_timer(self.update_scenarios, single_shot=True)
+        self._plan_file_timer = self.page_timer(self.write_plan_file, SAVE_DELAY_MS, single_shot=True)
+        self._autosave_timer = self.page_timer(self.autosave_tyres, SAVE_DELAY_MS, single_shot=True)
+        self._live_timer = self.page_timer(self.refresh_live, LIVE_REFRESH_MS)
+        self._team_timer = self.page_timer(self.refresh_team, TEAM_REFRESH_MS)
+        self._garage_timer = self.page_timer(self.refresh_garage, GARAGE_REFRESH_MS)
 
         # Inputs of a race plan opened last time kept: live laps shown, not filled in
         self._batch = 0
         with self.batch():
-            self.show_live_data(fill_inputs=not config.get("enable_plan_inputs"))
-            self.auto_load_combo_plan()
+            if self.game_data:
+                self.show_live_data(fill_inputs=not config.get("enable_plan_inputs"))
+                self.auto_load_combo_plan()
         self.refresh_race_state()
-        self._live_timer.start()
-
-    def _timer(self, slot, interval: int = 0, single: bool = False) -> QTimer:
-        timer = QTimer(self)
-        timer.setSingleShot(single)
-        timer.setInterval(interval)
-        timer.timeout.connect(slot)
-        return timer
+        if self.game_data:
+            self._live_timer.start()
+        _active = weakref.ref(self)
 
     # Page shown or hidden, closed
     def set_active(self, active: bool):
@@ -371,12 +405,51 @@ class RaceBackend(QObject):
         self.update_team_timer()
         self.update_garage_timer()
 
-    def release(self):
+    def release_resources(self):
         """Page closed: tyre plan & plan input written now, timers stopped"""
+        global _active
         for timer in (self._live_timer, self._team_timer, self._garage_timer, self._scenario_timer):
             timer.stop()
         self.autosave_tyres()
         self.flush_plan_file()
+        if _active is not None and _active() is self:
+            _active = None
+
+    # Calculator on or off (setting kept under its first name: game data)
+    @property
+    def game_data(self) -> bool:
+        """Calculator on: game read (live laps, live race, rivals, team, garage, stops counted); off: page shows
+        nothing and the game is not read"""
+        return cfg.user.config["fuel_calculator"].get("enable_game_data", True) is not False
+
+    @Slot(bool)
+    def setGameData(self, enabled: bool):
+        """Calculator on or off (kept for next time). Off: page empty, nothing read from the game, live race
+        plan back to the whole race; inputs, tyre plan & plan file kept"""
+        if enabled == self.game_data:
+            return
+        self.set_option("enable_game_data", enabled)
+        app_signal.refresh.emit(True)  # navigation bar dot
+        if enabled:
+            self._live_timer.start()
+            if self.active:
+                self.refresh_live()
+        else:
+            for timer in (self._live_timer, self._team_timer, self._garage_timer):
+                timer.stop()
+            self.refresh_race_state()
+            if self._rivals != results.class_rivals([], 0):
+                self._rivals = results.class_rivals([], 0)
+                self.rivalsChanged.emit()
+        self.update_team_timer()
+        self.update_garage_timer()
+
+    def game_data_refused(self) -> bool:
+        """Action asking the game while calculator is off: told, True"""
+        if self.game_data:
+            return False
+        self.host.toast(tr("Race Calculator is off"))
+        return True
 
     @contextmanager
     def batch(self) -> Iterator[None]:
@@ -496,7 +569,7 @@ class RaceBackend(QObject):
             "autoCombo": bool(config.get("enable_auto_load_combo_plan", True)),
             "showHistory": bool(config.get("show_consumption_history", True)),
             "collapsed": self.collapsed_sections(),
-            "tab": self.tab, "combo": self.combo_name(),
+            "tab": self.tab, "combo": self.combo_name() if self.game_data else "", "gameData": self.game_data,
             "trackLogo": self.logos.track(self.source_name.split(" - ", 1)[0]) if self.source_name else "",
         }
 
@@ -949,6 +1022,8 @@ class RaceBackend(QObject):
     def loadLive(self):
         """Laps of live session, race length of a live race and every live value followed (live tab)
         filled in, LMU garage screens asked (filled in once answered)"""
+        if self.game_data_refused():
+            return
         with self.batch():
             self.show_live_data(fill_inputs=True)
             self.apply_live(followed=True)
@@ -1005,7 +1080,7 @@ class RaceBackend(QObject):
     def setFollowLive(self, checked: bool):
         """Inputs follow new live laps (kept for next time)"""
         self.set_option("enable_follow_live", checked)
-        if checked and self.live_source:
+        if checked and self.live_source and self.game_data:
             with self.batch():
                 self.fill_in_data(history_laps(minfo.history.consumptionDataSet), skip=self.unfollowed_live())
                 self.apply_live(followed=True)
@@ -1046,6 +1121,8 @@ class RaceBackend(QObject):
     def refresh_live(self):
         """Every few seconds: stops counted, and while page shown: new laps, live race state,
         plan of car & track, class rivals"""
+        if not self.game_data:
+            return
         live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
         if not self.active:
             return
@@ -1077,6 +1154,14 @@ class RaceBackend(QObject):
     def refresh_race_state(self, live=None):
         """Rest of race planned again at each lap & stop (not while in the pits), status shown
         next to Live Race (values read from the game in its tooltip, to check them)"""
+        if not self.game_data:  # whole race planned, nothing read
+            if (self.live_status, self.live_tip) != ("", ""):
+                self.live_status, self.live_tip = "", ""
+                self.liveChanged.emit()
+            if self._race_key is not None:
+                self._race_key = None
+                self.set_race_state(None)
+            return
         if live is None:
             live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
         checked = bool(cfg.user.config["fuel_calculator"].get("enable_live_race"))
@@ -1215,23 +1300,18 @@ class RaceBackend(QObject):
             return False
         return True
 
-    def apply_race_plan(self, data, name: str, unitless_fuel: str = "") -> bool:
+    def apply_race_plan(self, data, name: str) -> bool:
         """Race setup, fuel & tyre plan of race plan data replaced, False if not a race plan
-
-        Args:
-            unitless_fuel: fuel unit of plan saved without one (older version): share codes are
-                litres, own plan files were saved in fuel unit of page (default).
-        """
+        (plan saved without fuel unit by an older version: fuel unit of page)"""
         try:
-            if not isinstance(data, dict) or data.get("format") != RACE_PLAN_FORMAT:
+            if not isinstance(data, dict) or data.get("format") not in RACE_PLAN_FORMATS:
                 raise ValueError
             inputs: dict = data["inputs"] if isinstance(data.get("inputs"), dict) else {}
             tyre_data = validate_tyre_strategy(data.get("tyre_strategy") or {})
         except (ValueError, TypeError, AttributeError):
             return False
-        # Inputs checked & in the fuel unit of the page (plan without unit: see unitless_fuel)
-        # before anything is applied: never half applied
-        plan_unit = data.get("fuel_unit") or unitless_fuel or self.fuel_unit
+        # Inputs checked & in the fuel unit of the page before anything is applied: never half applied
+        plan_unit = data.get("fuel_unit") or self.fuel_unit
         values = ranged_inputs(convert_fuel_inputs(checked_inputs(inputs), plan_unit, self.fuel_unit))
         # One calculation with the whole plan loaded: rows of the new tyre plan follow the new
         # stints, not the ones of the plan replaced (whose rows kept aside are dropped)
@@ -1246,28 +1326,6 @@ class RaceBackend(QObject):
         self.autosave_tyres()
         self.set_plan_inputs(True)
         return True
-
-    # Share code: race plan in one line of text
-    @Slot()
-    def copyShareCode(self):
-        QGuiApplication.clipboard().setText(encode_share_code(self.race_plan_data()))
-        self.host.toast(tr("Share code of race plan copied"))
-
-    @Slot()
-    def pasteShareCode(self):
-        """Race plan of a share code (clipboard proposed)"""
-        text, accepted = self.host.ask_text(tr("Paste Share Code..."), tr("Race plan share code:"),
-                                            QGuiApplication.clipboard().text().strip())
-        if not accepted or not text.strip():
-            return
-        try:
-            data = decode_share_code(text)
-        except ValueError:
-            data = None
-        if not self.apply_race_plan(data, tr("Shared plan"), unitless_fuel="Liter"):
-            self.host.warn(tr("Invalid race plan share code."))
-            return
-        self.host.toast(tr("Race plan of share code opened"))
 
     # Pit stop plan export
     def plan_columns(self) -> list[int]:
@@ -1379,7 +1437,7 @@ class RaceBackend(QObject):
     def write_plan_file(self):
         try:
             with atomic_write(f"{cfg.path.config}{PLAN_FILE}") as file:
-                json.dump(self._plan_file_data, file)
+                file.write(json.dumps(self._plan_file_data))
         except OSError:
             pass
 
@@ -1776,7 +1834,11 @@ class RaceBackend(QObject):
             self.host.warn(trm("Cannot open selected file.<br><br>Invalid tyre strategy file."))
             return
         save_tyre_strategy_file_path(filepath)
-        self.tyres.load(user_data, os.path.splitext(filename)[0])
+        self.apply_tyre_strategy(user_data, os.path.splitext(filename)[0])
+
+    def apply_tyre_strategy(self, user_data: dict, name: str):
+        """Tyre strategy (validated file) replacing tyre plan"""
+        self.tyres.load(user_data, name)
         self.tyre_plan_changed(user_edit=False)
 
     @Slot()
@@ -1851,7 +1913,7 @@ class RaceBackend(QObject):
     @Slot()
     def tyreAllocationFromGame(self):
         """Tyres allowed by the session asked to game (LMU)"""
-        if self.tyre_request.start():
+        if not self.game_data_refused() and self.tyre_request.start():
             self.tyresChanged.emit()
 
     @Property(bool, notify=tyresChanged)
@@ -1900,7 +1962,33 @@ class RaceBackend(QObject):
     # Live game data (live tab): every input value the game gives, see race_live_data
     @Property(dict, notify=liveDataChanged)
     def liveData(self) -> dict:
-        return self._live_view
+        """Whole live view (Python callers & tests: QML reads the parts below)"""
+        return dict(self._live_parts, rows=self._live_rows,
+                    groups=[{"key": key, "title": tr(title)} for key, title in LIVE_GROUPS])
+
+    @Property(QObject, constant=True)
+    def liveRows(self) -> DictListModel:
+        return self.live_model
+
+    @Property(list, notify=liveRaceChanged)
+    def liveRace(self) -> list:
+        return self._live_parts["race"]
+
+    @Property(dict, notify=liveTyresChanged)
+    def liveTyres(self) -> dict:
+        return self._live_parts["tyres"]
+
+    @Property(str, notify=liveDataStatusChanged)
+    def liveDataStatus(self) -> str:
+        return self._live_parts["status"]
+
+    @Property(bool, notify=liveBusyChanged)
+    def liveBusy(self) -> bool:
+        return self._live_parts["busy"]
+
+    @Property(int, notify=liveDifferingChanged)
+    def liveDiffering(self) -> int:
+        return self._live_parts["differing"]
 
     @staticmethod
     def unfollowed_live() -> set[str]:
@@ -1912,7 +2000,7 @@ class RaceBackend(QObject):
         """LMU garage screens asked at once, then every few seconds while the live tab is shown or
         inputs follow live"""
         follow = bool(cfg.user.config["fuel_calculator"].get("enable_follow_live"))
-        if self.active and (self.tab == TABS.index("live") or follow):
+        if self.active and self.game_data and (self.tab == TABS.index("live") or follow):
             if not self._garage_timer.isActive():
                 self._garage_timer.start()
                 self.refresh_garage()
@@ -1921,13 +2009,15 @@ class RaceBackend(QObject):
 
     @Slot()
     def refreshGarage(self):
+        if self.game_data_refused():
+            return
         self.refresh_garage()
         self.publish_live_data()
 
     def refresh_garage(self, apply: bool = False):
         """LMU garage screens asked (game in a session only), apply: followed values filled in once
         answered"""
-        if not api.read.state.active():
+        if not self.game_data or not api.read.state.active():
             self._apply_garage = False
             if self.garage != GarageData():  # values of a session left behind
                 self.garage = GarageData()
@@ -1942,12 +2032,14 @@ class RaceBackend(QObject):
         self.garage_request.busy = False
         refuel, tyres, session = (list(answers) + [None] * 3)[:3]
         self.garage = parse_garage(refuel, tyres, session)
-        self.garage_time = time.strftime("%H:%M:%S") if self.garage.available else ""
+        self.garage_time = clock_seconds() if self.garage.available else ""
         apply = self._apply_garage or bool(cfg.user.config["fuel_calculator"].get("enable_follow_live"))
         self._apply_garage = False
+        values = None
         if apply and self.garage.available and self.live_source:
             self.apply_live(followed=True)
-        self.publish_live_data()
+            values = self.live_values
+        self.publish_live_data(values)
 
     def garage_request_failed(self):
         """Game request raised an error: asked again by the garage timer"""
@@ -1960,8 +2052,12 @@ class RaceBackend(QObject):
         inputs of now (not the last calculation: values filled in together agree)"""
         setup = replace(self.strategy_input(), rain_lap=0, rain_laps=0, rain_tyres=False,
                         tyre_change_seconds=self.tyres.full_change_seconds())
-        strategy = plan(setup)
-        return strategy.race_laps if strategy.ready else 0
+        last, laps = self._dry_plan
+        if setup != last:  # planned again only when an input changed (live tab asks every few seconds)
+            strategy = plan(setup)
+            laps = strategy.race_laps if strategy.ready else 0
+            self._dry_plan = (setup, laps)
+        return laps
 
     def collect_live_values(self) -> list[LiveValue]:
         return collect_live(history_laps(minfo.history.consumptionDataSet), self.garage, self.unit_fuel,
@@ -1981,16 +2077,20 @@ class RaceBackend(QObject):
                     and (filled or item.key not in FILLED_KEYS))
 
         count = 0
+        values = self.collect_live_values()  # game read once per action
         with self.batch():
-            for item in self.collect_live_values():
+            for item in values:
                 if item.key != "rain" and wanted(item) and not self.live_matches(item):
                     self.apply_live_value(item)
                     count += 1
-            # Rain laps last: race laps follow the values just filled in
-            rain = next((item for item in self.collect_live_values() if item.key == "rain"), None)
+            # Rain laps last: race laps follow the values just filled in (only rain planned again)
+            if count and values and values[-1].key == "rain":
+                values[-1] = collect_rain(self.garage, self.dry_plan_laps())
+            rain = next((item for item in values if item.key == "rain"), None)
             if rain is not None and wanted(rain) and not self.live_matches(rain):
                 self.apply_live_value(rain)
                 count += 1
+        self.live_values = values  # as filled in: shown by publish_live_data of the same action
         return count
 
     def apply_live_value(self, item: LiveValue):
@@ -2153,7 +2253,7 @@ class RaceBackend(QObject):
         for wheel, offers in zip(HEADER_TYREPLAN, garage.used_tyres):
             wheels.append({"wheel": tr(wheel), "tyres": [
                 {"text": f"{offer.compound} {offer.tread:.0f}%", "color": tread_color(offer.tread / 100),
-                 "tip": offer.text} for offer in offers]})
+                 "compound": offer.compound, "tip": offer.text} for offer in offers]})
         return {
             "known": bool(garage.new_compounds or garage.used_tyres or garage.tyres_allowed),
             "allowed": garage.tyres_allowed, "newLeft": garage.new_tyres_left,
@@ -2170,28 +2270,48 @@ class RaceBackend(QObject):
             return trm("LMU garage data at {}").replace("{}", self.garage_time, 1)
         return tr("No LMU garage data: pit stop times, tyres & team come from LMU in a session")
 
-    def publish_live_data(self):
-        """Live tab shown again when anything changed: values of the game against the calculator"""
-        values = self.live_values = self.collect_live_values()
+    def publish_live_data(self, values: list[LiveValue] | None = None):
+        """Live tab shown again where anything changed: values of the game against the calculator (values:
+        collected by apply_live in the same action, else collected now), rows synced in place, other parts
+        notified only when changed (race time changes at each refresh: race card only)"""
+        if not self.game_data:  # calculator off: page empty, game not read
+            return
+        if values is None:
+            values = self.collect_live_values()
+        self.live_values = values
         unfollowed = self.unfollowed_live()
         rows = []
         for item in values:
             known = item.value is not None
             rows.append({
-                "key": item.key, "group": item.group, "title": tr(item.title),
+                "key": item.key, "group": item.group, "header": False, "title": tr(item.title),
                 "game": trm(tr(item.text)), "calc": self.live_current(item.key),
                 "source": trm(tr(item.source)), "tip": trm(tr(item.tip)), "known": known, "auto": item.follow,
                 "followed": item.follow and item.key not in unfollowed,
                 "differs": known and not self.live_matches(item),
             })
-        view = {
-            "rows": rows, "groups": [{"key": key, "title": tr(title)} for key, title in LIVE_GROUPS],
+        parts = {
             "status": self.live_data_status(), "busy": self.garage_request.busy,
             "differing": sum(1 for row in rows if row["differs"] and row["followed"]),
             "tyres": self.garage_tyres(), "race": self.live_race_items(),
         }
-        if view != self._live_view:
-            self._live_view = view
+        changed = [name for name, value in parts.items() if value != self._live_parts[name]]
+        rows_changed = rows != self._live_rows
+        if rows_changed:
+            self._live_rows = rows
+            shown = []
+            for key, title in LIVE_GROUPS:  # title row before each group
+                members = [row for row in rows if row["group"] == key]
+                if members:
+                    shown.append({"key": f"hdr:{key}", "header": True, "title": tr(title), "game": "", "calc": "",
+                                  "source": "", "tip": "", "known": True, "auto": False, "followed": False,
+                                  "differs": False})
+                    shown.extend(members)
+            self.live_model.sync(shown)
+        for name in changed:
+            self._live_parts[name] = parts[name]
+            getattr(self, LIVE_PART_SIGNALS[name]).emit()
+        if changed or rows_changed:
             self.liveDataChanged.emit()
 
     @Slot()
@@ -2211,14 +2331,14 @@ class RaceBackend(QObject):
     def applyLiveValue(self, key: str):
         """Live value of a row filled in (followed or not)"""
         if self.apply_live(keys={key}):
-            self.publish_live_data()
+            self.publish_live_data(self.live_values)
 
     @Slot()
     def applyAllLive(self):
         """Every live value followed filled in"""
         count = self.apply_live(followed=True, filled=True)
         self.host.toast(trm(f"{count} live value(s) filled in") if count else tr("Calculator already holds the live values"))
-        self.publish_live_data()
+        self.publish_live_data(self.live_values)
 
     @Slot(str, bool)
     def setLiveFollowed(self, key: str, followed: bool):
@@ -2232,7 +2352,7 @@ class RaceBackend(QObject):
     # Team stints (game strategy data)
     def update_team_timer(self):
         """Game asked at once, then every few seconds while team tab is shown"""
-        if self.active and self.tab == TABS.index("team"):
+        if self.active and self.game_data and self.tab == TABS.index("team"):
             if not self._team_timer.isActive():
                 self._team_timer.start()
                 self.refresh_team()
@@ -2241,29 +2361,29 @@ class RaceBackend(QObject):
 
     @Slot()
     def refresh_team(self):
-        if self.team_request.start():
+        if self.game_data and self.team_request.start(partial(read_team_usage, USAGE_RESOURCES)):
             self.team_status_changed()
 
     @Slot()
     def refreshTeam(self):
-        self.refresh_team()
+        if not self.game_data_refused():
+            self.refresh_team()
 
     def team_status_changed(self):
         """Status line & busy state shown again (rows & drivers left as they are)"""
         self.teamStatusChanged.emit()
         self.teamChanged.emit()
 
-    def received_team(self, answers: list):
-        """Game answers: strategy usage, repair & refuel screen (tank capacity)"""
+    def received_team(self, answer: tuple[list[StintUsage] | None, float]):
+        """Game answers read in background (read_team_usage): stints, tank capacity (liters)"""
         self.team_request.busy = False
-        usage, refuel = answers
-        if usage is None:
+        stints, capacity = answer
+        if stints is None:
             self.team_status = tr("No data from game: LMU not running or not in a session")
             self.team_status_changed()
             return
-        capacity = tank_capacity(refuel)
-        self.show_team_stints(stint_usage(parse_usage(usage)), self.unit_fuel(capacity) if capacity else 0.0)
-        self.team_status = trm("Updated from game at {}").replace("{}", time.strftime("%H:%M:%S"), 1)
+        self.show_team_stints(stints, self.unit_fuel(capacity) if capacity else 0.0)
+        self.team_status = trm("Updated from game at {}").replace("{}", clock_seconds(), 1)
         self.team_status_changed()
 
     def team_request_failed(self):

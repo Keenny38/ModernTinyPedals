@@ -31,9 +31,20 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from ..api_control import api
 from ..const_common import MAX_SECONDS
-from ..module_info import minfo
+from ..module_info import VehicleDataSet, minfo
 from ..validator import generator_init
 from ._snapping import constrain_axis, grid_value, snap_position
+
+NO_PLAYER = VehicleDataSet()  # neutral car data (read only): no player car (spectating, player left)
+
+
+def player_vehicle() -> VehicleDataSet:
+    """Player car data of vehicles module, neutral data (NO_PLAYER) if no player car (player index -1): never
+    the last car of the list (dataSet[-1])"""
+    vehicles = minfo.vehicles
+    index = vehicles.playerIndex
+    data_set = vehicles.dataSet
+    return data_set[index] if 0 <= index < len(data_set) else NO_PLAYER
 
 
 class FontMetrics(NamedTuple):

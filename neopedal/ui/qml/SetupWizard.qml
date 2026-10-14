@@ -8,7 +8,7 @@ import QtQuick.Layouts
 TpPage {
     id: page
 
-    readonly property bool narrow: width < theme.em * 46
+    readonly property bool narrow: width < theme.em * 46  // content-tuned: step list becomes a progress bar
     readonly property var stepFiles: [
         "SetupWelcome.qml", "SetupGame.qml", "SetupUnits.qml", "SetupLook.qml", "SetupOverlays.qml", "SetupReady.qml"
     ]
@@ -87,13 +87,15 @@ TpPage {
                     spacing: theme.em * 0.6
                     Image {
                         source: backend.appIcon
+                        asynchronous: true
                         Layout.preferredWidth: Math.round(theme.em * 2.4)
                         Layout.preferredHeight: Math.round(theme.em * 2.4)
-                        sourceSize.width: Math.round(theme.em * 4.8)
-                        sourceSize.height: Math.round(theme.em * 4.8)
+                        // Decoded at shown size, no mipmaps (+33% texture, out of the shared atlas)
+                        sourceSize.width: Math.max(1, Math.ceil(Math.round(theme.em * 2.4) * Screen.devicePixelRatio))
+                        sourceSize.height: Math.max(1, Math.ceil(Math.round(theme.em * 2.4) * Screen.devicePixelRatio))
                         fillMode: Image.PreserveAspectFit
                         smooth: true
-                        mipmap: true
+                        mipmap: false
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -109,7 +111,7 @@ TpPage {
                             Layout.fillWidth: true
                             text: i18n.tr("Setup Wizard")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                             wrapMode: Text.WordWrap
                         }
                     }
@@ -132,9 +134,9 @@ TpPage {
                         Rectangle {
                             anchors.fill: parent
                             anchors.leftMargin: -theme.em * 0.3
-                            radius: theme.em * 0.5
+                            radius: theme.radiusMd
                             color: entryArea.containsMouse && !entry.active ? theme.hover : "transparent"
-                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Behavior on color { ColorAnimation { duration: theme.motionFast } }
                         }
                         // Line to next step, filled once passed
                         Rectangle {
@@ -145,7 +147,7 @@ TpPage {
                             height: entry.height - dot.height - 6
                             radius: 1
                             color: entry.done ? theme.accent : theme.border
-                            Behavior on color { ColorAnimation { duration: 250 } }
+                            Behavior on color { ColorAnimation { duration: theme.motionSlow } }
                         }
                         Rectangle {
                             id: dot
@@ -154,18 +156,18 @@ TpPage {
                             width: Math.round(theme.em * 1.75)
                             height: width
                             radius: width / 2
-                            color: entry.active || entry.done ? theme.accent : "transparent"
+                            color: entry.active || entry.done ? theme.accentFill : "transparent"
                             border.width: entry.active || entry.done ? 0 : 1.5
                             border.color: theme.border
                             scale: entry.active ? 1.08 : 1
-                            Behavior on color { ColorAnimation { duration: 200 } }
-                            Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
+                            Behavior on color { ColorAnimation { duration: theme.motionBase } }
+                            Behavior on scale { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutBack } }
                             Text {
                                 anchors.centerIn: parent
                                 visible: !entry.done
                                 text: entry.index + 1
                                 color: entry.active ? "white" : theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 font.weight: Font.DemiBold
                             }
                             Icon {
@@ -203,7 +205,7 @@ TpPage {
                     text: i18n.tr("Every choice can be changed later.")
                     color: theme.dimText
                     wrapMode: Text.WordWrap
-                    font.pointSize: theme.fontPoint * 0.88
+                    font.pointSize: theme.fontSmall
                 }
             }
         }
@@ -229,7 +231,7 @@ TpPage {
                         implicitHeight: Math.round(theme.em * 0.3)
                         radius: height / 2
                         color: index <= backend.step ? theme.accent : theme.border
-                        Behavior on color { ColorAnimation { duration: 250 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionSlow } }
                     }
                 }
             }
@@ -257,7 +259,7 @@ TpPage {
                             Layout.fillWidth: true
                             text: (backend.step + 1) + " / " + backend.stepCount + "  ·  " + page.current.label
                             color: theme.accent
-                            font.pointSize: theme.fontPoint * 0.85
+                            font.pointSize: theme.fontSmall
                             font.weight: Font.DemiBold
                             font.capitalization: Font.AllUppercase
                             font.letterSpacing: 0.8
@@ -268,7 +270,7 @@ TpPage {
                             text: page.current.title
                             color: theme.text
                             wrapMode: Text.WordWrap
-                            font.pointSize: theme.fontPoint * 1.75
+                            font.pointSize: theme.fontDisplay
                             font.weight: Font.DemiBold
                         }
                         Text {
@@ -294,7 +296,7 @@ TpPage {
                         property: "x"
                         from: page.direction * theme.em * 2.5
                         to: 0
-                        duration: 280
+                        duration: theme.motionSlow
                         easing.type: Easing.OutCubic
                     }
                     NumberAnimation {
@@ -302,7 +304,7 @@ TpPage {
                         property: "opacity"
                         from: 0
                         to: 1
-                        duration: 220
+                        duration: theme.motionSlow
                         easing.type: Easing.OutQuad
                     }
                 }

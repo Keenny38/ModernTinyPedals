@@ -23,9 +23,11 @@ Black box widget, read telemetry into widget state, decide when to repaint
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from PySide6.QtGui import QColor
 
 from ... import calculation as calc
 from ...api_control import api
@@ -38,12 +40,16 @@ from ...userfile.heatmap import (
     HEATMAP_DEFAULT_TYRE,
     load_heatmap_color,
     select_brake_heatmap_name,
+    select_compound_color,
     select_compound_symbol,
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
 from .._common import delta_shown, tyre_punctured
+from .._data import run_laps as stint_laps_left
+from .._modern.draw import readable_on
 from .common import REAR_MAX_STEER
+from .persist import keep_clock, kept_clock
 from .recorder import EXPORT_QUEUE, IncidentBrowse, RaceReadings, Sample, index_of, log_race_events
 from .sizing import Presence
 from .state import (
@@ -58,7 +64,12 @@ from .state import (
 )
 from .suspension import TYRE_DIAMETER_MM
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
+
 MIN_AIRBORNE_SPEED = 5.0  # m/s, below this a light tyre load is a car at rest or jacked up
+LEVEL_SETTINGS = frozenset(("tc", "tc_slip", "tc_cut", "abs", "motor_map", "front_arb", "rear_arb"))  # with maximum
+POPUP_EVENTS = frozenset(("limiter", "headlights", "wipers"))  # pop-up readings shown as new state only
 
 
 def is_new_impact(impact_time: float, last_time: float) -> bool:
@@ -69,12 +80,26 @@ def is_new_impact(impact_time: float, last_time: float) -> bool:
     return math.isfinite(impact_time) and impact_time > 0 and impact_time > last_time
 
 
+def tick_read(owner: Any, key: str, read: Callable[[], Any]) -> Any:
+    """Game value read once per update of owner (first use), read on each call outside updates"""
+    reads = getattr(owner, "tick_reads", None)
+    if reads is None:
+        return read()
+    value = reads.get(key, reads)  # reads: not read yet
+    if value is reads:
+        value = reads[key] = read()
+    return value
+
+
 CONTACT_REPEAT_SECONDS = 2.0  # contacts with the same car closer in time: one contact
 CONTACT_RECENT_SECONDS = 10.0  # contacts older than this when first seen are not logged
 
 
 class DataReader:
     """Read telemetry into widget state, decide when to repaint"""
+
+    tick_reads: dict[str, Any] | None = None  # game values read during an update, see tick_read
+    clock_taken_over = False  # recorder clock of the replaced widget continued, see recorder_now
 
     # Attributes set by black box widget class (widget/black_box.py) or other parts
     alert_pulse: Any
@@ -133,6 +158,12 @@ class DataReader:
     need_lap_stats: Any
     need_laptime: Any
     need_lights: Any
+    need_wipers: Any
+    need_track_limits: Any
+    need_gaps: Any
+    need_lift_coast: Any
+    popup_events: Any
+    popup_maximum: Any
     need_limiter: Any
     need_locking: Any
     need_pedals: Any
@@ -141,6 +172,7 @@ class DataReader:
     need_slip: Any
     need_switches: Any
     need_temp_trend: Any
+    overlay_started: bool
     paused_total: Any
     pres_trends: Any
     presence: Any
@@ -159,6 +191,9 @@ class DataReader:
     show_pres_trend: Any
     show_pressure_range: Any
     show_recorder: Any
+    show_setting_popup: Any
+    setting_changes: Any
+    vehicle_name: Any
     show_stint: Any
     show_surface_overheat: Any
     show_susp_damage: Any
@@ -176,16 +211,18 @@ class DataReader:
     susp_travels: Any
     suspension_totaled: Any
     temp_trends: Any
+    text: Any
     tick: Any
     trace_version: Any
     tyre_fades: Any
     tyre_temp_source: Any
     unit_temp: Any
     update: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     wear_forecast_laps: Any
     wheel_targets: Any
     wheels: Any
+    widget_name: str
 
     # Widget state written here, initialized by BlackBox (declared for type checking)
     browse_seen: int
@@ -226,11 +263,15 @@ class DataReader:
         in_pits = api.read.vehicle.in_pits()  # read once, also used by compound matching
         if slow:  # car only changes in pit: read with slow data, used by every part
             self.vehicle_name = api.read.vehicle.vehicle_name()
-        if self.need_compound:
-            self.update_compound_state(in_pits)
-        if slow:
-            self.update_slow(in_pits)
-        self.update_fast(in_pits)
+        self.tick_reads = {}
+        try:
+            if self.need_compound:
+                self.update_compound_state(in_pits)
+            if slow:
+                self.update_slow(in_pits)
+            self.update_fast(in_pits)
+        finally:
+            self.tick_reads = None
         if IncidentBrowse.requests != self.browse_seen:
             self.browse_seen = IncidentBrowse.requests
             self.browse_next_incident()
@@ -238,6 +279,59 @@ class DataReader:
         if self.auto_resize and slow:
             self.update_presence()
         self.repaint_changed()
+
+    @staticmethod
+    def read_limit_points() -> float:
+        """Track limits points giving a penalty, races only (no penalty in practice & qualifying)"""
+        return api.read.session.limits_points() * api.read.session.in_race()
+
+    def update_setting_changes(self):
+        """Driver settings as displayed (None: car has none), changes shown by pop-up (see _black_box.popup)
+
+        Values the chips read in this update are read once (tick_read).
+        """
+        switch = api.read.switch
+
+        def level(key: str, read: Callable[[], int]) -> str | None:
+            value = tick_read(self, key, read)
+            return str(value) if value >= 0 else None
+
+        bias = tick_read(self, "bias_front", api.read.brake.bias_front)
+        has_migration = switch.brake_migration_level() >= 0
+        readings = {
+            "tc": level("tc_level", switch.tc_level),
+            "tc_slip": level("tc_slip_level", switch.tc_slip_level),
+            "tc_cut": level("tc_cut_level", switch.tc_cut_level),
+            "abs": level("abs_level", switch.abs_level),
+            "brake_bias": f"{bias * 100:.1f}" if 0 < bias < 1 else None,
+            "brake_migration": f"{tick_read(self, 'migration', api.read.brake.migration):.1f}" if has_migration else None,
+            "motor_map": level("motor_map_level", switch.motor_map_level),
+            "front_arb": level("front_arb_level", switch.front_arb_level),
+            "rear_arb": level("rear_arb_level", switch.rear_arb_level),
+        }
+        if self.popup_events:  # driving events: new state only
+            text = self.text
+            on, off = text["state_on"], text["state_off"]
+            readings["limiter"] = on if tick_read(self, "limiter", switch.speed_limiter) else off
+            readings["headlights"] = on if tick_read(self, "headlights", switch.headlights) else off
+            readings["wipers"] = self.wipers_text(tick_read(self, "wipers", switch.wipers))
+        maximum = self.setting_maximum if self.popup_maximum else None
+        self.setting_changes.update(self.vehicle_name, readings, monotonic(), quiet=bool(api.read.vehicle.in_garage()),
+                                    maximum=maximum, events=POPUP_EVENTS)
+
+    @staticmethod
+    def setting_maximum(name: str) -> str:
+        """Highest level of a setting shown by pop-up ("TC 3 > 4/9"), "" if unknown or not a level"""
+        if name not in LEVEL_SETTINGS:
+            return ""
+        value = api.read.switch.level_maximum(name)
+        return str(value) if value > 0 else ""
+
+    def wipers_text(self, state: int) -> str:
+        """Wipers state as shown: off, auto, slow, fast"""
+        text = self.text
+        return (text["state_off"], text["wipers_auto"], text["wipers_slow"], text["wipers_fast"])[
+            min(max(int(state), 0), 3)]
 
     def update_slow(self, in_pits):
         """Slow changing data: temperatures, pressure, wear, damage, fuel"""
@@ -247,15 +341,18 @@ class DataReader:
         pressure = api.read.tyre.pressure() if self.need_pressure else WHEELS_ZERO
         tread = api.read.tyre.wear() if self.show_tyre_wear else WHEELS_ZERO  # remaining tread (fraction)
         self.check_new_session()
+        if self.need_track_limits:  # points change a few times per lap at most
+            self.cut_points = tick_read(self, "cut_points", api.read.session.cut_points)
+            self.limit_points = tick_read(self, "limit_points", self.read_limit_points)
         ico = (api.read.tyre.surface_temperature_ico()
                if wcfg["show_tyre_temperature_bands"] or self.show_camber_spread else ())
         if self.show_surface_overheat:
             surface = tyre_temp if self.tyre_temp_source == "Surface" else api.read.tyre.surface_temperature_avg()
         leaving = self.last_pits_state is not None and self.last_pits_state and not in_pits
         self.last_pits_state = bool(in_pits)
-        braking = self.show_brake_peak and api.read.inputs.brake_raw() > 0.05
+        braking = self.show_brake_peak and tick_read(self, "brake_raw", api.read.inputs.brake_raw) > 0.05
         if wcfg["show_tyre_status"]:
-            detached = api.read.wheel.is_detached()
+            detached = tick_read(self, "detached", api.read.wheel.is_detached)
             puncture = tyre_punctured()
             locking_wear = minfo.wheels.lockingTreadWear if self.use_wheels else WHEELS_ZERO
         else:
@@ -272,10 +369,8 @@ class DataReader:
         if end_stint:
             if self.wear_forecast_laps > 0:
                 run_laps = self.wear_forecast_laps
-            elif minfo.energy.available:
-                run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
             else:
-                run_laps = minfo.fuel.estimatedLaps
+                run_laps = stint_laps_left(minfo.fuel, minfo.energy)
         need_wear_per_lap = (wcfg["show_tyre_wear_per_lap"] or self.show_stint) and self.use_wheels
         brake_wear = wcfg["show_brake_wear"] and self.use_wheels
         now = monotonic()
@@ -331,7 +426,7 @@ class DataReader:
             self.brake_heat_balance = front - rear if math.isfinite(front - rear) else 0.0
 
         if self.brake_class_targets and wcfg["show_brake_temperature"]:
-            self.update_brake_window(api.read.vehicle.class_name())
+            self.update_brake_window(tick_read(self, "class_name", api.read.vehicle.class_name))
         if self.need_damage_total or self.show_damage_panel:
             self.body_damage = api.read.vehicle.damage_severity()
         if self.show_damage_panel:
@@ -340,7 +435,7 @@ class DataReader:
             self.damage_total = float(sum(self.body_damage)) + float(sum(suspension))
         if self.show_event_log:
             self.event_log.update(
-                api.read.lap.number(), api.read.session.elapsed(),
+                tick_read(self, "lap", api.read.lap.number), tick_read(self, "elapsed", api.read.session.elapsed),
                 [wheel.status for wheel in self.wheels], self.damage_total, self.event_labels,
             )
         if self.show_stint:
@@ -383,14 +478,14 @@ class DataReader:
         slip_angle = wcfg["show_tyre_slip_angle"] and self.use_wheels
         if need_slip:
             slip_ratio = minfo.wheels.slipRatio
-            braking = api.read.inputs.brake_raw() > 0.02
+            braking = tick_read(self, "brake_raw", api.read.inputs.brake_raw) > 0.02
         # Diagnostic readings: each reader is skipped unless its own reading is turned on
         ride_height = (api.read.wheel.ride_height()
                        if wcfg["show_ride_height"] or self.need_lap_stats else WHEELS_ZERO)
         heave = api.read.wheel.third_spring_deflection() if self.show_heave else WHEELS_ZERO
         brake_pressure = api.read.brake.pressure() if wcfg["show_brake_pressure"] else WHEELS_ZERO
         if wcfg["show_tyre_load"]:
-            tyre_load = api.read.tyre.load()  # Newtons
+            tyre_load = tick_read(self, "load", api.read.tyre.load)  # Newtons
             total_load = sum(tyre_load)
         else:
             tyre_load = WHEELS_ZERO
@@ -400,7 +495,8 @@ class DataReader:
                 self.steer_vehicle = self.vehicle_name
                 self.steer_convention.reset()
             wheel_angle = [math.degrees(angle) if math.isfinite(angle) else 0.0 for angle in api.read.wheel.toe()]
-            self.steer_convention.update(wheel_angle[0], wheel_angle[1], api.read.inputs.steering())
+            steering = tick_read(self, "steering", api.read.inputs.steering)
+            self.steer_convention.update(wheel_angle[0], wheel_angle[1], steering)
 
         for index, wheel in enumerate(self.wheels):
             if need_slip:
@@ -428,19 +524,21 @@ class DataReader:
             self.tc_active = bool(api.read.switch.tc_active())
             self.abs_seen = self.abs_seen or self.abs_active
             self.tc_seen = self.tc_seen or self.tc_active
-            self.abs_level = api.read.switch.abs_level()
-            self.tc_level = api.read.switch.tc_level()
-            self.tc_cut_level = api.read.switch.tc_cut_level()
-            self.tc_slip_level = api.read.switch.tc_slip_level()
+            self.abs_level = tick_read(self, "abs_level", api.read.switch.abs_level)  # shared with setting pop-up
+            self.tc_level = tick_read(self, "tc_level", api.read.switch.tc_level)
+            self.tc_cut_level = tick_read(self, "tc_cut_level", api.read.switch.tc_cut_level)
+            self.tc_slip_level = tick_read(self, "tc_slip_level", api.read.switch.tc_slip_level)
         if self.need_brake_bias:
-            self.brake_bias = api.read.brake.bias_front()
+            self.brake_bias = tick_read(self, "bias_front", api.read.brake.bias_front)
         if self.need_locking and self.use_wheels:
             self.locking_front = minfo.wheels.lockingPercentFront * 100
             self.locking_rear = minfo.wheels.lockingPercentRear * 100
         if self.need_brake_migration:
-            self.brake_migration = api.read.brake.migration()
+            self.brake_migration = tick_read(self, "migration", api.read.brake.migration)
         if self.need_motor_map:
-            self.motor_map_level = api.read.switch.motor_map_level()
+            self.motor_map_level = tick_read(self, "motor_map_level", api.read.switch.motor_map_level)
+        if self.show_setting_popup:
+            self.update_setting_changes()
         if self.need_delta and self.use_delta:
             self.delta_best = self.read_delta()
             self.delta_shown = delta_shown(self.wcfg["deltabest_source"])
@@ -448,19 +546,26 @@ class DataReader:
             self.laptime_current = minfo.delta.lapTimeCurrent
         self.in_pits = bool(in_pits)
         if self.need_limiter:
-            self.limiter = bool(api.read.switch.speed_limiter())
+            self.limiter = bool(tick_read(self, "limiter", api.read.switch.speed_limiter))
         if self.need_lights:
-            self.headlights = bool(api.read.switch.headlights())
+            self.headlights = bool(tick_read(self, "headlights", api.read.switch.headlights))
+        if self.need_wipers:
+            self.wipers = tick_read(self, "wipers", api.read.switch.wipers)
+        if self.need_gaps:
+            self.gap_ahead = api.read.timing.gap_car_ahead()
+            self.gap_behind = api.read.timing.gap_car_behind()
+        if self.need_lift_coast:
+            self.lift_coast = api.read.engine.lift_and_coast_progress()
         if self.need_engine:
             self.ignition = api.read.switch.ignition_starter() * (
-                1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"]))
-            self.oil_temp = api.read.engine.oil_temperature()
-            self.water_temp = api.read.engine.water_temperature()
+                1 + (tick_read(self, "rpm", api.read.engine.rpm) > self.wcfg["stalling_rpm_threshold"]))
+            self.oil_temp = tick_read(self, "oil", api.read.engine.oil_temperature)
+            self.water_temp = tick_read(self, "water", api.read.engine.water_temperature)
         if self.need_gear:
             self.gear = api.read.engine.gear()
         self.speed = speed
         if self.need_rpm:
-            self.rpm = api.read.engine.rpm()
+            self.rpm = tick_read(self, "rpm", api.read.engine.rpm)
             self.rpm_max = api.read.engine.rpm_max()
         if self.need_pedals:
             self.read_pedals()
@@ -501,7 +606,7 @@ class DataReader:
             if self.wcfg["show_clutch_bar"]:
                 self.clutch = inputs.clutch()
         else:
-            self.throttle, self.brake = inputs.throttle_raw(), inputs.brake_raw()
+            self.throttle, self.brake = inputs.throttle_raw(), tick_read(self, "brake_raw", inputs.brake_raw)
             if self.wcfg["show_clutch_bar"]:
                 self.clutch = inputs.clutch_raw()
 
@@ -551,19 +656,19 @@ class DataReader:
     def update_damage_panel(self, suspension):
         """Wheel, tyre & aero damage, last impact (same data as the Damage widget)"""
         self.damage_suspension = tuple(suspension)
-        self.damage_detached = tuple(api.read.wheel.is_detached())
+        self.damage_detached = tuple(tick_read(self, "detached", api.read.wheel.is_detached))
         self.damage_puncture = tyre_punctured()
         self.damage_aero = api.read.vehicle.aero_damage()
         if not self.wcfg["show_damage_panel_impact_cone"]:
             return
-        impact_time = api.read.vehicle.impact_time()
+        impact_time = tick_read(self, "impact_time", api.read.vehicle.impact_time)
         if self.impact_time is None or not is_new_impact(impact_time, self.impact_time):
             if self.impact_time is not None and impact_time < self.impact_time:
                 self.impact_visible = False  # new session: impact of old one no longer shown
             self.impact_time = impact_time  # before widget started, or new session: not shown
         elif impact_time != self.impact_time:
             self.impact_time = impact_time
-            self.impact_position = api.read.vehicle.impact_position()
+            self.impact_position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
             self.impact_visible = True
         if self.impact_visible and (
             api.read.timing.elapsed() - self.impact_time > self.wcfg["damage_panel_impact_cone_duration"]
@@ -574,16 +679,29 @@ class DataReader:
         """Recorder clock: monotonic seconds, stopped while the game is paused
 
         A pause leaves no gap in the recording, and a frozen incident stays on screen
-        as long as the pause lasts.
+        as long as the pause lasts. A rebuilt widget continues the clock of the one it replaces:
+        incidents taken over (persist.restore_records) keep their times.
         """
+        if not self.clock_taken_over:
+            self.clock_taken_over = True
+            kept = kept_clock(self.widget_name)
+            if kept is not None:
+                self.pause_start, self.paused_total = kept
         now = monotonic()
         paused = bool(api.read.state.paused())
         if paused and self.pause_start is None:
             self.pause_start = now
+            self.share_clock()
         elif not paused and self.pause_start is not None:
             self.paused_total += now - self.pause_start
             self.pause_start = None
+            self.share_clock()
         return (self.pause_start if self.pause_start is not None else now) - self.paused_total
+
+    def share_clock(self):
+        """Recorder clock kept for the rebuilt widget (started overlay only, never a preview)"""
+        if self.overlay_started:
+            keep_clock(self.widget_name, self.pause_start, self.paused_total)
 
     def update_recorder(self, speed: float):
         """Feed incident recorder, log & save incident once recorded"""
@@ -594,18 +712,20 @@ class DataReader:
         warnings = [wheel.warning for wheel in self.wheels]
         slip = "lock" if ("lock" in warnings or "locked" in warnings) else "spin" if "spin" in warnings else ""
         last_time = recorder.samples[-1].time if recorder.samples else None
-        impact_time = api.read.vehicle.impact_time()
+        impact_time = tick_read(self, "impact_time", api.read.vehicle.impact_time)
         impact = self.recorder_impact_time is not None and is_new_impact(impact_time, self.recorder_impact_time)
         self.recorder_impact_time = impact_time  # impact before widget started: not an incident
         if impact:  # same direction as the damage panel cone
-            self.impact_direction = impact_arrow(calc.degrees(calc.oriyaw(*api.read.vehicle.impact_position())))
+            position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
+            self.impact_direction = impact_arrow(calc.degrees(calc.oriyaw(*position)))
         slips = tuple(minfo.wheels.slipRatio) if self.use_wheels else WHEELS_ZERO
         incident = recorder.add(
             Sample(now, speed, self.throttle, self.brake, self.gear, self.abs_active, self.tc_active, slip,
-                   api.read.inputs.steering(), slips, tuple(api.read.tyre.load())),
+                   tick_read(self, "steering", api.read.inputs.steering), slips,
+                   tuple(tick_read(self, "load", api.read.tyre.load))),
             self.damage_total,
-            api.read.lap.number(),
-            api.read.session.elapsed(),
+            tick_read(self, "lap", api.read.lap.number),
+            tick_read(self, "elapsed", api.read.session.elapsed),
             impact,
             self.impact_direction,
         )
@@ -635,8 +755,8 @@ class DataReader:
         penalties = self.log_penalty_events
         engine = self.log_engine_events
         if engine:
-            oil = api.read.engine.oil_temperature()
-            water = api.read.engine.water_temperature()
+            oil = tick_read(self, "oil", api.read.engine.oil_temperature)
+            water = tick_read(self, "water", api.read.engine.water_temperature)
         else:
             oil = water = 0.0
         readings = RaceReadings(
@@ -644,21 +764,22 @@ class DataReader:
             blue=bool(api.read.session.blue_flag()) if flags else None,
             in_pits=bool(in_pits) if self.log_pit_events else None,
             penalties=api.read.vehicle.number_penalties() if penalties else None,
-            cut_points=api.read.session.cut_points() if penalties else None,
-            limit_points=api.read.session.limits_points() if penalties else 0.0,
+            cut_points=tick_read(self, "cut_points", api.read.session.cut_points) if penalties else None,
+            limit_points=tick_read(self, "limit_points", self.read_limit_points) if penalties else 0.0,
             oil_hot=oil >= wcfg["engine_oil_warning_temperature"] if engine else None,
             water_hot=water >= wcfg["engine_water_warning_temperature"] if engine else None,
             oil=oil, water=water,
         )
         log_race_events(
-            self.event_log, api.read.lap.number(), api.read.session.elapsed(), readings, self.event_labels,
+            self.event_log, tick_read(self, "lap", api.read.lap.number),
+            tick_read(self, "elapsed", api.read.session.elapsed), readings, self.event_labels,
             lambda value: f"{self.unit_temp(value):.0f}{self.sign_text}",
         )
 
     def update_contact_events(self):
         """Event log: contacts of player with other cars & walls, from game contact list (LMU),
         each contact once as it happens (contacts from before widget started not logged)"""
-        now = api.read.session.elapsed()
+        now = tick_read(self, "elapsed", api.read.session.elapsed)
         if now < self.contacts_session_time:  # new session
             self.contacts_logged.clear()
         self.contacts_session_time = now
@@ -675,7 +796,7 @@ class DataReader:
                 continue
             labels = self.event_labels
             text = labels["wall"] if other == IMMOVABLE else f"{labels['contact']} {other}"
-            self.event_log.add(api.read.lap.number(), time, text)
+            self.event_log.add(tick_read(self, "lap", api.read.lap.number), time, text)
 
     def displayed_incident(self, now: float | None = None):
         """Incident the trace shows frozen: picked with the hotkey, or the last one, for
@@ -708,7 +829,7 @@ class DataReader:
     def check_new_session(self):
         """New session (session time going back): recorder & event log forget the old session,
         lap statistics and stint pressure range start again"""
-        elapsed = api.read.session.elapsed()
+        elapsed = tick_read(self, "elapsed", api.read.session.elapsed)
         if math.isfinite(elapsed) and elapsed < self.last_session_elapsed - 1:
             incident = self.recorder.reset()  # incident still recording is kept, not lost
             if incident is not None:
@@ -724,7 +845,7 @@ class DataReader:
     def update_lap_stats(self):
         """Per wheel over the current lap: lowest ride height, bottoming, bump stop contacts,
         travel used, damper speed histogram (reset on each new lap)"""
-        lap = api.read.lap.number()
+        lap = tick_read(self, "lap", api.read.lap.number)
         if lap != self.stats_lap:
             self.stats_lap = lap
             for stats in self.lap_stats:
@@ -769,7 +890,7 @@ class DataReader:
             self.tyre_diameters = (TYRE_DIAMETER_MM,) * 4  # learned again for the new car
         positions = api.read.wheel.suspension_deflection()
         forces = api.read.wheel.suspension_force()
-        loads = api.read.tyre.load()
+        loads = tick_read(self, "load", api.read.tyre.load)
         now = monotonic()
         if self.use_wheels:
             lows: Sequence[float]
@@ -906,11 +1027,14 @@ class DataReader:
                 if self.match_heatmap:
                     self.heatmap_tyre[index] = self.load_tyre_heatmap(select_tyre_heatmap_name(compound))
                 symbol = select_compound_symbol(compound)
-                self.wheels[index].compound = symbol  # shown only if show_tyre_compound
+                wheel = self.wheels[index]
+                wheel.compound = symbol  # shown only if show_tyre_compound
+                wheel.compound_color = select_compound_color(compound, text=False)  # badge like Standings
+                wheel.compound_ink = readable_on(QColor(wheel.compound_color)).name()
                 self.wheel_targets[index] = self.compound_target(compound, symbol, index >= 2)
         if not self.match_heatmap:
             return
-        vehicle = (api.read.vehicle.class_name(), self.vehicle_name)
+        vehicle = (tick_read(self, "class_name", api.read.vehicle.class_name), self.vehicle_name)
         if self.last_vehicle != vehicle:
             self.last_vehicle = vehicle
             front = self.load_brake_heatmap(select_brake_heatmap_name(set_predefined_brake_name(*vehicle, True)))

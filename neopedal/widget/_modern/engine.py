@@ -25,6 +25,8 @@ power to weight ratio.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,9 +36,14 @@ from ...module_info import minfo
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import EngineConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: EngineConfig
 
     options = (
         "font_size", "layout", "overheat_threshold_oil", "overheat_threshold_water", "show_oil_temperature",

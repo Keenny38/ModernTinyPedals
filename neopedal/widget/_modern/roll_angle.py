@@ -24,6 +24,8 @@ Front & rear roll angle, difference rear to front, roll angle ratio (front share
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -31,9 +33,14 @@ from ...api_control import api
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RollAngleConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: RollAngleConfig
 
     options = (
         "font_size", "layout", "show_degree_and_percentage_sign", "wheel_track_front", "wheel_track_rear",

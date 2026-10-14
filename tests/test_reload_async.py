@@ -152,7 +152,10 @@ def reloader(ui_env, monkeypatch):
     loader.cancel_reload()
 
 
-def test_reload_returns_while_modules_stopping(reloader):
+def test_reload_returns_while_modules_stopping(reloader, monkeypatch):
+    monkeypatch.setattr(cfg, "is_saving", True)  # settings being saved
+    monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: reloader.calls.append(
+        "cfg.save_now" if kwargs.get("next_task") else "cfg.save"))
     done = []
     loader.reload(reload_preset=True, wait=False)
     loader.after_reload(lambda: done.append(list(reloader.calls)))
@@ -160,12 +163,15 @@ def test_reload_returns_while_modules_stopping(reloader):
     spin_until(lambda: False, 0.05)  # event loop runs, modules still stopping
     assert loader.reloading() and "api.restart" not in reloader.calls
     reloader.mctrl.pending = False  # modules stopped
+    spin_until(lambda: False, 0.05)  # saving (data saved by stopped modules) waited, polled
+    assert loader.reloading() and "cfg.load_user" not in reloader.calls
+    monkeypatch.setattr(cfg, "is_saving", False)
     assert spin_until(lambda: done)
     calls = done[0]
     # Same steps & order as blocking reload: saved, stopped, saved again, preset loaded, api, modules
-    assert calls[0] == "cfg.flush"
+    assert calls[0] == "cfg.save_now" and "cfg.flush" not in calls  # GUI never waits for saving
     assert calls.index("wctrl.stop_all") < calls.index("mctrl.stop_all") < calls.index("octrl.disable")
-    assert calls.index("octrl.disable") < calls.index("cfg.flush", 1) < calls.index("cfg.load_user")
+    assert calls.index("octrl.disable") < calls.index("cfg.save_now", 1) < calls.index("cfg.load_user")
     assert calls.index("cfg.load_user") < calls.index("layout") < calls.index("api.restart")
     assert calls.index("api.restart") < calls.index("mctrl.start") < calls.index("wctrl.start")
     assert not loader.reloading()

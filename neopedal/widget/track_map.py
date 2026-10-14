@@ -20,7 +20,8 @@
 Track map Widget
 """
 
-from typing import Any
+from math import isfinite
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QStaticText, QTransform
@@ -33,11 +34,14 @@ from ..validator import vehicle_position_interp
 from ._base import Overlay
 from ._painter import fill_pixmap, fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TrackMapConfig
+
 
 class TrackMapMixin:
     """Map geometry, car, safety car & pit out prediction positions, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "TrackMapConfig"
 
     def setup_map(self, area_size: int, area_margin: int):
         """Map area & options, last data"""
@@ -53,16 +57,21 @@ class TrackMapMixin:
             self.pitout_time_offset = max(self.wcfg["pitout_time_offset"], 0)
             self.min_pit_time = self.wcfg["pitout_duration_minimum"] + self.pitout_time_offset
             self.pit_time_increment = max(self.wcfg["pitout_duration_increment"], 1)
-            self.auto_pit_time = -1
+            self.auto_pit_time: float = -1
             if self.wcfg["enable_fixed_pitout_prediction"]:
                 self.fixed_pit_times = tuple(sorted(set(self.set_fixed_pit_time())))
 
         if self.wcfg["show_safety_car"]:
             self.gen_position_interp = vehicle_position_interp()
+        self.safetycar_pos: tuple[float, float] | None = None  # set by update_safetycar, read by paint
+        # Pit out predictions, set by update_predictions, read by paint (None: not updated yet, picture)
+        self.predictions: tuple | None = None
 
         # Last data
         self.last_modified = 0
         self.last_veh_data_version: int | None = None
+        # Car positions, set by update (vehicle_positions), read by paint (None: not updated yet, picture)
+        self.car_positions: tuple[tuple[int, float, float], ...] | None = None
         self.circular_map = True
         self.map_scaled: Any = None  # scaled coordinates of recorded map, None for temporary circle map
         self.map_range = (0, 10, 0, 10)
@@ -164,6 +173,18 @@ class TrackMapMixin:
             return rot_x * self.map_scale - x_offset, rot_y * self.map_scale - y_offset
         return veh_info.worldPositionX * self.map_scale - x_offset, veh_info.worldPositionY * self.map_scale - y_offset
 
+    def vehicle_positions(self, inpit_offset: float) -> tuple[tuple[int, float, float], ...]:
+        """Index & position of each car in draw order (recorded map, else temporary circle map, cars in pit moved
+        inside circle by offset), computed once per update, drawn by paint"""
+        veh_info = minfo.vehicles.dataSet
+        total = len(veh_info)  # draw order of relative can list a car vehicles data no longer has (car left)
+        draw_order = [index for index in minfo.relative.drawOrder if 0 <= index < total]
+        if self.map_scaled:
+            position = self.map_position
+            return tuple((index, *position(veh_info[index])) for index in draw_order)
+        circle = self.circle_position
+        return tuple((index, *circle(veh_info[index], inpit_offset)) for index in draw_order)
+
     def circle_position(self, veh_info, inpit_offset: float) -> tuple[float, float]:
         """Car position on temporary circle map, cars in pit moved inside circle by offset"""
         offset = self.area_size * 0.5
@@ -179,6 +200,16 @@ class TrackMapMixin:
         if self.show_position_in_class:
             return veh_info.positionInClass
         return veh_info.positionOverall
+
+    def update_safetycar(self) -> tuple[float, float] | None:
+        """Safety car position shown (None if none), interpolation advanced once per update (not per paint)"""
+        position = None
+        if self.wcfg["show_safety_car"] and self.map_scaled and api.read.lap.safety_car_active():
+            found = self.safetycar_position(self.map_scaled)
+            if found is not None:
+                position = (found[0], found[1])
+        self.safetycar_pos = position
+        return position
 
     def safetycar_position(self, map_data) -> tuple[float, float] | None:
         """Safety car position on recorded map, None without map or lap distance data"""
@@ -206,6 +237,23 @@ class TrackMapMixin:
                 safetycar_dist,
             )
         return map_data[0]
+
+    def update_predictions(self) -> tuple:
+        """Pit out predictions shown: ((x, y, pit time, auto estimated), ...), computed once per update (game
+        data read, auto pit time set), not per paint"""
+        predictions: tuple = ()
+        if self.wcfg["show_pitout_prediction"]:
+            index = minfo.vehicles.playerIndex
+            if 0 <= index < len(minfo.vehicles.dataSet):  # none without player car (spectating)
+                predictions = tuple(self.pitout_predictions(self.map_scaled, minfo.vehicles.dataSet[index]))
+        self.predictions = predictions
+        return predictions
+
+    def shown_predictions(self) -> tuple:
+        """Pit out predictions to draw: from last update, computed now before first update (overlay picture)"""
+        if self.predictions is None:
+            return self.update_predictions()
+        return self.predictions
 
     def pitout_predictions(self, map_data, plr_veh_info):
         """Pit out prediction positions on recorded map: (x, y, pit time, auto estimated)"""
@@ -317,6 +365,9 @@ class TrackMapMixin:
 class Realtime(TrackMapMixin, Overlay):
     """Draw widget"""
 
+    wcfg: "TrackMapConfig"
+    max_repaint_rate = 25  # whole window repainted when any car moves
+
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
@@ -400,11 +451,35 @@ class Realtime(TrackMapMixin, Overlay):
         modified = minfo.mapping.lastModified
         self.update_map(modified)
 
-        # Vehicles
+        # Vehicles, safety car & pit out predictions: repaint when drawn in other device pixels or style
+        ratio = self.devicePixelRatioF()
         veh_data_version = minfo.vehicles.dataSetVersion
-        if self.last_veh_data_version != veh_data_version:
+        if self.last_veh_data_version != veh_data_version or self.car_positions is None:
             self.last_veh_data_version = veh_data_version
-            self.update()
+            self.car_positions = self.vehicle_positions(self.circle_pit_offset)
+        safetycar = self.update_safetycar()
+        show_duration = self.wcfg["show_pitout_prediction"] and self.wcfg["show_pitstop_duration"]
+        key = (
+            self.vehicles_key(self.car_positions, ratio),
+            safetycar and device_point(*safetycar, ratio),
+            tuple((device_point(pos_x, pos_y, ratio), show_duration and self.pitstop_duration_text(pit_time), auto)
+                  for pos_x, pos_y, pit_time, auto in self.update_predictions()),
+        )
+        if self.changed("cars", key):
+            self.request_update()
+
+    def vehicles_key(self, positions: tuple, ratio: float) -> tuple:
+        """Cars as drawn: position in device pixels, outline & fill style, place number"""
+        veh_info = minfo.vehicles.dataSet
+        show_standings = self.show_standings
+        key = []
+        for index, pos_x, pos_y in positions:
+            data = veh_info[index]
+            key.append((
+                device_point(pos_x, pos_y, ratio), data.isPlayer, id(self.outline_vehicle(data)),
+                id(self.color_vehicle(data)), show_standings and self.place_number(data),
+            ))
+        return tuple(key)
 
     # GUI update methods
     def update_map(self, data):
@@ -414,6 +489,7 @@ class Realtime(TrackMapMixin, Overlay):
             raw_data = minfo.mapping.coordinates if data != -1 else None
             map_sector_paths, map_full_path = self.create_map_path(raw_data)
             self.draw_map_image(map_sector_paths, map_full_path, self.circular_map)
+            self.car_positions = None  # map scale changed
             if self.wcfg["show_proximity_circle"]:
                 self.update_proximity_rect()
 
@@ -423,22 +499,17 @@ class Realtime(TrackMapMixin, Overlay):
         painter.drawPixmap(0, 0, self.pixmap_map)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
+        positions = self.car_positions
+        if positions is None:  # not updated yet (overlay picture)
+            positions = self.vehicle_positions(self.circle_pit_offset)
         if self.map_scaled:
-            self.draw_vehicle_on_map(
-                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
-            )
-            if self.wcfg["show_safety_car"] and api.read.lap.safety_car_active():
+            self.draw_vehicle_on_map(painter, minfo.vehicles.dataSet, positions)
+            if self.safetycar_pos is not None:
                 self.draw_safetycar_on_map(painter, self.map_scaled)
         else:
-            self.draw_vehicle_on_circle(
-                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
-            )
+            self.draw_vehicle_on_circle(painter, minfo.vehicles.dataSet, positions)
         if self.wcfg["show_pitout_prediction"]:
-            self.draw_pitout_prediction(
-                painter,
-                self.map_scaled,
-                minfo.vehicles.dataSet[minfo.vehicles.playerIndex],
-            )
+            self.draw_pitout_prediction(painter)
 
     def draw_map_image(self, map_sector_paths: list, map_full_path, circular_map=True):
         """Draw map image separately"""
@@ -465,7 +536,7 @@ class Realtime(TrackMapMixin, Overlay):
 
         # Draw map outline
         if self.wcfg["map_outline_width"] > 0:
-            pen.setWidth(self.wcfg["map_width"] + self.wcfg["map_outline_width"])
+            pen.setWidthF(self.wcfg["map_width"] + self.wcfg["map_outline_width"])
             pen.setColor(self.wcfg["map_outline_color"])
             painter.setPen(pen)
             painter.drawPath(map_full_path)
@@ -476,7 +547,7 @@ class Realtime(TrackMapMixin, Overlay):
             self.wcfg["map_color_sector_2"],
             self.wcfg["map_color_sector_3"],
         )
-        pen.setWidth(self.wcfg["map_width"])
+        pen.setWidthF(self.wcfg["map_width"])
         for map_sector_path, map_color in zip(map_sector_paths, map_colors):
             pen.setColor(map_color)
             painter.setPen(pen)
@@ -487,7 +558,7 @@ class Realtime(TrackMapMixin, Overlay):
         if self.map_scaled:
             # SF line (line across first 2 nodes)
             if self.wcfg["show_start_line"] and len(self.map_scaled) > 1:
-                pen.setWidth(self.wcfg["start_line_width"])
+                pen.setWidthF(self.wcfg["start_line_width"])
                 pen.setColor(self.wcfg["start_line_color"])
                 painter.setPen(pen)
                 pos_x1, pos_y1, pos_x2, pos_y2 = self.map_line(0, self.wcfg["start_line_length"])
@@ -496,7 +567,7 @@ class Realtime(TrackMapMixin, Overlay):
             # Sector lines
             sectors_index = minfo.mapping.sectors
             if self.wcfg["show_sector_line"] and isinstance(sectors_index, tuple):
-                pen.setWidth(self.wcfg["sector_line_width"])
+                pen.setWidthF(self.wcfg["sector_line_width"])
                 pen.setColor(self.wcfg["sector_line_color"])
                 painter.setPen(pen)
 
@@ -508,7 +579,7 @@ class Realtime(TrackMapMixin, Overlay):
         else:
             # SF line
             if self.wcfg["show_start_line"]:
-                pen.setWidth(self.wcfg["start_line_width"])
+                pen.setWidthF(self.wcfg["start_line_width"])
                 pen.setColor(self.wcfg["start_line_color"])
                 painter.setPen(pen)
                 painter.drawLine(
@@ -518,11 +589,11 @@ class Realtime(TrackMapMixin, Overlay):
                     int(self.area_size * 0.5),
                 )
 
-    def draw_vehicle_on_circle(self, painter, veh_info, veh_draw_order):
-        """Draw vehicles on temporary circle map"""
-        for index in veh_draw_order:
+    def draw_vehicle_on_circle(self, painter, veh_info, positions):
+        """Draw vehicles on temporary circle map (index & position in draw order, see vehicle_positions)"""
+        for index, pos_x, pos_y in positions:
             data = veh_info[index]
-            painter.translate(*self.circle_position(data, self.circle_pit_offset))
+            painter.translate(pos_x, pos_y)
 
             painter.setPen(self.outline_vehicle(data))
             painter.setBrush(self.color_vehicle(data))
@@ -541,11 +612,11 @@ class Realtime(TrackMapMixin, Overlay):
                 self.draw_place_number(painter, self.place_number(data))
             painter.resetTransform()
 
-    def draw_vehicle_on_map(self, painter, veh_info, veh_draw_order):
-        """Draw vehicles on track map"""
-        for index in veh_draw_order:
+    def draw_vehicle_on_map(self, painter, veh_info, positions):
+        """Draw vehicles on track map (index & position in draw order, see vehicle_positions)"""
+        for index, pos_x, pos_y in positions:
             data = veh_info[index]
-            painter.translate(*self.map_position(data))
+            painter.translate(pos_x, pos_y)
 
             painter.setPen(self.outline_vehicle(data))
             painter.setBrush(self.color_vehicle(data))
@@ -593,8 +664,8 @@ class Realtime(TrackMapMixin, Overlay):
         return rect.topLeft(), static_text
 
     def draw_safetycar_on_map(self, painter, map_data):
-        """Draw safety car on map"""
-        position = self.safetycar_position(map_data)
+        """Draw safety car on map (position set by update_safetycar)"""
+        position = self.safetycar_pos
         if position is None:
             return
         painter.translate(*position)
@@ -605,10 +676,10 @@ class Realtime(TrackMapMixin, Overlay):
         painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, self.wcfg["safety_car_text"])
         painter.resetTransform()
 
-    def draw_pitout_prediction(self, painter, map_data, plr_veh_info):
-        """Draw pitout prediction circles"""
+    def draw_pitout_prediction(self, painter):
+        """Draw pitout prediction circles (positions set by update_predictions)"""
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        for pos_x, pos_y, pit_time, auto_prediction in self.pitout_predictions(map_data, plr_veh_info):
+        for pos_x, pos_y, pit_time, auto_prediction in self.shown_predictions():
             painter.translate(pos_x, pos_y)
             painter.setPen(self.pen_outline["auto_prediction" if auto_prediction else "prediction"])
             painter.drawEllipse(self.veh_shape)
@@ -675,11 +746,11 @@ class Realtime(TrackMapMixin, Overlay):
             return self.brush_overall["laps_behind"]
         return self.brush_overall["same_lap"]
 
-    def set_pen_style(self, color: str, width: int):
+    def set_pen_style(self, color: str, width: float):
         """Set pen style"""
         if width > 0:
             pen = QPen()
-            pen.setWidth(width)
+            pen.setWidthF(width)
             pen.setColor(color)
         else:
             pen = QPen(Qt.PenStyle.NoPen)
@@ -694,6 +765,12 @@ def target_pitstop_duration(pit_timer: float, min_pit_time: float, pit_time_incr
     """Target pitstop duration = min pit duration + pit duration increment * number of increments"""
     overflow_increments = max(pit_timer - min_pit_time + pit_time_increment, 0) // pit_time_increment
     return min_pit_time + pit_time_increment * overflow_increments
+
+
+def device_point(pos_x: float, pos_y: float, ratio: float) -> tuple[int, int]:
+    """Position in device pixels (0 if not finite): repaint key of a drawn position"""
+    x, y = pos_x * ratio, pos_y * ratio
+    return (round(x) if isfinite(x) else 0), (round(y) if isfinite(y) else 0)
 
 
 def target_node_time(position: float, delta_data: tuple, max_index: int, laptime_scale: float) -> float:

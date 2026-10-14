@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Home page: state at a glance (game & session, overlay, preset, version, last session) & shortcuts
+Home page: state at a glance (game & session, overlay, preset, version, last session, driver) & shortcuts
 
 Header with version, what's new of running version (local changelog, works offline) and update
 state. Cards are clickable (open their page), laid out in 1 to 3 columns following page width.
@@ -28,6 +28,7 @@ from __future__ import annotations
 import html
 import os
 from collections.abc import Callable
+from time import monotonic
 from typing import NamedTuple
 
 from PySide6.QtCore import QDateTime, QLocale, QPointF, Qt, QTimer, Slot
@@ -50,10 +51,10 @@ from ..api_control import api
 from ..calculation import sec2laptime_full
 from ..const_app import APP_NAME, VERSION
 from ..i18n import current_language, tr, trm
+from ..lazy_service import update_checker
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
-from ..update import changelog_sections, localized_changelog_name, update_checker
 from ..userfile.custom_image import LOGO_LOADER, brand_logo_file, logo_for_background, read_picture
 from ..userfile.driver_history import SessionRecord, last_record
 from ..userfile.game_images import images
@@ -61,6 +62,7 @@ from . import app_icon_file, status_color
 from ._common import UIScaler
 from .nav_rail import RailEditor
 from .ordered_picker import PickerEntry
+from .quick.background import BackgroundJobs
 from .quick.game_pictures import notifier
 
 CHANGELOG_FILE = "CHANGELOG.md"  # next to app (release build) or project root (source)
@@ -75,6 +77,7 @@ GLYPH_OVERLAYS = ("", "O")  # view all
 GLYPH_MODULES = ("", "M")  # processing
 GLYPH_HISTORY = ("", "H")  # history
 GLYPH_START = ("", "S")  # play
+GLYPH_DRIVER = ("\ue77b", "D")  # contact
 # Quick access actions (besides tools & pages): key: (label, glyph, letter)
 QUICK_ACTIONS = {
     "command_palette": ("Command Palette", "\ue721", "C"),  # search
@@ -82,6 +85,7 @@ QUICK_ACTIONS = {
     "check_updates": ("Check for Updates", "\ue895", "U"),  # sync
 }
 QUICK_SHORTCUTS = {"command_palette": "Ctrl+K"}  # shown after label
+DRIVER_DATA_SECONDS = 600.0  # driver card: results files & profile read again this often while Home shows
 COLUMN_WIDTH = 30  # UIScaler size of one card column, page gets 2 or 3 columns from this width
 QUICK_COLUMNS = {1: 1, 2: 3, 3: 5}  # quick access buttons per row for card columns
 LOGO_CHECK_MS = 100  # logos read on logo loader thread checked for at this interval
@@ -178,6 +182,8 @@ def base_version(version: str = VERSION) -> str:
 
 def read_changelog(filename: str) -> list[tuple[str, str]]:
     """Changelog sections (version, body), empty if no changelog"""
+    from ..update import changelog_sections
+
     try:
         with open(filename, encoding="utf-8") as file:
             return changelog_sections(file.read())
@@ -191,6 +197,8 @@ def current_release_notes(filename: str = CHANGELOG_FILE, version: str = VERSION
     Section of running version in language, else in English (not translated yet), else
     newest section (development version).
     """
+    from ..update import localized_changelog_name
+
     translated = read_changelog(localized_changelog_name(language, filename)) if language != "en" else []
     english = read_changelog(filename)
     base = base_version(version)
@@ -525,6 +533,10 @@ class HomeView(QWidget):
         self.card_last = HomeCard(content, "Last Session", GLYPH_HISTORY, icon_family,
                                   lambda: self.open_tool("driver_stats_viewer.DriverStatsViewer"),
                                   tr("Open driver stats"))
+        self.card_driver = HomeCard(content, "Driver", GLYPH_DRIVER, icon_family,
+                                    lambda: self.open_tool("driver_stats_viewer.DriverStatsViewer"),
+                                    tr("Open driver stats"))
+        self.card_driver.hide()  # shown once anything is known (ranks, profile, races)
         self.card_start = HomeCard(content, "Before Driving", GLYPH_START, icon_family)
         self.card_start.set_text(
             f"<b>{html.escape(tr('Game Setup'))}</b>",
@@ -533,7 +545,7 @@ class HomeView(QWidget):
                            "rFactor 2: install the shared memory plugin.")))
         self.cards = (
             self.card_game, self.card_overlay, self.card_preset,
-            self.card_widget, self.card_module, self.card_last,
+            self.card_widget, self.card_module, self.card_last, self.card_driver,
         )
         self.grid = QGridLayout()
         self.grid.setSpacing(UIScaler.pixel(10))
@@ -586,10 +598,16 @@ class HomeView(QWidget):
         self.arrange(self.column_count(self.width()))
         app_signal.updates.connect(self.refresh_version)
         # Game state changes without refresh signal
+        self._stale = False  # refresh skipped while window minimized: done once shown again
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh_live)
         self._timer.start(1000)
         notifier().changed.connect(self.refresh_last_session)  # logos fetched from game meanwhile
+        # Driver card: ranks of game menu file (polled in background), profile & races read in background
+        self._jobs = BackgroundJobs(self, "Home")
+        self._driver_data = None  # DriverData once read
+        self._driver_read_time = -DRIVER_DATA_SECONDS
+        self._driver_key: tuple | None = None  # what driver card shows (made again only when changed)
         self.refresh()
 
     # Quick access
@@ -684,6 +702,7 @@ class HomeView(QWidget):
         super().showEvent(event)
         self.refresh_last_session()  # session saved while page was hidden
         self.refresh_live()
+        self.read_driver_data()
 
     # Actions
     def open_tool(self, path: str):
@@ -754,12 +773,13 @@ class HomeView(QWidget):
         """Version, update chip & button"""
         game = api.name if cfg.user.setting else ""
         self.label_version.setText(" · ".join(text for text in (f"{tr('Version')} {VERSION}", game) if text))
-        if update_checker.is_checking():
+        checked = update_checker.imported  # update module imported by first check, not at start for this
+        if checked and update_checker.is_checking():
             self.chip_update.setHidden(True)
             self.button_update.setText(tr("Checking..."))
             self.button_update.setEnabled(False)
             self.button_update.setObjectName("")
-        elif update_checker.is_updates():
+        elif checked and update_checker.is_updates():
             version = ".".join(str(part) for part in update_checker.latest_version())
             self.chip_update.setText(f"{tr('Update Available')} · v{version}")
             self.chip_update.setHidden(False)
@@ -771,13 +791,16 @@ class HomeView(QWidget):
             self.button_update.setText(tr("Check for Updates"))
             self.button_update.setEnabled(True)
             self.button_update.setObjectName("")
-            self.button_update.setToolTip(trm(update_checker.message()))
+            self.button_update.setToolTip(trm(update_checker.message()) if checked else "")
         self.button_update.style().unpolish(self.button_update)  # object name changes style
         self.button_update.style().polish(self.button_update)
 
     def refresh_last_session(self):
         """Last driven session from driver stats, card hidden if none (refreshed when page shown)"""
         if not self.isVisible():  # hidden page or window: refreshed by showEvent
+            return
+        if self.window().isMinimized():  # refreshed once restored (refresh_live)
+            self._stale = True
             return
         record = last_session()
         hidden = record is None
@@ -798,6 +821,13 @@ class HomeView(QWidget):
         """Refresh game, session & overlay state"""
         if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
             return
+        if self.window().isMinimized():  # still "visible" while minimized: refreshed once restored
+            self._stale = True
+            return
+        if self._stale:  # restored: changes made meanwhile shown
+            self._stale = False
+            self.refresh_last_session()
+        self.refresh_driver()
         state, running = api_state_text()
         dot = status_color("success" if running else "inactive")
         session = session_text() if running else ""
@@ -826,3 +856,42 @@ class HomeView(QWidget):
         text = tr("Unlock Overlay") if locked else tr("Lock Overlay")
         if self.button_lock.text() != text:
             self.button_lock.setText(text)
+
+    def read_driver_data(self, force: bool = False):
+        """Profile & race record read in background, again once DRIVER_DATA_SECONDS passed (page shown)"""
+        if not force and monotonic() - self._driver_read_time < DRIVER_DATA_SECONDS:
+            return
+        from .home_driver import read_driver_data
+
+        self._driver_read_time = monotonic()
+        self._jobs.run("driver card", read_driver_data, self.driver_data_read, key="driver")
+
+    def driver_data_read(self, data):
+        self._driver_data = data
+        self.refresh_driver()
+
+    def refresh_driver(self):
+        """Driver card: ranks checked in background (game menu file changed), made again only when changed"""
+        from ..rank_info import history_path, ranks
+
+        ranks.poll()
+        if monotonic() - self._driver_read_time >= DRIVER_DATA_SECONDS:
+            self.read_driver_data()
+        light = light_page()
+        key = (ranks.serial, id(self._driver_data), light, current_language())
+        if key == self._driver_key:
+            return
+        self._driver_key = key
+        from ..process import driver_ranks as dr
+        from .home_driver import driver_card_text
+
+        player = ranks.player
+        history = dr.account_history(dr.read_history(history_path()), player.steam_id) if player is not None else []
+        text = driver_card_text(player, ranks.remembered, ranks.updated, history, self._driver_data, light,
+                                ranks.others)
+        hidden = text is None
+        if text is not None:
+            self.card_driver.set_text(*text)
+        if self.card_driver.isHidden() != hidden:
+            self.card_driver.setHidden(hidden)
+            self.rearrange()

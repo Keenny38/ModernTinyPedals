@@ -20,6 +20,7 @@ def make(ui_env, bundled_fonts, monkeypatch):
     monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)  # never looks for the game folder
     monkeypatch.setattr(api.read.session, "cut_points", lambda *args: 1.25)
     monkeypatch.setattr(api.read.session, "limits_points", lambda: 5.0)
+    monkeypatch.setattr(api.read.session, "in_race", lambda: True)
 
     def build(modern: bool, **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
@@ -65,3 +66,12 @@ def test_modern(make, monkeypatch):
     monkeypatch.setattr(rank_info.ranks, "player", None)
     widget.timerEvent(None)
     assert widget.state[0].text != "Silver 2"
+
+
+def test_no_limit_outside_race(make, monkeypatch):
+    monkeypatch.setattr(api.read.session, "in_race", lambda: False)  # practice & qualifying: no penalty
+    widget = make(True)
+    widget.timerEvent(None)
+    limits = widget.state[-1]
+    assert limits.text.startswith("1.25/") and limits.text != "1.25/5"
+    assert limits.color == widget.theme.warning

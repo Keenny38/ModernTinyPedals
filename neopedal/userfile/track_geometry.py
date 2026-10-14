@@ -37,7 +37,9 @@ import re
 from collections.abc import Sequence
 from contextlib import suppress
 from itertools import pairwise
-from typing import NamedTuple
+from typing import Any, NamedTuple
+
+from . import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -138,25 +140,22 @@ def load_geometry(folder: str, track: str) -> TrackGeometry | None:
     return None
 
 
-def save_geometry(folder: str, track: str, geometry: TrackGeometry):
+def save_geometry(folder: str, track: str, geometry: TrackGeometry) -> None:
     target = cache_path(folder, track)
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        temp = f"{target}.tmp"
-        with open(temp, "w", encoding="utf-8") as file:
-            json.dump({
-                "layout": geometry.layout, "name": geometry.name, "length": geometry.length,
-                "center": [[round(value, 3) for value in point] for point in geometry.center],
-                "pit": [[round(value, 3) for value in point] for point in geometry.pit],
-                "start": [round(value, 3) for value in geometry.start] if geometry.start else None,
-            }, file)
-        os.replace(temp, target)
+        write_json(target, {
+            "layout": geometry.layout, "name": geometry.name, "length": geometry.length,
+            "center": [[round(value, 3) for value in point] for point in geometry.center],
+            "pit": [[round(value, 3) for value in point] for point in geometry.pit],
+            "start": [round(value, 3) for value in geometry.start] if geometry.start else None,
+        }, raise_error=True)
     except OSError as error:
         logger.warning("TRACK GEOMETRY: unable to save %s: %s", target, error)
 
 
 # Game REST API
-def rest_get(host: str, port: int, resource: str, timeout: float = REQUEST_TIMEOUT):
+def rest_get(host: str, port: int, resource: str, timeout: float = REQUEST_TIMEOUT) -> Any:
     """Json from game REST API, None if game not running or no answer"""
     from ..async_request import forget_hostname, get_response, resolve_hostname, set_header_get
 

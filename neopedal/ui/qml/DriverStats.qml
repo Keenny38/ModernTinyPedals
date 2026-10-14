@@ -31,8 +31,8 @@ TpPage {
     function resultColor(result, podium) {
         if (result === "DNF" || result === "DQ") return theme.warning
         if (podium === 1) return theme.gold
-        if (podium === 2) return theme.dark ? "#C3CAD4" : "#64748B"
-        if (podium === 3) return theme.dark ? "#D99A62" : "#9A5B2C"
+        if (podium === 2) return theme.silver
+        if (podium === 3) return theme.bronze
         return theme.text
     }
     function openRowMenu(key, column, item, x, y) {
@@ -40,6 +40,13 @@ TpPage {
         menuColumn = column
         menuActions = backend.rowActions(key, column)
         rowMenu.popup(item, x, y)
+    }
+    // Popup or menu closed: focus put back where it was, but left on the window (table keys lost): table
+    // (a popup or field focused by the menu action keeps it)
+    function refocusTable() {
+        var current = Window.activeFocusItem
+        if (!current || current === Window.contentItem)
+            table.forceActiveFocus()
     }
     function popupBelow(menu, button) {
         menu.visible ? menu.close() : menu.popup(button, 0, button.height + 4)
@@ -70,13 +77,13 @@ TpPage {
             anchors.centerIn: parent
             text: parent.text
             color: parent.tint
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.weight: parent.strong ? Font.Bold : Font.DemiBold
             font.features: { "tnum": 1 }
         }
     }
     // Empty state: icon, message
-    component EmptyState: ColumnLayout {
+    component StatsEmpty: ColumnLayout {  // not shared EmptyState.qml: fills a layout, smaller texts
         property string glyph: ""
         property string text: ""
         property string detail: ""
@@ -110,16 +117,16 @@ TpPage {
     // Small section title inside a card
     component SectionLabel: Text {
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.85
+        font.pointSize: theme.fontSmall
         font.weight: Font.DemiBold
-        Layout.topMargin: theme.em * 0.25
+        Layout.topMargin: theme.em * 0.3
     }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.em * 0.8
         anchors.bottomMargin: theme.em * 0.6
-        spacing: theme.em * 0.65
+        spacing: theme.em * 0.7
 
         // Header: back to All Tracks, track picker & subtitle, actions
         RowLayout {
@@ -140,12 +147,13 @@ TpPage {
                 Layout.minimumWidth: theme.em * 12
                 TrackPicker {
                     id: picker
+                    onClosed: page.refocusTable()
                     Layout.fillWidth: true
                     Layout.maximumWidth: Math.max(implicitWidth, theme.em * 14)
                 }
                 RowLayout {
                     spacing: theme.em * 0.5
-                    Layout.leftMargin: theme.em * 0.55
+                    Layout.leftMargin: theme.em * 0.6
                     Layout.fillWidth: true
                     Rectangle {  // track of game session
                         visible: page.info.live === true
@@ -155,32 +163,25 @@ TpPage {
                         color: Qt.rgba(theme.gain.r, theme.gain.g, theme.gain.b, 0.14)
                         ToolTip.visible: liveHover.hovered
                         ToolTip.text: i18n.tr("Track of the running game session")
-                        ToolTip.delay: 500
+                        ToolTip.delay: theme.tipDelay
                         HoverHandler { id: liveHover }
                         Row {
                             id: liveRow
                             anchors.centerIn: parent
-                            spacing: theme.em * 0.35
-                            Rectangle {
+                            spacing: theme.em * 0.4
+                            TpPulseDot {
                                 id: liveDot
                                 width: theme.em * 0.5
-                                height: width
-                                radius: width / 2
                                 color: theme.gain
                                 anchors.verticalCenter: parent.verticalCenter
-                                SequentialAnimation on opacity {
-                                    // A few pulses when state starts or page shows again, then still: no endless redraw
-                                    running: page.info.live === true && pageState.active
-                                    loops: 3
-                                    onRunningChanged: if (!running) liveDot.opacity = 1
-                                    NumberAnimation { to: 0.3; duration: 800; easing.type: Easing.InOutSine }
-                                    NumberAnimation { to: 1; duration: 800; easing.type: Easing.InOutSine }
-                                }
+                                pulsing: page.info.live === true
+                                low: 0.3
+                                pulseDuration: 800
                             }
                             Text {
                                 text: i18n.tr("Live")
                                 color: theme.gain
-                                font.pointSize: theme.fontPoint * 0.8
+                                font.pointSize: theme.fontCaption
                                 font.weight: Font.Bold
                             }
                         }
@@ -194,7 +195,7 @@ TpPage {
                 }
             }
             RowLayout {
-                spacing: theme.em * 0.35
+                spacing: theme.em * 0.4
                 Layout.alignment: Qt.AlignTop
                 TpButton {
                     glyph: ""  // map
@@ -222,6 +223,7 @@ TpPage {
                     onClicked: page.popupBelow(exportMenu, exportButton)
                     TpMenu {
                         id: exportMenu
+                        onClosed: page.refocusTable()
                         Action { text: i18n.tr("Export CSV..."); onTriggered: backend.exportCsv(false) }
                         Action { text: i18n.tr("Export Raw Values (CSV)..."); onTriggered: backend.exportCsv(true) }
                         MenuSeparator {}
@@ -238,6 +240,7 @@ TpPage {
                     onClicked: page.popupBelow(viewMenu, viewButton)
                     TpMenu {
                         id: viewMenu
+                        onClosed: page.refocusTable()
                         TpMenu {
                             id: columnsMenu
                             title: i18n.tr("Columns")
@@ -279,6 +282,7 @@ TpPage {
                     onClicked: page.popupBelow(referenceMenu, referenceButton)
                     TpMenu {
                         id: referenceMenu
+                        onClosed: page.refocusTable()
                         Action { text: i18n.tr("Update Reference"); enabled: !backend.downloading; onTriggered: backend.updateReference() }
                         Action { text: i18n.tr("Change Sheet Address..."); onTriggered: backend.changeSheetUrl() }
                         Action {
@@ -302,6 +306,7 @@ TpPage {
                     onClicked: page.popupBelow(moreMenu, moreButton)
                     TpMenu {
                         id: moreMenu
+                        onClosed: page.refocusTable()
                         Action { text: i18n.tr("Reload") + "\tF5"; onTriggered: backend.reload() }
                         TpMenu {
                             id: backupMenu
@@ -349,14 +354,14 @@ TpPage {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: theme.em * 0.65
+            spacing: theme.em * 0.7
 
             // Table & what goes below it
             ColumnLayout {
                 id: mainColumn
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: theme.em * 0.65
+                spacing: theme.em * 0.7
 
                 StatsCard {
                     id: tableCard
@@ -381,14 +386,9 @@ TpPage {
                         visible: backend.loading
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        BusyIndicator {
-                            anchors.centerIn: parent
-                            running: parent.visible
-                            width: theme.em * 2.4
-                            height: width
-                        }
+                        TpLoadingState { anchors.centerIn: parent }
                     }
-                    EmptyState {
+                    StatsEmpty {
                         visible: !backend.hasRows && !backend.loading
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -398,13 +398,24 @@ TpPage {
                     }
                 }
 
-                Loader {  // progression & sessions of selected vehicle, or daily activity (All Tracks)
+                // Daily activity (All Tracks), progression & sessions of selected vehicle: each made when first
+                // shown, then kept (switching between All Tracks and a track only hides one, nothing rebuilt)
+                Loader {
                     Layout.fillWidth: true
-                    Layout.fillHeight: !page.allTracks
-                    Layout.preferredHeight: page.allTracks && item ? item.implicitHeight : -1
-                    Layout.minimumHeight: page.allTracks ? 0 : theme.em * 15
-                    visible: page.allTracks || backend.hasRows
-                    sourceComponent: page.allTracks ? activityCard : progressionCard
+                    Layout.preferredHeight: item ? item.implicitHeight : -1
+                    visible: page.allTracks
+                    active: page.allTracks
+                    onLoaded: active = true  // kept once made
+                    sourceComponent: activityCard
+                }
+                Loader {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: theme.em * 15
+                    visible: !page.allTracks && backend.hasRows
+                    active: !page.allTracks
+                    onLoaded: active = true  // kept once made
+                    sourceComponent: progressionCard
                 }
             }
 
@@ -421,10 +432,20 @@ TpPage {
                 ColumnLayout {
                     id: sideColumn
                     width: side.width - (side.contentHeight > side.height ? theme.em * 0.7 : 0)
-                    spacing: theme.em * 0.65
-                    Loader {
+                    spacing: theme.em * 0.7
+                    Loader {  // All Tracks side (driver, levels, recent sessions): made when first shown, then kept
                         Layout.fillWidth: true
-                        sourceComponent: page.allTracks ? allTracksSide : vehicleSide
+                        visible: page.allTracks
+                        active: page.allTracks
+                        onLoaded: active = true
+                        sourceComponent: allTracksSide
+                    }
+                    Loader {  // selected vehicle side: made when first shown, then kept
+                        Layout.fillWidth: true
+                        visible: !page.allTracks
+                        active: !page.allTracks
+                        onLoaded: active = true
+                        sourceComponent: vehicleSide
                     }
                     StatsCard {  // friend's personal bests against own (exported session history of a friend)
                         visible: page.friend.visible === true
@@ -443,9 +464,9 @@ TpPage {
                             visible: (page.friend.rows || []).length > 0
                             Layout.fillWidth: true
                             spacing: theme.em * 0.4
-                            Text { text: page.allTracks ? i18n.tr("Track") : i18n.tr("Class"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; Layout.fillWidth: true }
-                            Text { text: i18n.tr("You"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; Layout.preferredWidth: theme.em * 5; horizontalAlignment: Text.AlignRight }
-                            Text { text: page.friend.name || ""; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; elide: Text.ElideRight; Layout.preferredWidth: theme.em * 5; horizontalAlignment: Text.AlignRight }
+                            Text { text: page.allTracks ? i18n.tr("Track") : i18n.tr("Class"); color: theme.dimText; font.pointSize: theme.fontSmall; Layout.fillWidth: true }
+                            Text { text: i18n.tr("You"); color: theme.dimText; font.pointSize: theme.fontSmall; Layout.preferredWidth: theme.em * 5; horizontalAlignment: Text.AlignRight }
+                            Text { text: page.friend.name || ""; color: theme.dimText; font.pointSize: theme.fontSmall; elide: Text.ElideRight; Layout.preferredWidth: theme.em * 5; horizontalAlignment: Text.AlignRight }
                             Item { Layout.preferredWidth: theme.em * 4.4 }
                         }
                         Repeater {
@@ -542,7 +563,7 @@ TpPage {
                         Layout.minimumHeight: theme.em * 8
                         chartData: page.progression
                     }
-                    EmptyState {
+                    StatsEmpty {
                         visible: page.progression.visible !== true
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -554,7 +575,7 @@ TpPage {
                         text: page.progression.info || ""
                         color: theme.dimText
                         wrapMode: Text.WordWrap
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                     }
                 }
                 Rectangle {
@@ -574,9 +595,12 @@ TpPage {
                         Layout.fillWidth: true
                         SectionLabel { text: i18n.tr("Sessions"); Layout.topMargin: 0 }
                         Text {
-                            text: page.sessions.length ? String(page.sessions.length) : ""
+                            readonly property int total: page.progression.sessions || 0  // all, list shows newest
+                            text: !page.sessions.length ? ""
+                                  : total > page.sessions.length ? page.sessions.length + " / " + total
+                                  : String(page.sessions.length)
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.85
+                            font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
                         }
                         Item { Layout.fillWidth: true }
@@ -596,11 +620,11 @@ TpPage {
                             required property int index
                             width: ListView.view.width
                             height: Math.round(theme.em * 2)
-                            radius: theme.em * 0.35
+                            radius: theme.radiusSm
                             color: sessionArea.containsMouse ? theme.hover : "transparent"
                             ToolTip.visible: sessionArea.containsMouse
                             ToolTip.text: modelData.tip
-                            ToolTip.delay: 600
+                            ToolTip.delay: theme.tipDelay
                             MouseArea {  // session of a results file: shown in race results page
                                 id: sessionArea
                                 anchors.fill: parent
@@ -613,12 +637,12 @@ TpPage {
                                 anchors.fill: parent
                                 anchors.leftMargin: theme.em * 0.3
                                 anchors.rightMargin: theme.em * 0.3
-                                spacing: theme.em * 0.45
+                                spacing: theme.em * 0.5
                                 Text {
                                     text: sessionItem.modelData.date
                                     color: theme.dimText
                                     font.features: { "tnum": 1 }
-                                    font.pointSize: theme.fontPoint * 0.9
+                                    font.pointSize: theme.fontLabel
                                     Layout.preferredWidth: theme.em * 5.6  // dd/mm/yyyy
                                 }
                                 Chip {
@@ -630,7 +654,7 @@ TpPage {
                                     visible: text !== ""
                                     text: sessionItem.modelData.version ? "v" + sessionItem.modelData.version : ""
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.pointSize: theme.fontCaption
                                     font.features: { "tnum": 1 }
                                 }
                                 Item { Layout.fillWidth: true }
@@ -656,7 +680,7 @@ TpPage {
                                     text: sessionItem.modelData.laps
                                     color: theme.dimText
                                     font.features: { "tnum": 1 }
-                                    font.pointSize: theme.fontPoint * 0.9
+                                    font.pointSize: theme.fontLabel
                                     Layout.preferredWidth: theme.em * 2.8
                                     horizontalAlignment: Text.AlignRight
                                 }
@@ -707,7 +731,7 @@ TpPage {
     Component {
         id: vehicleSide
         ColumnLayout {
-            spacing: theme.em * 0.65
+            spacing: theme.em * 0.7
             Connections {  // other vehicle: contents fade in
                 target: backend
                 function onSelectionChanged() { selectionFade.restart() }
@@ -717,15 +741,15 @@ TpPage {
                 title: i18n.tr("Lap Time Reference")
                 glyph: ""  // globe
                 tip: i18n.tr("Community lap times compared with your lap times")
-                NumberAnimation { id: selectionFade; target: referenceCard; property: "opacity"; from: 0.4; to: 1; duration: 220 }
+                NumberAnimation { id: selectionFade; target: referenceCard; property: "opacity"; from: 0.4; to: 1; duration: theme.motionSlow }
                 RowLayout {  // vehicle & level of its personal best
                     visible: page.reference.vehicle !== undefined && page.reference.vehicle !== ""
                     Layout.fillWidth: true
-                    spacing: theme.em * 0.45
+                    spacing: theme.em * 0.5
                     Text {
                         text: page.reference.vehicle || ""
                         color: theme.text
-                        font.pointSize: theme.fontPoint * 1.1
+                        font.pointSize: theme.fontSubtitle
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                         Layout.fillWidth: true
@@ -741,7 +765,7 @@ TpPage {
                     Layout.fillWidth: true
                     text: page.reference.detail || ""
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                     wrapMode: Text.WordWrap
                 }
                 StatsGauge {
@@ -756,14 +780,14 @@ TpPage {
                     columns: 2
                     columnSpacing: theme.em * 0.8
                     rowSpacing: theme.em * 0.15
-                    Text { text: i18n.tr("Reference"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.9 }
+                    Text { text: i18n.tr("Reference"); color: theme.dimText; font.pointSize: theme.fontLabel }
                     Text {
                         text: page.reference.referenceTime || "-"
                         color: theme.text
                         font.features: { "tnum": 1 }
                         Layout.fillWidth: true
                     }
-                    Text { visible: (page.reference.gapTime || "") !== ""; text: i18n.tr("Gap"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.9 }
+                    Text { visible: (page.reference.gapTime || "") !== ""; text: i18n.tr("Gap"); color: theme.dimText; font.pointSize: theme.fontLabel }
                     Text {
                         visible: (page.reference.gapTime || "") !== ""
                         text: (page.reference.gapTime || "") + "  (" + (page.reference.percent || "") + ")"
@@ -771,10 +795,10 @@ TpPage {
                         font.features: { "tnum": 1 }
                         Layout.fillWidth: true
                     }
-                    Text { visible: (page.reference.next || "") !== ""; text: i18n.tr("Next level"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.9 }
+                    Text { visible: (page.reference.next || "") !== ""; text: i18n.tr("Next level"); color: theme.dimText; font.pointSize: theme.fontLabel }
                     RowLayout {
                         visible: (page.reference.next || "") !== ""
-                        spacing: theme.em * 0.35
+                        spacing: theme.em * 0.4
                         Layout.fillWidth: true
                         Rectangle {
                             visible: (page.reference.nextLevel || {}).color !== undefined
@@ -795,7 +819,7 @@ TpPage {
                             HoverHandler { id: nextHover }
                             ToolTip.visible: nextHover.hovered
                             ToolTip.text: page.reference.next || ""
-                            ToolTip.delay: 500
+                            ToolTip.delay: theme.tipDelay
                         }
                     }
                 }
@@ -804,7 +828,7 @@ TpPage {
                     Layout.fillWidth: true
                     text: page.reference.fastest || ""
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                     wrapMode: Text.WordWrap
                 }
                 // Lap time limit of each level, marks of personal, qualifying & race bests
@@ -815,12 +839,12 @@ TpPage {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: Math.round(theme.em * 1.75)
-                        radius: theme.em * 0.35
+                        radius: theme.radiusSm
                         color: modelData.active ? Qt.rgba(theme.hover.r, theme.hover.g, theme.hover.b, 0.9) : "transparent"
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: theme.em * 0.35
-                            anchors.rightMargin: theme.em * 0.35
+                            anchors.leftMargin: theme.em * 0.4
+                            anchors.rightMargin: theme.em * 0.4
                             spacing: theme.em * 0.4
                             Rectangle {
                                 Layout.preferredWidth: theme.em * 0.6
@@ -847,7 +871,7 @@ TpPage {
                                 text: modelData.limit
                                 color: theme.dimText
                                 font.features: { "tnum": 1 }
-                                font.pointSize: theme.fontPoint * 0.9
+                                font.pointSize: theme.fontLabel
                                 Layout.preferredWidth: theme.em * 5.2
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -857,7 +881,7 @@ TpPage {
                 RowLayout {  // no reference: reason
                     visible: page.reference.visible !== true && (page.reference.reason || "") !== ""
                     Layout.fillWidth: true
-                    spacing: theme.em * 0.45
+                    spacing: theme.em * 0.5
                     Icon { glyph: ""; color: theme.dimText; size: theme.em * 0.95; Layout.alignment: Qt.AlignTop }  // info
                     Text {
                         Layout.fillWidth: true
@@ -876,7 +900,7 @@ TpPage {
                 glyph: ""  // pulse
                 BusyIndicator {
                     visible: page.stints.busy === true
-                    running: visible
+                    running: visible && pageState.active
                     implicitWidth: theme.em * 1.6
                     implicitHeight: implicitWidth
                     Layout.alignment: Qt.AlignHCenter
@@ -895,7 +919,7 @@ TpPage {
                     Text {
                         text: page.stints.index || ""
                         color: theme.accent
-                        font.pointSize: theme.fontPoint * 1.35
+                        font.pointSize: theme.fontLarge
                         font.weight: Font.DemiBold
                         font.features: { "tnum": 1 }
                     }
@@ -908,10 +932,10 @@ TpPage {
                             font.weight: Font.DemiBold
                             HoverHandler { id: indexHover }
                             ToolTip.visible: indexHover.hovered
-                            ToolTip.delay: 500
+                            ToolTip.delay: theme.tipDelay
                             ToolTip.text: i18n.tr("Coefficient of variation of clean laps (lap time spread in percent of average lap time, traffic & mistakes left out): lower is more consistent")
                         }
-                        Text { text: page.stints.indexInfo || ""; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Text { text: page.stints.indexInfo || ""; color: theme.dimText; font.pointSize: theme.fontSmall; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
                 }
                 // Tyre compounds: stints, clean laps, average pace, lap time change per lap (degradation)
@@ -920,7 +944,7 @@ TpPage {
                     text: i18n.tr("By tyre compound")
                     HoverHandler { id: compoundHover }
                     ToolTip.visible: compoundHover.hovered
-                    ToolTip.delay: 500
+                    ToolTip.delay: theme.tipDelay
                     ToolTip.text: i18n.tr("Average clean lap & lap time change per lap of stints (positive: tyres wear, slower each lap)")
                 }
                 Repeater {
@@ -929,6 +953,10 @@ TpPage {
                         required property var modelData
                         Layout.fillWidth: true
                         spacing: theme.em * 0.4
+                        Repeater {  // compound badges (as overlays): front, rear if another
+                            model: modelData.names || []
+                            TpCompound { required property string modelData; name: modelData }
+                        }
                         Text { text: modelData.compound; color: theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
                         Text { text: modelData.stints + " × " + modelData.laps; color: theme.dimText; font.features: { "tnum": 1 } }
                         Text { text: modelData.pace; color: theme.text; font.features: { "tnum": 1 } }
@@ -950,7 +978,7 @@ TpPage {
                         Layout.fillWidth: true
                         spacing: theme.em * 0.4
                         ToolTip.visible: stintHover.hovered
-                        ToolTip.delay: 600
+                        ToolTip.delay: theme.tipDelay
                         ToolTip.text: modelData.session + " · " + modelData.compound + " · " + i18n.tr("clean laps") + " " + modelData.laps
                         HoverHandler { id: stintHover }
                         Text { text: modelData.date; color: theme.dimText; font.features: { "tnum": 1 }; Layout.preferredWidth: theme.em * 5.6 }
@@ -993,7 +1021,7 @@ TpPage {
     Component {
         id: allTracksSide
         ColumnLayout {
-            spacing: theme.em * 0.65
+            spacing: theme.em * 0.7
             StatsCard {  // driver: game profile, Steam picture, races of game results files
                 visible: page.driver.visible === true
                 title: i18n.tr("Driver")
@@ -1005,14 +1033,14 @@ TpPage {
                     Rectangle {  // Steam profile picture, else initials
                         Layout.preferredWidth: Math.round(theme.em * 3.4)
                         Layout.preferredHeight: Layout.preferredWidth
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16)
                         Text {
                             anchors.centerIn: parent
                             visible: avatar.status !== Image.Ready
                             text: page.driver.initials || ""
                             color: theme.accent
-                            font.pointSize: theme.fontPoint * 1.3
+                            font.pointSize: theme.fontHeading
                             font.weight: Font.Bold
                         }
                         Image {
@@ -1033,7 +1061,7 @@ TpPage {
                             text: page.driver.name || ""
                             color: theme.text
                             font.weight: Font.DemiBold
-                            font.pointSize: theme.fontPoint * 1.15
+                            font.pointSize: theme.fontSubtitle
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -1041,17 +1069,17 @@ TpPage {
                             visible: text !== ""
                             text: page.driver.detail || ""
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
                     }
                 }
-                ColumnLayout {  // driver & safety ranks of game menu: rank in its color, progress to next tier
-                    visible: (page.driver.ranks || []).length > 0
+                ColumnLayout {  // driver & safety ranks of game menu: rank in its color, progress to next tier; badge
+                    visible: (page.driver.ranks || []).length > 0 || ((page.driver.badge || {}).name || "") !== ""
                     Layout.fillWidth: true
                     Layout.topMargin: theme.em * 0.3
-                    spacing: theme.em * 0.35
+                    spacing: theme.em * 0.4
                     Repeater {
                         model: page.driver.ranks || []
                         RowLayout {
@@ -1063,7 +1091,7 @@ TpPage {
                             Text {
                                 text: modelData.label
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 Layout.preferredWidth: theme.em * 6.5
                                 elide: Text.ElideRight
                             }
@@ -1071,7 +1099,7 @@ TpPage {
                                 text: modelData.value
                                 color: parent.rankColor
                                 font.weight: Font.DemiBold
-                                font.pointSize: theme.fontPoint * 1.05
+                                font.pointSize: theme.fontSubtitle
                                 Layout.preferredWidth: theme.em * 5.5
                             }
                             Rectangle {  // progress to next tier
@@ -1090,7 +1118,7 @@ TpPage {
                             Text {
                                 text: modelData.progressText
                                 color: theme.text
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                                 horizontalAlignment: Text.AlignRight
                                 Layout.preferredWidth: theme.em * 2.6
@@ -1099,8 +1127,54 @@ TpPage {
                                 visible: modelData.change !== ""
                                 text: (modelData.changeTone > 0 ? "\u25B2 " : "\u25BC ") + modelData.change
                                 color: modelData.changeTone > 0 ? theme.gain : theme.loss
-                                font.pointSize: theme.fontPoint * 0.8
+                                font.pointSize: theme.fontCaption
                                 font.features: { "tnum": 1 }
+                            }
+                        }
+                    }
+                    RowLayout {  // badge of game menu: game icon, name in its color, description
+                        readonly property var badge: page.driver.badge || {}
+                        readonly property color badgeColor: (theme.dark ? badge.color : badge.lightColor) || theme.text
+                        visible: (badge.name || "") !== ""
+                        Layout.fillWidth: true
+                        spacing: theme.em * 0.5
+                        Text {
+                            text: i18n.tr("Badge")
+                            color: theme.dimText
+                            font.pointSize: theme.fontSmall
+                            Layout.preferredWidth: theme.em * 6.5
+                            Layout.alignment: Qt.AlignTop
+                            elide: Text.ElideRight
+                        }
+                        Image {
+                            readonly property int side: Math.round(theme.em * 1.4)
+                            visible: source !== "" && status === Image.Ready
+                            source: parent.badge.icon || ""
+                            sourceSize: Qt.size(side * 2, side * 2)  // sharp on high DPI screen
+                            Layout.preferredWidth: side
+                            Layout.preferredHeight: side
+                            Layout.alignment: Qt.AlignTop
+                            asynchronous: true
+                            smooth: true
+                        }
+                        ColumnLayout {
+                            spacing: 0
+                            Layout.fillWidth: true
+                            Text {
+                                text: parent.parent.badge.name || ""
+                                color: parent.parent.badgeColor
+                                font.weight: Font.DemiBold
+                                font.pointSize: theme.fontSubtitle
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                visible: text !== ""
+                                text: parent.parent.badge.description || ""
+                                color: theme.dimText
+                                font.pointSize: theme.fontCaption
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
                             }
                         }
                     }
@@ -1108,9 +1182,72 @@ TpPage {
                         visible: text !== ""
                         text: page.driver.ranksInfo || ""
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.75
+                        font.pointSize: theme.fontCaption
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
+                    }
+                }
+                ColumnLayout {  // other game accounts of this computer: last ranks seen, badge, date
+                    visible: (page.driver.otherAccounts || []).length > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.em * 0.3
+                    spacing: theme.em * 0.3
+                    Text {
+                        text: i18n.tr("Other accounts")
+                        color: theme.dimText
+                        font.pointSize: theme.fontCaption
+                        font.capitalization: Font.AllUppercase
+                        font.letterSpacing: 0.4
+                    }
+                    Repeater {
+                        model: page.driver.otherAccounts || []
+                        RowLayout {
+                            id: accountRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: theme.em * 0.5
+                            Image {  // Steam profile picture of account
+                                readonly property int side: Math.round(theme.em * 1.5)
+                                visible: source !== "" && status === Image.Ready
+                                source: accountRow.modelData.avatar
+                                sourceSize: Qt.size(side * 2, side * 2)
+                                Layout.preferredWidth: side
+                                Layout.preferredHeight: side
+                                asynchronous: true
+                                smooth: true
+                            }
+                            Text {
+                                text: accountRow.modelData.name
+                                color: theme.text
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: theme.em * 4
+                            }
+                            Repeater {
+                                model: accountRow.modelData.ranks
+                                Text {
+                                    required property var modelData
+                                    text: modelData.label + " " + modelData.value
+                                    color: (theme.dark ? modelData.color : modelData.lightColor) || theme.text
+                                    font.weight: Font.DemiBold
+                                    font.pointSize: theme.fontSmall
+                                }
+                            }
+                            Text {
+                                readonly property var badge: accountRow.modelData.badge || {}
+                                visible: (badge.name || "") !== ""
+                                text: badge.name || ""
+                                color: (theme.dark ? badge.color : badge.lightColor) || theme.text
+                                font.pointSize: theme.fontSmall
+                            }
+                            Text {  // when ranks were seen
+                                text: accountRow.modelData.when
+                                color: theme.dimText
+                                font.pointSize: theme.fontCaption
+                                font.features: { "tnum": 1 }
+                            }
+                        }
                     }
                 }
                 GridLayout {  // races of results files
@@ -1131,13 +1268,13 @@ TpPage {
                                 text: modelData.value
                                 color: theme.text
                                 font.weight: Font.DemiBold
-                                font.pointSize: theme.fontPoint * 1.1
+                                font.pointSize: theme.fontSubtitle
                                 font.features: { "tnum": 1 }
                             }
                             Text {
                                 text: modelData.label
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.8
+                                font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
@@ -1148,7 +1285,7 @@ TpPage {
                     visible: text !== ""
                     text: page.driver.info || ""
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.8
+                    font.pointSize: theme.fontCaption
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -1161,7 +1298,7 @@ TpPage {
                     Text {
                         text: page.driver.fixText || ""
                         color: theme.text
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -1182,7 +1319,7 @@ TpPage {
                     RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        spacing: theme.em * 0.45
+                        spacing: theme.em * 0.5
                         Rectangle {
                             Layout.preferredWidth: theme.em * 1.3
                             Layout.preferredHeight: theme.em * 1.3
@@ -1191,8 +1328,8 @@ TpPage {
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData.letter
-                                color: "white"
-                                font.pointSize: theme.fontPoint * 0.72
+                                color: theme.inkOn(modelData.color)  // readable on level color
+                                font.pointSize: theme.fontTiny
                                 font.weight: Font.Bold
                             }
                         }
@@ -1207,7 +1344,7 @@ TpPage {
                                 height: parent.height
                                 radius: height / 2
                                 color: modelData.color
-                                Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+                                Behavior on width { NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
                             }
                         }
                         Text {
@@ -1225,7 +1362,7 @@ TpPage {
                     Layout.fillWidth: true
                     text: backend.levelsInfo
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                     wrapMode: Text.WordWrap
                 }
             }
@@ -1240,9 +1377,9 @@ TpPage {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: recentRow.implicitHeight + theme.em * 0.5
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: recentArea.containsMouse ? theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: 100 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
                         MouseArea {
                             id: recentArea
                             anchors.fill: parent
@@ -1252,13 +1389,13 @@ TpPage {
                         }
                         ToolTip.visible: recentArea.containsMouse
                         ToolTip.text: i18n.tr("Show this track & vehicle")
-                        ToolTip.delay: 700
+                        ToolTip.delay: theme.tipDelay
                         RowLayout {
                             id: recentRow
                             anchors.verticalCenter: parent.verticalCenter
                             x: theme.em * 0.35
                             width: parent.width - theme.em * 0.7
-                            spacing: theme.em * 0.45
+                            spacing: theme.em * 0.5
                             GameLogo {  // circuit logo of game
                                 source: recentItem.modelData.trackLogo || ""
                                 boxWidth: theme.em * 2.6
@@ -1277,7 +1414,7 @@ TpPage {
                                 Text {
                                     text: recentItem.modelData.date + " · " + recentItem.modelData.vehicle
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     font.features: { "tnum": 1 }
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
@@ -1304,7 +1441,7 @@ TpPage {
                                 }
                                 Row {
                                     Layout.alignment: Qt.AlignRight
-                                    spacing: theme.em * 0.25
+                                    spacing: theme.em * 0.3
                                     Chip {
                                         text: recentItem.modelData.result
                                         tint: page.resultColor(recentItem.modelData.result, recentItem.modelData.podium)
@@ -1326,6 +1463,7 @@ TpPage {
     // Right click menus: row actions, columns shown
     TpMenu {
         id: rowMenu
+        onClosed: page.refocusTable()
         Instantiator {
             model: page.menuActions
             delegate: Action {
@@ -1340,6 +1478,7 @@ TpPage {
     }
     TpMenu {
         id: headerMenu
+        onClosed: page.refocusTable()
         Instantiator {
             model: backend.columnMenu
             delegate: Action {

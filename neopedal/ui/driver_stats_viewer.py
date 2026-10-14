@@ -22,7 +22,7 @@ Driver stats viewer: stats of each track & vehicle, community lap time levels, p
 Qt Quick page (ui/qml/DriverStats.qml), state & actions in quick/stats_backend.py.
 """
 
-from PySide6.QtCore import QSize, QUrl
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
@@ -68,7 +68,5 @@ class DriverStatsViewer(BaseDialog):
         super().hideEvent(event)
 
     def closeEvent(self, event):
-        # QML bindings never read a released backend (see qml page pitfalls: view goes first)
-        self.view.setSource(QUrl())
-        self.backend.release()
+        self.release_page()
         super().closeEvent(event)

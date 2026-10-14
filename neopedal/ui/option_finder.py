@@ -29,7 +29,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, NamedTuple
 
-from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QVBoxLayout
 
 from .. import loader
@@ -215,6 +214,5 @@ class OptionFinder(BaseDialog):
         super().showEvent(event)
 
     def closeEvent(self, event):
+        self.release_page()
         super().closeEvent(event)
-        if event.isAccepted():  # QML gone before the backend it binds to
-            self.view.setSource(QUrl())

@@ -81,7 +81,7 @@ Item {
         var cache = labelCache
         var texts = cache.texts[key]
         if (texts === undefined) {
-            texts = backend.axisLabels(column, values, span)
+            texts = backend.charts.axisLabels(column, values, span)
             if (cache.count > 200) { cache.texts = {}; cache.count = 0 }
             cache.texts[key] = texts
             cache.count++
@@ -105,10 +105,11 @@ Item {
         restored = true
         update()
     }
-    onModeChanged: { save(); update() }
-    onXColumnChanged: { save(); resetZoom(); refresh.restart() }
-    onYColumnChanged: { save(); resetZoom(); refresh.restart() }
-    onHistogramColumnChanged: { save(); refresh.restart() }
+    // Choices restored one by one: nothing computed until the last (one update once restored)
+    onModeChanged: { if (!restored) return; save(); update() }
+    onXColumnChanged: { if (!restored) return; save(); resetZoom(); refresh.restart() }
+    onYColumnChanged: { if (!restored) return; save(); resetZoom(); refresh.restart() }
+    onHistogramColumnChanged: { if (!restored) return; save(); refresh.restart() }
     Timer { id: refresh; interval: 120; onTriggered: root.update() }
     Connections {
         target: backend
@@ -140,7 +141,7 @@ Item {
         onColumnChanged: currentIndex = root.columnIndex(column)
         onModelChanged: currentIndex = root.columnIndex(column)
         background: Rectangle {
-            radius: theme.em * 0.45
+            radius: theme.radiusMd
             color: box.hovered ? theme.hover : theme.raised
             border.width: 1
             border.color: theme.border
@@ -180,7 +181,7 @@ Item {
         Flow {
             visible: root.mode === "scatter"
             Layout.fillWidth: true
-            spacing: theme.em * 0.25
+            spacing: theme.em * 0.3
             Repeater {
                 model: root.presets
                 TpButton {
@@ -203,7 +204,7 @@ Item {
             visible: root.chart ? root.chart.zoomed : false
             text: i18n.tr("Zoomed chart part only")
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
         }
         LapFilter { id: lapFilter; Layout.fillWidth: true }
 
@@ -232,7 +233,7 @@ Item {
                 clip: true
                 Rectangle {
                     anchors.fill: parent
-                    radius: theme.em * 0.35
+                    radius: theme.radiusSm
                     color: theme.dark ? Qt.darker(theme.base, 1.18) : Qt.darker(theme.base, 1.015)
                     border.width: 1
                     border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
@@ -281,20 +282,25 @@ Item {
                     visible: at > 0 && at < 1
                     y: Math.round((1 - at) * plot.height); width: plot.width; height: 1; color: theme.text; opacity: 0.2
                 }
-                Item {  // dots of every lap: one transform for all of them (zoom & move frames stay cheap)
-                    transform: Matrix4x4 {
-                        matrix: Qt.matrix4x4(plot.width * root.zoom, 0, 0, -root.viewX * root.zoom * plot.width,
-                                             0, -plot.height * root.zoom, 0, plot.height + root.viewY * root.zoom * plot.height,
-                                             0, 0, 1, 0, 0, 0, 0, 1)
-                    }
-                    Repeater {
-                        model: root.scatterData.laps || []
-                        GpuShape {
-                            key: modelData.key
-                            visible: lapFilter.shown(modelData.lap)
-                            color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
-                            opacity: root.lapOpacity(modelData.lap)
-                            revision: backend.revision
+                Item {  // multisampled layer while shown (smooth dots, window without MSAA)
+                    anchors.fill: parent
+                    layer.enabled: pageState.active && plot.visible
+                    layer.samples: 4
+                    Item {  // dots of every lap: one transform for all of them (zoom & move frames stay cheap)
+                        transform: Matrix4x4 {
+                            matrix: Qt.matrix4x4(plot.width * root.zoom, 0, 0, -root.viewX * root.zoom * plot.width,
+                                                 0, -plot.height * root.zoom, 0, plot.height + root.viewY * root.zoom * plot.height,
+                                                 0, 0, 1, 0, 0, 0, 0, 1)
+                        }
+                        Repeater {
+                            model: root.scatterData.laps || []
+                            GpuShape {
+                                key: modelData.key
+                                visible: lapFilter.shown(modelData.lap)
+                                color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
+                                opacity: root.lapOpacity(modelData.lap)
+                                revision: backend.revision
+                            }
                         }
                     }
                 }
@@ -317,7 +323,7 @@ Item {
                     visible: tick !== undefined && y > -height / 2 && y < plot.height
                     text: tick ? tick.text : ""
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.72
+                    font.pointSize: theme.fontTiny
                     font.features: { "tnum": 1 }
                 }
             }
@@ -330,7 +336,7 @@ Item {
                     y: plot.height + theme.em * 0.15
                     text: tick ? tick.text : ""
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.72
+                    font.pointSize: theme.fontTiny
                     font.features: { "tnum": 1 }
                 }
             }
@@ -340,7 +346,7 @@ Item {
                 anchors.bottom: parent.bottom
                 text: root.scatterData.xTitle || ""
                 color: theme.text
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
             }
             Text {
                 visible: scatterArea.hasData
@@ -350,7 +356,7 @@ Item {
                 transformOrigin: Item.TopLeft
                 text: root.scatterData.yTitle || ""
                 color: theme.text
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
             }
         }
 
@@ -367,6 +373,23 @@ Item {
             readonly property real padLeft: theme.em * 2.6
             readonly property real binWidth: (width - padLeft) / Math.max(bins.length, 1)
             readonly property int labelEvery: Math.max(1, Math.ceil(theme.em * 3 / Math.max(binWidth, 1)))
+            readonly property real plotHeight: height - padBottom
+            readonly property real barWidth: Math.max((binWidth * 0.8) / Math.max(laps.length, 1) - 1, 1)
+            readonly property real barsOffset: (binWidth - (barWidth + 1) * laps.length + 1) / 2  // bars centered in bin
+            function barHeight(binIndex, lapIndex) {
+                var lap = laps[lapIndex]
+                return lap ? (lap.values[binIndex] || 0) / peak * plotHeight : 0
+            }
+            // Bin & lap of bar under mouse (one mouse area over plot), [-1, -1] if none
+            function barAt(px, py) {
+                var binIndex = Math.floor((px - padLeft) / Math.max(binWidth, 1e-9))
+                if (binIndex < 0 || binIndex >= bins.length) return [-1, -1]
+                var along = px - padLeft - binIndex * binWidth - barsOffset
+                var lapIndex = Math.floor(along / (barWidth + 1))
+                if (along < 0 || lapIndex >= laps.length || along - lapIndex * (barWidth + 1) > barWidth) return [-1, -1]
+                if (py < plotHeight - barHeight(binIndex, lapIndex) || py > plotHeight) return [-1, -1]
+                return [binIndex, lapIndex]
+            }
 
             Text {
                 anchors.centerIn: parent
@@ -387,7 +410,7 @@ Item {
                         horizontalAlignment: Text.AlignRight
                         text: parent.share.toFixed(0) + "%"
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.7
+                        font.pointSize: theme.fontTiny
                     }
                 }
             }
@@ -399,40 +422,63 @@ Item {
                     x: histogramArea.padLeft + index * histogramArea.binWidth
                     width: histogramArea.binWidth
                     height: histogramArea.height - histogramArea.padBottom
-                    Row {
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        spacing: 1
-                        Repeater {
-                            model: histogramArea.laps
-                            Rectangle {
-                                readonly property real value: modelData.values[bin.binIndex] || 0
-                                width: Math.max((bin.width * 0.8) / Math.max(histogramArea.laps.length, 1) - 1, 1)
-                                height: value / histogramArea.peak * bin.height
-                                anchors.bottom: parent.bottom
-                                radius: Math.min(width / 2, 2)
-                                color: modelData.color
-                                opacity: root.highlightKey === "" ? 0.85 : 0.6
-                                ToolTip.visible: barArea.containsMouse
-                                ToolTip.text: !barArea.containsMouse ? "" :  // built only for the hovered bar
-                                              modelData.label + " · " + histogramArea.bins[bin.binIndex] + " " + (root.histogramData.unit || "")
-                                              + " · " + value.toFixed(1).replace(".", theme.decimalPoint) + "%"
-                                ToolTip.delay: 300
-                                MouseArea { id: barArea; anchors.fill: parent; hoverEnabled: true }
-                            }
+                    // Bars of laps (count as model: kept while laps are filtered, read by index)
+                    Repeater {
+                        model: histogramArea.laps.length
+                        Rectangle {
+                            required property int index
+                            readonly property var lap: histogramArea.laps[index]
+                            x: histogramArea.barsOffset + index * (histogramArea.barWidth + 1)
+                            y: bin.height - height
+                            width: histogramArea.barWidth
+                            height: histogramArea.barHeight(bin.binIndex, index)
+                            radius: Math.min(width / 2, 2)
+                            color: lap ? lap.color : "transparent"
+                            opacity: root.highlightKey === "" ? 0.85 : 0.6
                         }
                     }
                     Text {
                         visible: bin.binIndex % histogramArea.labelEvery === 0
                         anchors.top: parent.bottom
-                        anchors.topMargin: theme.em * 0.15
+                        anchors.topMargin: theme.em * 0.2
                         x: 0
                         text: histogramArea.bins[bin.binIndex]
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.7
+                        font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
                     }
                 }
+            }
+            // Bar under mouse: tooltip placed over it (bin & lap worked out from mouse position)
+            Item {
+                id: hoveredBar
+                objectName: "histogramHover"
+                property int binIndex: -1
+                property int lapIndex: -1
+                readonly property var lap: binIndex >= 0 ? histogramArea.laps[lapIndex] : undefined
+                readonly property real value: lap ? lap.values[binIndex] || 0 : 0
+                x: histogramArea.padLeft + binIndex * histogramArea.binWidth + histogramArea.barsOffset
+                   + lapIndex * (histogramArea.barWidth + 1)
+                y: histogramArea.plotHeight - height
+                width: histogramArea.barWidth
+                height: lap ? histogramArea.barHeight(binIndex, lapIndex) : 0
+                ToolTip.visible: lap !== undefined
+                ToolTip.text: !lap ? "" : lap.label + " · " + histogramArea.bins[binIndex] + " " + (root.histogramData.unit || "")
+                                          + " · " + value.toFixed(1).replace(".", theme.decimalPoint) + "%"
+                ToolTip.delay: theme.tipDelay
+            }
+            MouseArea {
+                anchors.fill: parent
+                visible: histogramArea.bins.length > 0
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+                function pick(px, py) {
+                    var found = containsMouse ? histogramArea.barAt(px, py) : [-1, -1]
+                    hoveredBar.binIndex = found[0]
+                    hoveredBar.lapIndex = found[1]
+                }
+                onPositionChanged: function(mouse) { pick(mouse.x, mouse.y) }
+                onContainsMouseChanged: pick(mouseX, mouseY)
             }
         }
     }

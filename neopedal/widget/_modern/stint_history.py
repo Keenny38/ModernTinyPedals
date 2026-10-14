@@ -26,6 +26,7 @@ tyre compounds, tyre wear, lap time delta & consistency.
 from __future__ import annotations
 
 from math import ceil
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -35,11 +36,19 @@ from ... import units
 from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .draw import panel
-from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
+from .rows import compound_cell
+from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin, compounds_width
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import StintHistoryConfig
+
+ROW_SCALE = 1.45
 
 
 class Realtime(TableMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: StintHistoryConfig
 
     options = (
         "font_size", "stint_history_count", "show_empty_history", "show_laps", "show_time",
@@ -61,6 +70,8 @@ class Realtime(TableMixin, ModernOverlay):
         self.dec_wear = max(int(wcfg["decimal_places_wear"]), 0)
         self.dec_delta = max(int(wcfg["decimal_places_delta"]), 0)
         self.dec_consist = max(int(wcfg["decimal_places_consistency"]), 0)
+        self.add_font("tiny", 0.5, "bold", caps=True)  # per wheel compound letters
+        self.compound_cells: dict[tuple, Cell] = {}
         columns = []
         if wcfg["show_laps"]:
             columns.append(Column("laps", self.text_width("value", "888"), RIGHT, "Laps"))
@@ -69,7 +80,7 @@ class Realtime(TableMixin, ModernOverlay):
         if wcfg["show_fuel"]:
             columns.append(Column("fuel", self.text_width("dim", f"888.{'8' * self.dec_fuel}E"), RIGHT, "Used"))
         if wcfg["show_tyre"]:
-            columns.append(Column("tyre", self.text_width("dim", "MMMM"), RIGHT, "Tyre"))
+            columns.append(Column("tyre", compounds_width(self.unit, ROW_SCALE, 2), RIGHT, "Tyre"))
         if wcfg["show_wear"]:
             columns.append(Column("wear", self.text_width("dim", f"88.{'8' * self.dec_wear}%"), RIGHT, "Wear"))
         if wcfg["show_delta"]:
@@ -77,7 +88,7 @@ class Realtime(TableMixin, ModernOverlay):
         if wcfg["show_consistency"]:
             columns.append(Column("consistency", self.text_width("dim", f"188.{'8' * self.dec_consist}%"), RIGHT, "Consist."))  # 100% at stint start
         columns = self.display_ordered(columns)
-        self.table = self.build_table(columns, 1.45, header=True)
+        self.table = self.build_table(columns, ROW_SCALE, header=True)
         self.history_rows: tuple = ()
         self.last_data_version = -1
         self.resize_rows(1)
@@ -129,7 +140,7 @@ class Realtime(TableMixin, ModernOverlay):
                     text = f"{fit(self.unit_fuel(data.totalFuel), self.dec_fuel)}{self.sign_fuel}"
                 cells.append(Cell(TEXT, text, "dim", theme.text_dim))
             elif key == "tyre":
-                cells.append(Cell(TEXT, data.tyreCompound, "dim", theme.text_dim))
+                cells.append(self.compound_cell(data))
             elif key == "wear":
                 cells.append(Cell(TEXT, f"{fit(data.totalTyreWear, self.dec_wear)}{self.sign_wear}", "dim", theme.text_dim))
             elif key == "delta":
@@ -140,6 +151,16 @@ class Realtime(TableMixin, ModernOverlay):
                 text = f"{data.lapTimeConsistency:.{self.dec_consist}f}{self.sign_consist}"
                 cells.append(Cell(TEXT, text, "dim", theme.text_dim))
         return Row(tuple(cells), player=current)
+
+    def compound_cell(self, data) -> Cell:
+        """Compound badges of stint, as in Standings (symbols as text for stints without compound names)"""
+        names = data.tyreCompoundNames
+        if not names:
+            return Cell(TEXT, data.tyreCompound, "dim", self.theme.text_dim)
+        cell = self.compound_cells.get(names)
+        if cell is None:
+            cell = self.compound_cells[names] = compound_cell(names)
+        return cell
 
 
 def fit(value: float, size: int) -> str:

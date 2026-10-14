@@ -25,6 +25,8 @@ and net change over last lap.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -33,9 +35,14 @@ from ...api_control import api
 from .base import STEADY, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import EngineTemperatureConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: EngineTemperatureConfig
 
     options = (
         "font_size", "layout", "overheat_threshold_oil", "overheat_threshold_water", "show_oil_temperature",

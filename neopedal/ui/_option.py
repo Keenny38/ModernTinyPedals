@@ -22,6 +22,7 @@ Option edit widget
 
 from __future__ import annotations
 
+import math
 import os
 from collections import deque
 from collections.abc import Mapping
@@ -309,6 +310,8 @@ class FloatEdit(BaseLineEdit):
         if not is_string_number(text):
             return None
         value = float(text)
+        if not math.isfinite(value):  # "1e999", "nan": never saved to preset
+            return None
         if value % 1 == 0:  # remove unnecessary decimal points
             return int(value)
         return value
@@ -389,24 +392,6 @@ class ColorEdit(BaseLineEdit):
                 fg_color = "#000"
             # Apply style
             self.setStyleSheet(f"QLineEdit {{color:{fg_color};background:{color_str};}}")
-
-
-class CompoundTargetEdit(StringEdit):
-    """Tyre targets per compound, as text, with double click table editor"""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setToolTip(tr("Double click to edit as a table"))
-
-    def mouseDoubleClickEvent(self, event):
-        """Double click to open table editor"""
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            self.open_dialog_table()
-
-    def open_dialog_table(self):
-        dialog = CompoundTargetDialog(self, self.text())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.setText(dialog.result_text())
 
 
 class CompoundTargetDialog(QDialog):

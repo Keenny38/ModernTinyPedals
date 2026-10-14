@@ -43,6 +43,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 
+from . import atomic_replace, write_json
 from .telemetry_lap import EXACT_COLUMNS, Column, LapData, LapFile, column_type, load_lap, read_lap_info
 
 logger = logging.getLogger(__name__)
@@ -77,27 +78,19 @@ def file_stamp(path: str) -> tuple[int, int]:
     return stat.st_size, stat.st_mtime_ns
 
 
-def write_arrays_file(target: str, values: dict, arrays: Mapping[str, array]):
+def write_arrays_file(target: str, values: dict, arrays: Mapping[str, array]) -> None:
     """Write values (JSON) & packed arrays to file atomically (temporary file renamed), raises OSError"""
     names = list(arrays)
     header = json.dumps({"values": values, "arrays": [
         [name, arrays[name].typecode, len(arrays[name])] for name in names]}).encode("utf-8")
-    temp = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"  # threads & processes never share one
-    try:
-        with open(temp, "wb") as file:
-            file.write(ARRAYS_HEAD.pack(ARRAYS_MAGIC, ARRAYS_FORMAT, len(header)))
-            file.write(header)
-            for name in names:
-                values_array = arrays[name]
-                if sys.byteorder != "little":
-                    values_array = array(values_array.typecode, values_array)
-                    values_array.byteswap()
-                file.write(values_array.tobytes())
-        os.replace(temp, target)
-    except OSError:
-        with suppress(OSError):
-            os.remove(temp)
-        raise
+    parts = [ARRAYS_HEAD.pack(ARRAYS_MAGIC, ARRAYS_FORMAT, len(header)), header]
+    for name in names:
+        values_array = arrays[name]
+        if sys.byteorder != "little":
+            values_array = array(values_array.typecode, values_array)
+            values_array.byteswap()
+        parts.append(values_array.tobytes())
+    atomic_replace(target, b"".join(parts), fsync=False)  # cache: rebuilt if lost
 
 
 def read_arrays_file(path: str) -> tuple[dict, dict[str, array]] | None:
@@ -159,7 +152,7 @@ def load_cached_lap(folder: str, path: str) -> LapData:
     return lap
 
 
-def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData):
+def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData) -> None:
     """Write lap cache file atomically (laps loaded in threads)"""
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -205,7 +198,7 @@ def read_index(path: str) -> dict:
     return saved
 
 
-def keep_parsed(path: str, stamp: tuple[int, int] | None, index: dict):
+def keep_parsed(path: str, stamp: tuple[int, int] | None, index: dict) -> None:
     if stamp is None:
         return
     with _parsed_lock:
@@ -263,14 +256,14 @@ def read_infos(paths: Sequence[str]) -> list[tuple[str, float, dict] | None]:
         return list(pool.map(read, paths))
 
 
-def save_info_index(path: str, index: dict):
+def save_info_index(path: str, index: dict) -> None:
     """Lap infos of a lap folder saved atomically (temporary file renamed): never read half written, one save at a
     time (thread jobs)"""
     with _index_lock:
         _write_index(path, index)
 
 
-def save_pending_index(path: str, pending: dict[str, dict]):
+def save_pending_index(path: str, pending: dict[str, dict]) -> None:
     """Newest index of path waiting in pending saved (thread job), nothing if a job started later saved it already"""
     with _index_lock:
         index = pending.pop(path, None)
@@ -278,21 +271,16 @@ def save_pending_index(path: str, pending: dict[str, dict]):
             _write_index(path, index)
 
 
-def _write_index(path: str, index: dict):
-    temp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+def _write_index(path: str, index: dict) -> None:
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(temp, "w", encoding="utf-8", newline="\n") as file:
-            json.dump(index, file, separators=(",", ":"))
-        os.replace(temp, path)
+        write_json(path, index, newline="\n", raise_error=True, separators=(",", ":"))
         keep_parsed(path, index_stamp(path), index)  # read back without parsing
     except (OSError, TypeError, ValueError) as error:
         logger.warning("LAP CACHE: unable to save lap infos index: %s", error)
-        with suppress(OSError):
-            os.remove(temp)
 
 
-def remove_cached_lap(folder: str, path: str):
+def remove_cached_lap(folder: str, path: str) -> None:
     """Forget cached lap (lap file deleted)"""
     with suppress(OSError):
         os.remove(cache_file(folder, path))

@@ -167,11 +167,11 @@ def test_backend_map_corners_gcircle(backend):
     assert VertexStore.get(track_map["lines"][0]["highlight"]).vertex_count > 0
     backend.setMapMode("gain")
     assert VertexStore.get(track_map["colored"]).colored
-    corner = next((row for row in backend.corners if row["kind"] == "corner"), None)
+    corner = next((row for row in backend.cornerTable.items if row["kind"] == "corner"), None)
     assert corner is not None  # braking zone at mid lap
-    start, end = backend.cornerRange(corner["index"])
+    start, end = backend.cornerTable.range(corner["index"])
     assert start < 1500.0 < end
-    assert backend.cornerMarks and backend.cornerRange(99) == []
+    assert backend.cornerTable.marks and backend.cornerTable.range(99) == []
     assert backend.gCircle["limit"] == 2.0 and len(backend.gCircle["dots"]) == 2
     assert len(backend.gCursor(100.0)) == 2
 
@@ -234,10 +234,12 @@ def test_qml_page_loads_with_bundled_modules(backend, tmp_path):
 
         parent = QWidget()
         director = DirectorBackend(parent)
-        for page, page_backend in (("LapViewer.qml", backend), ("TrackMapViewer.qml", TrackMapBackend(parent)),
-                                   ("GameReplays.qml", GameReplaysBackend(parent)),  # type: ignore[arg-type]
-                                   ("BroadcastDirector.qml", director)):
-            view = create_quick_view(parent, page, {"backend": page_backend})
+        replays = GameReplaysBackend(parent)  # type: ignore[arg-type]
+        for page, properties in (("LapViewer.qml", {"backend": backend}),
+                                 ("TrackMapViewer.qml", {"backend": TrackMapBackend(parent)}),
+                                 ("ReplayView.qml", {"replays": replays}),  # replay tab of results & replays
+                                 ("BroadcastDirector.qml", {"backend": director})):
+            view = create_quick_view(parent, page, properties)
             assert not view.errors(), [error.toString() for error in view.errors()]
         parent.deleteLater()
     finally:

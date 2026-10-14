@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QPainter,
     QPalette,
     QPen,
+    QScreen,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -70,7 +71,7 @@ from ..i18n import install_qt_translation, set_language, tr, trm
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
-from ..update import update_checker
+from ..template.page_registry import tool_pages
 from ..userfile.layout_profile import screen_key
 from . import (
     app_icon_file,
@@ -83,7 +84,7 @@ from . import (
     system_dark_mode,
 )
 from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler
-from .lazy_page import LazyPage, PageRelease, release_quick_views
+from .lazy_page import IdlePageRelease, LazyPage, PageRelease, release_quick_views
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
 from .notification import NotifyBar
@@ -105,6 +106,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 UPDATE_CHECK_POLL_MS = 600000  # whether automatic update check is due, every 10 minutes
+SCREEN_SETTLE_MS = 500  # screen setup checked once screen signals stopped this long (several in a row)
+SCREEN_RETRY_MS = 3000  # screen setup applied again this often while config pages hold unsaved changes
 
 
 # Rail overlay toggles: (overlay option, tooltip, icon glyph, fallback letter)
@@ -200,6 +203,13 @@ def safe_mode_enabled() -> bool:
     return safe_mode.state.enabled
 
 
+# Tool pages with an on / off switch (dialog class, backend module, status function: "on", "off", "" closed),
+# see template.page_registry.PageSpec.status
+PAGE_SWITCHES = tuple(
+    (page.dialog.rsplit(".", 1)[-1], *page.status.split(":", 1)) for page in tool_pages() if page.status
+)
+
+
 class NavButton(QAbstractButton):
     """Navigation rail entry: icon over a short label, accent pill when selected"""
 
@@ -286,6 +296,13 @@ class NavButton(QAbstractButton):
         painter.setFont(icon_font)
         icon_rect = QRectF(area.left(), area.top() + area.height() * 0.1, area.width(), area.height() * 0.5)
         painter.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, self.glyph)
+        if self.dot_color is not None:  # at top right of the icon
+            dot = area.height() * 0.13
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.dot_color)
+            painter.drawEllipse(QRectF(icon_rect.center().x() + icon_rect.height() * 0.3, icon_rect.top(), dot, dot))
+            painter.restore()
         label_font = QFont(self.font())
         label_font.setPixelSize(max(round(area.height() * 0.2), 8))
         label_font.setBold(self.isChecked())
@@ -495,6 +512,13 @@ class DialogPage(QWidget):
             self.closed.emit(self)
 
 
+def kept_when_hidden(dialog) -> bool:
+    """Page following the live session now (Broadcast Director, Race Calculator turned on), see
+    BaseDialog.keep_when_hidden: not freed while hidden"""
+    keep = getattr(dialog, "keep_when_hidden", None)
+    return bool(keep()) if callable(keep) else False
+
+
 class TabView(QWidget):
     """Main view: navigation rail on the left, page on the right"""
 
@@ -506,6 +530,9 @@ class TabView(QWidget):
         notify_bar.spectate.clicked.connect(self.select_spectate_tab)
         notify_bar.pacenotes.clicked.connect(self.select_pacenotes_tab)
         notify_bar.hotkey.clicked.connect(self.select_hotkey_tab)
+        notify_bar.director.clicked.connect(
+            lambda: open_tool("broadcast_director.BroadcastDirector", parent))  # dialog parent: window
+        self._notify_bar = notify_bar
 
         # Pages: each built when first shown or selected (memory, startup time)
         icon_family = icon_font_family()
@@ -525,6 +552,10 @@ class TabView(QWidget):
         self._releasing_pages = False  # pages closed while window hidden: no page built meanwhile
         self._page_release = PageRelease(
             self, self._lazy_pages.values(), release_others=self.release_tool_pages, shown=self.reopen_deferred_pages)
+        # Qt Quick pages left hidden a while: freed (rail tools closed, reopened from rail), see release_idle_page
+        self._idle_released: list[str] = []  # tool paths of rail pages released, still remembered as open
+        self._idle_closing = False  # rail page released now, see release_idle_page
+        self._idle_release = IdlePageRelease(self._pages, self.release_idle_page)
 
         # Navigation rail
         rail = QWidget(self)
@@ -617,7 +648,7 @@ class TabView(QWidget):
         layout_quick.addWidget(self._button_pages, 3, 0)
         layout_rail.addLayout(layout_quick)
         self._rail_timer = QTimer(self)
-        self._rail_timer.timeout.connect(self.refresh_rail)
+        self._rail_timer.timeout.connect(self.refresh_rail_shown)
         self._rail_timer.start(1000)  # also follows changes from hotkeys, tray menu & API
         self.refresh_rail()
 
@@ -743,6 +774,7 @@ class TabView(QWidget):
             if existing is not None:
                 dialog.shown_instead = existing.dialog  # caller works on open one, see shown_dialog
                 self.show_page_widget(existing)
+                release_quick_views(dialog)  # QML unloaded before its backend goes
                 dialog.deleteLater()  # second copy of open dialog: never shown
                 return True
             page = DialogPage(dialog, self._pages, self.page_of(dialog.parentWidget()))
@@ -1025,19 +1057,79 @@ class TabView(QWidget):
         menu.exec(button.mapToGlobal(button.rect().topRight()))
         menu.deleteLater()
 
-    def open_page_paths(self) -> list[str]:
-        """Tool dialog paths of open pages in order, shown page marked with leading "*" """
+    def open_page_paths(self, released: bool = False) -> list[str]:
+        """Tool dialog paths of open pages in order, shown page marked with leading "*", then (released) rail
+        tool pages released while hidden a while (see release_idle_page), still open for the user"""
         pages = self.dialog_pages()
         if self._deferred_pages is not None and not pages:  # window hidden: pages reopened once shown
-            return list(self._deferred_pages)
-        tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
-        current = self._pages.currentWidget()
-        paths = []
-        for page in pages:
-            path = tools.get(type(page.dialog).__name__) if page.dialog is not None else None
-            if path:
-                paths.append(f"*{path}" if page is current else path)
+            paths = list(self._deferred_pages)
+        else:
+            tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+            current = self._pages.currentWidget()
+            paths = []
+            for page in pages:
+                path = tools.get(type(page.dialog).__name__) if page.dialog is not None else None
+                if path:
+                    paths.append(f"*{path}" if page is current else path)
+        if released and self._idle_released:
+            listed = {path.strip().removeprefix("*") for path in paths}  # open again
+            rail_tools = self.rail_tool_buttons()
+            self._idle_released = [
+                path for path in self._idle_released
+                if path not in listed and path.rsplit(".", 1)[-1] in rail_tools]  # still in rail
+            paths.extend(self._idle_released)
         return paths
+
+    def release_idle_page(self, page: QWidget) -> bool | None:
+        """Page hidden a while (see IdlePageRelease): its Qt Quick page freed, True if released, False if kept
+        for now, None if kept until shown again
+
+        App page is built again when shown. Tool page of navigation rail is closed, reopened from rail
+        (remembered as open meanwhile, see open_page_paths). Kept: pages following the live session
+        (KEEP_WHEN_HIDDEN: Broadcast Director, Race Calculator, while turned on: checked again later, may be
+        turned off meanwhile), pages with unsaved changes, pages other open pages were opened from, pages
+        without Qt Quick view. App pages are kept while a page outside rail is open (it may call them back).
+        """
+        from PySide6.QtQuickWidgets import QQuickWidget
+
+        if self._releasing_pages or self._restoring_pages or self._closing_pages or page in self.shown_pages():
+            return False
+        if isinstance(page, LazyPage):
+            built = page.page
+            if built is None or getattr(built, "KEEP_WHEN_HIDDEN", False) or built.findChild(QQuickWidget) is None:
+                return None
+            if self.other_pages():  # page opened from it may call it back (input of preset list...)
+                return False
+            return page.release()
+        if not isinstance(page, DialogPage) or page.dialog is None or self._pages.indexOf(page) < 0:
+            return None
+        dialog = page.dialog
+        if not self.is_rail_page(page) or dialog.findChild(QQuickWidget) is None:
+            return None
+        if kept_when_hidden(dialog):
+            return False  # live page turned on: tried again later (turned off meanwhile: released)
+        if page.has_unsaved_changes() or any(other.opener is page for other in self.dialog_pages()):
+            return False  # tried again later (saved, page opened from it closed...)
+        path = next((path for _, entries in TOOL_SECTIONS for _, _, path in entries
+                     if path.rsplit(".", 1)[-1] == type(dialog).__name__), None)
+        if path is None:
+            return None
+        track, self.track_pages = self.track_pages, False  # remembered pages kept as they are
+        self._closing_pages = True  # page closed alone: no other page closed meanwhile
+        self._idle_closing = True  # window grown for page keeps its size, see close_dialog_page
+        try:
+            closed = dialog.close()
+            if closed:
+                page.notify_closed()  # hidden page: no hide event, page removed at once
+        finally:
+            self._idle_closing = False
+            self._closing_pages = False
+            self.track_pages = track
+        if not closed:
+            return False
+        if path not in self._idle_released:
+            self._idle_released.append(path)
+        return True
 
     def defer_pages(self, paths: list[str]):
         """Tool pages reopened once window is shown (started hidden in tray), remembered meanwhile"""
@@ -1060,13 +1152,18 @@ class TabView(QWidget):
         once window is shown again (their Qt Quick graphics freed), True if released
 
         Only when every open page is such a page without unsaved changes: pages opened by user
-        (state of their session) and edits are kept as they are.
+        (state of their session) and edits are kept as they are. Pages following the live session
+        (KEEP_WHEN_HIDDEN: Broadcast Director, Race Calculator, while turned on) keep every page open,
+        unless keep_director_and_calculator_running_while_hidden is disabled.
         """
         pages = self.dialog_pages()
         if not pages or not all(getattr(page, "restored", False) and not page.has_unsaved_changes()
                                 for page in pages):
             return False
-        paths = self.open_page_paths()
+        if cfg.application.get("keep_director_and_calculator_running_while_hidden", True) and any(
+                kept_when_hidden(page.dialog) for page in pages):
+            return False
+        paths = self.open_page_paths()  # rail pages released before stay released (not listed)
         if len(paths) != len(pages):
             return False
         track, self.track_pages = self.track_pages, False  # remembered pages kept as they are
@@ -1135,6 +1232,8 @@ class TabView(QWidget):
             page.closed.disconnect(self.close_dialog_page)
             if page.dialog is not None:
                 page.dialog.close()
+        # Rail pages released while hidden (see release_idle_page) reopened too: new view keeps them open
+        paths.extend(path for path in self._idle_released if path not in paths)
         return paths, kept, shown
 
     def adopt_pages(self, pages: list[DialogPage]):
@@ -1232,7 +1331,8 @@ class TabView(QWidget):
                 other.opener = None
         self._page_history = [shown for shown in self._page_history if shown is not page]
         self._grown_for.discard(page)
-        if not self._grown_for:  # no open page needs grown window anymore
+        # No open page needs grown window anymore (hidden page released: size kept, user never closed it)
+        if not self._grown_for and not self._idle_closing:
             self.restore_window_size()
         self.refresh_open_pages()
         if was_current:
@@ -1289,6 +1389,13 @@ class TabView(QWidget):
         if callable(remember):
             remember(index)
 
+    def refresh_rail_shown(self):
+        """Refresh rail each second while window is shown: not in tray, not minimized (refreshed within a
+        second once shown again)"""
+        window = self.window()
+        if window.isVisible() and not window.isMinimized():
+            self.refresh_rail()
+
     @Slot(bool)  # type: ignore[operator]
     def refresh_rail(self):
         """Sync quick action states with config & API"""
@@ -1306,6 +1413,22 @@ class TabView(QWidget):
             self._button_api.dot_color = dot_color
             self._button_api.setToolTip(tooltip)
             self._button_api.update()
+        self.refresh_page_states()
+
+    def refresh_page_states(self):
+        """Open pages with an on / off switch: dot on their rail entry (green on, grey off), Broadcast Director
+        notice (on), each second"""
+        buttons = self.rail_tool_buttons()
+        for name, module_name, function in PAGE_SWITCHES:
+            module = sys.modules.get(module_name)  # imported only by the page
+            status = getattr(module, function)() if module is not None else ""
+            button = buttons.get(name)
+            if button is not None:
+                dot_color = QColor(status_color("success" if status == "on" else "inactive")) if status else None
+                if button.dot_color != dot_color:
+                    button.dot_color = dot_color
+                    button.update()
+        self._notify_bar.refresh_director()
 
     def toggle_overlay(self, option: str):
         """Toggle overlay option from rail"""
@@ -1513,15 +1636,22 @@ class AppWindow(QMainWindow):
         # Import preset, preset package or plugin by drag & drop
         self.setAcceptDrops(True)
 
-        # Screen setup changed (screen plugged, resolution changed): reload widget positions
+        # Screen setup changed (screen plugged, resolution changed): reload widget positions, checked once
+        # screen signals settle (several in a row), again later while config pages hold unsaved changes
         self._screen_key = screen_key()
         self._screen_timer = QTimer(self)
+        self._screen_timer.setSingleShot(True)
         self._screen_timer.timeout.connect(self.check_screen_setup)
-        self._screen_timer.start(3000)
+        app = QGuiApplication.instance()
+        if isinstance(app, QGuiApplication):
+            app.screenAdded.connect(self.screen_added)
+            app.screenRemoved.connect(self.screen_setup_changed)
+            for screen in app.screens():
+                self.watch_screen(screen)
 
         # Updates checked again while app runs, see number_of_hours_between_update_checks
         self._update_timer = QTimer(self)
-        self._update_timer.timeout.connect(lambda: update_checker.check_due())
+        self._update_timer.timeout.connect(lambda: loader.update_checker.check_due())  # imported once used
         self._update_timer.start(UPDATE_CHECK_POLL_MS)
 
         # Window state
@@ -1557,6 +1687,19 @@ class AppWindow(QMainWindow):
             if getattr(dialog, "is_modified", lambda: False)()
         ]
 
+    def watch_screen(self, screen: QScreen):
+        """Screen resolution or position changes followed"""
+        screen.geometryChanged.connect(self.screen_setup_changed)
+        screen.availableGeometryChanged.connect(self.screen_setup_changed)
+
+    def screen_added(self, screen: QScreen):
+        self.watch_screen(screen)
+        self.screen_setup_changed()
+
+    def screen_setup_changed(self, *_args):
+        """Screen plugged, unplugged or changed: setup checked once signals settle"""
+        self._screen_timer.start(SCREEN_SETTLE_MS)
+
     def check_screen_setup(self):
         """Reload overlay with positions of new screen setup"""
         key = screen_key()
@@ -1568,7 +1711,8 @@ class AppWindow(QMainWindow):
         if cfg.compatibility["enable_window_position_correction"] and self.isVisible():
             keep_on_screen(self)  # screen unplugged or resolution lowered
         if self.modified_config_dialogs():
-            return  # retried once config changes are saved or cancelled
+            self._screen_timer.start(SCREEN_RETRY_MS)  # retried once config changes are saved or cancelled
+            return
         self._screen_key = key
         if cfg.application["enable_layout_per_screen_setup"]:
             logger.info("LAYOUT: screen setup changed to %s", key)
@@ -1576,7 +1720,7 @@ class AppWindow(QMainWindow):
             loader.after_reload(partial(app_signal.refresh.emit, True))
 
     def dragEnterEvent(self, event):
-        """Accept preset & zip files"""
+        """Accept preset, zip & MoTeC files"""
         from .file_drop import dropped_files
 
         if dropped_files(event.mimeData()):
@@ -1897,7 +2041,7 @@ class AppWindow(QMainWindow):
         view = self.centralWidget()
         if not isinstance(view, TabView):
             return
-        open_pages = ",".join(view.open_page_paths()) if cfg.application["remember_open_pages"] else ""
+        open_pages = ",".join(view.open_page_paths(released=True)) if cfg.application["remember_open_pages"] else ""
         if cfg.application["open_pages"] != open_pages:
             cfg.application["open_pages"] = open_pages
             cfg.save(delay, config_type=ConfigType.CONFIG)

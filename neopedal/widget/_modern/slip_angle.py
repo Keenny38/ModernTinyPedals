@@ -24,12 +24,19 @@ Slip angle per tyre with gauge, gauge color by balance: oversteer (blue), unders
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...module_info import minfo
 from .gauge_quad import GaugeQuad
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SlipAngleConfig
 
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: SlipAngleConfig
 
     options = (
         *GaugeQuad.common_options, "slip_angle_maximum_range",

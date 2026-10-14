@@ -24,11 +24,18 @@ Classic drawing with design font & theme colors (see restyle module).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..pace_notes import Realtime as Classic
 from .restyle import Restyled, restyled_options
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import PaceNotesConfig
 
 
 class Realtime(Restyled, Classic):
     """Draw widget"""
+
+    wcfg: PaceNotesConfig
 
     options = restyled_options("pace_notes")

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
@@ -66,6 +66,9 @@ from .state import (
     WheelState,
     fit_readings,
 )
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 SHADOW_COLOR = QColor(0, 0, 0, 90)
 LAPS_SHORT = "L"  # brake laps left
@@ -171,12 +174,14 @@ class WheelPainter:
     susp_extra: Any
     disc_swing_x: Any
     text: Any
+    tick: Any
     tyre_fades: Any
     unit: Any
     unit_pres: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     wheel_reaches: Any
     wheel_targets: Any
+    widget_font: Any
 
     def pulse(self, now: float | None = None) -> float:
         """Alert intensity, 0.35 to 1, pulsing at alert_pulse_frequency (1 if frequency is 0)"""
@@ -217,7 +222,7 @@ class WheelPainter:
             painter.drawPath(path)
             painter.restore()
             painter.setPen(qcolor(wcfg["wheel_detached_color"]))
-            self.draw_fit_text(painter, rect, self.text["detached"], self.font())
+            self.draw_fit_text(painter, rect, self.text["detached"], self.widget_font())
             return
         if self.depth_effects:  # soft drop shadow, below and right of tyre
             painter.fillPath(path.translated(self.shadow_offset, self.shadow_offset * 1.3), SHADOW_COLOR)
@@ -253,36 +258,76 @@ class WheelPainter:
         painter.restore()
 
         usable = rect.height() * 0.88
-        lines = fit_readings(self.tyre_lines(index, wheel), usable, self.unit)
+        lines = self.fitted_tyre_lines(index, wheel, usable)
         total = sum(line[3] for line in lines) or 1
         top = rect.top() + rect.height() * 0.06
-        for priority, text, font, weight, pill_color, text_color in lines:
+        for priority, text, font, weight, pill_color, text_color, *badge in lines:
             line_rect = QRectF(rect.left(), top, rect.width(), usable * weight / total)
             top += line_rect.height()
-            font = self.fitted_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
-            painter.setFont(font)
-            if pill_color:
-                pill_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
+            if badge:  # compound badge on the left of wear: room of the text shared with it
+                size = line_rect.height() * 0.84
+                gap = size * 0.2
+                font = self.fitted_font(painter, font, text, line_rect.width() * 0.9 - size - gap,
+                                        line_rect.height() * 1.1)
+                painter.setFont(font)
+                text_w = painter.fontMetrics().horizontalAdvance(text)
+                left = line_rect.center().x() - (size + gap + text_w) / 2
+                box = QRectF(left, line_rect.center().y() - size / 2, size, size)
+                path = QPainterPath()
+                path.addRoundedRect(box, size * 0.2, size * 0.2)
+                letter, color, ink = badge[0]
+                painter.fillPath(path, qcolor(color))
+                painter.setPen(qcolor(ink))
+                painter.setFont(self.fitted_font(painter, self.font_small, letter, size * 0.8, size))
+                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, letter)
+                painter.setFont(font)
+                line_rect = QRectF(box.right() + gap, line_rect.top(), text_w, line_rect.height())
+            else:
+                font = self.fitted_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
+                painter.setFont(font)
+            if pill_color and priority == READING_COMPOUND:  # letter on rounded square, as in Standings
+                size = line_rect.height() * 0.84
+                box = QRectF(line_rect.center().x() - size / 2, line_rect.center().y() - size / 2, size, size)
+                path = QPainterPath()
+                path.addRoundedRect(box, size * 0.2, size * 0.2)
+                painter.fillPath(path, qcolor(pill_color))
+            elif pill_color:
+                pill_w =min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
                 pill = QRectF(line_rect.center().x() - pill_w / 2, line_rect.top() + line_rect.height() * 0.08,
                               pill_w, line_rect.height() * 0.84)
                 fill_chip(painter, pill, self.pulsed_color(pill_color, strength)
                           if priority == READING_STATUS else pill_color)
             painter.setPen(qcolor(text_color) if text_color else self.pen_temp)
             painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
-        painter.setFont(self.font())
+        painter.setFont(self.widget_font())
+
+    def fitted_tyre_lines(self, index: int, wheel: WheelState, usable: float) -> list[tuple]:
+        """Readings drawn on the tyre (fit_readings), built once per update: by wheel_key, then reused by
+        draw_tyre (readings dropped for room never repaint the wheel)"""
+        cache = self.__dict__.setdefault("_fitted_lines", {})
+        found = cache.get(index)
+        if found is not None and found[0] == self.tick and found[1] == usable:
+            return found[2]
+        lines = fit_readings(self.tyre_lines(index, wheel), usable, self.unit)
+        cache[index] = (self.tick, usable, lines)
+        return lines
 
     def tyre_lines(self, index: int, wheel: WheelState) -> list[tuple]:
         """Text lines (upright): (priority, text, font, weight in height, pill color, text color), before
-        dropping lines without room (font & weight set by priority)"""
+        dropping lines without room (font & weight set by priority). Wear line shown: compound badge drawn
+        on its left (7th item: letter, color, ink), so wear & compound never drop each other for room"""
         wcfg = self.wcfg
         lines: list[tuple] = []
-        if wcfg["show_tyre_compound"] and wheel.compound:
-            lines.append((READING_COMPOUND, wheel.compound, self.font_small, 0.9, "", ""))
+        badge = (wheel.compound, wheel.compound_color, wheel.compound_ink) if (
+            wcfg["show_tyre_compound"] and wheel.compound) else None
+        if badge and not wcfg["show_tyre_wear"]:
+            lines.append((READING_COMPOUND, wheel.compound, self.font_small, 0.9, wheel.compound_color,
+                          wheel.compound_ink))
         if wcfg["show_tyre_temperature"]:
             text = self.format_temp(wheel.tyre_temp)
             if self.show_temp_trend:
                 text += TREND_SYMBOLS[wheel.temp_trend]
-            lines.append((READING_TEMPERATURE, text, self.font(), 1.3, "", self.tyre_phase_color(index, wheel)))
+            lines.append((READING_TEMPERATURE, text, self.widget_font(), 1.3, "", self.tyre_phase_color(index, wheel)))
         if wcfg["show_tyre_pressure"]:
             text = f"{self.unit_pres(wheel.pressure):.{self.pres_decimals}f}"
             if self.show_pres_trend:
@@ -294,7 +339,7 @@ class WheelPainter:
             low = wheel.tread < wcfg["tyre_wear_warning_threshold"]
             lines.append((READING_WEAR, f"{wheel.tread:.0f}%", self.font_small, 1.0,
                           wcfg["tyre_wear_warning_color"] if low else "",
-                          wcfg["font_color_tyre_wear_warning"] if low else ""))
+                          wcfg["font_color_tyre_wear_warning"] if low else "", *((badge,) if badge else ())))
         if self.show_pressure_range and wheel.pressure_min > 0:
             lines.append((READING_PRESSURE_RANGE,
                           f"{self.unit_pres(wheel.pressure_min):.{self.pres_decimals}f}-"
@@ -356,7 +401,8 @@ class WheelPainter:
         else:
             tyre = (wheel.ico_colors if self.wcfg["show_tyre_temperature_bands"] else wheel.tyre_color,
                     wheel.surface_hot, wheel.warning,
-                    tuple((line[0], line[1], line[4], line[5]) for line in self.tyre_lines(index, wheel)))
+                    tuple((line[0], line[1], line[4], line[5], *line[6:]) for line in self.fitted_tyre_lines(
+                        index, wheel, self.rects_tyre[index].height() * 0.88)))
         disc = (wheel.brake_color, wheel.brake_imbalance,
                 tuple((row[0], row[2], row[3]) for row in self.disc_rows(wheel)))
         return self.steer_steps(index, wheel), wheel.status, tyre, disc
@@ -468,7 +514,7 @@ class WheelPainter:
             text = self.format_temp(wheel.brake_temp)
             if self.show_brake_trend:
                 text += TREND_SYMBOLS[wheel.brake_trend]
-            rows.append((text, self.font(), self.brake_phase_color(wheel), 1.3))
+            rows.append((text, self.widget_font(), self.brake_phase_color(wheel), 1.3))
         if self.show_brake_peak and wheel.brake_peak > 0:  # peak of last braking zone
             peak = wheel.brake_peak
             color = (wcfg["font_color_brake_temperature_hot"] if 0 < self.brake_hot <= peak

@@ -26,6 +26,7 @@ one row per driver of the car: driving time, time left to target, thin progress 
 from __future__ import annotations
 
 from math import ceil
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -36,9 +37,14 @@ from .draw import bar, panel
 from .stats import Stat, StatsMixin, Value
 from .table import LEFT, RIGHT, TEXT, Cell, Column, Row, TableMixin
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import StintTimerConfig
+
 
 class Realtime(StintTimerMixin, StatsMixin, TableMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: StintTimerConfig
 
     options = (
         "font_size", "maximum_stint_minutes", "stint_warning_minutes", "show_stint_laps", "show_stint_countdown",

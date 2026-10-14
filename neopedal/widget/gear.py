@@ -20,6 +20,9 @@
 Gear Widget
 """
 
+from math import isfinite
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
@@ -28,9 +31,14 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import GearGaugeBar, ProgressBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import GearConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "GearConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -271,8 +279,9 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_gauge(self, target, rpm, gear, speed):
-        """Gauge bar"""
-        gauge_state = rpm + gear + speed
+        """Gauge bar: state as tuple (a sum of values may stay equal while they change), neutral warning
+        included (set by shifting timer alone, values unchanged)"""
+        gauge_state = (rpm, gear, speed, self.neutral_warning(gear, speed))
         if target.last != gauge_state:
             target.last = gauge_state
             color_index = self.color_rpm(rpm, gear, speed)
@@ -284,16 +293,19 @@ class Realtime(Overlay):
             )
 
     def update_rpmbar(self, target, data):
-        """RPM bar"""
-        if target.last != data:
-            target.last = data
-            rpm_offset = data - self.rpm_safe
-            if self.rpm_range > 0 <= rpm_offset:  # show only above offset
-                rpm_percent = rpm_offset / self.rpm_range
-            else:
-                rpm_percent = 0
+        """RPM bar: repaint when drawn (bar end in device pixels, reading text)"""
+        rpm_offset = data - self.rpm_safe
+        if self.rpm_range > 0 <= rpm_offset:  # show only above offset
+            rpm_percent = rpm_offset / self.rpm_range
+        else:
+            rpm_percent = 0
+        text = f"{data:.{self.decimals_rpm}f}" if target.show_reading else ""
+        scaled = rpm_percent * target.bar_width * target.devicePixelRatioF()
+        key = (round(scaled) if isfinite(scaled) else 0, text)
+        if target.last != key:
+            target.last = key
             if target.show_reading:
-                target.text = f"{data:.{self.decimals_rpm}f}"
+                target.text = text
             target.update_input(rpm_percent)
 
     def update_battbar(self, target, data, state):
@@ -349,16 +361,19 @@ class Realtime(Overlay):
             gear < self.gear_max and
             rpm >= self.rpm_crit):
             return -4
-        if (not gear and
-            speed > self.wcfg["neutral_warning_speed_threshold"] and
-            self.shifting_timer >= self.wcfg["neutral_warning_time_threshold"]
-            ) or rpm > self.rpm_max:
+        if self.neutral_warning(gear, speed) or rpm > self.rpm_max:
             return 3
         if rpm >= self.rpm_red:
             return 2
         if rpm >= self.rpm_safe:
             return 1
         return 0
+
+    def neutral_warning(self, gear, speed) -> bool:
+        """In neutral at speed for a while"""
+        return bool(not gear and
+                    speed > self.wcfg["neutral_warning_speed_threshold"] and
+                    self.shifting_timer >= self.wcfg["neutral_warning_time_threshold"])
 
     def set_gauge_size(self, font_m, font_scale_speed):
         """Set gauge size"""

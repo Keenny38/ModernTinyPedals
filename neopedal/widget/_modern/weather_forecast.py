@@ -27,7 +27,7 @@ reading. Unavailable forecasts hidden (or shown as dashes).
 from __future__ import annotations
 
 from math import cos, pi, sin
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
@@ -39,6 +39,9 @@ from ..weather_forecast import ForecastMixin, forecast_time_text
 from .base import CENTER, DASH, ModernOverlay, display_order_options
 from .draw import bar, panel, rounded
 from .theme import Theme
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import WeatherForecastConfig
 
 ROWS = ("estimated_time", "weather_icon", "ambient_temperature", "rain_chance_bar")
 
@@ -55,6 +58,8 @@ class Slot(NamedTuple):
 
 class Realtime(ForecastMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: WeatherForecastConfig
 
     options = (
         "font_size", "layout", "number_of_forecasts", "show_unavailable_data", "show_estimated_time",

@@ -25,7 +25,7 @@ AppId={{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=TinyPedal developers
+AppPublisher={#AppName}
 AppPublisherURL={#RepoUrl}
 AppSupportURL={#RepoUrl}/issues
 AppUpdatesURL={#RepoUrl}/releases
@@ -62,10 +62,14 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Type: filesandordirs; Name: "{app}\lib"
 ; Executable of versions until 0.23.0, renamed neopedal.exe (shortcuts below point to the new name)
 Type: files; Name: "{app}\{#LegacyName}.exe"
-; Shortcuts named "Modern Tiny Pedals" before the NeoPedal name (Start menu folder keeps its name on update)
+; Shortcuts named "Modern Tiny Pedals" or "ModernPedal" before the NeoPedal name (Start menu folder keeps its
+; name on update), pointing to the old executable deleted above
 Type: files; Name: "{group}\Modern Tiny Pedals.lnk"
 Type: files; Name: "{userdesktop}\Modern Tiny Pedals.lnk"
 Type: files; Name: "{group}\{cm:UninstallProgram,Modern Tiny Pedals}.lnk"
+Type: files; Name: "{group}\ModernPedal.lnk"
+Type: files; Name: "{userdesktop}\ModernPedal.lnk"
+Type: files; Name: "{group}\{cm:UninstallProgram,ModernPedal}.lnk"
 ; Example speed plugin, shipped until 0.21: removed from the app (plugins added by user are kept)
 Type: filesandordirs; Name: "{app}\plugins\example_speed"
 
@@ -78,6 +82,7 @@ Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 Type: filesandordirs; Name: "{app}\openxr_layer"
 ; Copies to an ASCII folder when the app folder has non-ASCII characters (OpenXR loader reads ANSI paths);
 ; copies in %PUBLIC% or at the system drive root removed by CurUninstallStepChanged (below)
+Type: filesandordirs; Name: "{commonappdata}\NeoPedal\openxr_layer"
 Type: filesandordirs; Name: "{commonappdata}\ModernTinyPedals\openxr_layer"
 
 [Icons]
@@ -105,11 +110,12 @@ end;
 // registers that NeoPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
 // Non-ASCII app folder: registered by its 8.3 short path, or copied to the first writable ASCII folder of
 // neopedal/vr_shared.py ascii_layer_roots: {commonappdata}, %PUBLIC% or system drive root, each followed by
-// ModernTinyPedals\openxr_layer\<user>\<build>\.
+// NeoPedal\openxr_layer\<user>\<build>\ (ModernTinyPedals\... for versions until 0.23.0, removed too).
 // Removed on uninstall (after files are deleted): OpenXR games must never look for a layer whose files are gone.
 const
   OpenXRLayersKey = 'SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit';
-  LayerCopyFolder = 'ModernTinyPedals\openxr_layer\';
+  LayerCopyFolder = 'NeoPedal\openxr_layer\';
+  LegacyLayerCopyFolder = 'ModernTinyPedals\openxr_layer\';
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
@@ -120,27 +126,33 @@ var
 begin
   if CurUninstallStep <> usPostUninstall then
     exit;
-  // Index 0: install folder (files already deleted), 1-3: ASCII copy folders (all users' copies removed)
-  SetArrayLength(Roots, 4);
+  // Index 0: install folder (files already deleted), 1-3: ASCII copy folders (all users' copies removed),
+  // 4-6: same ASCII folders of versions until 0.23.0
+  SetArrayLength(Roots, 7);
   Roots[0] := AddBackslash(ExpandConstant('{app}'));
   Roots[1] := AddBackslash(ExpandConstant('{commonappdata}')) + LayerCopyFolder;
   Roots[2] := '';
   if GetEnv('PUBLIC') <> '' then
     Roots[2] := AddBackslash(GetEnv('PUBLIC')) + LayerCopyFolder;
   Roots[3] := AddBackslash(ExpandConstant('{sd}')) + LayerCopyFolder;
-  for J := 1 to 3 do
+  Roots[4] := AddBackslash(ExpandConstant('{commonappdata}')) + LegacyLayerCopyFolder;
+  Roots[5] := '';
+  if GetEnv('PUBLIC') <> '' then
+    Roots[5] := AddBackslash(GetEnv('PUBLIC')) + LegacyLayerCopyFolder;
+  Roots[6] := AddBackslash(ExpandConstant('{sd}')) + LegacyLayerCopyFolder;
+  for J := 1 to 6 do
     if Roots[J] <> '' then
     begin
       // A copy still loaded by a running game stays until removed by hand
       DelTree(RemoveBackslash(Roots[J]), True, True, True);
-      RemoveDir(ExtractFileDir(RemoveBackslash(Roots[J])));  // ModernTinyPedals folder, only if empty
+      RemoveDir(ExtractFileDir(RemoveBackslash(Roots[J])));  // NeoPedal (or ModernTinyPedals) folder, if empty
     end;
   if RegGetValueNames(HKCU, OpenXRLayersKey, Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
     begin
       Name := Lowercase(Names[I]);
       Remove := not FileExists(Names[I]);
-      for J := 0 to 3 do
+      for J := 0 to 6 do
         if (Roots[J] <> '') and (Pos(Lowercase(Roots[J]), Name) = 1) then
           Remove := True;
       if ((Pos('neopedalxrlayer.json', Name) > 0) or (Pos('{#LegacyName}xrlayer.json', Name) > 0)) and Remove then

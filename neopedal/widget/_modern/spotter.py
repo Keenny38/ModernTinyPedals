@@ -26,6 +26,8 @@ side is free again, rising warning glow at bottom of bar for a car coming up beh
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath
 
@@ -33,6 +35,9 @@ from .._race_aids import HiddenPreview
 from ..spotter import APPROACH_ZONE, CLEAR_STEPS, NO_STATE, Side, SpotterMixin
 from .base import ModernOverlay
 from .draw import rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SpotterConfig
 
 GLOW_ALPHA = 70  # soft light of lit part, toward screen center
 CLEAR_ALPHA = 220
@@ -52,6 +57,8 @@ def blend(low: QColor, high: QColor, fraction: float) -> QColor:
 
 class Realtime(HiddenPreview, SpotterMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SpotterConfig
 
     options = (
         "bar_width", "bar_height", "horizontal_gap", "vehicle_length", "vehicle_width", "nearby_side_distance",

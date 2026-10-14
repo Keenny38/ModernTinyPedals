@@ -25,6 +25,8 @@ fastest speed of session.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import units
@@ -32,9 +34,14 @@ from ...api_control import api
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SpeedometerConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SpeedometerConfig
 
     options = (
         "font_size", "layout", "decimal_places", "off_throttle_threshold", "on_throttle_threshold",

@@ -25,18 +25,26 @@ refill set & needed, laps & minutes the refill lasts, pit occupancy & requests.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import minfo
+from .._common import player_vehicle
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import PitStopEstimateConfig
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: PitStopEstimateConfig
 
     options = (
         "font_size", "additional_pitstop_time", "lengthy_stop_duration_threshold",
@@ -83,7 +91,7 @@ class Realtime(StatsMixin, ModernOverlay):
         stop_time = api.read.vehicle.pit_stop_time()
         abs_refill = api.read.vehicle.absolute_refill()
         pass_time = minfo.mapping.pitPassTime
-        pit_timer = minfo.vehicles.dataSet[minfo.vehicles.playerIndex].pitTimer.elapsed
+        pit_timer = player_vehicle().pitTimer.elapsed
         lengthy = stop_time >= self.wcfg["lengthy_stop_duration_threshold"]
         if not api.read.vehicle.in_pits() or self.minimum_total < pass_time:
             if stop_time > 0:

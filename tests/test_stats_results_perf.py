@@ -105,7 +105,7 @@ def test_results_parsed_once_for_both_pages(results_folder, monkeypatch):  # noq
     ri.forget_summaries()
     calls = []
     real = rf.read_results
-    monkeypatch.setattr(rf, "read_results", lambda *args: calls.append(args[0]) or real(*args))
+    monkeypatch.setattr(rf, "read_results", lambda *args, **kwargs: calls.append(args[0]) or real(*args, **kwargs))
     folders = (str(results_folder),)
     summaries = ri.read_summaries(folders)  # driver stats page
     parsed = len(calls)
@@ -140,10 +140,10 @@ def test_scan_running_while_released_keeps_nothing(results_folder, monkeypatch):
     started, go_on = threading.Event(), threading.Event()
     real = rf.read_results
 
-    def slow(*args):
+    def slow(*args, **kwargs):
         started.set()
         go_on.wait(5)
-        return real(*args)
+        return real(*args, **kwargs)
 
     monkeypatch.setattr(rf, "read_results", slow)
     thread = threading.Thread(target=ri.read_summaries, args=((str(results_folder),),))

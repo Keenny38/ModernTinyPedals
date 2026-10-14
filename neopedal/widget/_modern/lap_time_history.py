@@ -26,6 +26,7 @@ delta to previous lap, fuel or virtual energy used, fuel ratio, tyre wear.
 from __future__ import annotations
 
 from math import ceil
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -39,9 +40,14 @@ from .base import DASH, ModernOverlay, display_order_options
 from .draw import panel
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import LapTimeHistoryConfig
+
 
 class Realtime(TableMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: LapTimeHistoryConfig
 
     options = (
         "font_size", "lap_time_history_count", "show_empty_history", "show_laps", "show_time",

@@ -22,15 +22,21 @@ Modern overlay design: driver row cells shared by list widgets (relative, standi
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
+from typing import Any
 
 from PySide6.QtGui import QColor
 
 from ... import calculation as calc
 from ... import units
 from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
-from ...formatter import random_color_class, shorten_driver_name
+from ...formatter import class_style as shared_class_style
+from ...formatter import shorten_driver_name
 from ...i18n import tr_overlay as tr
+from ...penalty_info import NO_PENALTY, Penalty
+from ...penalty_info import label as penalty_label
+from ...template.setting_status_colors import energy_tone
 from ...userfile.heatmap import select_compound_color, select_compound_symbol
 from .base import DASH
 from .draw import readable_on
@@ -48,12 +54,10 @@ def _qcolor(value: str) -> QColor:
 
 def class_style(config, class_name: str, theme: Theme) -> tuple[str, QColor]:
     """Class alias & color, from vehicle class presets"""
-    style = config.user.classes.get(class_name)
-    if style is not None:
-        return style["alias"], _qcolor(style["color"])
-    if class_name:
-        return class_name, _qcolor(random_color_class(class_name))
-    return "", theme.surface_raised
+    if not class_name:
+        return "", theme.surface_raised
+    alias, color = shared_class_style(class_name, config.user.classes)  # same as app pages & stream graphics
+    return alias, _qcolor(color)
 
 
 def laptime_text(laptime: float, valid: bool = True) -> str:
@@ -64,7 +68,7 @@ def laptime_text(laptime: float, valid: bool = True) -> str:
     return TEXT_NOLAPTIME
 
 
-def _compound(name: str) -> tuple[str, QColor]:
+def compound_badge(name: str) -> tuple[str, QColor]:
     """Compound symbol & color (compound presets may be edited: not cached)"""
     return select_compound_symbol(name), _qcolor(select_compound_color(name, text=False))  # badge
 
@@ -72,7 +76,7 @@ def _compound(name: str) -> tuple[str, QColor]:
 def compound_cell(names: tuple[str, ...], per_wheel: bool = True) -> Cell:
     """Tyre compounds (front left, front right, rear left, rear right): one square if same on
     every wheel, front & rear, or every wheel (per_wheel) when left & right of an axle differ"""
-    items = tuple(map(_compound, names))
+    items = tuple(map(compound_badge, names))
     if not items:
         return Cell(COMPOUND, extra=())
     if per_wheel and len(items) >= 4 and (items[0] != items[1] or items[2] != items[3]):
@@ -90,9 +94,9 @@ def pit_cell(theme: Theme, in_pit: int, is_yellow: bool, is_finished: bool,
     """
     finish, pit, garage, slow = texts or tuple(map(tr, PIT_STATUS))
     if is_finished:
-        return Cell(PILL, finish, color=readable_on(theme.text), fill=theme.text)
+        return Cell(PILL, finish, color=readable_on(theme.positive), fill=theme.positive)  # as app pages & Director
     if in_pit == 1:
-        return Cell(PILL, pit, color=readable_on(theme.accent), fill=theme.accent)
+        return Cell(PILL, pit, color=readable_on(theme.orange), fill=theme.orange)
     if in_pit == 2:
         return Cell(PILL, garage, color=theme.text, fill=theme.surface_strong)
     if is_yellow:
@@ -103,7 +107,7 @@ def pit_cell(theme: Theme, in_pit: int, is_yellow: bool, is_finished: bool,
 class RowStyle:
     """Row cell builders that depend on widget options"""
 
-    def __init__(self, widget, wcfg: dict):
+    def __init__(self, widget, wcfg: Mapping[str, Any]):
         self.widget = widget
         self.wcfg = wcfg
         self.theme: Theme = widget.theme
@@ -121,7 +125,7 @@ class RowStyle:
         pos_w = widget.digit_width("small") * 2 + widget.unit * 0.4
         return max(alias_w / 0.6, pos_w / 0.4)
 
-    def name_width(self, chars: int, role: str = "value") -> float:
+    def name_width(self, chars: float, role: str = "value") -> float:
         """Name column width for number of characters"""
         chars = max(int(chars), 1)
         return self.widget.metrics[role].averageCharWidth() * chars * 1.12
@@ -145,29 +149,38 @@ class RowStyle:
             return theme.lap_behind
         return theme.text
 
-    def pitstop_cell(self, count: int, requested: bool) -> Cell:
-        """Pit stops done, pit request, penalty"""
+    def pitstop_cell(self, count: int, requested: bool, penalty: Penalty = NO_PENALTY) -> Cell:
+        """Pit stops done, pit request, penalty: disqualified (DQ), first one to serve (DT, SG10, +10s), number
+        to serve when several, time added at finish (+35s); count is penalties to serve (negative) if any"""
         theme = self.theme
-        if count < 0:
-            return Cell(BADGE, tr("PEN"), "label", readable_on(theme.best), theme.best)
+        text = penalty_label(penalty, -count if count < 0 else 0)
+        if text:
+            if text.startswith("PEN"):  # kind unknown (penalty given before app started)
+                text = tr("PEN") + text[3:]
+            if penalty.disqualified or count < 0 or penalty.pending:  # red as app pages & stream graphics
+                fill = theme.negative
+            else:  # served by time added at finish
+                fill = theme.warning
+            return Cell(BADGE, text, "label", readable_on(fill), fill)
         if requested and self.wcfg.get("show_pit_request", True):
             return Cell(BADGE, f"{count}", "small", readable_on(theme.positive), theme.positive)
         if count == 0:
             return Cell(TEXT, DASH, "dim", theme.text_faint)
         return Cell(BADGE, f"{count}", "small", theme.text_dim, theme.surface_raised)
 
+    def energy_text(self, energy: float) -> str:
+        """Energy remaining in percent, decimals as set (game gives about 0.4 % steps)"""
+        decimals = min(max(int(self.wcfg.get("decimal_places_energy_remaining", 0)), 0), 2)
+        return f"{energy:.{decimals}%}"
+
     def energy_cell(self, energy: float) -> Cell:
         """Virtual energy remaining"""
         theme = self.theme
         if energy <= -1:
             return Cell(TEXT, DASH, "dim", theme.text_faint)
-        if energy <= 0.1:
-            color = theme.negative
-        elif energy <= 0.3:
-            color = theme.warning
-        else:
-            color = theme.positive
-        return Cell(TEXT, f"{energy:.0%}", "dim", color)
+        tone = energy_tone(energy)  # thresholds & colors of every surface
+        color = theme.negative if tone == "loss" else theme.orange if tone == "warning" else theme.positive
+        return Cell(TEXT, self.energy_text(energy), "dim", color)
 
     def integrity_cell(self, integrity: float) -> Cell:
         """Vehicle integrity"""

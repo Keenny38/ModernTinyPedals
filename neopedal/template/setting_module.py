@@ -137,3 +137,15 @@ MODULE_DEFAULT = {
 }
 
 MODULE_FILENAME = tuple(MODULE_DEFAULT)
+
+# Modules run on demand: enabled module runs only while an enabled overlay, a running module or a feature
+# reads the module_info fields it fills (module: fields), see module_control. Disabled module never runs.
+MODULE_ON_DEMAND = {
+    "module_force": ("force",),
+    "module_notes": ("pacenotes", "tracknotes"),
+}
+
+# Features (setting section with "enable" option) needing modules while enabled, besides overlays
+FEATURE_MODULES = {
+    "pace_notes_playback": ("module_notes",),
+}

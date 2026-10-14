@@ -200,7 +200,7 @@ def test_invalid_user_data_path_falls_back(tmp_path, monkeypatch):
 
     from neopedal.userfile import set_user_data_path
 
-    def invalid(path):
+    def invalid(path, *args, **kwargs):
         raise OSError(22, "The filename, directory name, or volume label syntax is incorrect")
 
     monkeypatch.setattr(os, "mkdir", invalid)

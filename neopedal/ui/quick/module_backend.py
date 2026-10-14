@@ -27,14 +27,9 @@ are found the same way.
 
 from __future__ import annotations
 
-import dis
 import logging
 import re
-import sys
 from collections.abc import Callable, Iterable
-from importlib.machinery import ModuleSpec as ImportSpec
-from importlib.machinery import PathFinder
-from types import CodeType
 from typing import NamedTuple
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
@@ -42,19 +37,26 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 from ... import app_signal
 from ...i18n import tr, trm
 from ...i18n.options import module_label
-from ...module_control import ModuleControl
+from ...module_control import (  # noqa: F401  (code scan re-exported: tests, other readers)
+    MODULE_PACKAGE,
+    WIDGET_PACKAGE,
+    CodeScan,
+    ModuleControl,
+    find_spec,
+    module_code,
+    resolve_import,
+    scan_code,
+)
 from ...setting import cfg
 from ..module_view import sort_key
-from .background import BackgroundJobs
 from .models import DictListModel
+from .page_backend import PageBackend
 
 logger = logging.getLogger(__name__)
 
 FILTER_ALL = 0
 FILTER_ACTIVE = 1
 FILTER_INACTIVE = 2
-WIDGET_PACKAGE = "neopedal.widget"
-MODULE_PACKAGE = "neopedal.module"
 ROLES = (
     "key", "label", "description", "glyph", "active", "running", "failed", "interval", "idleInterval",
     "users", "userCount", "userTotal", "moduleUsers", "needs", "needed", "resets",
@@ -142,148 +144,6 @@ def module_title(name: str) -> str:
     return title[:1].upper() + title[1:] if title else label
 
 
-# Dependencies from compiled code
-def find_spec(name: str) -> ImportSpec | None:
-    """Import spec of module name, nothing imported (parent packages found the same way)"""
-    module = sys.modules.get(name)
-    if module is not None:
-        return getattr(module, "__spec__", None)
-    parent, _, _ = name.rpartition(".")
-    if not parent:
-        return None
-    parent_spec = find_spec(parent)
-    locations = None if parent_spec is None else parent_spec.submodule_search_locations
-    if not locations:
-        return None
-    try:  # path entry finders: source files & release build archive
-        return PathFinder.find_spec(name, list(locations))
-    except (ImportError, ValueError, OSError):
-        return None
-
-
-def module_code(name: str) -> tuple[CodeType | None, bool]:
-    """Compiled code of module (not run) & whether it is a package, None if not found"""
-    spec = find_spec(name)
-    get_code = getattr(spec.loader, "get_code", None) if spec is not None else None
-    if get_code is None:
-        return None, False
-    try:
-        return get_code(name), spec.submodule_search_locations is not None  # type: ignore[union-attr]
-    except Exception:  # source with syntax error, archive entry missing
-        logger.debug("Modules page: no code for %s", name, exc_info=True)
-        return None, False
-
-
-def resolve_import(module_name: str, is_package: bool, name: str, level: int, fromlist) -> set[str]:
-    """Module names an import statement may load (from x import y: x, and x.y if y is a module)"""
-    if level:
-        parts = module_name.split(".")
-        if not is_package:
-            parts = parts[:-1]
-        if level > 1:
-            parts = parts[:len(parts) - (level - 1)]
-        base = ".".join(parts)
-        target = f"{base}.{name}" if name else base
-    else:
-        target = name
-    found = {target}
-    if isinstance(fromlist, tuple):
-        found.update(f"{target}.{item}" for item in fromlist if isinstance(item, str) and item != "*")
-    return found
-
-
-# Opcodes read by scan_code (wordcode: opcode & argument bytes, inline cache entries are CACHE opcodes)
-_OPCODES = dis.opmap
-_CACHE = _OPCODES["CACHE"]
-_EXTENDED_ARG = _OPCODES["EXTENDED_ARG"]
-_LOAD_GLOBAL = _OPCODES["LOAD_GLOBAL"]  # name index << 1 (Python 3.11+)
-_LOAD_NAME = {_OPCODES[name] for name in ("LOAD_NAME", "LOAD_FROM_DICT_OR_GLOBALS") if name in _OPCODES}
-_LOAD_ATTR = _OPCODES["LOAD_ATTR"]
-_ATTR_SHIFT = 1 if sys.version_info >= (3, 12) else 0  # name index << 1 since Python 3.12
-_LOAD_CONST = _OPCODES["LOAD_CONST"]
-_LOAD_SMALL_INT = _OPCODES.get("LOAD_SMALL_INT", -1)  # Python 3.14
-_IMPORT_NAME = _OPCODES["IMPORT_NAME"]
-
-
-def _instructions(code: CodeType):
-    """(opcode, argument) of code, cache entries left out (much faster than dis.get_instructions)"""
-    raw = code.co_code
-    extended = 0
-    for index in range(0, len(raw), 2):
-        opcode = raw[index]
-        if opcode == _CACHE:
-            continue
-        argument = raw[index + 1] | extended
-        if opcode == _EXTENDED_ARG:
-            extended = argument << 8
-            continue
-        extended = 0
-        yield opcode, argument
-
-
-def scan_code(code: CodeType, module_name: str, is_package: bool) -> tuple[frozenset[str], frozenset[str]]:
-    """module_info fields read (minfo.<field>, nested functions & classes included) & modules imported
-    at module level by code"""
-    fields: set[str] = set()
-    imports: set[str] = set()
-    stack = [(code, True)]
-    while stack:
-        current, top = stack.pop()
-        names = current.co_names
-        if top or "minfo" in names:  # other code objects have nothing to read
-            after_minfo = False
-            consts: list = []
-            for opcode, argument in _instructions(current):
-                if opcode == _LOAD_GLOBAL:
-                    after_minfo = names[argument >> 1] == "minfo"
-                    continue
-                if opcode in _LOAD_NAME:
-                    after_minfo = names[argument] == "minfo"
-                    continue
-                if opcode == _LOAD_ATTR and after_minfo:
-                    fields.add(names[argument >> _ATTR_SHIFT])
-                elif top:
-                    if opcode == _LOAD_CONST:
-                        consts.append(current.co_consts[argument])
-                    elif opcode == _LOAD_SMALL_INT:
-                        consts.append(argument)
-                    elif opcode == _IMPORT_NAME and len(consts) >= 2 and isinstance(consts[-2], int):
-                        imports.update(resolve_import(module_name, is_package, names[argument], consts[-2], consts[-1]))
-                after_minfo = False
-        stack.extend((const, False) for const in current.co_consts if isinstance(const, CodeType))
-    return frozenset(fields), frozenset(imports)
-
-
-class CodeScan:
-    """module_info fields read by modules & the modules of their package they import (cached)"""
-
-    def __init__(self):
-        self._scanned: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
-
-    def fields_of(self, name: str, package: str) -> set[str]:
-        """Fields read by module name & modules of package it imports (any depth)"""
-        found: set[str] = set()
-        pending = [name]
-        seen: set[str] = set()
-        while pending:
-            current = pending.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            fields, imports = self._scan(current)
-            found |= fields
-            pending.extend(imported for imported in imports if imported.startswith(f"{package}."))
-        return found
-
-    def _scan(self, name: str) -> tuple[frozenset[str], frozenset[str]]:
-        result = self._scanned.get(name)
-        if result is None:
-            code, is_package = module_code(name)
-            result = scan_code(code, name, is_package) if code is not None else (frozenset(), frozenset())
-            self._scanned[name] = result
-        return result
-
-
 class Dependencies(NamedTuple):
     """Overlays & modules depending on each module (by name), modules each module needs"""
 
@@ -338,7 +198,7 @@ def _find_dependencies(widget_names: tuple[str, ...], module_names: tuple[str, .
     )
 
 
-class ModuleBackend(QObject):
+class ModuleBackend(PageBackend):
     """Modules page state & actions
 
     Args:
@@ -365,7 +225,7 @@ class ModuleBackend(QObject):
         show_log: Callable[[], None] = lambda: None,
         reset_data: Callable[[str], None] = lambda method: None,
     ):
-        super().__init__(parent)
+        super().__init__(parent, "Modules page")
         self._control = module_control
         self._widgets = widget_control
         self._open_config = open_config
@@ -373,7 +233,6 @@ class ModuleBackend(QObject):
         self._show_log = show_log
         self._reset_data = reset_data
         self._dependencies: Dependencies | None = None
-        self._jobs = BackgroundJobs(self, "Modules page")
         self._rows: list[dict] = []
         self._search = ""
         self._words: tuple[str, ...] = ()
@@ -395,10 +254,10 @@ class ModuleBackend(QObject):
     @Slot()
     def loadDependenciesLater(self):
         """Read dependencies in background (page shown at once, cold compile of code takes seconds)"""
-        if self._dependencies is not None or self._jobs.is_busy("dependencies"):
+        if self._dependencies is not None or self.jobs.is_busy("dependencies"):
             return
         names = tuple(self._widgets.names), tuple(self._control.names)
-        self._jobs.run(
+        self.jobs.run(
             "dependencies", lambda: find_dependencies(*names), self._dependencies_found, key="dependencies")
 
     def _dependencies_found(self, dependencies: Dependencies):
@@ -412,6 +271,11 @@ class ModuleBackend(QObject):
     # Rows
     def _enabled(self, name: str) -> bool:
         return bool(cfg.user.setting[name]["enable"])
+
+    def _should_run(self, name: str) -> bool:
+        """Whether enabled module should run (on demand module not needed: idle, not failed)"""
+        should_run = getattr(self._control, "should_run", None)
+        return should_run is None or should_run(name)
 
     def _row(self, name: str) -> dict:
         spec = MODULE_SPECS.get(name, DEFAULT_SPEC)
@@ -446,7 +310,7 @@ class ModuleBackend(QObject):
             "glyph": spec.glyph,
             "active": enabled,
             "running": running,
-            "failed": enabled and not running,
+            "failed": enabled and not running and self._should_run(name),
             "interval": int(setting.get("update_interval", 0)),
             "idleInterval": int(setting.get("idle_update_interval", 0)),
             "users": users,

@@ -118,16 +118,24 @@ def copy_replays(sources: Sequence[str], folder: str, progress: Callable[[float]
                     copied += len(chunk)
                     progress(copied / max(total, 1))
             if cancelled is not None and cancelled.is_set():
-                os.remove(part)
+                remove_part(part)
                 return CopyResult(added, errors, True)
             shutil.copystat(source, part)  # replay keeps its date in game list
             os.replace(part, target)
             added.append(name)
         except OSError as error:
             errors.append(f"{os.path.basename(source)}: {error.strerror or error}")
-            with suppress(OSError):
-                os.remove(part)
+            remove_part(part)
+        except BaseException:  # any other failure (progress callback...): never a half copied file left
+            remove_part(part)
+            raise
     return CopyResult(added, errors)
+
+
+def remove_part(path: str):
+    """File being copied removed (copy cancelled or failed)"""
+    with suppress(OSError):
+        os.remove(path)
 
 
 def rename_replay(folder: str, name: str, new_name: str) -> str:

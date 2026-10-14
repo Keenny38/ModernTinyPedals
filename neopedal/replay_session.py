@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 MANUAL_PREFIX = "replay-"
 AUTO_PREFIX = "replay-auto-"
+CLOSING_RETRY_DELAY = 5.0  # automatic recording started again after a previous one still closing its file
 # Only automatic recordings are removed over limit: exact name of automatic recording,
 # so a section saved from it ("...-12-345") or a renamed file is never removed
 AUTO_NAME = re.compile(re.escape(AUTO_PREFIX) + r"\d{4}(-\d{2}){5}" + re.escape(FILE_EXT))
@@ -136,6 +137,8 @@ class AutoReplay:
                     self.started = True
                     self.retry_at = None
                     logger.info("RECORDER: automatic replay recording %s", os.path.basename(filename))
+                elif replay.recording_closing:  # previous recording still closing its file: retried later
+                    self.retry_at = now + CLOSING_RETRY_DELAY
                 elif not replay.recording:  # failed: not retried every update until next driving
                     self.user_stopped = True
             return

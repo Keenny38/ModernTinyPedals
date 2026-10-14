@@ -20,14 +20,21 @@
 Brake bias Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..api_control import api
 from ..module_info import minfo
 from ..validator import generator_init
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BrakeBiasConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "BrakeBiasConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

@@ -33,6 +33,7 @@ import os
 from dataclasses import fields
 from math import isfinite
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from .. import units
 from ..api_control import api
@@ -53,6 +54,9 @@ from ..race_live import read_race_state as read_live
 from ..setting import cfg
 from ..userfile.tyre_strategy import load_tyre_strategy_file, plan_tyre_changes
 from ._base import Overlay
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RacePlanConfig
 
 PLAN_CHECK_SECONDS = 2.0  # race calculator plan & tyre plan checked for changes
 TYRE_PLAN_NAME = "race_calculator_tyres"  # tyre plan kept by race calculator (config folder)
@@ -108,6 +112,8 @@ def load_plan_input(filename: str) -> tuple[StrategyInput, list[int]] | None:
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "RacePlanConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

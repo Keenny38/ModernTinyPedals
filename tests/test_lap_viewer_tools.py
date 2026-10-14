@@ -62,7 +62,7 @@ def test_map_line_keeps_increasing_distance():
     line = lap_map.map_line(lap)
     # Distance far back (glitch) dropped, same distance (late game update) kept just after previous point
     assert line is not None and line.distances == pytest.approx([0.0, 10.0, 20.0, 20.001, 30.0])
-    assert line.xs == [1.0, 2.0, 4.0, 5.0, 6.0]
+    assert list(line.xs) == [1.0, 2.0, 4.0, 5.0, 6.0]  # packed array (column type, double if a list)
 
 
 def test_slip_events_and_map_rotation_helpers():
@@ -292,15 +292,15 @@ def test_corner_compare_lap_sort_and_ideal(viewer, laps):  # noqa: F811
     backend = viewer.backend
     check_only(viewer, [laps[1], laps[2], laps[0]])
     assert len(backend.comparedLaps) == 2
-    first = backend.compareKey
+    first = backend.cornerTable.compareKey
     other = next(lap["key"] for lap in backend.comparedLaps if lap["key"] != first)
-    backend.setCompareKey(other)
-    assert backend.compareKey == other
-    backend.setCornerSort("loss")
-    corners = [row for row in backend.corners if row["kind"] == "corner"]
+    backend.cornerTable.setCompareKey(other)
+    assert backend.cornerTable.compareKey == other
+    backend.cornerTable.setSort("loss")
+    corners = [row for row in backend.cornerTable.items if row["kind"] == "corner"]
     assert [row["bar"] for row in corners] == sorted((row["bar"] for row in corners), reverse=True)
-    assert backend.corners[-1]["kind"] == "ideal" and corners[0]["entry"] and corners[0]["gear"]
-    backend.setCornerSort("track")
+    assert backend.cornerTable.items[-1]["kind"] == "ideal" and corners[0]["entry"] and corners[0]["gear"]
+    backend.cornerTable.setSort("track")
     assert backend.speedUnit == "km/h" and backend.speedScale == 1.0
 
 
@@ -349,7 +349,7 @@ def test_export_in_foreground_and_status_cleared(viewer, laps, tmp_path):  # noq
     backend = viewer.backend
     folder = tmp_path / "export"
     folder.mkdir()
-    assert backend.export_many(laps[:2], str(folder), background=False) == 2
+    assert backend.exports.export_many(laps[:2], str(folder), background=False) == 2
     assert len(os.listdir(folder)) == 2 and backend._status_timer.isActive()  # transient message
     backend._status_timer.timeout.emit()
     assert backend.status == ""
@@ -442,7 +442,7 @@ def test_map_driving_points_and_options(viewer):  # noqa: F811
     backend.setMapOption("unknown", True)  # ignored
     assert backend.mapOptions["values"] and load_viewer_setting(cfg.path.telemetry)["map_options"]["values"]
     assert len(backend.trackMap["arrows"]) == 14
-    backend.setHysteresis(200)  # no corner found: no driving point
+    backend.cornerTable.setHysteresis(200)  # no corner found: no driving point
     assert backend.trackMap["points"] == []
 
 
@@ -559,9 +559,9 @@ def test_map_markers_picking_and_card(viewer, laps):  # noqa: F811
     hit = backend.mapPickLap(line.xs[100], line.ys[100], 3.0)
     assert hit["x"] == pytest.approx(line.distances[100], abs=1)
     assert backend.mapPickLap(1e6, 1e6, 3.0) == {}
-    card = backend.cornerCard(0)
+    card = backend.cornerTable.card(0)
     assert card["title"] == "T1" and len(card["laps"]) == 2 and card["laps"][1]["gap"]
-    assert backend.cornerCard(99) == {}
+    assert backend.cornerTable.card(99) == {}
     backend.setSelectedCorner(1)
     assert backend.selectedCorner == 1
     assert [point.get("row") for point in track_map["corners"]] == [0, 1]

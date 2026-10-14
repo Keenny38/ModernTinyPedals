@@ -12,6 +12,7 @@ Item {
     required property string vehicle
     required property string carClass
     required property string classColor
+    required property string classAlias
     required property string bestLap
     required property string lastLap
     required property string status
@@ -19,7 +20,7 @@ Item {
     required property bool spectated
     required property string brandLogo
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
-    readonly property bool wide: width > theme.em * 34
+    readonly property bool wide: width > theme.em * 34  // row width (not page): class & best lap columns
     property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal picked(int slot)
 
@@ -37,14 +38,14 @@ Item {
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.em * 0.5
+        radius: theme.radiusMd
         color: row.spectated ? Qt.tint(theme.base, Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.14))
              : area.containsMouse ? theme.hover : theme.base
         border.width: 1
         border.color: row.spectated ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.8)
                     : theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 150 } }
-        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionBase } }
+        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: theme.motionBase } }
 
         MouseArea {
             id: area
@@ -121,7 +122,7 @@ Item {
                 text: row.wide ? row.vehicle : [row.carClass, row.vehicle].filter(function(part) { return part !== "" }).join(" · ")
                 visible: text !== ""
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
         }
@@ -134,21 +135,13 @@ Item {
             spacing: theme.em * 0.7
             Row {
                 visible: row.wide && row.carClass !== ""
-                spacing: theme.em * 0.35
+                spacing: theme.em * 0.4
                 anchors.verticalCenter: parent.verticalCenter
                 width: theme.em * 7
-                Rectangle {
-                    width: Math.round(theme.em * 0.55)
-                    height: width
-                    radius: width / 2
-                    color: row.classColor
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    width: parent.width - theme.em
-                    text: row.carClass
-                    color: theme.dimText
-                    elide: Text.ElideRight
+                TpClassBadge {  // as overlays: class alias on class color
+                    label: row.classAlias
+                    fullName: row.carClass
+                    fill: row.classColor
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -176,7 +169,7 @@ Item {
                 ToolTip.visible: lapArea.containsMouse
                 ToolTip.text: lapArea.containsMouse  // text built only while hovered, not on each lap for every row
                     ? i18n.tr("Best Lap") + (row.lastLap !== "" ? "  ·  " + i18n.tr("Last lap") + " " + row.lastLap : "") : ""
-                ToolTip.delay: 500
+                ToolTip.delay: theme.tipDelay
             }
             Item {
                 width: theme.em * 1.3
@@ -187,7 +180,7 @@ Item {
                     glyph: ""  // view
                     color: theme.accent
                     opacity: row.spectated ? 1 : area.containsMouse ? 0.35 : 0
-                    Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: 150 } }
+                    Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: theme.motionBase } }
                 }
             }
         }

@@ -26,7 +26,6 @@ Deleted laps are moved to a trash batch folder (lap viewer trash), so they can b
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -36,6 +35,7 @@ from collections.abc import Callable, Iterator
 from contextlib import suppress
 from typing import NamedTuple
 
+from . import read_json, replace_retry, write_json
 from .lap_cache import remove_cached_lap
 from .telemetry_lap import (
     IMPORT_FOLDER,
@@ -185,12 +185,8 @@ def compatible_lap(reference: dict, info: dict, vehicle_class: str, path: str = 
 
 def foreign_source(group: str) -> str:
     """Folder laps of foreign group were imported from (normalized), empty if not a foreign group"""
-    try:
-        with open(os.path.join(group, FOREIGN_MARK), encoding="utf-8") as file:
-            mark = json.load(file)
-    except (OSError, ValueError):
-        return ""
-    source = mark.get("source") if isinstance(mark, dict) else None
+    mark = read_json(os.path.join(group, FOREIGN_MARK), strict=False, default={}, dict_only=True)
+    source = mark.get("source")
     return os.path.normcase(os.path.normpath(source)) if isinstance(source, str) and source else ""
 
 
@@ -213,12 +209,12 @@ def foreign_group(filepath: str, source: str) -> str:
     return name
 
 
-def copy_file(source: str, target: str):
+def copy_file(source: str, target: str) -> None:
     """Copy file to a temporary file renamed once complete (copy stopped at app exit leaves no partial lap)"""
     temporary = f"{target}.tmp"
     try:
         shutil.copy2(source, temporary)
-        os.replace(temporary, target)
+        replace_retry(temporary, target)
     except OSError:
         with suppress(OSError):
             os.remove(temporary)
@@ -259,9 +255,7 @@ def import_foreign_job(filepath: str, source: str, reference: dict, vehicle_clas
     try:
         os.makedirs(group, exist_ok=True)
         mark = os.path.join(group, FOREIGN_MARK)
-        with open(f"{mark}.tmp", "w", encoding="utf-8") as file:
-            json.dump({"source": os.path.normpath(source), "imported": round(time.time())}, file)
-        os.replace(f"{mark}.tmp", mark)
+        write_json(mark, {"source": os.path.normpath(source), "imported": round(time.time())}, raise_error=True)
         for path in laps:
             target = os.path.normpath(os.path.join(group, os.path.basename(path)))
             if target in result["paths"]:  # same file name in two track folders of source
@@ -301,7 +295,7 @@ def delete_laps(filepath: str, paths: list[str], trash: str) -> Deletion:
             target = os.path.join(trash, IMPORT_FOLDER, os.path.basename(os.path.dirname(path)), os.path.basename(path))
             try:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
-                os.replace(path, target)
+                replace_retry(path, target)
             except FileNotFoundError:  # removed meanwhile
                 deletion.failed.pop(path, None)
                 deletion.deleted.append(path)
@@ -332,7 +326,7 @@ def delete_laps(filepath: str, paths: list[str], trash: str) -> Deletion:
         if os.path.isfile(mark):
             try:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
-                os.replace(mark, target)
+                replace_retry(mark, target)
                 deletion.trashed.append((mark, target))
             except OSError as error:
                 logger.error("LAP LIBRARY: unable to delete %s: %s", mark, error)
@@ -351,7 +345,7 @@ def restore_laps(trashed: list[tuple[str, str]]) -> list[str]:
             continue
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            os.replace(target, path)
+            replace_retry(target, path)
         except OSError as error:
             logger.error("LAP LIBRARY: unable to restore %s: %s", path, error)
             continue

@@ -56,7 +56,22 @@ BLACK_BOX_SECTIONS = {
     "display_order_locking": "Center Column Order",
 }
 
-# Options shown in simple mode besides every on/off and choice option: the ones people
+# On/off & choice options shown in simple mode: main items only (89 on/off options in all), details
+# (trends, diagnostics, event kinds, effects) stay in advanced mode
+BLACK_BOX_SIMPLE_SWITCHES = frozenset((
+    "enable", "show_background", "enable_auto_resize", "display_profile", "override_unit_temperature",
+    "override_unit_tyre_pressure", "override_unit_speed", "override_unit_fuel",
+    "show_wheel_angle", "show_slip_warning", "show_tyre_temperature", "show_tyre_pressure", "show_tyre_wear",
+    "show_tyre_status", "show_tyre_compound", "show_brake_temperature", "show_brake_wear", "show_suspension",
+    "show_rpm_leds", "show_gear", "show_speed", "show_rpm", "show_pedal_bars", "show_abs_indicator",
+    "show_tc_indicator", "show_brake_bias", "show_motor_map", "show_headlights_indicator", "show_wipers_indicator",
+    "show_engine_status", "show_delta_best", "show_laptime", "show_pit_limiter_indicator",
+    "show_track_limits_points", "show_gap_ahead_behind", "show_lift_and_coast", "show_setting_change_popup",
+    "setting_popup_position", "show_fuel_gauge", "show_energy_gauge", "show_stint_comparison", "show_battery_bar",
+    "show_damage_panel", "damage_panel_position", "show_incident_recorder", "show_event_log",
+))
+
+# Options shown in simple mode besides the on/off & choice options above: the ones people
 # commonly adjust. Colors, thresholds, fine scales and labels stay in advanced mode.
 BLACK_BOX_BASIC = frozenset((
     "position_x", "position_y", "font_name", "font_size", "font_weight", "opacity",
@@ -64,7 +79,7 @@ BLACK_BOX_BASIC = frozenset((
     "display_scale", "fixed_width", "fixed_height",
     "maximum_wheel_angle", "tyre_pressure_target_minimum", "tyre_pressure_target_maximum",
     "tyre_target_by_compound", "gauge_low_lap_threshold", "suspension_motion_scale",
-    "damage_panel_scale", "number_of_event_log_lines", "number_of_rpm_leds",
+    "damage_panel_scale", "number_of_event_log_lines", "number_of_rpm_leds", "setting_popup_duration", "layout",
 ))
 
 
@@ -186,13 +201,49 @@ COMPACT_HIDDEN = (
 )
 
 
+# User profiles: on/off options saved from the page (Save as Profile), text option of the preset each
+USER_PROFILES = {"User 1": "user_profile_1", "User 2": "user_profile_2", "User 3": "user_profile_3"}
+
+
+def format_user_profile(values: Mapping) -> str:
+    """On/off show options of values as profile text, like show_gear:1, show_rpm:0"""
+    return ", ".join(f"{key}:{int(value)}" for key, value in values.items()
+                     if key.startswith("show_") and isinstance(value, bool))
+
+
+def parse_user_profile(text: str) -> dict[str, bool]:
+    """Profile text back to on/off options (invalid entries ignored)"""
+    values = {}
+    for entry in (text or "").split(","):
+        key, _, state = entry.strip().partition(":")
+        if key.startswith("show_") and state in ("0", "1"):
+            values[key] = state == "1"
+    return values
+
+
+def profile_overrides(wcfg: Mapping) -> dict[str, bool]:
+    """Options set by display profile (built-in or user profile; empty: Custom, or user profile not saved)"""
+    name = wcfg["display_profile"]
+    if name in USER_PROFILES:
+        return parse_user_profile(wcfg.get(USER_PROFILES[name], ""))
+    return dict(DISPLAY_PROFILES.get(name, {}))
+
+
 def display_overrides(wcfg: Mapping) -> dict[str, bool]:
     """Options overridden by display profile, then by auto compact mode"""
-    overrides = dict(DISPLAY_PROFILES.get(wcfg["display_profile"], {}))
+    overrides = profile_overrides(wcfg)
     threshold = wcfg["auto_compact_display_scale"]
     if 0 < wcfg["display_scale"] < threshold:
         overrides.update(dict.fromkeys(COMPACT_HIDDEN, False))
     return overrides
+
+
+def release_profile(wcfg: Mapping) -> dict[str, object]:
+    """Options set to edit an option of display profile: profile values kept, profile Custom"""
+    profile = profile_overrides(wcfg)
+    if not profile:
+        return {}
+    return {**profile, "display_profile": "Custom"}
 
 
 # Color themes: each default color mapped to the theme color with the same meaning
@@ -260,6 +311,10 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_brake_heat_balance": ("text_brake_heat",),
     "show_motor_map": ("text_motor_map", "motor_map_color"),
     "show_headlights_indicator": ("headlights_active_color", "status_icons_side", "status_icon_scale"),
+    "show_wipers_indicator": ("wipers_active_color", "text_wipers_auto", "text_wipers_slow", "text_wipers_fast"),
+    "show_track_limits_points": ("track_limits_warning_color", "track_limits_penalty_color"),
+    "show_gap_ahead_behind": ("text_gap",),
+    "show_lift_and_coast": ("lift_and_coast_color", "text_lift_and_coast"),
     "show_engine_status": (
         "stalling_rpm_threshold", "engine_oil_warning_temperature", "engine_water_warning_temperature",
         "engine_running_color", "engine_warning_color", "engine_off_color", "engine_ignition_color",
@@ -296,6 +351,13 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_pit_limiter_indicator": ("pit_active_color", "limiter_active_color", "text_pit", "text_limiter"),
     "show_rpm": ("font_scale_rpm", "rpm_bar_color", "rpm_redline_color", "text_rpm"),
     "show_pedal_bars": ("pedal_input_source", "show_clutch_bar", "throttle_color", "brake_color"),
+    "show_setting_change_popup": (
+        "setting_popup_duration", "setting_popup_position", "setting_popup_color", "font_color_setting_popup",
+        "show_setting_popup_maximum", "enable_setting_popup_direction_color", "show_setting_popup_driving_events",
+        "text_tc_slip", "text_tc_cut", "text_front_arb", "text_rear_arb",
+    ),
+    "enable_setting_popup_direction_color": ("setting_popup_increase_color", "setting_popup_decrease_color"),
+    "show_setting_popup_driving_events": ("text_headlights", "text_wipers", "text_state_on", "text_state_off"),
     "show_clutch_bar": ("clutch_color",),
     "show_fuel_gauge": ("fuel_gauge_color", "text_fuel"),
     "show_energy_gauge": ("energy_gauge_color", "text_energy"),
@@ -357,6 +419,8 @@ class OptionUI(NamedTuple):
     color_themes: Mapping[str, Mapping[str, str]]  # theme name: default color to theme color
     overrides: Callable[[Mapping], Mapping[str, bool]] | None = None  # options set by a profile
     override_source: str = ""  # option whose value causes the overrides, named in tooltips
+    # Values ending the overrides of override source (option set by it edited: its values kept, then edited)
+    release: Callable[[Mapping], Mapping[str, object]] | None = None
     dependencies: Mapping[str, str] = {}  # option: on/off option it depends on
     # Sections in page order (title, options), instead of first options of sections; ORDER_LIST among
     # options places the display order list (others: after the last section)
@@ -366,6 +430,14 @@ class OptionUI(NamedTuple):
     design_order: tuple[str, ...] = ()  # display order options in modern design order (while none changed)
     order_labels: Mapping[str, str] = {}  # display order option: English label of item in the list
     simple_mode: bool = True  # simple mode switch (basic options only)
+    # On/off & choice options shown in simple mode (None: every one), see shown_in_mode
+    simple_switches: frozenset[str] | None = None
+    hidden: frozenset[str] = frozenset()  # options never shown (set by page tools: user profiles...)
+    # User profiles: profile name (value of override source): option holding it, saved by profile_text
+    user_profiles: Mapping[str, str] = {}
+    profile_text: Callable[[Mapping], str] | None = None  # values (overrides applied) as user profile text
+    # Part of overlay picture (see black box regions): option shown when clicked in the page preview
+    part_options: Mapping[str, str] = {}
     modern_only: bool = False  # declared sections for modern design only (classic: automatic sections)
 
 
@@ -378,5 +450,18 @@ BLACK_BOX_UI = OptionUI(
     color_themes=BLACK_BOX_COLOR_THEMES,
     overrides=display_overrides,
     override_source="display_profile",
+    release=release_profile,
     dependencies=BLACK_BOX_DEPENDENCIES,
+    simple_switches=BLACK_BOX_SIMPLE_SWITCHES,
+    hidden=frozenset(USER_PROFILES.values()),
+    user_profiles=USER_PROFILES,
+    profile_text=format_user_profile,
+    part_options={
+        "leds": "show_rpm_leds", "wheel0": "show_tyre_temperature", "wheel1": "show_tyre_temperature",
+        "wheel2": "show_tyre_temperature", "wheel3": "show_tyre_temperature", "center": "center_column_alignment",
+        "status": "show_headlights_indicator", "side_rows": "show_brake_bias", "battery": "show_battery_bar",
+        "fuel": "show_fuel_gauge", "energy": "show_energy_gauge", "stint": "show_stint_comparison",
+        "damper": "show_damper_histogram", "damage": "show_damage_panel", "trace": "show_incident_recorder",
+        "events": "show_event_log",
+    },
 )

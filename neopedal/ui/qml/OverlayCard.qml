@@ -39,7 +39,7 @@ Item {
         id: surface
         anchors.fill: parent
         anchors.margins: Math.round(theme.em * 0.3)
-        radius: theme.em * 0.7
+        radius: theme.radiusXl
         color: card.active ? Qt.tint(theme.base, Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.07))
              : area.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.12) : Qt.darker(theme.base, 1.02))
              : theme.base
@@ -47,8 +47,8 @@ Item {
         border.color: card.active ? theme.accent
                     : area.containsMouse ? Qt.lighter(theme.border, 1.3)
                     : theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border
-        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
-        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
+        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
 
         // Card background click (buttons above get their own clicks)
         MouseArea {
@@ -73,7 +73,7 @@ Item {
             y: card.pad
             width: parent.width - card.pad * 2
             height: parent.height - footer.height - card.pad
-            radius: theme.em * 0.45
+            radius: theme.radiusMd
             clip: true
             gradient: Gradient {
                 GradientStop { position: 0; color: "#2B313A" }
@@ -98,8 +98,8 @@ Item {
                 smooth: true
                 opacity: card.active ? 1 : 0.5
                 scale: area.containsMouse ? 1.03 : 1
-                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: 180 } }
-                Behavior on scale { enabled: !card.recycling; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionBase } }
+                Behavior on scale { enabled: !card.recycling; NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
             }
 
             // Loading: soft pulse where the picture comes
@@ -108,11 +108,11 @@ Item {
                 anchors.centerIn: parent
                 width: parent.width * 0.55
                 height: parent.height * 0.34
-                radius: theme.em * 0.35
+                radius: theme.radiusSm
                 color: "#FFFFFF"
                 opacity: 0.05
                 SequentialAnimation on opacity {
-                    running: card.previewState === 0 && card.visible && pageState.active  // QML visible stays true while page hidden
+                    running: card.previewState === 0 && card.visible && pageState.active && theme.animate  // QML visible stays true while page hidden
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.12; duration: 650; easing.type: Easing.InOutQuad }
                     NumberAnimation { to: 0.05; duration: 650; easing.type: Easing.InOutQuad }
@@ -127,7 +127,7 @@ Item {
                 wrapMode: Text.WordWrap
                 text: i18n.tr("Preview not available")
                 color: "#8B949E"
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
             }
 
             // Enabled but not running: start error (see log)
@@ -135,11 +135,11 @@ Item {
                 visible: card.failed
                 anchors.top: parent.top
                 anchors.left: parent.left
-                anchors.margins: theme.em * 0.35
+                anchors.margins: theme.em * 0.4
                 height: Math.round(theme.em * 1.5)
                 width: failedRow.implicitWidth + theme.em * 0.8
                 radius: height / 2
-                color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.92)
+                color: theme.lossFill
                 Row {
                     id: failedRow
                     anchors.centerIn: parent
@@ -148,7 +148,7 @@ Item {
                     Text {
                         text: i18n.tr("Error")
                         color: "white"
-                        font.pointSize: theme.fontPoint * 0.8
+                        font.pointSize: theme.fontCaption
                         font.weight: Font.DemiBold
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -156,7 +156,7 @@ Item {
                 MouseArea { id: failedArea; anchors.fill: parent; hoverEnabled: true }
                 ToolTip.visible: failedArea.containsMouse
                 ToolTip.text: i18n.tr("Overlay could not start, see log (Help menu)")
-                ToolTip.delay: 300
+                ToolTip.delay: theme.tipDelay
             }
 
             // Settings, shown while hovering the card (card click opens settings too)
@@ -164,17 +164,17 @@ Item {
                 id: settingsButton
                 anchors.top: parent.top
                 anchors.right: parent.right
-                anchors.margins: theme.em * 0.35
+                anchors.margins: theme.em * 0.4
                 width: Math.round(theme.em * 2)
                 height: width
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
                 opacity: area.containsMouse || hovered || card.current ? 1 : 0
                 visible: opacity > 0
-                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: 140 } }
+                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionFast } }
                 ToolTip.visible: hovered
                 ToolTip.text: i18n.tr("Config")
-                ToolTip.delay: 500
+                ToolTip.delay: theme.tipDelay
                 Accessible.name: i18n.tr("Config")
                 background: Rectangle {
                     radius: width / 2
@@ -214,7 +214,7 @@ Item {
             Column {
                 id: texts
                 anchors.left: dot.right
-                anchors.leftMargin: theme.em * 0.45
+                anchors.leftMargin: theme.em * 0.5
                 anchors.right: controls.left
                 anchors.rightMargin: theme.em * 0.3
                 anchors.verticalCenter: parent.verticalCenter
@@ -234,13 +234,13 @@ Item {
                     }
                     ToolTip.visible: truncated && nameArea.containsMouse
                     ToolTip.text: card.label
-                    ToolTip.delay: 400
+                    ToolTip.delay: theme.tipDelay
                 }
                 Text {
                     width: parent.width
                     text: card.categoryLabel
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     elide: Text.ElideRight
                 }
             }

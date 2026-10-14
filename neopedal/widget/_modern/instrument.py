@@ -28,7 +28,7 @@ Off indicators stay dim.
 from __future__ import annotations
 
 from math import cos, pi, sin
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
@@ -37,6 +37,9 @@ from ...api_control import api
 from ..instrument import InstrumentMixin
 from .base import ModernOverlay, display_order_options
 from .draw import panel, readable_on, rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import InstrumentConfig
 
 ITEMS = ("headlights", "ignition", "clutch", "wheel_lock", "wheel_slip")
 
@@ -51,6 +54,8 @@ class Light(NamedTuple):
 
 class Realtime(InstrumentMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: InstrumentConfig
 
     options = (
         "layout", "icon_size", "show_headlights", "show_ignition", "stalling_rpm_threshold", "show_clutch",

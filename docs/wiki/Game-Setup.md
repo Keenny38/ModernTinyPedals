@@ -41,8 +41,8 @@ LMU's built-in API can be selected on Linux, but may need a third-party plugin t
 
 With Le Mans Ultimate, the app also reads the game's local REST API. It is enabled by default and needs no setup. It provides:
 
-- the in-game **chat** (Chat overlay) and **contacts** between cars (Black box event log, Game Replays page);
-- the **replays** saved by the game, which the Game Replays page can open and control;
+- the in-game **chat** (Chat overlay) and **contacts** between cars (Dashboard HUD event log, Results & Replays page);
+- the **replays** saved by the game, which the Results & Replays page can open and control;
 - **team stints** (fuel, energy and tyre wear of each driver of your car) and the **allowed tyres** of the session, used by the [Race Calculator](Race-Calculator.md);
 - the game's **fuel and energy estimate** per lap, used until a lap of the car is recorded on the track;
 - the **official track layout**, track edges and pit lane, used by the [Telemetry Viewer](Telemetry-Viewer.md);

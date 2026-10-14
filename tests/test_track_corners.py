@@ -125,10 +125,10 @@ def test_lap_viewer_uses_official_corners(ui_env):
         backend.data.set_laps([PlotLap("a", "a", lap, QColor("red")), PlotLap("b", "b", lap, QColor("blue"))])
         backend.rebuild_chart()
         assert backend.track_name() == "Michelin Raceway Road Atlanta"
-        labels = [mark["label"] for mark in backend.cornerMarks]
+        labels = [mark["label"] for mark in backend.cornerTable.marks]
         assert labels == ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T10a", "T10b", "T11", "T12"]
         assert [point["label"] for point in backend.trackMap["corners"]] == labels  # every official corner
-        rows = [row for row in backend.corners if row["kind"] == "corner"]
+        rows = [row for row in backend.cornerTable.items if row["kind"] == "corner"]
         assert [row["label"] for row in rows][:2] == ["T1", "T5"]
         assert all(row["label"].startswith("T") for row in rows)
         chip = backend.trackMap["corners"][0]

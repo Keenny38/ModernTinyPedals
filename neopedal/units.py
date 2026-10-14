@@ -31,11 +31,6 @@ def pass_value(v: float) -> float:
 
 
 # Unit conversion
-def meter_to_millimeter(meter: float) -> float:
-    """Meter to Millimeter"""
-    return meter * 1000
-
-
 def meter_to_feet(meter: float) -> float:
     """Meter to Feet"""
     return meter * 3.2808399
@@ -74,11 +69,6 @@ def liter_to_gallon(liter: float) -> float:
 def kilogram_to_pound(kilogram: float) -> float:
     """Kilogram to pound"""
     return kilogram * 2.20462262
-
-
-def kelvin_to_celsius(kelvin: float) -> float:
-    """Kelvin to Celsius"""
-    return kelvin - 273.15
 
 
 def kpa_to_psi(kilopascal: float) -> float:

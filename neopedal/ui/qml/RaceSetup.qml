@@ -16,11 +16,11 @@ Card {
     component Caption: Text {
         property string tip: ""
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.85
+        font.pointSize: theme.fontSmall
         HoverHandler { id: captionHover; enabled: parent.tip !== "" }
         ToolTip.visible: captionHover.hovered
         ToolTip.text: tip
-        ToolTip.delay: 500
+        ToolTip.delay: theme.tipDelay
     }
     component SetupField: Column {
         id: setupField
@@ -60,10 +60,7 @@ Card {
                 options: [i18n.tr("Time"), i18n.tr("Laps")]
                 currentIndex: setup.lapRace ? 1 : 0
                 implicitHeight: Math.round(theme.em * 2.05)
-                onActivated: function(index) {
-                    backend.setInput("enable_lap_race", index === 1)
-                    currentIndex = Qt.binding(function() { return setup.lapRace ? 1 : 0 })
-                }
+                onActivated: function(index) { backend.setInput("enable_lap_race", index === 1) }
             }
         }
         SetupField {
@@ -117,12 +114,9 @@ Card {
                     implicitHeight: Math.round(theme.em * 2.05)
                     ToolTip.visible: unitHover.hovered
                     ToolTip.text: i18n.tr("Safety margin in laps, in fuel kept in the tank, or in % more consumption per lap")
-                    ToolTip.delay: 600
+                    ToolTip.delay: theme.tipDelay
                     HoverHandler { id: unitHover }
-                    onActivated: function(index) {
-                        backend.setInput("input_safety_margin_kind", index)
-                        currentIndex = Qt.binding(function() { return Number(setup.inputs.input_safety_margin_kind) })
-                    }
+                    onActivated: function(index) { backend.setInput("input_safety_margin_kind", index) }
                 }
             }
         }

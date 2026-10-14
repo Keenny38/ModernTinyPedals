@@ -26,6 +26,7 @@ gap change per lap to each car (averaged over about 30 seconds), green when play
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ...api_control import api
 from ...module_info import minfo
@@ -33,6 +34,9 @@ from ...template.widget.drivers_ui import RELATIVE_COLUMNS
 from ..relative import relative_data
 from .drivers import DRIVER_OPTIONS, Context, DriverTable
 from .table import RIGHT, TEXT, TREND, Cell, Column, Row, change_width
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RelativeConfig
 
 TREND_STEADY = 0.05  # seconds per lap: gap change below this shown as steady
 # Gap change per lap of sample race rows (index -> seconds), overlay pictures
@@ -43,6 +47,8 @@ TrendOf = Callable[[float, int], "float | None"]
 
 class Realtime(DriverTable):
     """Draw widget"""
+
+    wcfg: RelativeConfig
 
     COLUMNS = RELATIVE_COLUMNS
     options = (

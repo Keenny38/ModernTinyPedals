@@ -37,10 +37,14 @@ from collections.abc import Callable, Iterable, Sequence
 from itertools import pairwise
 from typing import NamedTuple
 
+from ...const_app import FORMAT_PREFIX, LEGACY_FORMAT_PREFIX
+from ...userfile import write_json
 from ...userfile.driver_history import SessionRecord
 from ...userfile.telemetry_lap import group_sessions, lap_files, lap_number_of, lap_timestamp_of, read_lap_info
+from .formatting import iso_minutes
 
-HISTORY_FORMAT = "modern-tiny-pedals-driver-history"  # exported session history (JSON), friend's stats read back
+HISTORY_FORMAT = f"{FORMAT_PREFIX}-driver-history"  # exported session history (JSON), friend's stats read back
+HISTORY_FORMATS = (HISTORY_FORMAT, f"{LEGACY_FORMAT_PREFIX}-driver-history")  # exports of versions until 0.23.0 too
 HISTORY_VERSION = 1
 OUTLIER_FACTOR = 1.07  # laps slower than fastest of session by this factor left out (traffic, mistakes)
 MIN_CLEAN_LAPS = 3  # clean laps needed for a consistency index or a stint pace
@@ -314,8 +318,7 @@ def history_document(records: Iterable[SessionRecord], stats: dict, classes: dic
 
 def write_history_json(filename: str, document: dict):
     """Write exported session history, raises OSError"""
-    with open(filename, "w", encoding="utf-8") as file:
-        json.dump(document, file, ensure_ascii=False, indent=1)
+    write_json(filename, document, ensure_ascii=False, indent=1, raise_error=True)
 
 
 def write_history_csv(filename: str, records: Iterable[SessionRecord], header: Sequence[str], session_names:
@@ -332,7 +335,7 @@ def write_history_csv(filename: str, records: Iterable[SessionRecord], header: S
         writer.writerow(header)
         for record in sorted(records, key=lambda item: item.time):
             writer.writerow([
-                time.strftime("%Y-%m-%d %H:%M", time.localtime(record.time)), record.track, record.vehicle,
+                iso_minutes(record.time), record.track, record.vehicle,
                 record.vehicle_class,
                 session_names[record.session] if 0 <= record.session < len(session_names) else str(record.session),
                 number(record.best, 3) if record.best > 0 else "", record.valid, record.invalid,
@@ -341,21 +344,34 @@ def write_history_csv(filename: str, records: Iterable[SessionRecord], header: S
 
 
 def load_friend(filename: str) -> dict:
-    """Friend's exported session history (JSON of history_document): name, stats & classes compared (sessions
-    left out), raises ValueError if not one"""
+    """Friend's exported session history (JSON of history_document), see friend_from_document (name: file name
+    if none), raises ValueError if not one"""
     try:
         with open(filename, encoding="utf-8") as file:
             document = json.load(file)
     except (OSError, ValueError) as error:
         raise ValueError(str(error)) from error
-    if not isinstance(document, dict) or document.get("format") != HISTORY_FORMAT:
+    return friend_from_document(document, os.path.splitext(os.path.basename(filename))[0])
+
+
+def friend_from_document(document, name: str = "") -> dict:
+    """Friend's stats of an exported session history: name (driver, else name given), stats
+    (finite numbers of STAT_KEYS only) & classes compared, sessions left out, raises ValueError if not one"""
+    if not isinstance(document, dict) or document.get("format") not in HISTORY_FORMATS:
         raise ValueError("not an exported session history")
-    stats = document.get("stats")
-    classes = document.get("classes")
-    stats = stats if isinstance(stats, dict) else {}
+    stats, classes, driver = document.get("stats"), document.get("classes"), document.get("driver")
+    best: dict[str, dict] = {}
+    for track, vehicles in stats.items() if isinstance(stats, dict) else ():
+        if isinstance(vehicles, dict):
+            best[str(track)] = {
+                str(vehicle): {key: value for key, value in values.items() if key in STAT_KEYS
+                               and isinstance(value, (int, float)) and not isinstance(value, bool)
+                               and math.isfinite(value)}
+                for vehicle, values in vehicles.items() if isinstance(values, dict)
+            }
     classes = classes if isinstance(classes, dict) else {}
-    name = str(document.get("driver") or "") or os.path.splitext(os.path.basename(filename))[0]
-    return {"name": name, "stats": stats, "classes": {str(key): str(value) for key, value in classes.items()}}
+    return {"name": (driver if isinstance(driver, str) else "") or name, "stats": best,
+            "classes": {str(key): value for key, value in classes.items() if isinstance(value, str)}}
 
 
 def best_by_class(stats: dict, track: str, class_of: Callable[[str], str]) -> dict[str, float]:

@@ -28,6 +28,7 @@ chips, values in their line color.
 from __future__ import annotations
 
 from math import cos, radians, sin
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPainterPath, QPen, QPolygonF
@@ -37,11 +38,16 @@ from ..heading import HeadingMixin
 from .base import CENTER, ModernOverlay
 from .draw import disc, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import HeadingConfig
+
 CARDINALS = ((0, "N"), (90, "E"), (180, "S"), (270, "W"))
 
 
 class Realtime(HeadingMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: HeadingConfig
 
     options = (
         "font_size", "display_size", "show_degree_sign", "decimal_places", "show_yaw_angle_reading",

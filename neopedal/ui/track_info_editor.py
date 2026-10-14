@@ -26,11 +26,8 @@ from typing import Any, cast
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QHeaderView,
     QMenu,
     QMessageBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
@@ -43,7 +40,6 @@ from ..template.setting_tracks import TRACKINFO_DEFAULT
 from ._common import (
     BaseEditor,
     ClockTableItem,
-    CompactButton,
     FloatTableItem,
     UIScaler,
     run_after_saving,
@@ -86,14 +82,8 @@ class TrackInfoEditor(BaseEditor):
         self.tracks_temp = copy_setting(cfg.user.tracks)
 
         # Set table
-        self.table_tracks = QTableWidget(self)
-        self.table_tracks.setColumnCount(len(HEADER_TRACKS))
-        self.table_tracks.setHorizontalHeaderLabels([tr(name) for name in HEADER_TRACKS])
-        self.table_tracks.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.table_tracks.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for column_index in range(1, len(HEADER_TRACKS)):
-            self.table_tracks.horizontalHeader().setSectionResizeMode(column_index, QHeaderView.ResizeMode.Fixed)
-            self.table_tracks.setColumnWidth(column_index, UIScaler.size(5 if 5 <= column_index <= 6 else 8))
+        self.table_tracks = self.editor_table(HEADER_TRACKS, {
+            column_index: 5 if 5 <= column_index <= 6 else 8 for column_index in range(1, len(HEADER_TRACKS))})
         self.table_tracks.cellChanged.connect(self.verify_input)
 
         self.table_tracks.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -115,39 +105,9 @@ class TrackInfoEditor(BaseEditor):
 
     def set_layout_button(self):
         """Set button layout"""
-        button_add = CompactButton(tr("Add"))
-        button_add.clicked.connect(self.add_track)
-
-        button_sort = CompactButton(tr("Sort"))
-        button_sort.clicked.connect(self.sort_track)
-
-        button_delete = CompactButton(tr("Delete"))
-        button_delete.clicked.connect(self.delete_track)
-
-        button_reset = CompactButton(tr("Reset"))
-        button_reset.clicked.connect(self.reset_setting)
-
-        button_apply = CompactButton(tr("Apply"))
-        button_apply.clicked.connect(self.applying)
-
-        button_save = CompactButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(self.close)
-
-        # Set layout
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_add)
-        layout_button.addWidget(button_sort)
-        layout_button.addWidget(button_delete)
-        layout_button.addWidget(button_reset)
-        self.add_undo_buttons(layout_button)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_apply)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_close)
-        return layout_button
+        return self.editor_buttons(
+            (("Add", self.add_track), ("Sort", self.sort_track), ("Delete", self.delete_track)),
+            self.reset_setting, self.applying)
 
     def refresh_table(self):
         """Refresh tracks list"""

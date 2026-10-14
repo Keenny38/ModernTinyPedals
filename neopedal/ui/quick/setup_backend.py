@@ -30,10 +30,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
 import weakref
 from collections import deque
-from contextlib import suppress
 from time import perf_counter
 from typing import NamedTuple
 
@@ -55,6 +53,7 @@ from ..widget_preview import set_showing
 from . import Translator
 from .models import DictListModel
 from .overlay_backend import CATEGORY_COLORS, RENDER_BUDGET, widget_category
+from .page_backend import PageBackend
 from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
@@ -129,6 +128,11 @@ def running_games() -> set[str]:
         process_name = (process.info.get("name") or "").lower()
         found.update(name for name, starts in prefixes.items() if process_name.startswith(starts))
     return found
+
+
+def detect_running_games() -> list[str]:
+    """Running games, sorted (worker thread)"""
+    return sorted(running_games())
 
 
 def unit_system(units: dict) -> str:
@@ -228,7 +232,7 @@ class SetupTranslator(Translator):
         return trm(text) if self.code == current_language() else text
 
 
-class SetupBackend(QObject):
+class SetupBackend(PageBackend):
     """Setup wizard state: steps, choices, overlay tiles & previews"""
 
     stepChanged = Signal()
@@ -242,10 +246,9 @@ class SetupBackend(QObject):
     finished = Signal()
     skipped = Signal()
     skipRequested = Signal()  # Esc or window close: page asks before quitting
-    gamesDetected = Signal(list)
 
     def __init__(self, parent=None, detect_games: bool = True):
-        super().__init__(parent)
+        super().__init__(parent, "Setup")
         self._step = STEP_WELCOME
         self._language = cfg.application["language"] if cfg.application["language"] in LANGUAGES else "English"
         self.translator = SetupTranslator(self, self._language)
@@ -287,9 +290,8 @@ class SetupBackend(QObject):
         self._timer.timeout.connect(self._render_next)
         self.tiles = DictListModel(TILE_ROLES, self)
         self.tiles.reset(self._tile_rows())
-        self.gamesDetected.connect(self._games_detected)
-        if detect_games:
-            threading.Thread(target=self._detect_games, name="SetupGameDetect", daemon=True).start()
+        if detect_games:  # process list read in background
+            self.jobs.run("game detection", detect_running_games, self._games_detected, self._detection_failed)
 
     def tr(self, text: str) -> str:  # type: ignore[override]  # wizard language
         return self.translator.table.get(text, text)
@@ -476,17 +478,11 @@ class SetupBackend(QObject):
                 self._game = name
                 self.gamesChanged.emit()
 
-    def _detect_games(self):
-        """Running games (thread: process list read in background)"""
-        try:
-            running = running_games()
-        except Exception as error:  # psutil access denied, platform without process list
-            logger.debug("SETUP: game detection failed: %s", error)
-            return
-        with suppress(RuntimeError):  # wizard closed meanwhile
-            self.gamesDetected.emit(sorted(running))
+    @staticmethod
+    def _detection_failed(error: BaseException):
+        """psutil access denied, platform without process list: no game picked"""
+        logger.debug("SETUP: game detection failed: %s", error)
 
-    @Slot(list)
     def _games_detected(self, running: list):
         self._running = set(running) & set(self._games)
         if not self._game_picked and self._running and self._game not in self._running:

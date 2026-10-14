@@ -29,7 +29,7 @@ from __future__ import annotations
 from contextlib import suppress
 from functools import partial
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QMetaObject, QUrl
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QColorDialog, QDialog, QFileDialog, QMessageBox, QVBoxLayout
@@ -125,7 +125,14 @@ class OverlayOptions(BaseDialog):
 
     def save_action(self):
         """Ctrl+S: Apply, page kept open"""
-        return self.backend.apply
+        return self.apply_edits
+
+    def apply_edits(self) -> bool:
+        """Field being edited committed first (Ctrl+S keeps focus in it), then Apply"""
+        root = self.view.rootObject() if self.view is not None else None
+        if root is not None:
+            QMetaObject.invokeMethod(root, "commitEdits")
+        return self.backend.apply()
 
     def showEvent(self, event):
         """Saved values read again: options may have changed while hidden without app refresh (overlay
@@ -192,6 +199,9 @@ class OverlayOptions(BaseDialog):
         view, self.view = self.view, None  # type: ignore[assignment]
         if view is not None:  # closed twice (nested event loop while asking to save)
             view.setSource(QUrl())  # QML gone before the backend it binds to
+        from ..i18n.options import clear_help_cache
+
+        clear_help_cache()  # option help texts (several MB) read again by next page needing them
 
     def reject(self):
         """Esc: close, asking to save pending changes"""
@@ -221,6 +231,18 @@ class OverlayOptions(BaseDialog):
 
     def notify(self, text: str):
         show_toast(self, text)
+
+    def export_overlays(self, names: list[str]):
+        """Settings of picked overlays saved as package file (values shown, pending edits included)"""
+        from .overlay_share import export_overlay_settings
+
+        export_overlay_settings(self, names, self.backend.values)
+
+    def import_overlays(self):
+        """Overlay settings package picked, its values set as pending edits of this page"""
+        from .overlay_share import import_overlay_settings
+
+        import_overlay_settings(self, self)
 
     def applied(self, names: list[str]):
         """Options saved: edited overlays restarted once saving is finished, other pages follow"""

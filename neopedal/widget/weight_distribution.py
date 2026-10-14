@@ -20,13 +20,20 @@
 Weight distribution Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import WeightDistributionConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "WeightDistributionConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

@@ -23,17 +23,20 @@ Widget performance monitor
 from __future__ import annotations
 
 import gc
+import logging
 import threading
 from collections.abc import Callable
 from contextlib import suppress
 from functools import wraps
 from time import monotonic, perf_counter
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import psutil
 
 if TYPE_CHECKING:
     from .api_connector import ConnectorHealth
+
+logger = logging.getLogger(__name__)
 
 
 class PerfStats(NamedTuple):
@@ -50,6 +53,8 @@ class PerfStats(NamedTuple):
 
 STALL_INTERVAL = 0.025  # seconds between main thread checks while monitoring
 STALL_THRESHOLD = 0.05  # seconds a check came late: main thread blocked (window & overlays frozen)
+SLOW_CALL = 0.016  # seconds: UI thread callback longer than a frame (60 Hz) reported
+SLOW_CALL_LOG_INTERVAL = 60.0  # seconds between warnings of the same slow callback
 
 
 class PerfMonitor:
@@ -166,6 +171,27 @@ class _StallProbe:
 
 _gc_probe = _GcProbe()
 _stall_probe = _StallProbe()
+_slow_calls: dict[tuple[str, str], float] = {}  # (name, event): time of last warning
+
+
+def timed_call(name: str, event: str, func: Callable[..., Any], *args) -> Any:
+    """Call func(*args): time recorded while monitor is enabled, warning logged (once a minute per name & event,
+    debug in between) when it took longer than SLOW_CALL (UI thread blocked for more than a frame)"""
+    start = perf_counter()
+    try:
+        return func(*args)
+    finally:
+        elapsed = perf_counter() - start
+        if PerfMonitor.enabled:
+            PerfMonitor.record(name, event, elapsed)
+        if elapsed > SLOW_CALL:
+            now = monotonic()
+            last = _slow_calls.get((name, event))
+            warn = last is None or now - last >= SLOW_CALL_LOG_INTERVAL
+            if warn:
+                _slow_calls[(name, event)] = now
+            logger.log(logging.WARNING if warn else logging.DEBUG,
+                       "slow callback: %s %s took %.0f ms", name, event, elapsed * 1000)
 
 
 def _owner_name(widget) -> str:
@@ -280,6 +306,52 @@ class ProcessMonitor:
         )
         self._last_time, self._last_threads, self._last_total = now, threads_now, total_now
         return process, stats
+
+
+class GcStats(NamedTuple):
+    """Python garbage collection state"""
+
+    frozen: int  # objects moved out of garbage collection (gc.freeze, see loader.freeze_collected)
+    tracked: int  # objects waiting in generations for next collections
+
+
+def gc_stats() -> GcStats:
+    """Frozen & tracked object counts"""
+    return GcStats(gc.get_freeze_count(), sum(gc.get_count()))
+
+
+class AllocationRow(NamedTuple):
+    """Python memory allocated by a source line (tracemalloc)"""
+
+    source: str  # "file:line"
+    size_kb: float
+    allocations: int  # blocks allocated
+
+
+def set_allocation_tracing(enabled: bool, frames: int = 1):
+    """Trace Python memory allocations (off by default: slows down every allocation & uses memory itself)"""
+    import tracemalloc
+
+    if enabled and not tracemalloc.is_tracing():
+        tracemalloc.start(frames)
+    elif not enabled and tracemalloc.is_tracing():
+        tracemalloc.stop()
+
+
+def allocation_top(limit: int = 10) -> list[AllocationRow]:
+    """Source lines holding most Python memory since tracing started, empty if not tracing"""
+    import tracemalloc
+
+    if not tracemalloc.is_tracing():
+        return []
+    snapshot = tracemalloc.take_snapshot().filter_traces((
+        tracemalloc.Filter(False, tracemalloc.__file__),
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+    ))
+    return [
+        AllocationRow(f"{stat.traceback[0].filename}:{stat.traceback[0].lineno}", stat.size / 1024, stat.count)
+        for stat in snapshot.statistics("lineno")[:limit]
+    ]
 
 
 class EndpointRow(NamedTuple):

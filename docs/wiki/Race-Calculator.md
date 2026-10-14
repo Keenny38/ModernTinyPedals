@@ -8,9 +8,11 @@ Open it with the `Race` entry of the navigation bar, or `Tools` > `Race Calculat
 
 ## Page layout
 
-- **Top bar**: data source (live session or file), `Follow Live`, `Live Race` and its status, `Undo` / `Redo`, `Race Plan` menu, `Load Live`, `Load File`, `Reset to Zero`.
+- **Top bar**: `Enabled` / `Disabled` switch, data source (live session or file), `Follow Live`, `Live Race` and its status, `Undo` / `Redo`, `Race Plan` menu, `Load Live`, `Load File`, `Reset to Zero`.
 - **Race setup, key figures and strategy** (shared by all tabs): race type and length, formation laps, pit stop time and safety margin; race fuel and energy, pit stops and what limits the stints, longest stint, average refill per stop, tyres used; then the strategy timeline with the fuel in the tank over the race.
 - **Tabs**: `Fuel` (inputs, pit stop plan, details, scenarios, consumption history), `Tyres` (tyre wear, rules, tyre plan and stock), `Team` (LMU team stints), `Live` (every value the game gives). The page reopens on the last tab.
+
+**On / off**: the `Enabled` / `Disabled` switch (on by default, kept for next time) turns the whole page on or off, as in the Broadcast Director. Off, the page shows only `Race Calculator is off` and a `Turn On Race Calculator` button, and nothing is read from the game: no live laps, no live race plan, no class rivals, no automatic race plan of the car & track, no team stints or LMU garage screens, pit stops not counted. Inputs, tyre plan and race plan are kept for when it is turned back on, and the `Race plan` overlay still uses the last plan. Also from the `race_calculator_toggle` hotkey and the command palette (`Ctrl+K`, `Race Calculator (On)`), page open. While the page is open, its `Race` entry of the navigation bar has a dot: green on, grey off. Turned back on in a race, the stops made meanwhile were not counted. Turned off and hidden behind another page for 10 minutes, the page is closed to free memory, like any page, and opens again from the navigation bar (turned on, it stays open to follow the live race).
 
 The inputs of the `Fuel` and `Tyres` tabs are grouped in sections: click a section title to fold it (it stays folded next time, its main values shown in the title). The `Safety Car` and `Rain` sections have their switch in the title. On a narrow window the key figures go on two rows and the consumption history below the plan.
 
@@ -94,7 +96,6 @@ The `Race Plan` menu:
 
 - `Save Race Plan As...` / `Open Race Plan...`: race setup, every input and the tyre plan in one `.race-plan` file, to keep or share with your team.
 - `Save for Current Car & Track` and `Open Plan of Car & Track Automatically`: the plan comes back when you drive that car on that track.
-- `Copy Share Code` / `Paste Share Code...`: the whole plan as one line of text to paste in a chat. Share codes keep the fuel unit.
 - `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) for inputs and tyre plan.
 
 ## Race Plan overlay

@@ -8,7 +8,7 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from neopedal.adapter import lmu_connector
+from neopedal.adapter import _sync, lmu_connector
 from neopedal.replay import (
     KEYFRAME_INTERVAL,
     ReplayControl,
@@ -531,7 +531,7 @@ def test_damaged_frame_skipped_until_keyframe(tmp_path):
     frames = make_frames(KEYFRAME_INTERVAL + 5)
     filename = write_replay(tmp_path, frames)
     replay = ReplayFile(filename)
-    offset = replay._offsets[3]
+    offset = replay._heads[3] + replay._frame_header.size  # payload of frame 3
     replay.close()
     with open(filename, "r+b") as file:  # flip a byte of delta frame 3 payload: CRC fails
         file.seek(offset)
@@ -731,6 +731,7 @@ def test_paused_replay_keeps_overlays_active(tmp_path, monkeypatch):
 
     clock = {"offset": 0.0}
     monkeypatch.setattr(lmu_connector, "monotonic", lambda: time.monotonic() + clock["offset"])
+    monkeypatch.setattr(_sync, "monotonic", lambda: time.monotonic() + clock["offset"])  # update thread
     player = ReplayPlayer(ReplayFile(write_replay(tmp_path, lmu_frames(30))))
     info = lmu_connector.LMUInfo()
     info.setReplay(player)

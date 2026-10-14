@@ -20,6 +20,8 @@
 Damage Widget
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QBrush, QPainter, QPen
 
@@ -30,9 +32,14 @@ from ._base import Overlay
 from ._common import tyre_punctured, warning_flash
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import DamageConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "DamageConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -95,7 +102,7 @@ class Realtime(Overlay):
         self.pen_text.setColor(self.wcfg["font_color_integrity"])
         self.pen_puncture = QPen()
         self.pen_puncture.setColor(self.wcfg["puncture_outline_color"])
-        self.pen_puncture.setWidth(max(self.wcfg["puncture_outline_width"], 1))
+        self.pen_puncture.setWidthF(max(self.wcfg["puncture_outline_width"], 1))
         self.pen_puncture.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         self.brush_cone = QBrush(Qt.BrushStyle.SolidPattern)
         self.brush_cone.setColor(self.wcfg["last_impact_cone_color"])
@@ -108,7 +115,7 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.detached_parts = False
+        self.flash_highlight = False  # detached parts drawn in warning color (flash on)
         self.damage_aero = -1.0
         self.damage_body: tuple[int, ...] = (0,) * 8
         self.damage_wheel: tuple[bool, ...] = (False,) * 4
@@ -168,9 +175,15 @@ class Realtime(Overlay):
             self.damage_susp = temp_damage_susp
             update_later = True
 
-        # Update if any detached parts
-        if self.detached_parts:
-            self.detached_parts = False
+        # Detached parts flash: state set here once per update (not in paint), repainted only when it toggles
+        if self.wcfg["show_detached_warning_flash"] and (
+            any(value >= 3 for value in self.damage_body) or any(self.damage_wheel)
+        ):
+            flash_highlight = self.warn_flash.send(True)
+        else:
+            flash_highlight = False
+        if self.flash_highlight != flash_highlight:
+            self.flash_highlight = flash_highlight
             update_later = True
 
         if update_later:
@@ -245,22 +258,18 @@ class Realtime(Overlay):
             return self.wcfg["body_color_damage_heavy"]
         # body parts detached
         if value >= 3:
-            if self.wcfg["show_detached_warning_flash"]:
-                self.detached_parts = True
-                if self.warn_flash.send(True):
-                    return self.wcfg["warning_color_detached"]
+            if self.flash_highlight:
+                return self.wcfg["warning_color_detached"]
             return self.wcfg["body_color_detached"]
         # no damage
         return self.wcfg["body_color"]
 
-    def color_damage_wheel(self, wheel_detached: bool, susp_damage: float) -> int:
+    def color_damage_wheel(self, wheel_detached: bool, susp_damage: float) -> str:
         """Wheel and suspension damage color"""
         # wheel detached
         if wheel_detached:
-            if self.wcfg["show_detached_warning_flash"]:
-                self.detached_parts = True
-                if self.warn_flash.send(True):
-                    return self.wcfg["warning_color_detached"]
+            if self.flash_highlight:
+                return self.wcfg["warning_color_detached"]
             return self.wcfg["wheel_color_detached"]
         # no damage
         if susp_damage < self.wcfg["suspension_damage_light_threshold"]:

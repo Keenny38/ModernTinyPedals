@@ -226,18 +226,16 @@ def test_name_typed_with_json_extension_used_once(page):
 
 def test_host_actions(page, monkeypatch):
     calls = []
-    for name in ("export_package", "copy_share_code", "import_package", "import_share_code", "open_page"):
+    for name in ("export_package", "import_package", "open_page"):
         monkeypatch.setattr(page, name, lambda *args, _name=name: calls.append((_name, *args)))
     page.backend.exportPackage("race.json")
-    page.backend.copyShareCode("race.json")
     page.backend.importPackage()
-    page.backend.importShareCode()
     page.backend.compare("race.json")
     page.backend.openPage("trash")
     page.backend.exportPackage("missing.json")  # unknown: ignored
     assert calls == [
-        ("export_package", "race.json"), ("copy_share_code", "race.json"), ("import_package",),
-        ("import_share_code",), ("open_page", "compare", "race.json"), ("open_page", "trash"),
+        ("export_package", "race.json"), ("import_package",),
+        ("open_page", "compare", "race.json"), ("open_page", "trash"),
     ]
 
 

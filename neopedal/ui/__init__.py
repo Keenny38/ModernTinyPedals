@@ -272,7 +272,7 @@ def palette_light():
         ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.ToolTipBase),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.ToolTipText),
-        ("#8C9096", "#8C9096", "#8C9096", QPalette.ColorRole.PlaceholderText),
+        ("#6B7079", "#6B7079", "#6B7079", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.Text),
         ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Button),
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.ButtonText),
@@ -305,7 +305,7 @@ def palette_dark():
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.ButtonText),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.BrightText),
         ("#5A5D63", "#5A5D63", "#3A3C40", QPalette.ColorRole.Light),
-        ("#262A33", "#262A33", "#20232A", QPalette.ColorRole.Midlight),
+        ("#30353F", "#30353F", "#20232A", QPalette.ColorRole.Midlight),  # hover visible on Button
         ("#121315", "#121315", "#101113", QPalette.ColorRole.Dark),
         ("#2E323C", "#2E323C", "#262931", QPalette.ColorRole.Mid),
         ("#0B0B0C", "#0B0B0C", "#0B0B0C", QPalette.ColorRole.Shadow),
@@ -326,7 +326,7 @@ def palette_legacy_light():
         ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.ToolTipBase),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.ToolTipText),
-        ("#8C9096", "#8C9096", "#8C9096", QPalette.ColorRole.PlaceholderText),
+        ("#6B7079", "#6B7079", "#6B7079", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.Text),
         ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Button),
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.ButtonText),

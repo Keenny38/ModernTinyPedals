@@ -20,6 +20,8 @@
 Brake temperature Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
@@ -32,9 +34,14 @@ from ..userfile.heatmap import (
 )
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BrakeTemperatureConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "BrakeTemperatureConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

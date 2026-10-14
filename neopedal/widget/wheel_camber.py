@@ -20,14 +20,21 @@
 Wheel camber Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..const_common import TEXT_NA
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import WheelCamberConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "WheelCamberConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

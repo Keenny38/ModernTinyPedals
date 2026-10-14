@@ -111,7 +111,7 @@ def parse_championship(text: str) -> list[ChampionshipRow]:
         columns = {"points": point_columns[-1]}
     result = []
     for row in body:
-        def cell(key: str, row=row) -> str:
+        def cell(key: str, row: list[str] = row) -> str:
             index = columns.get(key, -1)
             return row[index] if 0 <= index < len(row) else ""
 

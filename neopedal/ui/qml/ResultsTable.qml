@@ -36,7 +36,7 @@ Item {
         width: cellWidth
         visible: cellWidth > 0
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.8
+        font.pointSize: theme.fontCaption
         font.capitalization: Font.AllUppercase
         font.letterSpacing: 0.3
         horizontalAlignment: alignRight ? Text.AlignRight : Text.AlignLeft
@@ -65,7 +65,7 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: table.pad
             Layout.topMargin: theme.em * 0.6
-            Layout.bottomMargin: theme.em * 0.35
+            Layout.bottomMargin: theme.em * 0.4
             HeaderText { cellWidth: table.wPos; text: i18n.tr("Pos") }
             HeaderText { cellWidth: table.wDelta; text: "" }
             HeaderText { cellWidth: table.wClass; text: i18n.tr("Class") }
@@ -89,7 +89,7 @@ Item {
             model: backend.classificationModel
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 } }
+            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
 
             delegate: Rectangle {
                 id: row
@@ -100,6 +100,7 @@ Item {
                 required property string classText
                 required property string classPosText
                 required property string classColor
+                required property string classAlias
                 required property string number
                 required property string driver
                 required property string team
@@ -125,12 +126,13 @@ Item {
                      : index % 2 ? Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.025 : 0.03) : "transparent"
                 border.width: selected ? 1.5 : 0
                 border.color: theme.accent
-                Behavior on color { ColorAnimation { duration: 100 } }
+                Behavior on color { ColorAnimation { duration: theme.motionFast } }
                 ToolTip.visible: rowArea.containsMouse && (row.drivers !== "" || row.penalties > 0)
-                ToolTip.text: [row.drivers !== "" ? i18n.tr("Drivers") + ": " + row.drivers : "",
-                               row.penalties > 0 ? i18n.tr("Penalties") + ": " + row.penalties : ""]
-                              .filter(function(part) { return part !== "" }).join("\n")
-                ToolTip.delay: 600
+                ToolTip.text: !rowArea.containsMouse ? ""
+                              : [row.drivers !== "" ? i18n.tr("Drivers") + ": " + row.drivers : "",
+                                 row.penalties > 0 ? i18n.tr("Penalties") + ": " + row.penalties : ""]
+                                .filter(function(part) { return part !== "" }).join("\n")
+                ToolTip.delay: theme.tipDelay
 
                 MouseArea {
                     id: rowArea
@@ -153,38 +155,25 @@ Item {
                         cellWidth: table.wPos
                         text: row.posText
                         font.weight: Font.Bold
-                        font.pointSize: theme.fontPoint * 1.05
+                        font.pointSize: theme.fontSubtitle
                     }
                     Cell {
                         cellWidth: table.wDelta
                         text: row.gridDelta > 0 ? "▲" + row.gridDelta : row.gridDelta < 0 ? "▼" + (-row.gridDelta) : ""
                         color: row.gridDelta > 0 ? theme.gain : theme.loss
-                        font.pointSize: theme.fontPoint * 0.82
+                        font.pointSize: theme.fontSmall
                     }
                     Item {
                         width: table.wClass
                         height: parent.height
                         visible: width > 0
-                        Rectangle {
+                        TpClassBadge {  // as overlays: alias on class color, position in class
                             visible: row.classText !== ""
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(classLabel.implicitWidth + theme.em * 0.9, parent.width - theme.em * 0.5)
-                            height: Math.round(theme.em * 1.55)
-                            radius: theme.em * 0.35
-                            color: Qt.rgba(Qt.color(row.classColor).r, Qt.color(row.classColor).g, Qt.color(row.classColor).b, 0.22)
-                            border.width: 1
-                            border.color: row.classColor
-                            Text {
-                                id: classLabel
-                                anchors.centerIn: parent
-                                width: Math.min(implicitWidth, parent.width - theme.em * 0.6)
-                                text: row.classText + (row.classPosText !== "" ? " " + row.classPosText : "")
-                                color: theme.text
-                                font.pointSize: theme.fontPoint * 0.78
-                                font.weight: Font.DemiBold
-                                font.features: { "tnum": 1 }
-                                elide: Text.ElideRight
-                            }
+                            label: row.classText !== "" ? row.classAlias : ""
+                            fullName: row.classText
+                            fill: row.classColor
+                            position: row.classPosText
                         }
                     }
                     Cell {
@@ -216,7 +205,7 @@ Item {
                             width: parent.width - theme.em * 0.5
                             text: row.team
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.82
+                            font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
                         }
                     }
@@ -224,7 +213,7 @@ Item {
                         cellWidth: table.wCar
                         text: row.car
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                     }
                     Cell {
                         cellWidth: table.wLaps
@@ -251,7 +240,7 @@ Item {
                             horizontalAlignment: Text.AlignRight
                             text: row.reasonText
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                             elide: Text.ElideRight
                         }
                     }
@@ -275,7 +264,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: theme.em * 0.5
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: theme.em * 0.25
+                            spacing: theme.em * 0.3
                             Icon {
                                 visible: row.penalties > 0
                                 glyph: ""  // warning

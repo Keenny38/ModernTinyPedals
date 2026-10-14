@@ -35,7 +35,7 @@ Card {
     readonly property real pad: theme.em * 0.75
 
     FontMetrics { id: metrics }
-    FontMetrics { id: boldMetrics; font.weight: Font.DemiBold; font.pointSize: theme.fontPoint * 0.9 }
+    FontMetrics { id: boldMetrics; font.weight: Font.DemiBold; font.pointSize: theme.fontLabel }
 
     function modeOf(modifiers) {
         return modifiers & Qt.ShiftModifier ? 2 : modifiers & Qt.ControlModifier ? 1 : 0
@@ -44,11 +44,11 @@ Card {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: panel.pad
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.45
+            spacing: theme.em * 0.5
             Icon { glyph: ""; color: theme.accent; size: theme.em * 0.95 }  // history
             Text {
                 text: i18n.tr("Consumption History")
@@ -73,6 +73,9 @@ Card {
                 Accessible.name: i18n.tr("Columns")
                 TpMenu {
                     id: columnMenu
+                    // focus put back where it was, but left on the window: list (keys kept)
+                    onClosed: if (!Window.activeFocusItem || Window.activeFocusItem === Window.contentItem)
+                                  list.forceActiveFocus()
                     Repeater {
                         model: panel.history.menu || []
                         MenuItem {
@@ -90,7 +93,7 @@ Card {
             Layout.fillWidth: true
             text: i18n.tr("Select laps, then add them: their average goes to the calculator, invalid laps (red) left out.")
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.88
+            font.pointSize: theme.fontSmall
             wrapMode: Text.Wrap
         }
 
@@ -126,7 +129,7 @@ Card {
                                 text: panel.columns[headerCell.column] ? panel.columns[headerCell.column].title : ""
                                 color: headerCell.sorted ? theme.text : theme.dimText
                                 font.weight: Font.DemiBold
-                                font.pointSize: theme.fontPoint * 0.9
+                                font.pointSize: theme.fontLabel
                                 width: Math.min(implicitWidth, headerCell.width - theme.em)
                                 elide: Text.ElideRight
                             }
@@ -187,9 +190,8 @@ Card {
                     required property bool selected
                     width: Math.max(panel.tableWidth, list.width)
                     height: Math.round(theme.em * 1.75)
-                    radius: theme.em * 0.3
-                    color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.3 : 0.2)
-                         : rowArea.containsMouse ? theme.hover
+                    radius: theme.radiusSm
+                    color: selected || rowArea.containsMouse ? theme.rowColor(rowArea.containsMouse, selected)
                          : index % 2 ? (theme.dark ? Qt.rgba(1, 1, 1, 0.035) : Qt.rgba(0, 0, 0, 0.03)) : "transparent"
                     Row {
                         Repeater {
@@ -241,7 +243,7 @@ Card {
             visible: text !== ""
             text: backend.notes.historyAdded
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.9
+            font.pointSize: theme.fontLabel
             elide: Text.ElideRight
         }
         RowLayout {

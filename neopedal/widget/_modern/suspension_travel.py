@@ -25,12 +25,17 @@ minimum, maximum & live position.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .quad import QuadMixin, Section, Tile
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SuspensionTravelConfig
 
 SECTIONS = (
     ("total_travel", "Total"),
@@ -51,6 +56,8 @@ def number(value: float) -> str:
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SuspensionTravelConfig
 
     options = ("font_size", "layout", *(f"show_{key}" for key, _ in SECTIONS),
                "show_live_position_relative_to_static_position", *display_order_options("suspension_travel"))
@@ -99,4 +106,6 @@ class Realtime(QuadMixin, ModernOverlay):
                 else:
                     color = theme.accent if key == "live_position" else None
                     sections[key].append(Tile((number(values[key]),), colors=(color,)))
-        self.refresh(tuple(tuple(sections[key]) for key in self.keys))
+        state = tuple(tuple(sections[key]) for key in self.keys)
+        self.refresh_keyed(state, tuple(self.pixel_key(tiles, [rect.width() for rect in slot.tiles], "level", "mark")
+                                        for slot, tiles in zip(self.quad_slots, state)))

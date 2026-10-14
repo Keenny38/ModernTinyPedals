@@ -113,7 +113,7 @@ def create_notes_metadata() -> dict:
     return {key: "" for key in METADATA_FIELDNAMES}
 
 
-def parse_csv_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
+def parse_csv_notes(notes_file: Iterable[str], table_header: tuple[str, ...]) -> tuple[list[dict], dict]:
     """Parse NeoPedal notes"""
     # Load meta info
     meta_info = create_notes_metadata()
@@ -124,7 +124,7 @@ def parse_csv_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
         # Load metadata
         key = info_split[0]
         if key in meta_info:
-            meta_info[key] = info_split[1].strip().strip('"')
+            meta_info[key] = metadata_value(info_split[1]) if len(info_split) > 1 else ""
             continue
         if key == column_key:  # start of header
             notes_header = meta_line.strip().split(",")
@@ -138,7 +138,17 @@ def parse_csv_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
     return sorted(notes_temp, key=itemgetter(column_key)), meta_info
 
 
-def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
+def metadata_value(text: str) -> str:
+    """Metadata value of notes file: CSV field (quotes doubled inside), unquoted text too"""
+    text = text.strip()
+    try:
+        fields = next(csv.reader([text], skipinitialspace=True), [])
+    except csv.Error:
+        return text.strip('"')
+    return ",".join(fields)  # unquoted commas (file edited by hand) kept
+
+
+def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]) -> tuple[list[dict], dict]:
     """Parse GPL pace notes"""
     meta_info = create_notes_metadata()
     column_key = table_header[0]
@@ -161,7 +171,10 @@ def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
             if not metadata_checked:  # found first valid number, set checked
                 metadata_checked = True
             split_string = split_line[-1].split(";", 1)
-            distance = float(split_string[0].strip())
+            try:
+                distance = float(split_string[0].strip())
+            except ValueError:  # invalid line skipped, rest of file loaded
+                continue
             if not isfinite(distance):
                 continue
             if len(split_string) > 1:
@@ -178,7 +191,7 @@ def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
     return sorted(notes_temp, key=itemgetter(column_key)), meta_info
 
 
-def parse_csv_notes_only(notes_file: Iterable[str], table_header: tuple[str, ...]):
+def parse_csv_notes_only(notes_file: Iterable[str], table_header: tuple[str, ...]) -> list[dict]:
     """Parse NeoPedal notes without metadata"""
     column_key = table_header[0]
     notes_header: Sequence[str] = ()
@@ -196,7 +209,7 @@ def parse_csv_notes_only(notes_file: Iterable[str], table_header: tuple[str, ...
 
 def load_notes_file(
     filepath: str, filename: str, table_header: tuple[str, ...],
-    parser: Callable = parse_csv_notes, extension: str = ""):
+    parser: Callable = parse_csv_notes, extension: str = "") -> Any:
     """Load notes file"""
     try:
         filename_full = f"{filepath}{filename}{extension}"
@@ -215,15 +228,15 @@ def load_notes_file(
 
 
 def write_csv_notes(
-    notes_file: Any, table_header: tuple, dataset: list, metadata: dict, _: str):
+    notes_file: Any, table_header: tuple, dataset: list, metadata: dict, _: str) -> None:
     """Write NeoPedal notes format to file"""
     # Write NeoPedal file version
     notes_file.write(f"NEOPEDAL {table_header[1].upper()}S FILE VERSION,2")
     notes_file.write(CRLF * 2)
-    # Write metadata
-    meta_output = CRLF.join(f"{key},\"{value}\"" for key, value in metadata.items())
-    notes_file.write(meta_output)
-    notes_file.write(CRLF * 2)
+    # Write metadata: CSV quoting (commas & quotes read back unchanged), one line each
+    meta_writer = csv.writer(notes_file, quoting=csv.QUOTE_MINIMAL, lineterminator=CRLF)
+    meta_writer.writerows((key, " ".join(str(value).splitlines())) for key, value in metadata.items())
+    notes_file.write(CRLF)
     # Write notes
     notes_writer = csv.DictWriter(
         notes_file, fieldnames=table_header, extrasaction="ignore", quoting=csv.QUOTE_MINIMAL
@@ -233,7 +246,7 @@ def write_csv_notes(
 
 
 def write_gpl_notes(
-    notes_file: Any, table_header: tuple, dataset: list, metadata: dict, filename: str):
+    notes_file: Any, table_header: tuple, dataset: list, metadata: dict, filename: str) -> None:
     """Write GPL pace notes format to file
 
     Pace notes formatting follows GPL pace notes 'Version 3' specification by Lee Bowden.

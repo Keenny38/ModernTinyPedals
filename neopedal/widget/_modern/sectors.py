@@ -25,6 +25,8 @@ Bottom: one tile per sector, best sector time, or gap to it (gain or loss tint) 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
@@ -36,11 +38,16 @@ from ...validator import valid_sectors
 from .base import CENTER, DASH, LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SectorsConfig
+
 NEUTRAL, GAIN, LOSS = 0, 1, 2
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: SectorsConfig
 
     options = (
         "font_size", "enable_all_time_best_sectors", "target_laptime", "freeze_duration",

@@ -27,7 +27,6 @@ Delta best file function
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import os
 from typing import Any
@@ -35,7 +34,7 @@ from typing import Any
 from ..const_common import DELTA_DEFAULT, MAX_SECONDS
 from ..const_file import FileExt
 from ..validator import invalid_save_name, is_same_session, load_json_strict, valid_delta_set
-from . import atomic_write
+from . import atomic_write, write_json
 from .json_setting import create_backup_file, set_backup_timestamp
 
 logger = logging.getLogger(__name__)
@@ -176,5 +175,4 @@ def save_delta_session_file(
         "session_best": session_best if len(session_best) >= 10 else [],
         "stint_best": stint_best if len(stint_best) >= 10 else [],
     }
-    with atomic_write(f"{filepath}{filename}{extension}") as file:
-        json.dump(data, file, separators=(",", ":"))
+    write_json(f"{filepath}{filename}{extension}", data, separators=(",", ":"))

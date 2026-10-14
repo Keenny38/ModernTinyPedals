@@ -26,18 +26,21 @@ Low amount warning flashes the remaining value & gauge.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, NamedTuple
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ...i18n import tr_overlay as tr
 from .._common import warning_flash
+from .._data import consumption_data, level_data
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import rounded
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import FuelConfig, VirtualEnergyConfig
 
 
 class Names(NamedTuple):
@@ -66,6 +69,7 @@ COMMON_OPTIONS = (
 class ConsumptionPanel(StatsMixin, ModernOverlay):
     """Fuel or energy panel"""
 
+    wcfg: FuelConfig | VirtualEnergyConfig
     names: Names
     source: Any  # minfo.fuel or minfo.energy
     convert: Callable[[float], float]
@@ -168,52 +172,45 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         """Update from data source"""
         wcfg = self.wcfg
         theme = self.theme
-        data = self.source
-        convert = self.convert
-        low = data.estimatedLaps <= wcfg[self.names.low_threshold]
-        if self.warn_flash is not None and data.estimatedValidConsumption:
+        source = self.source
+        low = source.estimatedLaps <= wcfg[self.names.low_threshold]
+        if self.warn_flash is not None and source.estimatedValidConsumption:
             low = self.warn_flash.send(low)
-        remaining = f"{convert(data.amountCurrent):.{self.dec_remaining}f}"
-        if wcfg[self.names.absolute]:
-            need = calc.sym_max(convert(data.neededAbsolute), 9999)
-        else:
-            need = calc.sym_max(convert(data.neededRelative), 9999)
-        refill = (f"{need:{self.refill_sign}.{self.dec_refill}f}", need if self.refill_sign else data.neededRelative)
+        data = consumption_data(source, self.convert, wcfg[self.names.absolute])
+        remaining = f"{data.remaining:.{self.dec_remaining}f}"
+        need = data.needed
+        refill = (f"{need:{self.refill_sign}.{self.dec_refill}f}", need if self.refill_sign else source.neededRelative)
         level = None
-        if wcfg[self.names.level_bar] and data.capacity:
-            capacity = data.capacity
-            level = (
-                round(data.amountCurrent / capacity, 3),
-                round(data.amountStart / capacity, 3),
-                round((data.amountCurrent + data.neededRelative) / capacity, 3),
-            )
+        if wcfg[self.names.level_bar] and source.capacity:
+            capacity = source.capacity
+            current, start, refilled = level_data(source)
+            level = (round(current / capacity, 3), round(start / capacity, 3), round(refilled / capacity, 3))
         values = []
         for key in self.keys:
             if key == "laps":
-                values.append(Value(f"{min(data.estimatedLaps, 9999):.{decimals(wcfg, 'estimated_laps')}f}",
+                values.append(Value(f"{data.laps:.{decimals(wcfg, 'estimated_laps')}f}",
                                     theme.negative if low else None))
             elif key == "minutes":
-                values.append(Value(f"{min(data.estimatedMinutes, 9999):.{decimals(wcfg, 'estimated_minutes')}f}"))
+                values.append(Value(f"{data.minutes:.{decimals(wcfg, 'estimated_minutes')}f}"))
             elif key == "used":
-                values.append(Value(f"{convert(data.estimatedConsumption):.{decimals(wcfg, 'estimated_consumption')}f}"))
+                values.append(Value(f"{data.used:.{decimals(wcfg, 'estimated_consumption')}f}"))
             elif key == "save":
-                save = calc.zero_max(convert(data.oneLessPitConsumption), 99.99)
+                save = data.save
                 values.append(Value(f"{save:.{decimals(wcfg, 'saving_target')}f}", theme.warning if save > 0 else theme.text_dim))
             elif key == "pits":
-                values.append(Value(f"{calc.zero_max(data.estimatedNumPitStopsEnd, 99.99):.{decimals(wcfg, 'pitstop_count')}f}"))
+                values.append(Value(f"{data.pits_end:.{decimals(wcfg, 'pitstop_count')}f}"))
             elif key == "early":
-                values.append(Value(f"{calc.zero_max(data.estimatedNumPitStopsEarly, 99.99):.{decimals(wcfg, 'early_pitstop_count')}f}",
-                                    theme.text_dim))
+                values.append(Value(f"{data.pits_early:.{decimals(wcfg, 'early_pitstop_count')}f}", theme.text_dim))
             elif key == "delta":
-                delta = convert(data.deltaConsumption)
+                delta = data.delta
                 values.append(Value(f"{delta:+.{decimals(wcfg, 'delta_consumption')}f}",
                                     theme.negative if delta > 0 else theme.positive))
             elif key == "end":
-                values.append(Value(f"{convert(data.amountEndStint):.{decimals(wcfg, 'end_remaining')}f}"))
+                values.append(Value(f"{data.end:.{decimals(wcfg, 'end_remaining')}f}"))
         values += extra_values
         self.refresh((tuple(values), remaining, refill, low, level))
 
 
-def decimals(wcfg: dict, name: str) -> int:
+def decimals(wcfg: Mapping[str, Any], name: str) -> int:
     """Decimal places option"""
     return max(int(wcfg.get(f"decimal_places_{name}", 2)), 0)

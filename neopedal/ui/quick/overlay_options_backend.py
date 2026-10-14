@@ -37,12 +37,12 @@ from __future__ import annotations
 
 import logging
 import weakref
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, NamedTuple, Protocol
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QPoint, QTimer, Signal, Slot
 
 from ...i18n import tr, trm
 from ...i18n.options import module_label, option_help_specific, option_label
@@ -67,9 +67,10 @@ from .option_kinds import (
     OptionKind,
     check_value,
     choice_label,
+    choice_values,
     decimals,
     display_text,
-    font_families,
+    display_value,
     number_range,
     number_text,
     option_kind,
@@ -78,6 +79,7 @@ from .option_kinds import (
 )
 from .overlay_backend import CATEGORY_COLORS, CATEGORY_ORDER, widget_category
 from .overlay_sections import (
+    GENERAL_KEYS,
     ITEM_PREFIX,
     SECTION_ORDER,
     Section,
@@ -87,6 +89,7 @@ from .overlay_sections import (
     order_keys,
     section_dependencies,
 )
+from .page_backend import PageBackend
 from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
@@ -140,6 +143,8 @@ class OverlayOptionsHost(Protocol):
     def edit_table(self, text: str) -> str | None: ...
     def notify(self, text: str) -> None: ...
     def applied(self, names: list[str]) -> None: ...
+    def export_overlays(self, names: list[str]) -> None: ...
+    def import_overlays(self) -> None: ...
 
 
 class OverlayLayout(NamedTuple):
@@ -193,6 +198,8 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     option_ui = WIDGET_OPTION_UI.get(name)
     if option_ui is not None and option_ui.modern_only and not uses_modern_design(design_config, name):
         option_ui = None  # classic layout: automatic sections
+    if option_ui is not None and option_ui.hidden:
+        keys = [key for key in keys if key not in option_ui.hidden]
     if option_ui is not None and option_ui.layout:
         sections = listed_sections(keys, option_ui.layout, option_ui.order_title, option_ui.order_toggles.values())
         dependencies: Mapping[str, str] = option_ui.dependencies
@@ -207,7 +214,7 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     return OverlayLayout(ordered, tuple(sections), section_of, dependencies, option_ui)
 
 
-class OverlayOptionsBackend(QObject):
+class OverlayOptionsBackend(PageBackend):
     """Overlay Options page state & actions
 
     Args:
@@ -225,7 +232,7 @@ class OverlayOptionsBackend(QObject):
     previewChanged = Signal()
 
     def __init__(self, parent, host: OverlayOptionsHost, control: ModuleControl):
-        super().__init__(parent)
+        super().__init__(parent, "Overlay options")
         self._host = host
         self._control = control
         self._preview_key = STORE.new_prefix("options") + "preview"
@@ -262,6 +269,7 @@ class OverlayOptionsBackend(QObject):
         self._helped: set[str] = set()  # descriptions shown once in results of every overlay
         self._active = False
         self._preview_enabled = True
+        self._preview_visible = True  # preview panel shown by page (not on narrow page, search of every overlay)
         self._preview_state = PREVIEW_OFF
         self._preview_url = ""
         self._preview_size = (0, 0)
@@ -375,11 +383,16 @@ class OverlayOptionsBackend(QObject):
         return True
 
     def shown_in_mode(self, layout: OverlayLayout, key: str) -> bool:
-        """Simple mode (overlays with many options): on/off & choice options, and the common ones"""
+        """Simple mode (overlays with many options): on/off & choice options (main ones if listed, see
+        OptionUI.simple_switches), and the common ones"""
         ui = layout.option_ui
         if ui is None or not ui.simple_mode or self._advanced or self.filtering:
             return True
-        return self.kind(key).kind in (KIND_BOOL, KIND_CHOICE) or key in ui.basic
+        if key in ui.basic or key in GENERAL_KEYS:
+            return True
+        if self.kind(key).kind not in (KIND_BOOL, KIND_CHOICE):
+            return False
+        return ui.simple_switches is None or key in ui.simple_switches
 
     # Rows
     def update_all(self):
@@ -408,6 +421,7 @@ class OverlayOptionsBackend(QObject):
         layout = self.layout(name)
         values = self.values(name)
         overrides = self._overrides(layout, values)
+        fixed = self._fixed(layout, values, overrides)
         self._row_overrides[name] = overrides
         collapsed = self._collapsed.get(name, set()) if not self.filtering else set()
         for section in layout.sections:
@@ -421,7 +435,7 @@ class OverlayOptionsBackend(QObject):
                     self._truncated += len(shown)
                     continue
                 self._match_count += len(shown)
-                rows.append(self._header_row(name, section, overrides, len(order_keys(section)), False,
+                rows.append(self._header_row(name, section, overrides, fixed, len(order_keys(section)), False,
                                              with_name))
                 rows.append(self._order_row(name, section))
                 continue
@@ -432,11 +446,11 @@ class OverlayOptionsBackend(QObject):
                 continue
             self._match_count += len(shown) + toggle_match
             is_collapsed = section.key in collapsed
-            rows.append(self._header_row(name, section, overrides, len(shown), is_collapsed, with_name))
+            rows.append(self._header_row(name, section, overrides, fixed, len(shown), is_collapsed, with_name))
             if is_collapsed:
                 continue
             for key in shown:
-                row = self._option_row(name, key, layout, values, overrides)
+                row = self._option_row(name, key, layout, values, overrides, fixed)
                 if with_name:
                     if row["help"] in self._helped:
                         row["help"] = ""
@@ -444,8 +458,8 @@ class OverlayOptionsBackend(QObject):
                         self._helped.add(row["help"])
                 rows.append(row)
 
-    def _header_row(self, name: str, section: Section, overrides: Mapping[str, bool], count: int, collapsed: bool,
-                    with_name: bool) -> dict:
+    def _header_row(self, name: str, section: Section, overrides: Mapping[str, bool], fixed: Collection[str],
+                    count: int, collapsed: bool, with_name: bool) -> dict:
         title = section_title(section)
         if with_name:
             title = f"{module_label(name)}  {chr(0x203A)}  {title}"
@@ -456,7 +470,7 @@ class OverlayOptionsBackend(QObject):
             label=option_label(toggle) if toggle else "",
             first=True,
             toggle=option_id(name, toggle) if toggle else "",
-            toggleChecked=bool(self.value(name, toggle)) if toggle else False,
+            toggleChecked=bool(overrides.get(toggle, self.value(name, toggle))) if toggle else False,
             collapsed=collapsed,
             count=count,
             changedCount=sum(self.is_changed(name, key) for key in section.keys),
@@ -464,7 +478,7 @@ class OverlayOptionsBackend(QObject):
             changed=bool(toggle) and self.is_changed(name, toggle),
             error=self._error_text(option_id(name, toggle)) if toggle else "",
             modified=bool(toggle) and self.is_customized(name, toggle),
-            locked=bool(toggle) and toggle in overrides,
+            locked=bool(toggle) and toggle in fixed,
         )
         return row
 
@@ -563,7 +577,7 @@ class OverlayOptionsBackend(QObject):
         return row
 
     def _option_row(self, name: str, key: str, layout: OverlayLayout, values: Mapping[str, Any],
-                    overrides: Mapping[str, bool]) -> dict:
+                    overrides: Mapping[str, bool], fixed: Collection[str]) -> dict:
         if key in LIST_OPTIONS:
             return self._list_row(name, key)
         oid = option_id(name, key)
@@ -572,7 +586,7 @@ class OverlayOptionsBackend(QObject):
         default = self.default(name, key)
         invalid = self._invalid.get(oid)
         row = self._blank_row(oid, name, ROW_OPTION)
-        locked = key in overrides
+        locked = key in fixed  # only set by profile: editable, profile switched to Custom (see _release)
         row.update(
             option=key,
             label=option_label(key),
@@ -589,11 +603,13 @@ class OverlayOptionsBackend(QObject):
             shared=max(self._shared.get(key, 1) - 1, 0) if key not in NOT_CUSTOMIZED else 0,
             table=kind.kind == KIND_TEXT and "by_compound" in key,
         )
-        if locked:
+        if key in overrides:
             state = tr("on") if overrides[key] else tr("off")
             ui = layout.option_ui
             source = ui.override_source if ui is not None else ""
             row["note"] = f"{tr('Set by')} {option_label(source)}: {tr(str(values.get(source, '')))} ({state})"
+            if not locked:
+                row["note"] += f"  ·  {tr('Changing it switches to')} {tr('Custom')}"
             row["checked"] = bool(overrides[key]) if kind.kind == KIND_BOOL else row["checked"]
         else:
             control = self._off_control(layout, values, overrides, key)
@@ -622,6 +638,18 @@ class OverlayOptionsBackend(QObject):
             return ui.overrides(values)
         except (KeyError, TypeError, ValueError):  # invalid value pending
             return {}
+
+    @staticmethod
+    def _fixed(layout: OverlayLayout, values: Mapping[str, Any], overrides: Mapping[str, bool]) -> Collection[str]:
+        """Overridden options still overridden once override source released (auto compact mode): locked"""
+        ui = layout.option_ui
+        if not overrides or ui is None or ui.release is None or ui.overrides is None:
+            return overrides.keys()
+        try:
+            release = ui.release(values)
+            return ui.overrides({**values, **release}).keys() if release else overrides.keys()
+        except (KeyError, TypeError, ValueError):  # invalid value pending
+            return overrides.keys()
 
     @staticmethod
     def _off_control(layout: OverlayLayout, values: Mapping[str, Any], overrides: Mapping[str, bool],
@@ -719,7 +747,7 @@ class OverlayOptionsBackend(QObject):
         number = self.rows.index_of(oid)
         if number >= 0:
             shown = self.rows.rows[number]
-            row = self._option_row(name, key, layout, values, overrides)
+            row = self._option_row(name, key, layout, values, overrides, self._fixed(layout, values, overrides))
             row["help"] = shown["help"]  # shown once in results of every overlay
             row["last"] = shown["last"]
             self.rows.update_row(number, row)
@@ -763,7 +791,8 @@ class OverlayOptionsBackend(QObject):
         name = self._overlay
         if not name:
             return {"name": "", "label": "", "category": "", "color": "", "enabled": False, "design": "",
-                    "optionCount": 0, "customized": 0, "simpleMode": False, "themes": [], "preset": ""}
+                    "optionCount": 0, "customized": 0, "simpleMode": False, "themes": [], "preset": "",
+                    "profile": "", "profileOption": "", "userProfiles": [], "previewParts": False}
         from ...template.widget.modern import MODERN_DESIGNS
         from ...widget._modern import uses_modern_design
 
@@ -775,6 +804,14 @@ class OverlayOptionsBackend(QObject):
                                                                  setting={name: self.values(name)}))
             design = tr("Modern design") if uses_modern_design(design_config, name) else tr("Classic layout")
         ui = layout.option_ui
+        # Option setting others (display profile) away from default: named in header, options it sets are
+        # shown with its value
+        profile = profile_option = ""
+        if ui is not None and ui.override_source and ui.override_source in cfg.user.setting[name]:
+            value = self.value(name, ui.override_source)
+            if value != self.default(name, ui.override_source):
+                profile = f"{option_label(ui.override_source)}: {tr(str(value))}"
+                profile_option = option_id(name, ui.override_source)
         return {
             "name": name,
             "label": module_label(name),
@@ -787,6 +824,11 @@ class OverlayOptionsBackend(QObject):
             "simpleMode": ui is not None and ui.simple_mode,
             "themes": [{"name": theme, "label": tr(theme)} for theme in ui.color_themes] if ui is not None else [],
             "preset": cfg.filename.setting.removesuffix(".json"),
+            "profile": profile,
+            "profileOption": profile_option,
+            "userProfiles": [{"name": profile_name, "label": tr(profile_name)}
+                             for profile_name in (ui.user_profiles if ui is not None else {})],
+            "previewParts": ui is not None and bool(ui.part_options),
         }
 
     @Property(int, notify=stateChanged)
@@ -896,6 +938,11 @@ class OverlayOptionsBackend(QObject):
         return self._preview_scale
 
     # Navigation & filters
+    @Slot(str)
+    def showOption(self, oid: str):
+        """Scroll to option & flash it (header profile pill)"""
+        self.focus_option(*split_id(oid))
+
     @Slot(str)
     def selectOverlay(self, name: str):
         if name not in self._names:
@@ -1108,9 +1155,28 @@ class OverlayOptionsBackend(QObject):
         if key == "enable_classic_layout":
             self._design_changed(name)
 
+    def _release(self, oid: str):
+        """Option set by override source (display profile) edited: override source released first (its
+        values kept, profile Custom), unless option stays overridden (auto compact mode)"""
+        name, key = split_id(oid)
+        if name not in self._names:
+            return
+        layout = self.layout(name)
+        ui = layout.option_ui
+        if ui is None or ui.release is None:
+            return
+        values = self.values(name)
+        overrides = self._overrides(layout, values)
+        if key not in overrides or key in self._fixed(layout, values, overrides):
+            return
+        for other, value in ui.release(values).items():
+            if other != key and other in values:
+                self._set(option_id(name, other), value)
+
     @Slot(str, bool)
     def setBool(self, oid: str, value: bool):
         with self._step():
+            self._release(oid)
             self._set(oid, bool(value))
 
     @Slot(str, int)
@@ -1124,11 +1190,13 @@ class OverlayOptionsBackend(QObject):
             choices.insert(0, current)
         if 0 <= index < len(choices):
             with self._step():
+                self._release(oid)
                 self._set(oid, choices[index])
 
     @Slot(str, str)
     def setText(self, oid: str, text: str):
         with self._step():
+            self._release(oid)
             self._set(oid, text=text)
 
     @Slot(str, float)
@@ -1138,6 +1206,7 @@ class OverlayOptionsBackend(QObject):
         if self.kind(key).kind == KIND_INTEGER or float(number).is_integer():
             value = round(number)
         with self._step():
+            self._release(oid)
             self._set(oid, value)
 
     @Slot(str)
@@ -1147,6 +1216,7 @@ class OverlayOptionsBackend(QObject):
         default = self.default(name, key)
         if default is not None:
             with self._step():
+                self._release(oid)
                 self._set(oid, default)
 
     def _reset_keys(self, name: str, keys) -> int:
@@ -1191,6 +1261,9 @@ class OverlayOptionsBackend(QObject):
         with self._step():
             self._reset_keys(name, default_keys(name))
 
+    def notify_host(self, text: str):
+        self._host.notify(text)
+
     @Slot(str)
     def applyToAll(self, oid: str):
         """Value of option set to every other overlay having it (pending)"""
@@ -1205,6 +1278,90 @@ class OverlayOptionsBackend(QObject):
         self._host.notify(trm(
             f"{option_label(key)}: {display_text(self.kind(key), value)} set to {len(names)} overlay(s), "
             "saved with Apply"))
+
+    @Slot()
+    def exportOverlays(self):
+        """Settings of overlays (shown values, selected overlay ticked) saved as package file"""
+        self._host.export_overlays([self._overlay] if self._overlay else [])
+
+    @Slot()
+    def importOverlays(self):
+        """Overlay settings package file picked, its values set as pending edits"""
+        self._host.import_overlays()
+
+    def import_values(self, overlays: Mapping[str, Mapping[str, Any]]) -> tuple[int, int]:
+        """Imported overlay values set as pending edits (one undo step, saved with Apply), invalid values
+        skipped (saved value kept), first overlay shown
+
+        Returns:
+            Number of options changed & of values skipped.
+        """
+        changed = skipped = 0
+        names = [name for name in overlays if name in self._names]
+        with self._step():
+            for name in names:
+                for key, value in overlays[name].items():
+                    if key not in cfg.user.setting[name]:
+                        skipped += 1
+                        continue
+                    kind = self.kind(key)
+                    if check_value(key, kind, value) or (
+                            kind.kind == KIND_CHOICE and value not in choice_values(kind)):
+                        skipped += 1
+                        continue
+                    if kind.kind == KIND_INTEGER and isinstance(value, float):
+                        value = round(value)
+                    if value != self.value(name, key):
+                        changed += 1
+                    self._set(option_id(name, key), value)
+        if names:
+            self.selectOverlay(names[0])
+        return changed, skipped
+
+    @Slot(float, float)
+    def previewClicked(self, x: float, y: float):
+        """Preview clicked at (x, y), fractions of picture size: options of the part drawn there shown"""
+        key = self.preview_part_option(x, y)
+        if key:
+            self.focus_option(self._overlay, key)
+
+    def preview_part_option(self, x: float, y: float) -> str:
+        """Option of the smallest part of the picture at (x, y) (fractions of picture size), "" if none"""
+        from ..widget_preview import widget_part_rects
+
+        name = self._overlay
+        ui = self.layout(name).option_ui if name else None
+        if ui is None or not ui.part_options or not (0 <= x <= 1 and 0 <= y <= 1):
+            return ""
+        try:
+            found = widget_part_rects(cfg, name, self.values(name))
+        except Exception as error:  # broken preview: click does nothing
+            logger.debug("Overlay options: preview parts of %s: %s", name, error, exc_info=True)
+            return ""
+        if found is None:
+            return ""
+        size, rects = found
+        point = QPoint(round(x * size.width()), round(y * size.height()))
+        hits = [(rect.width() * rect.height(), part) for part, rect in rects.items()
+                if part in ui.part_options and rect.contains(point)]
+        if not hits:
+            return ""
+        key = ui.part_options[min(hits)[1]]
+        return key if key in cfg.user.setting[name] else ""
+
+    @Slot(str)
+    def saveUserProfile(self, profile_name: str):
+        """Shown on/off options (profile values included) saved as user profile, profile selected (pending)"""
+        name = self._overlay
+        ui = self.layout(name).option_ui if name else None
+        if ui is None or ui.profile_text is None or profile_name not in ui.user_profiles:
+            return
+        values = self.values(name)
+        shown = {**values, **self._overrides(self.layout(name), values)}
+        with self._step():
+            self._set(option_id(name, ui.user_profiles[profile_name]), ui.profile_text(shown))
+            self._set(option_id(name, ui.override_source), profile_name)
+        self._host.notify(trm(f"Display saved as {tr(profile_name)}, saved with Apply"))
 
     @Slot(str)
     def applyColorTheme(self, theme_name: str):
@@ -1502,8 +1659,19 @@ class OverlayOptionsBackend(QObject):
         self._preview_zoom = preview_zoom(zoom)  # drawn again at new size
         self.schedule_preview(now=True)
 
+    @Slot(bool)
+    def setPreviewVisible(self, visible: bool):
+        """Preview panel shown or hidden by page: nothing drawn while hidden, drawn once when shown again"""
+        if visible == self._preview_visible:
+            return
+        self._preview_visible = visible
+        if visible:
+            self.schedule_preview(now=True)
+        else:
+            self._preview_timer.stop()
+
     def schedule_preview(self, now: bool = False):
-        if not self._preview_enabled or not self._active or not self._overlay:
+        if not self._preview_enabled or not self._preview_visible or not self._active or not self._overlay:
             return
         if now:
             self._preview_timer.start(0)
@@ -1544,6 +1712,10 @@ class OverlayOptionsBackend(QObject):
         self.previewChanged.emit()
 
     def close(self):
+        """Page closed (older name of release)"""
+        self.release()
+
+    def release_resources(self):
         self._preview_timer.stop()
         self._warm_timer.stop()
         self._info_timer.stop()
@@ -1596,17 +1768,6 @@ def preview_signature(name: str, values: dict, zoom: float) -> object:
     except Exception:  # never break the page: drawn again
         logger.debug("Overlay options preview inputs error: %s", name, exc_info=True)
         return object()
-
-
-def choice_values(kind: OptionKind) -> tuple[str, ...]:
-    return font_families() if kind.kind == KIND_FONT else kind.choices
-
-
-def display_value(kind: OptionKind, value: Any) -> str:
-    """Editable text of value (text fields)"""
-    if kind.kind in NUMBER_KINDS:
-        return number_text(value)
-    return str(value)
 
 
 def text_reason(key: str, kind: OptionKind, text: str) -> str:

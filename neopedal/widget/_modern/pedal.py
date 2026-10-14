@@ -21,17 +21,25 @@ Pedal Widget, modern design
 
 One capsule gauge per input (force feedback, clutch, brake, throttle): filled to filtered input
 with a soft gradient, raw input as a bright tick, optional reading, short label under.
-Force feedback turns orange while clipping.
+Force feedback turns orange while clipping, throttle & brake flash while TC / ABS active or wheels
+spinning / locking.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter
 
 from ...api_control import api
+from .._pedal_alert import ALERT_THEME_COLORS, PedalAlertMixin
 from .base import CENTER, ModernOverlay
 from .draw import panel, rounded
+from .theme import Theme
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import PedalConfig
 
 PEDALS = (  # key, label, theme color
     ("ffb", "FFB", "text_muted"),
@@ -41,14 +49,72 @@ PEDALS = (  # key, label, theme color
 )
 
 
-class Realtime(ModernOverlay):
+class PedalBarsMixin:
+    """Capsule input bars: filled to filtered input with a soft gradient, raw input as a bright tick
+    (pedal & trailing widget)"""
+
+    unit: float
+    theme: Theme
+    horizontal = False
+    fill_from_top = False  # vertical bar filled downward (inverted pedal range)
+    gradients: dict[int, QLinearGradient]
+
+    def gradient(self, color: QColor) -> QLinearGradient:
+        """Fill gradient of color: color stops set once, ends moved to filled part when drawn"""
+        gradient = self.gradients.get(color.rgba())
+        if gradient is None:
+            gradient = QLinearGradient()
+            gradient.setColorAt(0.0, color.darker(125))
+            gradient.setColorAt(1.0, color.lighter(115))
+            self.gradients[color.rgba()] = gradient
+        return gradient
+
+    def draw_fill(self, painter: QPainter, track: QRectF, value: float, color: QColor):
+        """Filled part of capsule, brighter toward input end"""
+        if value <= 0:
+            return
+        radius = min(track.width(), track.height()) / 2
+        gradient = self.gradient(color)
+        if self.horizontal:
+            fill = QRectF(track.left(), track.top(), track.width() * value, track.height())
+            gradient.setStart(fill.left(), 0)
+            gradient.setFinalStop(fill.right(), 0)
+        elif self.fill_from_top:
+            fill = QRectF(track.left(), track.top(), track.width(), track.height() * value)
+            gradient.setStart(0, fill.top())
+            gradient.setFinalStop(0, fill.bottom())
+        else:
+            height = track.height() * value
+            fill = QRectF(track.left(), track.bottom() - height, track.width(), height)
+            gradient.setStart(0, fill.bottom())
+            gradient.setFinalStop(0, fill.top())
+        rounded(painter, fill, min(radius, min(fill.width(), fill.height()) / 2), QBrush(gradient))
+
+    def draw_tick(self, painter: QPainter, track: QRectF, value: float):
+        """Raw input mark"""
+        size = max(self.unit * 0.12, 2.0)
+        if self.horizontal:
+            x = track.left() + (track.width() - size) * value
+            tick = QRectF(x, track.top() - size, size, track.height() + size * 2)
+        else:
+            offset = (track.height() - size) * value
+            y = track.top() + offset if self.fill_from_top else track.bottom() - size - offset
+            tick = QRectF(track.left() - size, y, track.width() + size * 2, size)
+        rounded(painter, tick, size / 2, self.theme.text)
+
+
+class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: PedalConfig
 
     options = (
         "font_size", "enable_horizontal_style", "bar_length", "bar_width_unfiltered", "bar_width_filtered",
         "maximum_indicator_height", "show_readings", "show_throttle", "show_throttle_filtered", "show_brake",
         "show_brake_filtered", "show_brake_pressure", "show_clutch", "show_clutch_filtered", "show_ffb_meter",
         "display_order_throttle", "display_order_brake", "display_order_clutch", "display_order_ffb",
+        "alert_flash_interval", "show_tc_activation_flash", "show_abs_activation_flash", "show_wheel_lock_flash",
+        "wheel_lock_threshold", "show_wheel_slip_flash", "wheel_slip_threshold",
     )
 
     def __init__(self, config, widget_name):
@@ -61,6 +127,8 @@ class Realtime(ModernOverlay):
         }
         self.keys = tuple(self.display_ordered([key for key, _, _ in PEDALS if shown[key]], key=str))
         self.colors = {key: getattr(self.theme, color) for key, _, color in PEDALS}
+        self.alert_colors = {alert: getattr(self.theme, color) for alert, color in ALERT_THEME_COLORS.items()}
+        self.setup_alerts(self.keys)
         self.gradients: dict[int, QLinearGradient] = {}
         self.labels = {key: label for key, label, _ in PEDALS}
         self.horizontal = wcfg["enable_horizontal_style"]
@@ -124,9 +192,9 @@ class Realtime(ModernOverlay):
 
     def paint(self, painter: QPainter):
         theme = self.theme
-        for key, (filtered, raw) in zip(self.keys, self.state):
+        for key, (filtered, raw, alert) in zip(self.keys, self.state):
             track, _, reading = self.rects[key]
-            color = self.colors[key]
+            color = self.alert_colors[alert] if alert else self.colors[key]
             if key == "ffb" and filtered >= 1:
                 color = theme.warning
             self.draw_fill(painter, track, min(max(filtered, 0.0), 1.0), color)
@@ -136,44 +204,6 @@ class Realtime(ModernOverlay):
                 rounded(painter, cap, min(cap.width(), cap.height()) / 2, color)
             if self.show_readings:
                 self.draw_text(painter, reading, f"{filtered * 100:.0f}", "small", theme.text_dim, CENTER, elide=False)
-
-    def gradient(self, color: QColor) -> QLinearGradient:
-        """Fill gradient of color: color stops set once, ends moved to filled part when drawn"""
-        gradient = self.gradients.get(color.rgba())
-        if gradient is None:
-            gradient = QLinearGradient()
-            gradient.setColorAt(0.0, color.darker(125))
-            gradient.setColorAt(1.0, color.lighter(115))
-            self.gradients[color.rgba()] = gradient
-        return gradient
-
-    def draw_fill(self, painter: QPainter, track: QRectF, value: float, color: QColor):
-        """Filled part of capsule, brighter toward input end"""
-        if value <= 0:
-            return
-        radius = min(track.width(), track.height()) / 2
-        gradient = self.gradient(color)
-        if self.horizontal:
-            fill = QRectF(track.left(), track.top(), track.width() * value, track.height())
-            gradient.setStart(fill.left(), 0)
-            gradient.setFinalStop(fill.right(), 0)
-        else:
-            height = track.height() * value
-            fill = QRectF(track.left(), track.bottom() - height, track.width(), height)
-            gradient.setStart(0, fill.bottom())
-            gradient.setFinalStop(0, fill.top())
-        rounded(painter, fill, min(radius, min(fill.width(), fill.height()) / 2), QBrush(gradient))
-
-    def draw_tick(self, painter: QPainter, track: QRectF, value: float):
-        """Raw input mark"""
-        size = max(self.unit * 0.12, 2.0)
-        if self.horizontal:
-            x = track.left() + (track.width() - size) * value
-            tick = QRectF(x, track.top() - size, size, track.height() + size * 2)
-        else:
-            y = track.bottom() - size - (track.height() - size) * value
-            tick = QRectF(track.left() - size, y, track.width() + size * 2, size)
-        rounded(painter, tick, size / 2, self.theme.text)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -201,4 +231,14 @@ class Realtime(ModernOverlay):
             else:
                 ffb = abs(inputs.force_feedback())
                 values.append((ffb, ffb))
-        self.refresh(tuple((round(filtered, 3), round(raw, 3)) for filtered, raw in values))
+        state = tuple((round(filtered, 3), round(raw, 3), alert)
+                      for (filtered, raw), alert in zip(values, self.read_alerts()))
+        self.refresh_keyed(state, tuple(self.pedal_key(key, *pedal) for key, pedal in zip(self.keys, state)))
+
+    def pedal_key(self, key: str, filtered: float, raw: float, alert: str = "") -> tuple:
+        """What a pedal draws: fill & tick in device pixels, reading text, full travel lights, alert lit"""
+        track = self.rects[key][0]
+        length = track.width() if self.horizontal else track.height()
+        reading = f"{filtered * 100:.0f}" if self.show_readings else ""
+        return (self.pixel_steps(min(max(filtered, 0.0), 1.0), length), self.pixel_steps(min(max(raw, 0.0), 1.0), length),
+                reading, filtered >= 1, raw >= 1, alert)

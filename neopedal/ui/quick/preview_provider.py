@@ -57,11 +57,20 @@ class PreviewStore:
         return f"{name}{next(self._owners)}/"
 
     def put(self, key: str, image: QImage) -> str:
-        """Store picture of key, URL for QML (same URL if picture unchanged)"""
+        """Store picture of key, URL for QML (same URL if picture unchanged)
+
+        Pixels compared outside the lock (image reader thread never waits for it): picture stored meanwhile
+        compared again, the last put stored.
+        """
         with self._lock:
             current = self._images.get(key)
-            if current is not None and same_picture(current[1], image):
-                return preview_url(key, current[0])
+        while current is not None and same_picture(current[1], image):
+            with self._lock:
+                latest = self._images.get(key)
+                if latest is current:
+                    return preview_url(key, current[0])
+            current = latest
+        with self._lock:
             serial = next(self._serials)
             self._images[key] = (serial, QImage(image))  # implicitly shared copy: caller may paint on its own
         return preview_url(key, serial)

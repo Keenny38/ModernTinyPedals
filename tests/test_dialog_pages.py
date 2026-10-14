@@ -57,8 +57,10 @@ def test_rail_items_setting():
     assert parse_rail_items(" home, nope,race_calculator,home ,tools") == ["home", "race_calculator", "tools"]
     # Former fuel calculator & tyre strategy planner entries: merged race calculator, once
     assert parse_rail_items("fuel_calculator,tools,tyre_strategy_planner") == ["race_calculator", "tools"]
+    # Former game replays entry: results & replays, once
+    assert parse_rail_items("game_replays,race_results_viewer") == ["race_results_viewer"]
     assert default_rail_items() == [
-        "home", "widget", "driver_stats_viewer", "race_results_viewer", "game_replays",
+        "home", "widget", "driver_stats_viewer", "race_results_viewer",
         "broadcast_director", "lap_viewer", "race_calculator", "preset",
     ]
 
@@ -133,6 +135,58 @@ def test_tool_and_config_shown_as_pages(window):
     for page in reversed(view.dialog_pages()):
         page.dialog.close()
     assert not view.dialog_pages() and view.current_index() == 1
+
+
+def test_broadcast_director_dot_and_notice(window, monkeypatch):
+    """Rail entry of the open Broadcast Director: green dot while on, grey while off; notice while on"""
+    from PySide6.QtGui import QColor
+
+    from neopedal.ui import game_rest, status_color
+    from neopedal.ui.tools_view import open_tool
+    from tests.test_game_info import FakeGame
+
+    monkeypatch.setattr(game_rest, "GameConnection", FakeGame().connection)  # no real game request
+    view = window.centralWidget()
+    button = view.rail_tool_buttons()["BroadcastDirector"]
+    notice = view._notify_bar.director
+    view.refresh_page_states()
+    assert button.dot_color is None and notice.isHidden()
+    open_tool("broadcast_director.BroadcastDirector", window)
+    view.refresh_page_states()
+    assert button.dot_color == QColor(status_color("success")) and not notice.isHidden()
+    backend = view.dialog_pages()[0].dialog.backend
+    backend.setEnabled(False)  # navigation & notification bars told at once
+    assert button.dot_color == QColor(status_color("inactive")) and notice.isHidden()
+    backend.setEnabled(True)
+    cfg.notification["notify_broadcast_director"] = False
+    view.refresh_page_states()
+    assert notice.isHidden()
+    view.dialog_pages()[0].dialog.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    view.refresh_page_states()
+    assert button.dot_color is None
+
+
+def test_race_calculator_dot(window):
+    """Rail entry of the open Race Calculator: green dot while game data on, grey while off"""
+    from PySide6.QtGui import QColor
+
+    from neopedal.ui import status_color
+    from neopedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    button = view.rail_tool_buttons()["RaceCalculator"]
+    open_tool("race_calculator.RaceCalculator", window)
+    view.refresh_page_states()
+    assert button.dot_color == QColor(status_color("success"))
+    backend = view.dialog_pages()[0].dialog.backend
+    backend.setGameData(False)  # navigation bar told at once
+    assert button.dot_color == QColor(status_color("inactive"))
+    backend.setGameData(True)
+    view.dialog_pages()[0].dialog.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    view.refresh_page_states()
+    assert button.dot_color is None
 
 
 def test_lap_viewer_page_releases_vertices(window):
@@ -433,6 +487,8 @@ def test_rail_entries_keep_size_and_scroll(window):
     from neopedal.ui.nav_rail import PAGE_INDEX
 
     view = window.centralWidget()
+    cfg.application["rail_items"] += ",spectate,hotkey"  # more entries than a short window shows
+    view.build_rail_items()
     window.resize(700, 900)
     window.show()
     QApplication.processEvents()
@@ -576,6 +632,8 @@ def test_go_back_to_previous_pages(window):
 
 def test_rail_fades_show_hidden_entries(window):
     view = window.centralWidget()
+    cfg.application["rail_items"] += ",spectate,hotkey"  # more entries than a short window shows
+    view.build_rail_items()
     top, bottom = view._rail_fades
     window.resize(700, 900)
     window.show()
@@ -874,7 +932,7 @@ def change_language(window, name: str):
 
 
 def test_language_change_closes_input_of_app_page(window):
-    """Text input opened from an app page (preset share code...): closed by a language change, app page shown
+    """Text input opened from an app page (preset page): closed by a language change, app page shown
     again (was: kept, its OK called back the deleted preset list)"""
     from neopedal.ui._common import TextInputDialog
     from neopedal.ui.nav_rail import PAGE_INDEX
@@ -882,7 +940,7 @@ def test_language_change_closes_input_of_app_page(window):
     window.show()
     view = window.centralWidget()
     view.select_page(PAGE_INDEX["preset"])
-    view.preset_tab.import_share_code()
+    TextInputDialog(view.preset_tab, "Input", "Text:", lambda text: True).open()
     settle()
     assert isinstance(view._pages.currentWidget().dialog, TextInputDialog)
     language = cfg.application["language"]

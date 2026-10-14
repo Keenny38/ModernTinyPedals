@@ -14,10 +14,12 @@ Image {
     Layout.preferredWidth: fitWidth
     Layout.preferredHeight: height
     Layout.alignment: Qt.AlignVCenter
-    sourceSize.width: Math.round(boxWidth * 2)
-    sourceSize.height: Math.round(boxHeight * 2)
+    // Decoded at box height (box fixed by theme: never reloaded; height only: a width too would make it
+    // cover the box), drawn 1:1 unless wider than the box. No mipmaps (+33% texture, out of the shared
+    // atlas): drawn at about decoded size, and a mipmap change reloads the image (status, then shown,
+    // width... binding loop)
+    sourceSize.height: Math.max(1, Math.ceil(boxHeight * Screen.devicePixelRatio))
     fillMode: Image.PreserveAspectFit
     asynchronous: true
     smooth: true
-    mipmap: true
 }

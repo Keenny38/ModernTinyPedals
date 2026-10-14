@@ -34,7 +34,7 @@ SetupStep {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: theme.em * 0.8
-            spacing: theme.em * 0.75
+            spacing: theme.em * 0.8
             Repeater {
                 model: backend.steps.slice(1, backend.stepCount - 1)  // game to overlays
                 RowLayout {
@@ -61,7 +61,7 @@ SetupStep {
                             text: modelData.subtitle
                             color: theme.dimText
                             wrapMode: Text.WordWrap
-                            font.pointSize: theme.fontPoint * 0.92
+                            font.pointSize: theme.fontLabel
                         }
                     }
                 }
@@ -74,6 +74,6 @@ SetupStep {
         text: i18n.tr("Takes about a minute. Nothing is changed until you finish.")
         color: theme.dimText
         wrapMode: Text.WordWrap
-        font.pointSize: theme.fontPoint * 0.92
+        font.pointSize: theme.fontLabel
     }
 }

@@ -29,7 +29,7 @@ drive it), from the moment the widget runs: kept while widget reloads, reset on 
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter
@@ -40,6 +40,9 @@ from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import LEFT, RIGHT, ClassicCells, finite, option_colors
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import StintTimerConfig
 
 DASH = chr(0x2013)
 MAX_STEP = 5.0  # seconds: longer jump of session time is not driving (pause, replay, rewind)
@@ -118,7 +121,7 @@ class StintReading(NamedTuple):
 class StintTimerMixin:
     """Stint & driving time readings, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: StintTimerConfig
 
     def setup_stint(self):
         """Options"""
@@ -191,6 +194,8 @@ class StintTimerMixin:
 
 class Realtime(StintTimerMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: StintTimerConfig
 
     update_while_hidden = True  # driving time counted while hidden
 

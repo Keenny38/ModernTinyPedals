@@ -29,12 +29,30 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from typing import NamedTuple
 
 from . import results_file as rf
 
 STEAM_USER = re.compile(r'"(?P<id>\d{17})"\s*\{(?P<body>[^{}]*)\}')
 MOST_RECENT = re.compile(r'"MostRecent"\s+"1"', re.I)
+TIMESTAMP = re.compile(r'"Timestamp"\s+"(\d+)"', re.I)
+PERSONA = re.compile(r'"PersonaName"\s+"([^"]*)"', re.I)
+STEAM_ID_BASE = 76561197960265728  # SteamID64 of account ID 0 (individual accounts)
+
+
+def active_steam_user() -> str:
+    """SteamID64 of account signed in to running Steam (Windows registry, read only), "" if none or unknown"""
+    if sys.platform != "win32":
+        return ""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam\ActiveProcess") as key:
+            account, _ = winreg.QueryValueEx(key, "ActiveUser")
+    except OSError:
+        return ""
+    return str(STEAM_ID_BASE + account) if isinstance(account, int) and account > 0 else ""
 
 
 class PlayerProfile(NamedTuple):
@@ -72,8 +90,17 @@ def read_profile(game_root: str) -> PlayerProfile | None:
                          _text(livery, "teamName"), _text(livery, "vehicleNumber"), "")
 
 
-def recent_steam_users(steam: str) -> list[str]:
-    """Steam IDs (SteamID64) of account last signed in first, empty if unknown"""
+class SteamAccount(NamedTuple):
+    """Steam account of this computer: SteamID64, name shown in Steam, profile picture file ("" if none)"""
+
+    steam_id: str
+    name: str
+    avatar: str
+
+
+def steam_accounts(steam: str, active: str | None = None) -> list[SteamAccount]:
+    """Steam accounts of this computer, account in use first: signed in to running Steam (active, read from
+    registry if None), else marked most recent (older Steam), else last signed in (timestamp)"""
     if not steam:
         return []
     try:
@@ -81,17 +108,31 @@ def recent_steam_users(steam: str) -> list[str]:
             content = file.read()
     except OSError:
         return []
-    users = [(match["id"], bool(MOST_RECENT.search(match["body"]))) for match in STEAM_USER.finditer(content)]
-    return [user for user, most_recent in users if most_recent] or [user for user, _ in users[:1]]
+    users = []
+    for match in STEAM_USER.finditer(content):
+        stamp = TIMESTAMP.search(match["body"])
+        persona = PERSONA.search(match["body"])
+        avatar = os.path.join(steam, "config", "avatarcache", f"{match['id']}.png")
+        account = SteamAccount(match["id"], persona.group(1) if persona else "", avatar if os.path.isfile(avatar) else "")
+        users.append((account, bool(MOST_RECENT.search(match["body"])), int(stamp.group(1)) if stamp else 0))
+    users.sort(key=lambda user: (user[1], user[2]), reverse=True)  # stable: file order when equal
+    accounts = [account for account, _, _ in users]
+    active = active_steam_user() if active is None else active
+    in_use = next((account for account in accounts if account.steam_id == active), None)
+    if in_use is not None:
+        accounts.remove(in_use)
+        accounts.insert(0, in_use)
+    return accounts
+
+
+def recent_steam_users(steam: str, active: str | None = None) -> list[str]:
+    """Steam IDs (SteamID64) of accounts of this computer, account in use first (see steam_accounts)"""
+    return [account.steam_id for account in steam_accounts(steam, active)]
 
 
 def steam_avatar(steam: str) -> str:
-    """Profile picture Steam keeps of account last signed in, "" if none"""
-    for user in recent_steam_users(steam):
-        path = os.path.join(steam, "config", "avatarcache", f"{user}.png")
-        if os.path.isfile(path):
-            return path
-    return ""
+    """Profile picture Steam keeps of account in use (else of another account), "" if none"""
+    return next((account.avatar for account in steam_accounts(steam) if account.avatar), "")
 
 
 def player_profile(results_folders: tuple[str, ...] = ()) -> PlayerProfile | None:

@@ -62,7 +62,11 @@ from ...i18n import tr, trm
 from ...i18n.options import module_label
 from ...module_control import ModuleControl
 from ...setting import cfg
+from ...template.widget.registry import CATEGORY_COLORS as REGISTRY_COLORS
+from ...template.widget.registry import OTHER as CATEGORY_OTHER
+from ...template.widget.registry import category_of
 from ..module_view import sort_key
+from .page_backend import PageBackend
 from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
@@ -76,53 +80,23 @@ PREVIEW_LOADING = 0
 PREVIEW_READY = 1
 PREVIEW_UNAVAILABLE = 2
 RENDER_BUDGET = 0.008  # seconds of previews rendered per event loop tick (at least one)
+_WIDGET_CATEGORY = category_of()  # category of built-in widgets
 
-# Widget categories: (name, widget name prefixes), first match wins, unmatched (plugins) are "Other"
-WIDGET_CATEGORIES = (
-    ("Timing", (
-        "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "race_plan", "relative", "rivals",
-        "sectors", "session", "standings", "stint_history", "timing", "track_clock",
-        "delta_graph", "gap_trend", "stint_timer", "speed_delta", "driver_rank",
-    )),
-    ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
-    ("Brakes", ("brake_",)),
-    ("Driver Inputs", ("onboard_setting", "pedal", "steering_", "trailing", "telemetry_compare")),
-    ("Engine & Energy", (
-        "battery", "cruise", "drs", "electric_motor", "engine", "fuel", "gear", "instrument", "lift_and_coast",
-        "push_to_pass", "rpm_led", "speedometer", "virtual_energy",
-    )),
-    ("Chassis", (
-        "acceleration", "damage", "differential", "force", "rake_angle", "ride_height", "roll_angle",
-        "suspension_", "weight_distribution",
-    )),
-    ("Track & Traffic", (
-        "black_box", "chat", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
-        "weather",
-        "pit_lane_helper", "race_notifications", "spotter",
-    )),
+# Widget categories: (name, widget names) in chips order, unknown widgets (plugins) are "Other",
+# see template.widget.registry.OVERLAYS
+WIDGET_CATEGORIES = tuple(
+    (category, tuple(name for name, of in _WIDGET_CATEGORY.items() if of == category))
+    for category in REGISTRY_COLORS if category != CATEGORY_OTHER
 )
 CATEGORY_ALL = ""  # category filter off
-CATEGORY_OTHER = "Other"
 # Category color, readable on light & dark theme
-CATEGORY_COLORS = {
-    "Timing": "#4C8DFF",
-    "Tyres & Wheels": "#A371F7",
-    "Brakes": "#E5534B",
-    "Driver Inputs": "#3FB950",
-    "Engine & Energy": "#F0883E",
-    "Chassis": "#22B8C8",
-    "Track & Traffic": "#D4A72C",
-    CATEGORY_OTHER: "#8B949E",
-}
+CATEGORY_COLORS = dict(REGISTRY_COLORS)
 CATEGORY_ORDER = (*(category for category, _ in WIDGET_CATEGORIES), CATEGORY_OTHER)
 
 
 def widget_category(name: str) -> str:
-    """Category of widget, by name prefix"""
-    for category, prefixes in WIDGET_CATEGORIES:
-        if name.startswith(prefixes):
-            return category
-    return CATEGORY_OTHER
+    """Category of widget"""
+    return _WIDGET_CATEGORY.get(name, CATEGORY_OTHER)
 
 
 def search_words(text: str) -> tuple[str, ...]:
@@ -433,7 +407,7 @@ def preview_signature(name: str) -> object:
     return preview_key(cfg, name, setting, max_size=PREVIEW_MAX)
 
 
-class OverlayBackend(QObject):
+class OverlayBackend(PageBackend):
     """Overlays page state & actions
 
     Args:
@@ -442,6 +416,8 @@ class OverlayBackend(QObject):
         open_config: open config dialog of overlay (name).
         confirm: ask a yes / no question (message), True if yes.
         show_log: show app log (start errors).
+        export_settings: export settings of overlays (names ticked first) as package file.
+        import_settings: import overlay settings package file.
     """
 
     countsChanged = Signal()
@@ -456,14 +432,18 @@ class OverlayBackend(QObject):
         open_config: Callable[[str], None],
         confirm: Callable[[str], bool],
         show_log: Callable[[], None] = lambda: None,
+        export_settings: Callable[[list[str]], object] = lambda names: None,
+        import_settings: Callable[[], object] = lambda: None,
     ):
-        super().__init__(parent)
+        super().__init__(parent, "Overlays")
         from ... import safe_mode
 
         self._control = module_control
         self._open_config = open_config
         self._confirm = confirm
         self._show_log = show_log
+        self._export_settings = export_settings
+        self._import_settings = import_settings
         self._safe_mode = safe_mode.state.enabled
         self._inputs_changed = False  # setting refreshed while hidden: previews checked once shown
         self.previews = PreviewCache(render_preview, self._preview_ready, self, self.preview_signature)
@@ -556,10 +536,6 @@ class OverlayBackend(QObject):
             self._check_previews()
 
     def _preview_ready(self, name: str):
-        self.source.row_changed(name, OverlayModel.PREVIEW_ROLES)
-
-    def invalidate_preview(self, name: str):
-        self.previews.invalidate(name)
         self.source.row_changed(name, OverlayModel.PREVIEW_ROLES)
 
     @Slot(int, int)
@@ -703,6 +679,15 @@ class OverlayBackend(QObject):
     def showLog(self):
         self._show_log()
 
+    @Slot(str)
+    def exportSettings(self, name: str):
+        """Settings of overlays saved as package file: this overlay ticked first, else enabled ones"""
+        self._export_settings([name] if name in self.source.index_of else [])
+
+    @Slot()
+    def importSettings(self):
+        self._import_settings()
+
     @Slot()
     def enableShown(self):
         self._set_shown(True)
@@ -733,6 +718,10 @@ class OverlayBackend(QObject):
         app_signal.refresh.emit(True)  # other pages & menus follow, rows updated by refresh
 
     def close(self):
+        """Page closed (older name of release)"""
+        self.release()
+
+    def release_resources(self):
         from ..widget_preview import set_showing
 
         self.previews.stop()

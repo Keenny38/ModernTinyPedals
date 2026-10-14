@@ -102,6 +102,21 @@ def test_language_pack_bad_replacement_skipped(tmp_path):
     assert read_language_pack(str(tmp_path / "xx.json"))["messages"] == (("^(Saved)", r"\1!"),)
 
 
+def test_language_pack_of_older_version_read(tmp_path):
+    """Pack made for a version until 0.23.0 (Modern Tiny Pedals format name) still read, other formats not"""
+    import json
+
+    from neopedal.i18n import LANGUAGE_PACK_FORMAT, read_language_pack
+
+    assert LANGUAGE_PACK_FORMAT == "neopedal-language"
+    pack = {"format": "modern-tiny-pedals-language", "code": "xx", "name": "Oldish"}
+    (tmp_path / "xx.json").write_text(json.dumps(pack), encoding="utf-8")
+    assert read_language_pack(str(tmp_path / "xx.json"))["name"] == "Oldish"
+    (tmp_path / "xx.json").write_text(json.dumps({**pack, "format": "other-language"}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        read_language_pack(str(tmp_path / "xx.json"))
+
+
 def test_language_pack_invalid_messages_skipped(tmp_path):
     """Pack with non-list messages (or too deep json) skipped, never breaks startup"""
     import json

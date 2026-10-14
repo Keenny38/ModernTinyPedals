@@ -33,7 +33,7 @@ Item {
             Layout.fillWidth: true
             text: i18n.tr("Stints of every driver of the car read from the game (LMU), teammates included: usage per lap, out laps & pit laps left out. Select stints, then fill in: their average goes to the calculator.")
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.88
+            font.pointSize: theme.fontSmall
             wrapMode: Text.Wrap
         }
         Row {  // header
@@ -48,7 +48,7 @@ Item {
                     text: modelData
                     color: theme.dimText
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
@@ -75,7 +75,7 @@ Item {
                 readonly property var cells: model.cells || []
                 width: list.width
                 height: Math.round(theme.em * 1.75)
-                radius: theme.em * 0.3
+                radius: theme.radiusSm
                 opacity: usable ? 1 : 0.5
                 color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.3 : 0.2)
                      : stintArea.containsMouse && usable ? theme.hover
@@ -132,7 +132,7 @@ Item {
                 Layout.fillWidth: true
                 text: backend.teamStatus
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
                 elide: Text.ElideRight
             }
             TpButton {

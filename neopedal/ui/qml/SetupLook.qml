@@ -152,7 +152,7 @@ SetupStep {
         readonly property real room: (width - theme.em * 2 - gap * (count - 1)) / count  // per overlay
         Layout.fillWidth: true
         implicitHeight: Math.round(theme.em * 10)
-        radius: theme.em * 0.75
+        radius: theme.radiusXl
         clip: true
         gradient: Gradient {
             GradientStop { position: 0; color: "#566070" }
@@ -190,10 +190,10 @@ SetupStep {
                     Rectangle {
                         anchors.fill: parent
                         visible: sampleItem.previewState === 0
-                        radius: theme.em * 0.3
+                        radius: theme.radiusSm
                         color: Qt.rgba(1, 1, 1, 0.1)
                         SequentialAnimation on opacity {
-                            running: sampleItem.previewState === 0 && pageState.active
+                            running: sampleItem.previewState === 0 && pageState.active && theme.animate
                             loops: Animation.Infinite
                             NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
                             NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }

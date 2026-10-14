@@ -60,6 +60,7 @@ from .const_file import ConfigType
 from .i18n import current_language, tr
 from .log_handler import ErrorThrottle
 from .setting import cfg
+from .template.setting_status_colors import STATUS_COLORS
 from .userfile.tls_cert import load_certificate, server_context
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,9 @@ ADDRESS_CACHE_SECONDS = 30.0  # LAN addresses asked again after this time (pages
 _address_lock = threading.Lock()
 _address_cache: tuple[float, list[str]] | None = None  # monotonic time, addresses
 _address_refreshing = False  # background lookup running
+_address_done = threading.Event()  # set once no background lookup running
+_address_done.set()
+ADDRESS_WAIT_SECONDS = 1.0  # wait=True: longest wait for background lookup, cached addresses returned after
 
 
 def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS, wait: bool = False) -> list[str]:
@@ -96,7 +100,8 @@ def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS, wait: bool = False) 
 
     Args:
         max_age: cached addresses older than this (seconds) looked up again.
-        wait: look up now and wait for result if cache is older than max_age.
+        wait: wait for background lookup if cache is older than max_age, up to ADDRESS_WAIT_SECONDS
+            (last known addresses returned if not found by then, GUI never blocked by a slow DNS).
     """
     global _address_refreshing
     now = time.monotonic()
@@ -104,12 +109,16 @@ def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS, wait: bool = False) 
         cached = _address_cache
         if cached is not None and now - cached[0] < max_age:
             return list(cached[1])
+        if not _address_refreshing:
+            _address_refreshing = True
+            _address_done.clear()
+            threading.Thread(target=_refresh_addresses, daemon=True, name="LAN addresses").start()
         if not wait:
-            if not _address_refreshing:
-                _address_refreshing = True
-                threading.Thread(target=_refresh_addresses, daemon=True, name="LAN addresses").start()
             return list(cached[1]) if cached is not None else []
-    return _store_addresses(lookup_local_addresses())
+    if _address_done.wait(ADDRESS_WAIT_SECONDS):
+        with _address_lock:
+            cached = _address_cache
+    return list(cached[1]) if cached is not None else []
 
 
 def _refresh_addresses():
@@ -120,6 +129,7 @@ def _refresh_addresses():
     finally:
         with _address_lock:
             _address_refreshing = False
+            _address_done.set()
 
 
 def _store_addresses(addresses: list[str]) -> list[str]:
@@ -351,11 +361,12 @@ class DashboardHandler(BoundedRequestHandler):
         morsel = cookie.get(SESSION_COOKIE)
         if morsel is None:
             return False
+        value = morsel.value.encode("utf-8")  # bytes: str compare raises TypeError on non ASCII cookie
         now = time.monotonic()
         with self.lock:
             self.purge_sessions(now)
             for token, times in self.sessions.items():
-                if hmac.compare_digest(morsel.value, token):
+                if hmac.compare_digest(value, token.encode("ascii")):
                     times[1] = now  # last used
                     return True
         return False
@@ -509,7 +520,7 @@ class WebDashboard:
         return int(cfg.user.config["web_dashboard"]["web_dashboard_port"])
 
     def urls(self, wait: bool = False) -> list[str]:
-        """Dashboard addresses with access code (wait: LAN addresses looked up now if outdated)"""
+        """Dashboard addresses with access code (wait: outdated LAN addresses waited for, bounded)"""
         code = self.access_code()
         hosts = local_addresses(wait=wait) if cfg.user.config["web_dashboard"]["enable_lan_access"] else []
         scheme = "https" if self.use_https() else "http"
@@ -685,7 +696,7 @@ DASHBOARD_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="ut
 <meta name="theme-color" content="#0e1116"><title>@@title@@</title>
 <style>
 :root{--bg:#0e1116;--panel:#1b1f27;--line:#2a303c;--text:#e9ecf1;--muted:#9aa3b2;
---green:#34c759;--red:#ff4d4f;--blue:#38bdf8;--yellow:#ffd43b}
+@@status@@}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
 font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
 main{display:grid;gap:10px;padding:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
@@ -725,7 +736,8 @@ background:var(--red);color:var(--bg);font-size:12px;letter-spacing:0}
 <script>
 const T=@@texts@@;
 const $=id=>document.getElementById(id);
-const lap=t=>{if(!(t>0))return"-:--.---";const m=Math.floor(t/60);return m+":"+(t-m*60).toFixed(3).padStart(6,"0")};
+const lap=t=>{if(!(t>0))return"-:--.---";const ms=Math.round(t*1000),m=Math.floor(ms/60000);  // rounded first: no 1:60.000
+  return m+":"+((ms-m*60000)/1000).toFixed(3).padStart(6,"0")};
 const hms=t=>{if(!(t>0))return"--:--";t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;
 return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0")};
 const quad=v=>v.map(x=>"<div>"+Math.round(x)+"</div>").join("");
@@ -755,3 +767,7 @@ $("remain").textContent=hms(d.time_remaining);setTimeout(tick,150)}
 catch(e){$("status").textContent=T.lost;setTimeout(tick,2000)}}
 tick();
 </script></body></html>"""
+# Status colors of every surface (overlays, app pages, stream graphics)
+DASHBOARD_HTML = DASHBOARD_HTML.replace("@@status@@", "".join(
+    f"--{name}:{STATUS_COLORS[role][0].lower()};"
+    for name, role in (("green", "gain"), ("red", "loss"), ("blue", "player"), ("yellow", "gold"))))

@@ -20,15 +20,22 @@
 Weather Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import units
 from ..api_control import api
 from ..const_common import TEXT_TREND_SIGN
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import WeatherConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "WeatherConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

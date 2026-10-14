@@ -20,6 +20,8 @@
 Lift and coast LED Widget
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QBrush, QPainter, QPen
 from PySide6.QtWidgets import QWidget
@@ -29,9 +31,14 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import LiftAndCoastLedConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "LiftAndCoastLedConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -148,8 +155,8 @@ class LEDBar(QWidget):
     def __init__(
         self,
         parent,
-        led_width: int = 0,
-        led_height: int = 0,
+        led_width: float = 0,
+        led_height: float = 0,
         led_radius: float = 0,
         led_count: int = 0,
         margin: int = 0,
@@ -158,7 +165,7 @@ class LEDBar(QWidget):
         show_background: bool = False,
         background_color: str = "",
         led_outline_color: str = "",
-        led_outline_width: int = 0,
+        led_outline_width: float = 0,
         lift_and_coast_color_off: str = "",
         lift_and_coast_color_low: str = "",
         lift_and_coast_color_critical: str = "",
@@ -196,7 +203,7 @@ class LEDBar(QWidget):
         if led_outline_width > 0:
             self.pen_led = QPen()
             self.pen_led.setColor(led_outline_color)
-            self.pen_led.setWidth(led_outline_width)
+            self.pen_led.setWidthF(led_outline_width)
         else:
             self.pen_led = QPen(Qt.PenStyle.NoPen)
 

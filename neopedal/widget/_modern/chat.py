@@ -31,7 +31,7 @@ pictures, never while merely unlocked (it would pass for real messages in game).
 from __future__ import annotations
 
 from time import localtime, strftime, time
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from zlib import crc32
 
 from PySide6.QtCore import QRectF, QTimer
@@ -42,6 +42,9 @@ from .._race_aids import HiddenPreview
 from ..chat import MAX_LINES, SAMPLE_PLAYER, sample_messages, stack_blocks
 from .base import LEFT, ModernOverlay
 from .draw import accent_edge, panel, rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import ChatConfig
 
 FADE_TIME = 1.0  # seconds of fade out at end of display
 FADE_STEPS = 8
@@ -76,6 +79,8 @@ def split_sender(message: str) -> tuple[str, str]:
 
 class Realtime(HiddenPreview, ModernOverlay):
     """Draw widget"""
+
+    wcfg: ChatConfig
 
     options = (
         "font_size", "number_of_lines", "line_width", "maximum_display_duration", "new_message_duration",

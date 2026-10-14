@@ -28,6 +28,7 @@ fast closing cars. Auto hide & fade out with distance of nearest car kept from c
 from __future__ import annotations
 
 from itertools import islice
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen, QPixmap, QRadialGradient
@@ -39,11 +40,16 @@ from .base import ModernOverlay
 from .cars import car_colors, status_color
 from .draw import disc
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RadarConfig
+
 RING_STEP = 10  # meters between distance rings
 
 
 class Realtime(RadarMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: RadarConfig
 
     options = (
         "global_scale", "radar_radius", "vehicle_length", "vehicle_width", "show_vehicle_orientation",
@@ -109,13 +115,8 @@ class Realtime(RadarMixin, ModernOverlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        veh_data_version = minfo.vehicles.dataSetVersion
-        if self.last_veh_data_version != veh_data_version:
-            self.last_veh_data_version = veh_data_version
-            show_radar = self.is_radar_visible()
-            if show_radar or self.show_radar != show_radar:
-                self.show_radar = show_radar
-                self.update()
+        if self.radar_changed(self.devicePixelRatioF()):
+            self.update()
 
     def edge_mask(self, ratio: float) -> QPixmap:
         """Edge fade: transparent center, opaque toward edge (erases what is under it)"""

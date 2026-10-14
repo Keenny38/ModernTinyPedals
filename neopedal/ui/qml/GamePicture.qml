@@ -15,7 +15,7 @@ Rectangle {
     implicitWidth: shown ? Math.round(boxHeight * aspect) : 0
     Layout.preferredHeight: implicitHeight
     Layout.preferredWidth: implicitWidth
-    radius: theme.em * 0.35
+    radius: theme.radiusSm
     color: theme.raised
     border.color: theme.border
     clip: true
@@ -24,10 +24,15 @@ Rectangle {
         id: picture
         anchors.fill: parent
         anchors.margins: 1
-        sourceSize.width: Math.round(frame.boxHeight * frame.aspect * 2)
+        // Decoded covering box size (box fixed by theme: never reloaded): cropped picture drawn 1:1;
+        // mipmaps (+33% texture, out of the shared atlas) only for one drawn well under its decoded
+        // size (fitted picture of another shape than the box)
+        sourceSize.width: Math.max(1, Math.ceil(frame.boxHeight * frame.aspect * Screen.devicePixelRatio))
+        sourceSize.height: Math.max(1, Math.ceil(frame.boxHeight * Screen.devicePixelRatio))
         fillMode: frame.crop ? Image.PreserveAspectCrop : Image.PreserveAspectFit
         asynchronous: true
         smooth: true
-        mipmap: true
+        mipmap: frame.shown && Math.min(paintedWidth / Math.max(implicitWidth, 1),
+                                        paintedHeight / Math.max(implicitHeight, 1)) * Screen.devicePixelRatio < 0.75
     }
 }

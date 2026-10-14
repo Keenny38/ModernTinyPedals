@@ -36,9 +36,7 @@ from ..i18n.options import option_label
 from ..module_control import mctrl
 from ..overlay_control import octrl
 from ..setting import cfg
-from ..update import update_checker
 from ..userfile.tls_cert import fingerprint as certificate_fingerprint
-from ..web_dashboard import webdashboard
 from .toast import show_toast
 from .tools_view import TOOL_SECTIONS, open_tool
 
@@ -306,7 +304,12 @@ class ResetDataMenu(QMenu):
         if delete_msg != QMessageBox.StandardButton.Yes:
             return False
         # Delete file
-        os.remove(filename_full)
+        try:
+            os.remove(filename_full)
+        except OSError as error:  # in use (overlay reading it), read-only or already gone
+            QMessageBox.warning(self._parent, tr("Error"), trm(
+                f"Unable to reset {data_name} data: {error.strerror or error}"))
+            return False
         show_toast(self._parent, trm(
             f"{data_name if translated else data_name.capitalize()} data has been reset for<br><b>{filename}</b>"))
         return True
@@ -432,6 +435,7 @@ class ConfigMenu(QMenu):
                 tr("Web dashboard is disabled. Enable it from Config menu, Web Dashboard."),
             )
             return
+        webdashboard = loader.webdashboard  # imported once used (http.server, ssl)
         links = "<br>".join(f"<a href='{url}'>{url}</a>" for url in webdashboard.urls(wait=True))
         message = QMessageBox(self._parent)
         message.setWindowTitle(tr("Web Dashboard"))
@@ -726,7 +730,7 @@ class HelpMenu(QMenu):
 
     def show_update(self):
         """Show update"""
-        update_checker.check(True)
+        loader.update_checker.check(True)  # update module imported once used
 
     def open_user_guide(self):
         """Open user guide link"""

@@ -27,6 +27,7 @@ Optional columns on the left: rate of consumption, pit entry bias, last lap cons
 from __future__ import annotations
 
 from math import floor
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -40,9 +41,14 @@ from ...module_info import minfo
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import FuelEnergySaverConfig
+
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: FuelEnergySaverConfig
 
     options = (
         "font_size", "layout", "bar_width", "minimum_reserve", "number_of_more_laps", "number_of_less_laps",

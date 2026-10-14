@@ -66,6 +66,7 @@ from ..replay import (
 from ..replay_session import api_supported, section_filename, start_api_recording
 from ..setting import cfg
 from ._common import BaseDialog, UIScaler, singleton_dialog, translate_filter
+from .quick.formatting import iso_minutes
 
 logger = logging.getLogger(__name__)
 
@@ -502,7 +503,7 @@ class ReplayView(BaseDialog):
         for item_info in list_replays(cfg.path.telemetry or "."):
             info = item_info.info
             item = QTreeWidgetItem(self.replay_list, [
-                time.strftime("%Y-%m-%d %H:%M", time.localtime(item_info.created)),
+                iso_minutes(item_info.created),
                 str(info.get("track", "")),
                 str(info.get("vehicle", "")),
                 tr(str(info.get("session", ""))) if info.get("session") else "",

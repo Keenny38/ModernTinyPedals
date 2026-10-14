@@ -8,14 +8,15 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    readonly property bool wide: width > theme.em * (backend.hasEnergy ? 47 : 40)  // last lap column shown
+    readonly property bool wide: width > theme.em * (replays.hasEnergy ? 47 : 40)  // last lap column shown
     readonly property real cellPad: theme.em * 0.35
+    readonly property real posWidth: classes.count > 1 ? theme.em * 4.4 : theme.em * 2.4  // room for class badges
     property string menuKey: ""
     property string menuDriver: ""
 
     function tone(name) { return name === "loss" ? theme.loss : name === "gain" ? theme.gain : name === "warning" ? theme.warning : theme.dimText }
     function showSelected() {
-        var index = backend.carIndex(backend.selectedCar)
+        var index = replays.carIndex(replays.selectedCar)
         if (index >= 0) list.positionViewAtIndex(index, ListView.Contain)
     }
 
@@ -23,23 +24,23 @@ Item {
         id: rowMenu
         Action {
             text: i18n.tr("Camera on This Car")
-            enabled: backend.inSession
-            onTriggered: backend.watchCar(root.menuKey)
+            enabled: replays.inSession
+            onTriggered: replays.watchCar(root.menuKey)
         }
         Action {
             text: i18n.tr("Go to Lap...")
-            enabled: backend.replayActive
-            onTriggered: backend.goToLap(root.menuKey)
+            enabled: replays.replayActive
+            onTriggered: replays.goToLap(root.menuKey)
         }
         Action {
             text: i18n.tr("Incidents of %1").arg(root.menuDriver)
-            onTriggered: backend.showDriverIncidents(root.menuDriver)
+            onTriggered: replays.showDriverIncidents(root.menuDriver)
         }
     }
 
     component HeaderText: Text {
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.8
+        font.pointSize: theme.fontCaption
         font.weight: Font.DemiBold
         elide: Text.ElideRight
     }
@@ -48,7 +49,7 @@ Item {
         anchors.fill: parent
         anchors.margins: theme.em * 0.7
         anchors.topMargin: 0
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
 
         // Classes: click to see one class only
         ListView {
@@ -57,26 +58,26 @@ Item {
             Layout.preferredHeight: Math.round(theme.em * 2.0)
             visible: count > 1
             orientation: ListView.Horizontal
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: backend.classes
+            model: replays.classes
             delegate: AbstractButton {
                 id: chip
                 required property var modelData
-                readonly property bool active: backend.classFilter === modelData.name
+                readonly property bool active: replays.classFilter === modelData.name
                 height: classes.height
                 width: chipRow.implicitWidth + theme.em * 1.1
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
-                onClicked: backend.setClassFilter(modelData.name)
+                onClicked: replays.setClassFilter(modelData.name)
                 background: Rectangle {
                     radius: height / 2
                     color: chip.active ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.2)
                          : chip.hovered ? theme.hover : theme.raised
                     border.width: 1
                     border.color: chip.active ? theme.accent : theme.border
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { ColorAnimation { duration: theme.motionFast } }
                 }
                 contentItem: Item {
                     Row {
@@ -90,11 +91,11 @@ Item {
                             color: chip.modelData.color
                             anchors.verticalCenter: parent.verticalCenter
                         }
-                        Text { text: chip.modelData.name; color: theme.text; font.pointSize: theme.fontPoint * 0.9 }
+                        Text { text: chip.modelData.name; color: theme.text; font.pointSize: theme.fontLabel }
                         Text {
                             text: chip.modelData.count
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                             font.weight: Font.DemiBold
                             font.features: { "tnum": 1 }
                         }
@@ -105,28 +106,28 @@ Item {
 
         // Last session (game in menus): standings kept
         Text {
-            visible: backend.lastSession && list.count > 0
+            visible: replays.lastSession && list.count > 0
             text: i18n.tr("Last Session")
             color: theme.warning
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             font.weight: Font.DemiBold
         }
 
         // Column titles, lined up with row cells (same margins, scroll bar room)
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: theme.em * 0.35
+            Layout.leftMargin: theme.em * 0.4
             Layout.rightMargin: theme.em * 0.2 + (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
             visible: list.count > 0
             spacing: root.cellPad
-            HeaderText { text: i18n.tr("Pos"); Layout.preferredWidth: theme.em * 2.4; horizontalAlignment: Text.AlignHCenter }
+            HeaderText { text: i18n.tr("Pos"); Layout.preferredWidth: root.posWidth; horizontalAlignment: Text.AlignHCenter }
             HeaderText { text: i18n.tr("Driver"); Layout.fillWidth: true }
             HeaderText { text: i18n.tr("Laps"); Layout.preferredWidth: theme.em * 2.4; horizontalAlignment: Text.AlignRight }
             HeaderText { text: i18n.tr("Best"); Layout.preferredWidth: theme.em * 4.9; horizontalAlignment: Text.AlignRight }
             HeaderText { text: i18n.tr("Last"); visible: root.wide; Layout.preferredWidth: theme.em * 4.9; horizontalAlignment: Text.AlignRight }
             HeaderText { text: i18n.tr("Gap"); Layout.preferredWidth: theme.em * 4.6; horizontalAlignment: Text.AlignRight }
             HeaderText { text: i18n.tr("Pit"); Layout.preferredWidth: theme.em * 3.2; horizontalAlignment: Text.AlignHCenter }
-            HeaderText { text: i18n.tr("Energy"); visible: backend.hasEnergy; Layout.preferredWidth: theme.em * 3.8; horizontalAlignment: Text.AlignHCenter }
+            HeaderText { text: i18n.tr("Energy"); visible: replays.hasEnergy; Layout.preferredWidth: theme.em * 3.8; horizontalAlignment: Text.AlignHCenter }
             Item { Layout.preferredWidth: theme.em * 2.4 }  // incidents
             Item { Layout.preferredWidth: theme.em * 2.0 }  // camera
         }
@@ -138,17 +139,17 @@ Item {
             clip: true
             focus: true
             activeFocusOnTab: true
-            model: backend.standingRows
+            model: replays.standingRows
             boundsBehavior: Flickable.StopAtBounds
             reuseItems: true  // rows scrolled out fed again with other cars (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            Keys.onUpPressed: { backend.moveCarSelection(-1); root.showSelected() }
-            Keys.onDownPressed: { backend.moveCarSelection(1); root.showSelected() }
-            Keys.onReturnPressed: backend.watchCar(backend.selectedCar)
-            Keys.onEnterPressed: backend.watchCar(backend.selectedCar)
-            move: Transition { NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.OutCubic } }
-            moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.OutCubic } }
-            displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
+            Keys.onUpPressed: { replays.moveCarSelection(-1); root.showSelected() }
+            Keys.onDownPressed: { replays.moveCarSelection(1); root.showSelected() }
+            Keys.onReturnPressed: replays.watchCar(replays.selectedCar)
+            Keys.onEnterPressed: replays.watchCar(replays.selectedCar)
+            move: Transition { NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+            moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+            displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
 
             delegate: Rectangle {
                 id: row
@@ -161,6 +162,7 @@ Item {
                 required property string vehicle
                 required property string carClass
                 required property string classColor
+                required property string classAlias
                 required property int laps
                 required property string best
                 required property string last
@@ -176,7 +178,7 @@ Item {
                 required property string energy
                 required property real energyLevel
                 required property string brandLogo
-                readonly property bool selected: key === backend.selectedCar
+                readonly property bool selected: key === replays.selectedCar
                 // Reused row: fed other car values at once, no color animation from the old car
                 property bool live: true
                 ListView.onPooled: live = false
@@ -184,42 +186,33 @@ Item {
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 2.9)
-                radius: theme.em * 0.45
-                color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
-                     : row.player ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.07)
-                     : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
+                radius: theme.radiusMd
+                color: row.player && !selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.07)
+                     : theme.rowColor(rowArea.containsMouse, selected)
+                Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
 
                 MouseArea {
                     id: rowArea
                     anchors.fill: parent
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onPressed: { list.forceActiveFocus(); backend.selectCar(row.key) }
+                    onPressed: { list.forceActiveFocus(); replays.selectCar(row.key) }
                     onClicked: function(mouse) {
                         if (mouse.button !== Qt.RightButton) return
                         root.menuKey = row.key
                         root.menuDriver = row.driver
                         rowMenu.popup(rowArea, mouse.x, mouse.y)
                     }
-                    onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.watchCar(row.key) }
-                }
-                Rectangle {  // class color
-                    x: 2
-                    width: 3
-                    height: parent.height - theme.em * 0.7
-                    anchors.verticalCenter: parent.verticalCenter
-                    radius: 1.5
-                    color: row.classColor
+                    onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) replays.watchCar(row.key) }
                 }
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: theme.em * 0.35
+                    anchors.leftMargin: theme.em * 0.4
                     anchors.rightMargin: theme.em * 0.2
                     spacing: root.cellPad
 
-                    Column {  // position, class position when several classes
-                        Layout.preferredWidth: theme.em * 2.4
+                    Column {  // position, class badge (as overlays: alias & position in class) when several classes
+                        Layout.preferredWidth: root.posWidth
                         Text {
                             width: parent.width
                             text: row.position > 0 ? row.position : "-"
@@ -228,15 +221,13 @@ Item {
                             font.features: { "tnum": 1 }
                             horizontalAlignment: Text.AlignHCenter
                         }
-                        Text {
-                            width: parent.width
-                            visible: classes.count > 1
-                            text: row.classPosition
-                            color: row.classColor
-                            font.pointSize: theme.fontPoint * 0.75
-                            font.weight: Font.DemiBold
-                            font.features: { "tnum": 1 }
-                            horizontalAlignment: Text.AlignHCenter
+                        TpClassBadge {
+                            visible: classes.count > 1 && label !== ""
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            label: row.classAlias
+                            fullName: row.carClass
+                            fill: row.classColor
+                            position: row.classPosition > 0 ? String(row.classPosition) : ""
                         }
                     }
                     ColumnLayout {
@@ -244,19 +235,19 @@ Item {
                         spacing: 1
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Rectangle {  // car number
                                 visible: row.number !== ""
                                 implicitWidth: Math.max(numberText.implicitWidth + theme.em * 0.5, theme.em * 1.6)
                                 implicitHeight: numberText.implicitHeight + 2
-                                radius: theme.em * 0.25
+                                radius: theme.radiusSm
                                 color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.1)
                                 Text {
                                     id: numberText
                                     anchors.centerIn: parent
                                     text: row.number
                                     color: theme.text
-                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.pointSize: theme.fontCaption
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                 }
@@ -271,7 +262,7 @@ Item {
                         }
                         RowLayout {  // status (garage, pits, finished...), class, team or car, penalties
                             Layout.fillWidth: true
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Rectangle {  // pit, finished, retired
                                 visible: row.status !== ""
                                 readonly property color tint: root.tone(row.statusTone)
@@ -284,7 +275,7 @@ Item {
                                     anchors.centerIn: parent
                                     text: row.status
                                     color: parent.tint
-                                    font.pointSize: theme.fontPoint * 0.72
+                                    font.pointSize: theme.fontTiny
                                     font.weight: Font.DemiBold
                                 }
                             }
@@ -298,7 +289,7 @@ Item {
                                 text: row.carClass + (row.vehicle !== "" ? "  ·  " + row.vehicle : "")
                                       + (row.penalties > 0 ? "  ·  " + i18n.tr("Penalties") + " " + row.penalties : "")
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.78
+                                font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
                             }
                         }
@@ -342,7 +333,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                     }
                     Item {  // virtual energy (else fuel) left: told by game for cars of own team
-                        visible: backend.hasEnergy
+                        visible: replays.hasEnergy
                         Layout.preferredWidth: theme.em * 3.8
                         Layout.preferredHeight: theme.em * 1.6
                         Row {
@@ -377,10 +368,10 @@ Item {
                         visible: row.incidents > 0
                         hoverEnabled: true
                         focusPolicy: Qt.NoFocus
-                        onClicked: backend.showDriverIncidents(row.driver)
+                        onClicked: replays.showDriverIncidents(row.driver)
                         ToolTip.visible: hovered
                         ToolTip.text: hovered ? i18n.tr("Incidents of %1").arg(row.driver) : ""
-                        ToolTip.delay: 400
+                        ToolTip.delay: theme.tipDelay
                         background: Rectangle {
                             radius: height / 2
                             color: parent.hovered ? Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.22)
@@ -394,7 +385,7 @@ Item {
                                 Text {
                                     text: row.incidents
                                     color: theme.loss
-                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.pointSize: theme.fontCaption
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                     anchors.verticalCenter: parent.verticalCenter
@@ -416,14 +407,14 @@ Item {
                         Loader {  // made only for the selected or hovered row
                             id: cameraLoader
                             anchors.fill: parent
-                            active: !row.onCamera && backend.inSession
+                            active: !row.onCamera && replays.inSession
                                     && (row.selected || rowArea.containsMouse
                                         || (cameraLoader.item !== null && cameraLoader.item.hovered))
                             sourceComponent: TpButton {
                                 flat: true
                                 glyph: ""
                                 tip: hovered ? i18n.tr("Camera on This Car") + " (" + i18n.tr("double click") + ")" : ""
-                                onClicked: backend.watchCar(row.key)
+                                onClicked: replays.watchCar(row.key)
                             }
                         }
                     }
@@ -444,7 +435,7 @@ Item {
                 }
                 Text {
                     width: parent.width
-                    text: backend.inSession ? i18n.tr("Asking game...")
+                    text: replays.inSession ? i18n.tr("Asking game...")
                         : i18n.tr("Standings show once a session or a replay is loaded in the game.")
                     color: theme.dimText
                     wrapMode: Text.WordWrap

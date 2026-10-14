@@ -17,23 +17,30 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Lap viewer conditions (mixin of LapViewerBackend): reference lap driven in similar conditions (track temperature,
-tyre compound, wetness), setup differences between two laps
+Lap viewer conditions (part of LapViewerBackend, QML backend.conditions): reference lap driven in similar conditions
+(track temperature, tyre compound, wetness), setup differences between two laps
 """
 
 from __future__ import annotations
 
 import html
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Protocol
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ...i18n import tr, trm
 from ...userfile.telemetry_lap import LapData, monotonic_distance, official_lap_time
 from .. import lap_viewer
 from ..lap_viewer import LapEntry, format_laptime, lap_label, number_text, save_viewer_setting
-from .lap_base import BackendBase
+from .lap_base import PagePart, int_setting, weak_host
 from .stint_analysis import lap_compound
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import SignalInstance
+
+    from ..lap_viewer import PlotLap
+    from .trace_data import TraceData
 
 SIMILAR_TOLERANCES = (1, 2, 3, 5, 8)  # °C, track temperature difference of laps in similar conditions (setting)
 SIMILAR_TOLERANCE = 3
@@ -137,37 +144,79 @@ def setup_diff(info_a: dict, info_b: dict, lap_a: LapData | None, lap_b: LapData
     return {"state": state, "rows": rows}
 
 
-class LapConditions(BackendBase):
-    """Similar conditions reference & setup differences of lap viewer page"""
+class ConditionsHost(Protocol):
+    """What the conditions part uses of the lap viewer page"""
+
+    data: TraceData
+    entries: list[LapEntry]
+    checked: set[str]
+    reference_key: str
+    folder: str
+
+    @property
+    def optionsChanged(self) -> SignalInstance: ...
+    def all_entries(self) -> list[LapEntry]: ...
+    def compared_lap(self) -> PlotLap | None: ...
+    def fill_list(self): ...
+    def load_laps(self): ...
+    def set_status(self, text: str, transient: bool = True): ...
+    def short_label(self, key: str) -> str: ...
+
+
+class LapConditions(PagePart):
+    """Similar conditions reference & setup differences of lap viewer page (QML backend.conditions)"""
+
+    toleranceChanged = Signal()  # similar conditions tolerance or its unit (temperature unit setting)
+
+    def __init__(self, page: ConditionsHost, setting: dict, parent: QObject | None = None):
+        super().__init__(parent)
+        self._page = weak_host(page)
+        tolerance = int_setting(setting, "similar_tolerance", SIMILAR_TOLERANCE)
+        self._similar_tolerance = tolerance if tolerance in SIMILAR_TOLERANCES else SIMILAR_TOLERANCE
+        page.optionsChanged.connect(self.toleranceChanged)  # units changed: tolerance texts
+
+    @Property(int, notify=toleranceChanged)
+    def similarTolerance(self) -> int:
+        """Track temperature difference (°C) of laps in similar conditions"""
+        return self._similar_tolerance
+
+    @Property(list, notify=toleranceChanged)
+    def similarTolerances(self) -> list[dict]:
+        """Track temperature differences to choose from: degrees, text in user unit"""
+        symbol = lap_viewer.display_units()["temperature"][1]
+        factor = 1.8 if symbol.endswith("F") else 1.0
+        return [{"value": degrees, "text": f"±{number_text(degrees * factor)}{symbol}"} for degrees in SIMILAR_TOLERANCES]
 
     def similar_target(self) -> LapEntry | None:
         """Lap looked at: first compared lap shown, else newest clean lap of track"""
-        entries = {entry.file.path: entry for entry in self.all_entries()}
-        compared = self.compared_lap()
+        page = self._page
+        entries = {entry.file.path: entry for entry in page.all_entries()}
+        compared = page.compared_lap()
         if compared is not None and compared.key in entries:
             return entries[compared.key]
-        return next((entry for entry in self.entries if entry.file.valid and entry.info.get("kind", "lap") == "lap"),
+        return next((entry for entry in page.entries if entry.file.valid and entry.info.get("kind", "lap") == "lap"),
                     None)
 
     @Slot()
     def compareSimilarConditions(self):
         """Lap looked at compared with fastest lap of track driven in similar conditions (track temperature
         within tolerance, same tyre compound & wetness when known), set as reference"""
+        page = self._page
         target = self.similar_target()
         if target is None:
-            self.set_status(tr("No lap to compare."))
+            page.set_status(tr("No lap to compare."))
             return
-        best = similar_best(self.entries, target.info, self._similar_tolerance, target.file.path)
+        best = similar_best(page.entries, target.info, self._similar_tolerance, target.file.path)
         temperature = info_number(target.info, "track_temperature")
         convert, symbol = lap_viewer.display_units()["temperature"]
         tolerance = self._similar_tolerance * (1.8 if symbol.endswith("F") else 1.0)
         if best is None:
-            self.set_status(trm(f"No other clean lap within ±{number_text(tolerance)}{symbol} of track temperature."))
+            page.set_status(trm(f"No other clean lap within ±{number_text(tolerance)}{symbol} of track temperature."))
             return
-        self.reference_key = best.file.path
-        self.checked = {best.file.path, target.file.path}
-        self.fill_list()
-        self.load_laps()
+        page.reference_key = best.file.path
+        page.checked = {best.file.path, target.file.path}
+        page.fill_list()
+        page.load_laps()
         details = []
         if temperature is not None:
             other = info_number(best.info, "track_temperature")
@@ -177,24 +226,25 @@ class LapConditions(BackendBase):
         if compound:
             details.append(compound)
         label = html.escape(lap_label(best.file.filename))
-        self.set_status(trm(f"Reference in similar conditions: {label}") + (f" ({', '.join(details)})" if details else ""))
+        page.set_status(trm(f"Reference in similar conditions: {label}") + (f" ({', '.join(details)})" if details else ""))
 
     @Slot(int)
     def setSimilarTolerance(self, degrees: int):
         if degrees in SIMILAR_TOLERANCES and degrees != self._similar_tolerance:
             self._similar_tolerance = degrees
-            save_viewer_setting(self.folder, similar_tolerance=degrees)
-            self.optionsChanged.emit()
+            save_viewer_setting(self._page.folder, similar_tolerance=degrees)
+            self.toleranceChanged.emit()
 
     @Slot(str, str, result=dict)
     def setupDiff(self, key_a: str, key_b: str) -> dict:
         """Setup differences of two shown laps (reference lap first if key_a empty): titles, state, rows"""
-        laps = {lap.key: lap for lap in self.data.laps}
-        first = laps.get(key_a) or self.data.reference
+        page = self._page
+        laps = {lap.key: lap for lap in page.data.laps}
+        first = laps.get(key_a) or page.data.reference
         second = laps.get(key_b)
         if first is None or second is None or first is second:
             return {}
-        entries = {entry.file.path: entry for entry in self.all_entries()}
+        entries = {entry.file.path: entry for entry in page.all_entries()}
         info_a = entries[first.key].info if first.key in entries else first.data.meta
         info_b = entries[second.key].info if second.key in entries else second.data.meta
         result = setup_diff(info_a, info_b, first.data, second.data)
@@ -206,7 +256,7 @@ class LapConditions(BackendBase):
         for row in result["rows"]:
             row["name"] = tr(row["name"])
         result.update({
-            "a": self.short_label(first.key), "b": self.short_label(second.key),
+            "a": page.short_label(first.key), "b": page.short_label(second.key),
             "colorA": first.color.name(), "colorB": second.color.name(),
             "timeA": format_laptime(official_lap_time(first.data) or first.data.lap_time),  # timed by game
             "timeB": format_laptime(official_lap_time(second.data) or second.data.lap_time),

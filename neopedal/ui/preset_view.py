@@ -20,15 +20,13 @@
 Presets page: loaded preset & auto load, presets with tags & content, actions & details
 
 Qt Quick page (qml/Presets.qml), state & actions in quick/preset_backend.py. This page hosts the
-QML view and runs actions needing dialogs: preset packages, share codes, delete with undo, and the
+QML view and runs actions needing dialogs: preset packages, delete with undo, and the
 Transfer, Restore Backup, Trash & Compare pages. The QML page is created when first shown.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import re
 import zipfile
 from contextlib import nullcontext
 from typing import Any
@@ -37,20 +35,15 @@ import shiboken6
 from PySide6.QtCore import Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
 
 from .. import app_signal
 from ..const_file import ConfigType, FileExt
 from ..i18n import tr, trm
-from ..i18n.options import module_label
-from ..module_control import mctrl, wctrl
 from ..setting import cfg
 from ..userfile.preset_package import export_preset_package, import_preset_package
-from ..userfile.preset_share import SHARE_PREFIX, decode_preset, encode_preset, save_preset_data, summarize_preset
 from ..userfile.preset_trash import TrashEntry, purge_trash
-from ..validator import is_allowed_filename, load_json_strict
-from ._common import TextInputDialog, translate_filter
-from .file_drop import unique_preset_name
+from ._common import translate_filter
 from .preset_compare import PresetCompare
 from .preset_management import (
     PresetTransfer,
@@ -171,7 +164,7 @@ class PresetList(QWidget):
         cfg.application["enable_auto_load_preset"] = checked
         cfg.save(config_type=ConfigType.CONFIG)
 
-    # Packages & share codes
+    # Packages
     def export_package(self, preset_filename: str):
         """Export preset, style presets and notes to single zip file"""
         include_notes = QMessageBox.question(
@@ -205,6 +198,13 @@ class PresetList(QWidget):
 
     def import_package_file(self, zip_filename: str):
         """Import preset package file"""
+        from ..userfile.overlay_package import is_overlay_package
+
+        if is_overlay_package(zip_filename):  # overlay settings: imported into loaded preset
+            from .overlay_share import import_overlay_file
+
+            import_overlay_file(self, zip_filename)
+            return
         overwrite_styles = QMessageBox.question(
             self, tr("Import Package"),
             tr("Also import style presets (brakes, brands, classes, compounds, heatmap, tracks)?<br><br>"
@@ -235,60 +235,6 @@ class PresetList(QWidget):
         if result.skipped:
             lines.append(f"Skipped: {len(result.skipped)} file(s) (existing or not allowed)")
         QMessageBox.information(self, tr("Import Package"), trm("<br>".join(lines)))
-
-    def copy_share_code(self, preset_filename: str):
-        """Copy preset as share code to clipboard"""
-        try:
-            with open(f"{cfg.path.settings}{preset_filename}", encoding="utf-8") as file:
-                code = encode_preset(json.load(file))
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to read preset:<br>{error}"))
-            return
-        QApplication.clipboard().setText(code)
-        show_toast(self, trm(f"Share code of <b>{preset_filename[:-5]}</b> copied ({len(code)} characters)"))
-
-    def import_share_code(self):
-        """Import preset from share code, with preview: code, then new preset name"""
-        clipboard = QApplication.clipboard().text().strip()
-        TextInputDialog(
-            self, tr("Import Share Code"), tr("Paste preset share code:"), self.share_code_entered,
-            text=clipboard if clipboard.startswith(SHARE_PREFIX) else "", multiline=True,
-        ).open()
-
-    def share_code_entered(self, code: str) -> bool:
-        """Share code entered: ask new preset name with preview, False keeps code input open"""
-        if not code.strip():
-            return False
-        try:
-            preset = decode_preset(code)
-            load_json_strict(json.dumps(preset))  # NaN & Infinity are not valid option values
-        except (ValueError, RecursionError) as error:  # RecursionError: data nested too deep
-            QMessageBox.warning(self, tr("Error"), trm(f"Invalid share code:<br>{error}"))
-            return False
-        summary = summarize_preset(preset, wctrl.names, mctrl.names)
-        widgets = ", ".join(module_label(name) for name in summary.widgets) or tr("None")
-        modules = ", ".join(module_label(name) for name in summary.modules) or tr("None")
-        TextInputDialog(
-            self, tr("Import Share Code"),
-            trm(f"<b>{len(summary.widgets)}</b> widgets: {widgets}<br><br>"
-                f"<b>{len(summary.modules)}</b> modules: {modules}<br><br>New preset name:"),
-            lambda name: self.save_shared_preset(preset, name), text=tr("Shared preset"),
-        ).open()
-        return True
-
-    def save_shared_preset(self, preset: dict, name: str) -> bool:
-        """Save imported preset, False keeps name input open (invalid name)"""
-        name = re.sub(r'[\\/:*?"<>|]', "", name).strip()  # characters not allowed in file name
-        if not name or not is_allowed_filename(name):
-            QMessageBox.warning(self, tr("Error"), tr("Invalid preset name."))
-            return False
-        filename = unique_preset_name(cfg.path.settings, f"{name}{FileExt.JSON}")
-        if not save_preset_data(cfg.path.settings, filename, preset):
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save preset {filename}"))
-            return False
-        self.refresh()
-        show_toast(self, trm(f"Preset imported: <b>{filename[:-5]}</b>"))
-        return True
 
     # Delete & undo
     def delete_preset(self, preset_filename: str) -> bool:

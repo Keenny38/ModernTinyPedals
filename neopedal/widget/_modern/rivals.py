@@ -24,15 +24,22 @@ Car ahead and car behind in player class, with interval to player.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...module_info import minfo
 from ...template.widget.drivers_ui import RIVALS_COLUMNS
 from .drivers import DRIVER_OPTIONS, Context, DriverTable
 from .rows import laptime_text
 from .table import DELTAS, RIGHT, TEXT, Cell, Column
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RivalsConfig
+
 
 class Realtime(DriverTable):
     """Draw widget"""
+
+    wcfg: RivalsConfig
 
     COLUMNS = RIVALS_COLUMNS
     options = (

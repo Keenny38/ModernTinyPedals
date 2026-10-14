@@ -34,7 +34,7 @@ from time import localtime, monotonic, sleep, strftime, time
 
 from ..const_file import FileExt
 from ..setting_validator import PresetValidator
-from . import atomic_write
+from . import atomic_write, encode_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,12 @@ _notified_files: set[str] = set()  # unreadable files user was told about (once 
 def _file_key(filename_source: str) -> str:
     """Normalized file path for unreadable file set"""
     return os.path.normcase(os.path.abspath(filename_source))
+
+
+def is_saving_backup(filename: str) -> bool:
+    """File (with path) is the temporary backup of a save in progress (removed once saved)"""
+    with _saving_lock:
+        return bool(_saving_backups) and _file_key(filename) in _saving_backups
 
 
 def _notify_save_skipped(filename: str, filepath: str) -> None:
@@ -70,6 +76,8 @@ def _notify_save_skipped(filename: str, filepath: str) -> None:
 
 
 _notice_lock = threading.Lock()
+_saving_backups: set[str] = set()  # temporary backups of saves in progress, see is_saving_backup
+_saving_lock = threading.Lock()
 _notices_ready = False  # main window shows error messages
 _pending_notices: list[str] = []  # messages sent before main window was ready
 
@@ -147,7 +155,7 @@ def load_setting_json_file(
     access_deadline = monotonic() + access_timeout
     while attempts > 0:
         try:
-            with open(filename_source, encoding="utf-8") as jsonfile:
+            with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM of Notepad, PowerShell
                 setting_user = json.load(jsonfile)
             # Verify & assign setting
             setting_user = validator(setting_user, dict_def)
@@ -192,10 +200,12 @@ def load_style_json_file(
     access_deadline = monotonic() + access_timeout
     while attempts > 0:
         try:
-            with open(filename_source, encoding="utf-8") as jsonfile:
+            with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM of Notepad, PowerShell
                 style_user = json.load(jsonfile)
             _unreadable_files.discard(_file_key(filename_source))
             _notified_files.discard(_file_key(filename_source))
+            if not isinstance(style_user, dict):  # list or value at top: invalid like corrupted file
+                raise TypeError(f"{filename} is not a JSON object")
             # Whether to validate style
             if validator is not None and validator(style_user):
                 create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
@@ -232,27 +242,46 @@ def load_style_json_file(
     return style_user
 
 
+def setting_json_text(dict_user: dict, compact_json: bool = False, max_attempts: int = 20) -> str:
+    """Serialize setting in one shot, retry if dict is modified by other thread meanwhile
+
+    Raises:
+        TypeError, ValueError: data not serializable.
+    """
+    options: dict = {"separators": (",", ":")} if compact_json else {"indent": 4}
+    for _ in range(max_attempts - 1):
+        try:
+            return json.dumps(dict_user, **options)
+        except RuntimeError:  # dictionary changed size during iteration
+            sleep(0.005)
+    return json.dumps(dict_user, **options)
+
+
 def save_json_file(
-    dict_user: dict, filename: str, filepath: str, extension: str = "", compact_json: bool = False
+    dict_user: dict, filename: str, filepath: str, extension: str = "", compact_json: bool = False,
+    text: str | None = None,
 ) -> None:
     """Save json file atomically (temporary file replaces target), error logged
 
     Existing file is never left half-written or empty (crash, power loss, full disk).
+    Text (serialized dict_user, see setting_json_text) is written as is if given.
     """
+    if text is None:
+        text = setting_json_text(dict_user, compact_json)
     filename_source = f"{filepath}{filename}{extension}"
     with atomic_write(filename_source) as jsonfile:
-        if compact_json:
-            json.dump(dict_user, jsonfile, separators=(",", ":"))
-        else:
-            json.dump(dict_user, jsonfile, indent=4)
+        jsonfile.write(text)
 
 
 def verify_json_file(
-    dict_user: dict | None, filename: str, filepath: str, extension: str = ""
+    dict_user: dict | None, filename: str, filepath: str, extension: str = "", text: str | None = None
 ) -> bool:
-    """Verify saved json file"""
+    """Verify saved json file, by byte compare with written text if given (see save_json_file)"""
     filename_source = f"{filepath}{filename}{extension}"
     try:
+        if text is not None:
+            with open(filename_source, "rb") as file:
+                return file.read() == encode_text(text)
         with open(filename_source, encoding="utf-8") as jsonfile:
             # Check load only
             if dict_user is None:
@@ -373,8 +402,29 @@ def save_and_verify_json_file(
         logger.info("USERDATA: %s was not accessible at load, saving skipped (file kept)", filename)
         _notify_save_skipped(filename, filepath)
         return False
-    file_found = os.path.exists(f"{filepath}{filename}")
+    # Serialize once (snapshot of dict_user), byte compared after each write
+    try:
+        text = setting_json_text(dict_user, compact_json)
+    except (TypeError, ValueError) as error:  # data not serializable, file untouched
+        logger.error("USERDATA: %s failed saving, invalid data: %s", filename, error)
+        return False
     backup_extension = set_backup_timestamp()
+    backup_key = _file_key(f"{filepath}{filename}{backup_extension}")
+    with _saving_lock:
+        _saving_backups.add(backup_key)
+    try:
+        return _save_with_backup(dict_user, filename, filepath, max_attempts, compact_json, text, backup_extension)
+    finally:
+        with _saving_lock:
+            _saving_backups.discard(backup_key)
+
+
+def _save_with_backup(
+    dict_user: dict, filename: str, filepath: str, max_attempts: int, compact_json: bool, text: str,
+    backup_extension: str,
+) -> bool:
+    """Save & verify json file, file backed up first (backup_extension) if exists, see save_and_verify_json_file"""
+    file_found = os.path.exists(f"{filepath}{filename}")
     # Create backup: abort saving if backup failed; skip backup and create new if not exist
     if not file_found:
         logger.info("USERDATA: %s not found, create new", filename)
@@ -384,17 +434,13 @@ def save_and_verify_json_file(
     # Start saving attempts
     attempts = max_attempts
     timer_start = monotonic()
-    try:
-        while attempts > 0:
-            save_json_file(dict_user, filename, filepath, compact_json=compact_json)
-            if verify_json_file(dict_user, filename, filepath):
-                break
-            attempts -= 1
-            logger.error("USERDATA: %s failed saving, %s attempt(s) left", filename, attempts)
-            sleep(0.05)
-    except (TypeError, ValueError) as error:  # data not serializable, file untouched (atomic write)
-        logger.error("USERDATA: %s failed saving, invalid data: %s", filename, error)
-        attempts = 0
+    while attempts > 0:
+        save_json_file(dict_user, filename, filepath, compact_json=compact_json, text=text)
+        if verify_json_file(dict_user, filename, filepath, text=text):
+            break
+        attempts -= 1
+        logger.error("USERDATA: %s failed saving, %s attempt(s) left", filename, attempts)
+        sleep(0.05)
     timer_end = round((monotonic() - timer_start) * 1000)
     # Clean up
     if attempts > 0:

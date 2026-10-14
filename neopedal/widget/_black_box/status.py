@@ -22,13 +22,16 @@ Black box widget, headlights & engine status icons, brake bias & motor map betwe
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 
 from .common import qcolor
 from .state import level_text
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 
 def headlight_path(box: QRectF) -> tuple[QPainterPath, list[tuple[QPointF, QPointF]]]:
@@ -68,6 +71,18 @@ def engine_path(box: QRectF) -> QPainterPath:
     return path
 
 
+def wipers_path(box: QRectF) -> tuple[QPainterPath, tuple[QPointF, QPointF]]:
+    """Windscreen outline (curved top) & wiper blade from bottom middle"""
+    w, h = box.width(), box.height()
+    x, y = box.left(), box.top()
+    screen = QPainterPath()
+    screen.moveTo(x + w * 0.08, y + h * 0.86)
+    screen.quadTo(x + w * 0.5, y - h * 0.02, x + w * 0.92, y + h * 0.86)
+    screen.closeSubpath()
+    blade = (QPointF(x + w * 0.5, y + h * 0.86), QPointF(x + w * 0.22, y + h * 0.36))
+    return screen, blade
+
+
 def icon_glow_rect(box: QRectF) -> QRectF:
     """Halo around a lit icon box"""
     pad = box.width() * 0.3
@@ -89,6 +104,7 @@ class StatusPainter:
     has_abs: Any
     has_tc: Any
     headlights: Any
+    wipers: Any
     ignition: Any
     motor_map_level: Any
     oil_temp: Any
@@ -108,7 +124,7 @@ class StatusPainter:
     unit: Any
     unit_temp: Any
     water_temp: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
 
     def side_gap(self, right: bool) -> QRectF:
         """Free room between front and rear wheel on one side (null if too small)"""
@@ -152,9 +168,9 @@ class StatusPainter:
         return height + self.unit * 0.5  # margins above & below
 
     def icons_height(self) -> float:
-        """Height of headlights & engine icons with engine text (0 if hidden)"""
+        """Height of headlights, wipers & engine icons with engine text (0 if hidden)"""
         wcfg = self.wcfg
-        show_lights = wcfg["show_headlights_indicator"]
+        show_lights = wcfg["show_headlights_indicator"] or wcfg["show_wipers_indicator"]
         show_engine = wcfg["show_engine_status"]
         if not (show_lights or show_engine):
             return 0.0
@@ -257,32 +273,45 @@ class StatusPainter:
     def status_key(self) -> tuple:
         """What headlights & engine icons show, see drawn"""
         running = self.ignition == 2
-        return self.headlights, self.ignition, self.engine_hot(), tuple(self.engine_rows()) if running else ()
+        return (self.headlights, self.wipers if self.wcfg["show_wipers_indicator"] else 0, self.ignition,
+                self.engine_hot(), tuple(self.engine_rows()) if running else ())
 
     def draw_status_icons(self, painter: QPainter):
         """Icons side by side in one side gap: headlights, then engine with its text below"""
         lights, engine, row = self.status_icon_boxes()
         if lights is not None:
             self.draw_headlights_icon(painter, lights)
+        wipers = self.wipers_icon_box()
+        if wipers is not None:
+            self.draw_wipers_icon(painter, wipers)
         if engine is not None:
             self.draw_engine_icon(painter, engine, row)
 
     def status_icon_boxes(self) -> tuple[QRectF | None, QRectF | None, QRectF]:
-        """(headlights icon, engine icon, first engine text row), None if not shown"""
+        """(headlights icon, engine icon, first engine text row), None if not shown (wipers: wipers_icon_box)"""
+        boxes = self.status_icon_layout()
+        return boxes[0], boxes[2], boxes[3]
+
+    def wipers_icon_box(self) -> QRectF | None:
+        return self.status_icon_layout()[1]
+
+    def status_icon_layout(self) -> tuple[QRectF | None, QRectF | None, QRectF | None, QRectF]:
+        """(headlights icon, wipers icon, engine icon, first engine text row), None if not shown"""
         wcfg = self.wcfg
         show_lights = wcfg["show_headlights_indicator"]
+        show_wipers = wcfg["show_wipers_indicator"]
         show_engine = wcfg["show_engine_status"]
-        if not self.rects_tyre or not (show_lights or show_engine):
-            return None, None, QRectF()
+        if not self.rects_tyre or not (show_lights or show_wipers or show_engine):
+            return None, None, None, QRectF()
         gap = self.side_gap(wcfg["status_icons_side"] == "Right")
         if gap.isNull():
-            return None, None, QRectF()
+            return None, None, None, QRectF()
         unit = self.unit
         rows = self.side_rows_height()
         if rows and self.side_rows_share_icons():  # side rows below icons
             gap.setBottom(max(gap.bottom() - rows - unit * 0.2, gap.top()))
-        # Icons side by side (lights left, engine right), engine text rows below
-        count = int(bool(show_lights)) + int(bool(show_engine))
+        # Icons side by side (lights, wipers, engine), engine text rows below
+        count = int(bool(show_lights)) + int(bool(show_wipers)) + int(bool(show_engine))
         size = min(gap.width() * 0.9 / (count * 1.7 - 0.7),
                    unit * 1.2 * max(wcfg["status_icon_scale"], 0.2))
         spacing = size * 0.7  # clear room between icons, in proportion to their size
@@ -294,10 +323,13 @@ class StatusPainter:
         icon = size * scale
         top = gap.top() + (gap.height() - total * scale) / 2
         left = gap.center().x() - (icon * count + spacing * scale * (count - 1)) / 2
-        lights = engine = None
+        lights = wipers = engine = None
         row = QRectF()
         if show_lights:
             lights = QRectF(left, top, icon, icon)
+            left += icon + spacing * scale
+        if show_wipers:
+            wipers = QRectF(left, top, icon, icon)
             left += icon + spacing * scale
         if show_engine:
             # Text centered under the engine icon, as wide as the gap allows on both sides
@@ -305,7 +337,7 @@ class StatusPainter:
             half = min(middle - gap.left(), gap.right() - middle)
             row = QRectF(middle - half, top + icon + unit * 0.1 * scale, half * 2, row_h * scale)
             engine = QRectF(left, top, icon, icon)
-        return lights, engine, row
+        return lights, wipers, engine, row
 
     def draw_icon_glow(self, painter: QPainter, box: QRectF, color: str):
         """Soft radial halo behind a lit icon"""
@@ -335,6 +367,28 @@ class StatusPainter:
         for start, end in beams:
             painter.drawLine(start, end)
         painter.restore()
+
+    def draw_wipers_icon(self, painter: QPainter, box: QRectF):
+        """Windscreen & blade, lit while wipers run, state letter at bottom right (A auto, slow, fast)"""
+        wcfg = self.wcfg
+        state = min(max(int(self.wipers), 0), 3)
+        color = wcfg["wipers_active_color"] if state else wcfg["indicator_inactive_color"]
+        painter.save()
+        if state:
+            self.draw_icon_glow(painter, box, color)
+        screen, (start, end) = wipers_path(box)
+        stroke = max(box.width() * 0.09, 1.5)
+        painter.setPen(QPen(qcolor(color), stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                            Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(screen)
+        painter.drawLine(start, end)
+        painter.restore()
+        if state:
+            text = (wcfg["text_wipers_auto"], wcfg["text_wipers_slow"], wcfg["text_wipers_fast"])[state - 1]
+            badge = QRectF(box.left(), box.bottom() - box.height() * 0.05, box.width(), box.height() * 0.42)
+            painter.setPen(qcolor(color))
+            self.draw_fit_text(painter, badge, text, self.font_label)
 
     def engine_color(self) -> str:
         wcfg = self.wcfg

@@ -157,6 +157,7 @@ TRANSLATION = MappingProxyType({
     "Pace Notes Playback Enabled": "Lecture des notes activée",
     "Global Hotkey Enabled": "Raccourcis globaux activés",
     "Auto Backup Car Setup Enabled": "Sauvegarde auto des réglages activée",
+    "Broadcast Director On": "Régie de course active",
     "View Updates On GitHub": "Voir les mises à jour sur GitHub",
     "Dismiss": "Ignorer",
     "Checking For Updates...": "Recherche de mises à jour...",
@@ -174,11 +175,18 @@ TRANSLATION = MappingProxyType({
     "Advanced Options": "Options avancées",
     "Show every option, including colors, thresholds and labels": "Afficher toutes les options, y compris couleurs, seuils et libellés",
     "Color Theme...": "Thème de couleurs...",
+    "Save as Profile...": "Enregistrer comme profil...",
+    "Save shown items as a display profile, then pick it in Display Profile (saved with Apply or Save)": "Enregistre les éléments affichés comme profil d'affichage, à choisir ensuite dans Profil d'affichage (enregistré avec Appliquer ou Enregistrer)",
+    "User 1": "Utilisateur 1",
+    "User 2": "Utilisateur 2",
+    "User 3": "Utilisateur 3",
     "Default": "Par défaut",
     "Colorblind Safe": "Adapté aux daltoniens",
     "Set every color to a theme (saved only with Apply or Save)": "Appliquer un thème à toutes les couleurs (enregistré seulement avec Appliquer ou Enregistrer)",
     "Reset options of this section to default": "Réinitialiser les options de cette section",
     "Set by": "Défini par",
+    "Changing it switches to": "La modifier passe en",
+    "Options set by this profile show its value: changing one switches to Custom. Click to show the option.": "Les options définies par ce profil affichent sa valeur : en modifier une passe en Personnalisé. Cliquer pour afficher l'option.",
     "on": "activé",
     "off": "désactivé",
     "Custom": "Personnalisé",
@@ -322,7 +330,13 @@ TRANSLATION = MappingProxyType({
     "Open Recorded Laps": "Ouvrir les tours enregistrés",
     "Penalties/Race": "Pénalités/course",
     "Personal best in percent of community reference lap time": "Record personnel en pourcentage du temps de référence de la communauté",
-    "Personal best minus theoretical best": "Record personnel moins meilleur tour théorique",
+    "Personal best minus theoretical best of the class (best sectors may be of another brand)":
+        "Record personnel moins meilleur tour théorique de la catégorie (meilleurs secteurs parfois d'une autre marque)",
+    "Level of personal best on the community race pace ladder (in percent of class reference): "
+    "qualifying & race bests are marked on the ladder of the reference card": (
+        "Niveau du record personnel sur l'échelle de rythme de course de la communauté (en pourcentage de la "
+        "référence de la catégorie) : les meilleurs tours en qualification et en course sont marqués sur l'échelle "
+        "de la carte de référence"),
     "Potential": "Potentiel",
     "Progression": "Progression",
     "Race starts (recorded since this version)": "Départs en course (enregistrés depuis cette version)",
@@ -438,12 +452,6 @@ TRANSLATION = MappingProxyType({
     "Consumption of the laps into & out of the pits (pit lane speed limit), % of race pace": "Consommation des tours d'entrée et de sortie des stands (limiteur), en % du rythme course",
     "Wet": "Pneus pluie",
     "Dry": "Slicks",
-    "Share code of race plan copied": "Code de partage du plan de course copié",
-    "Paste Share Code...": "Coller un code de partage...",
-    "Race plan share code:": "Code de partage du plan de course :",
-    "Shared plan": "Plan partagé",
-    "Race plan of share code opened": "Plan de course du code de partage ouvert",
-    "Invalid race plan share code.": "Code de partage de plan de course invalide.",
     "waiting for the race": "en attente de la course",
     "waiting for lap 1": "en attente du tour 1",
     "progress": "avancée",
@@ -563,6 +571,13 @@ TRANSLATION = MappingProxyType({
     "Remove tyres the plan does not use": "Retirer les pneus que le plan n'utilise pas",
     "Compound of measured wear per lap: wear of other compounds scaled by their wear per stint": "Gomme sur laquelle l'usure par tour a été mesurée : l'usure des autres gommes suit leur usure par relais",
     "Race Calculator": "Calculateur de course",
+    "Race Calculator on or off": "Calculateur de course activé ou désactivé",
+    "Race Calculator is off": "Calculateur de course désactivé",
+    "The game is not asked anything and the calculator shows nothing. Inputs, tyre plan & race plan are kept. "
+    "Turn it on to plan a race.":
+        "Le jeu n'est plus interrogé et le calculateur n'affiche rien. Les saisies, le plan pneus et le plan de "
+        "course sont conservés. Activez-le pour planifier une course.",
+    "Turn On Race Calculator": "Activer le calculateur de course",
     "Consumption history file": "Fichier d'historique de consommation",
     "Tyre Rules": "Règles pneus",
     "A used tyre stays on the same wheel": "Un pneu utilisé reste sur la même roue",
@@ -800,12 +815,6 @@ TRANSLATION = MappingProxyType({
     "Editors": "Éditeurs",
     "Management": "Gestion",
     "Advanced": "Avancé",
-    "Import preset package (.zip) or share code": "Importer un paquet de presets (.zip) ou un code de partage",
-    "Preset Package (.zip)...": "Paquet de presets (.zip)...",
-    "Share Code...": "Code de partage...",
-    "Copy Share Code": "Copier le code de partage",
-    "Import Share Code": "Importer un code de partage",
-    "Paste preset share code:": "Collez le code de partage du preset :",
     "No position recorded": "Aucune position enregistrée",
     "Export": "Exporter",
     "Import theme file shared by someone else": "Importer un fichier de thème partagé",
@@ -983,6 +992,24 @@ TRANSLATION = MappingProxyType({
     "Track limits": "Limites de piste",
     "Driver Rank": "Driver Rank",
     "Safety Rank": "Safety Rank",
+    "Good Driver": "Bon pilote",
+    "Trusted Racer": "Pilote de confiance",
+    "Rookie": "Débutant",
+    "Warning": "Avertissement",
+    "IRL Driver": "Pilote IRL",
+    "Content Creator": "Créateur de contenu",
+    "Early Access": "Accès anticipé",
+    "Test Driver": "Pilote d'essai",
+    "New to Le Mans Ultimate": "Nouveau venu sur Le Mans Ultimate",
+    "Returning from a ban": "Retour après une suspension",
+    "Has recently been involved in a higher number of incidents": "A récemment été impliqué dans un nombre plus élevé d'incidents.",
+    "This driver has a low number of incidents per race": "Ce pilote a un faible nombre d'incidents par course.",
+    "One of the safest players on the service": "Un des joueurs les plus sûrs sur le service",
+    "A staff member from Studio 397": "Un membre du personnel du Studio 397",
+    "A validated real-world racing driver": "Un pilote de course confirmé dans le monde réel",
+    "A recognised content creator": "Un créateur de contenu reconnu",
+    "An early access player": "Un joueur participant à l'accès anticipé",
+    "A Le Mans Ultimate test driver": "Un pilote d'essai de Le Mans Ultimate",
     "Track-out": "Point extérieur",
     "Track-out (outside edge)": "Point extérieur (bord de piste)",
     "Wheelspin": "Patinage",
@@ -1793,6 +1820,13 @@ TRANSLATION = MappingProxyType({
     "%1 replays, %2, %3 protected": "%1 rejeux, %2, %3 protégés",
     # Race results page (results files of the game)
     "Race Results": "Résultats de course",
+    "Results & Replays": "Résultats & rejeux",
+    "Watch in replay": "Voir dans le rejeu",
+    "Watch lap in replay": "Voir le tour dans le rejeu",
+    "Show Results": "Afficher les résultats",
+    "Results of this session found": "Résultats de cette session trouvés",
+    "Other accounts": "Autres comptes",
+    "Other account": "Autre compte",
     "Classification": "Classement",
     "Positions": "Positions",
     "Events": "Événements",
@@ -1990,6 +2024,9 @@ TRANSLATION = MappingProxyType({
     "Import a CSV file: driver, points, and team, class if you want":
         "Importer un fichier CSV : pilote, points, et équipe, catégorie si tu veux",
     "Remove this championship": "Retirer ce championnat",
+    "Remove this championship?": "Retirer ce championnat ?",
+    "Its standings leave the broadcast graphics. Import the CSV file again to get them back.":
+        "Son classement quitte l'habillage de diffusion. Importe à nouveau le fichier CSV pour le retrouver.",
     "Rows per page": "Lignes par page",
     "Panel opacity": "Opacité des panneaux",
     "Temperatures": "Températures",
@@ -2073,6 +2110,13 @@ TRANSLATION = MappingProxyType({
     "Join a session (driving or spectating) or open a replay in the game: the director follows it.":
         "Rejoignez une session (en pilote ou en spectateur) ou ouvrez un replay dans le jeu : la régie le suit.",
     "Ask Game Again": "Interroger le jeu",
+    "Broadcast Director on or off": "Régie de course activée ou coupée",
+    "Broadcast Director is off": "Régie de course désactivée",
+    "The game is not asked anything: no camera cut and the broadcast graphics stay empty. Graphics and director "
+    "settings can still be changed. Turn it on to direct a session or a replay.":
+        "Le jeu n'est plus interrogé : aucun changement de caméra et l'habillage reste vide. L'habillage et les "
+        "réglages de la régie restent modifiables. Activez-la pour réaliser une session ou un replay.",
+    "Turn On Broadcast Director": "Activer la régie de course",
     "Previous car": "Voiture précédente",
     "Next car": "Voiture suivante",
     "%1 contacts": "%1 contacts",
@@ -2427,6 +2471,9 @@ TRANSLATION = MappingProxyType({
     "Bottom Left": "En bas à gauche",
     "Bottom Center": "En bas au centre",
     "Bottom Right": "En bas à droite",
+    "Top": "En haut",
+    "Middle": "Au milieu",
+    "Bottom": "En bas",
     "Upward": "Vers le haut",
     "Downward": "Vers le bas",
     "Screen & Stream": "Écran et stream",
@@ -2444,6 +2491,8 @@ TRANSLATION = MappingProxyType({
     "fitted": "ajusté",
     "Math Channels": "Canaux calculés",
     "Math Channels...": "Canaux calculés...",
+    "Remove this math channel?": "Retirer ce canal calculé ?",
+    "Its formula is deleted and it leaves the charts.": "Sa formule est supprimée et il quitte les courbes.",
     "Channels computed from others: understeer angle, pedal rates, your own expressions":
         "Canaux calculés à partir des autres : angle de sous-virage, vitesses des pédales, vos propres expressions",
     "Expression over channel names: + - * / ( ), abs(x), min(a, b), max(a, b), d(x) change per second, numbers, pi, g, deg. Values in recorded units (km/h, °C, pedals & steering 0 to 1).":
@@ -2832,6 +2881,7 @@ TRANSLATION = MappingProxyType({
     "Brand Logo": "Logo de la marque",
     "Tyre Compound": "Gomme des pneus",
     "Pit Status": "Statut des stands",
+    "Pit Status & Stops": "Statut des stands & arrêts",
     "Last Lap Time": "Temps du dernier tour",
     "Best Lap Time": "Temps du meilleur tour",
     "Average Lap Time": "Temps moyen au tour",
@@ -2868,10 +2918,10 @@ TRANSLATION = MappingProxyType({
         "Choisissez le dossier de réglages globaux de l'autre copie de l'app, "
         "par exemple dans %APPDATA% sous Windows ou ~/.config sous Linux.",
     "Import settings from this folder?": "Importer les réglages de ce dossier ?",
-    "Options, shortcuts, driver stats, language packs and Black box incidents are copied, "
+    "Options, shortcuts, driver stats, language packs and Dashboard HUD incidents are copied, "
     "the folder is not changed. Current settings are set aside in a backup folder (never "
     "deleted), then the app restarts with the imported settings.":
-        "Options, raccourcis, statistiques pilote, packs de langue et incidents de la boîte noire "
+        "Options, raccourcis, statistiques pilote, packs de langue et incidents du Compteur ATH "
         "sont copiés, le dossier n'est pas modifié. Les réglages actuels sont mis de côté dans un "
         "dossier de sauvegarde (jamais supprimé), puis l'app redémarre avec les réglages importés.",
     "Request not saved, see log.": "Demande non enregistrée, voir le journal.",
@@ -2948,4 +2998,31 @@ TRANSLATION = MappingProxyType({
     "Used tyres the pit menu offers go to the tyre stock (Tyres tab) with their tread, to fit them by hand":
         "Les pneus usés du menu des stands vont dans le stock de pneus (onglet Pneus) avec leur gomme restante, "
         "à monter à la main",
+    "Track notes": "Notes de piste",
+    "Driver stats": "Stats pilote",
+    "not a preset": "ce n'est pas un preset",
+    "not an exported session history": "ce n'est pas un historique de sessions exporté",
+    # Overlay settings packages (share overlay settings as file)
+    "Share": "Partager",
+    "Export or import overlay settings as a file": "Exporter ou importer des réglages d'overlays dans un fichier",
+    "Export Overlay Settings": "Exporter des réglages d'overlays",
+    "Import Overlay Settings": "Importer des réglages d'overlays",
+    "Export Overlay Settings...": "Exporter des réglages d'overlays...",
+    "Import Overlay Settings...": "Importer des réglages d'overlays...",
+    "Export Settings...": "Exporter les réglages...",
+    "Export...": "Exporter...",
+    "NeoPedal overlay settings": "Réglages d'overlays NeoPedal",
+    "Overlays to share: options changed from default and position are saved in the file.":
+        "Overlays à partager : leurs options modifiées et leur position sont enregistrées dans le fichier.",
+    "With changes": "Avec modifications",
+    "Keep my positions": "Garder mes positions",
+    "Overlays stay where you placed them, else they move to the positions of the file":
+        "Les overlays restent où tu les as placés, sinon ils prennent les positions du fichier",
+    "No overlay of this file is available in this version.": "Aucun overlay de ce fichier n'existe dans cette version.",
+    "This is a preset package: import it on the Presets page.":
+        "C'est un paquet de presets : importe-le depuis la page Presets.",
+    "not a NeoPedal overlay settings package": "ce n'est pas un fichier de réglages d'overlays NeoPedal",
+    "not a NeoPedal preset package": "ce n'est pas un paquet de presets NeoPedal",
+    "package made by newer NeoPedal version": "paquet créé par une version plus récente de NeoPedal",
+    "too many files in package": "trop de fichiers dans le paquet",
 })

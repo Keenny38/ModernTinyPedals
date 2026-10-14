@@ -37,7 +37,7 @@ from ..userfile.consumption_history import (
 )
 from ..userfile.heatmap import select_compound_symbol
 from ..validator import generator_init
-from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, DataModule
+from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, WAIT_STATE_CHANGE, DataModule
 
 
 class Realtime(DataModule):
@@ -50,7 +50,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_fixed  # fixed interval while active
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval
@@ -80,9 +80,8 @@ class Realtime(DataModule):
                     gen_stint_history.send(vehicle_resets)
 
                 else:
-                    if reset:
-                        reset = False
-                        update_interval = self.idle_interval
+                    reset = False
+                    update_interval = WAIT_STATE_CHANGE  # idle until activity changes
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_consumption_history)
@@ -272,6 +271,7 @@ def record_stint_history(
                     lapTimeDelta=stint_data.lapTimeDelta,
                     lapTimeConsistency=stint_data.lapTimeConsistency,
                     tyreCompound=stint_data.tyreCompound,
+                    tyreCompoundNames=stint_data.tyreCompoundNames,
                 ),
             )
             output.stintDataVersion += 1
@@ -294,9 +294,11 @@ def record_stint_history(
             consistency = 1.0
             delta = 0.0
             # Update compound info once per stint
+            compounds = tuple(api.read.tyre.compound_class())
+            stint_data.tyreCompoundNames = compounds
             stint_data.tyreCompound = "".join(
                 select_compound_symbol(compound_class)
-                for compound_class in api.read.tyre.compound_class()
+                for compound_class in compounds
             )
 
         if start_fuel < fuel_curr:

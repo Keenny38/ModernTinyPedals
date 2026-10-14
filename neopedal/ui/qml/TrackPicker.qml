@@ -8,6 +8,7 @@ AbstractButton {
     id: picker
 
     property string filter: ""  // search text applied (typing settled)
+    signal closed()  // popup closed: page may give keyboard focus back to its list
     readonly property string current: backend.currentTrack  // read once for every row
     readonly property var shown: {
         var words = filter.toLowerCase().trim()
@@ -21,7 +22,6 @@ AbstractButton {
     }
 
     function applyFilter() {
-        filterTimer.stop()
         if (filter !== search.text) {
             filter = search.text
             list.currentIndex = 0
@@ -43,12 +43,12 @@ AbstractButton {
     Accessible.name: i18n.tr("Track") + ": " + backend.currentLabel
 
     background: Rectangle {
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: picker.down || popup.visible ? theme.hover
              : picker.hovered ? Qt.rgba(theme.hover.r, theme.hover.g, theme.hover.b, 0.7) : "transparent"
         border.width: popup.visible ? 1 : 0
         border.color: theme.accent
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: theme.motionFast } }
     }
     contentItem: RowLayout {
         spacing: theme.em * 0.5
@@ -69,7 +69,7 @@ AbstractButton {
         Text {
             text: backend.currentLabel
             color: theme.text
-            font.pointSize: theme.fontPoint * 1.4
+            font.pointSize: theme.fontLarge
             font.weight: Font.DemiBold
             elide: Text.ElideRight
             Layout.fillWidth: true
@@ -81,7 +81,7 @@ AbstractButton {
             color: picker.hovered || popup.visible ? theme.text : theme.dimText
             rotation: popup.visible ? 180 : 0
             Layout.rightMargin: theme.em * 0.5
-            Behavior on rotation { NumberAnimation { duration: 160 } }
+            Behavior on rotation { NumberAnimation { duration: theme.motionBase } }
         }
     }
 
@@ -91,31 +91,30 @@ AbstractButton {
         width: Math.max(picker.width, theme.em * 24)
         padding: 6
         focus: true
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 } }
-        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
         onOpened: {
-            search.text = ""
-            filterTimer.stop()
+            search.clearSearch()
             picker.filter = ""
             list.currentIndex = Math.max(0, picker.shown.findIndex(function(entry) { return entry.key === picker.current }))
             search.forceActiveFocus()
         }
+        onClosed: picker.closed()
         background: Rectangle {
-            radius: theme.em * 0.6
+            radius: theme.radiusLg
             color: theme.raised
             border.width: 1
             border.color: theme.border
         }
         contentItem: ColumnLayout {
             spacing: 4
-            TextField {
+            TpSearchField {
                 id: search
                 Layout.fillWidth: true
                 implicitHeight: Math.round(theme.em * 2.1)
+                searchDelay: 120  // list filtered once typing settles
                 placeholderText: i18n.tr("Search track...")
-                color: theme.text
-                placeholderTextColor: theme.dimText
-                onTextEdited: filterTimer.restart()  // list filtered once typing settles
+                onSearchChanged: picker.applyFilter()
                 Keys.onDownPressed: {
                     picker.applyFilter()
                     list.currentIndex = Math.min(list.currentIndex + 1, list.count - 1)
@@ -132,18 +131,7 @@ AbstractButton {
                     picker.applyFilter()
                     picker.choose(picker.shown[list.currentIndex])
                 }
-                Timer {
-                    id: filterTimer
-                    interval: 120
-                    onTriggered: picker.applyFilter()
-                }
                 Keys.onEscapePressed: popup.close()
-                background: Rectangle {
-                    radius: theme.em * 0.45
-                    color: theme.base
-                    border.width: 1
-                    border.color: search.activeFocus ? theme.accent : theme.border
-                }
             }
             ListView {
                 id: list
@@ -190,12 +178,12 @@ AbstractButton {
                         Text {
                             text: entryItem.modelData.date === "-" ? "" : entryItem.modelData.date
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.85
+                            font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
                         }
                     }
                     background: Rectangle {
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: entryItem.highlighted ? theme.hover : "transparent"
                     }
                 }

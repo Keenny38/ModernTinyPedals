@@ -24,6 +24,8 @@ Toe angle per wheel, total toe per axle in middle (toe out in orange, toe in in 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QColor, QPainter
 
 from ... import calculation as calc
@@ -31,9 +33,14 @@ from ...module_info import minfo
 from .base import ModernOverlay
 from .quad import QuadMixin, Section, Tile
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import WheelToeConfig
+
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: WheelToeConfig
 
     options = (
         "font_size", "enable_symmetric_toe_angle", "decimal_places_toe_angle", "toe_angle_smoothing_samples",

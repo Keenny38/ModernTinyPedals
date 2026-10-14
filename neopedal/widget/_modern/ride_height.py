@@ -25,16 +25,23 @@ Ride height per wheel with gauge, warning below bottoming height, front & rear r
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from .gauge_quad import GaugeQuad
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RideHeightConfig
 
 CORNERS = ("front_left", "front_right", "rear_left", "rear_right")
 
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: RideHeightConfig
 
     options = (
         *GaugeQuad.common_options, "ride_height_maximum_range",
@@ -66,7 +73,10 @@ class Realtime(GaugeQuad):
         if self.show_axle:
             vehicle = api.read.vehicle
             axles = tuple(f"{value:.{self.decimals}f}" for value in (vehicle.ride_height_front(), vehicle.ride_height_rear()))
-        self.refresh((self.read(), axles))
+        tiles = self.read()
+        rects = self.quad_slots[0].tiles if self.quad_slots else ()
+        self.refresh_keyed((tiles, axles),
+                           (self.pixel_key(tiles, [rect.width() for rect in rects], "level", "mark"), axles))
 
     def read(self) -> tuple:
         theme = self.theme

@@ -21,6 +21,7 @@ Fuel energy saver Widget
 """
 
 from math import floor
+from typing import TYPE_CHECKING
 
 from .. import calculation as calc
 from .. import units
@@ -29,9 +30,14 @@ from ..const_common import ENERGY_TYPE_ID, MAX_SECONDS, TEXT_PLACEHOLDER
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import FuelEnergySaverConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "FuelEnergySaverConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

@@ -18,10 +18,10 @@ Open the `Preset` page. The loaded preset is shown on top, with the `Auto Load P
 | Copy settings from the loaded preset to another one | `Transfer` (choose settings and option types: positions, colors, fonts...) |
 | Restore a backup | `Restore`, see [Backups](#backups) |
 | Restore a deleted preset | `Trash`, see [Trash](#trash) |
-| Import a preset package or a share code | `Import` > `Preset Package (.zip)...` or `Share Code...` |
+| Import a preset package | `Import`, choose the `.zip` file, see [Preset packages](#preset-packages) |
 | Load a preset automatically | `Auto Load Primary Preset`, see [Auto load](#auto-load-per-class-or-track) |
 
-Right-click a preset (or its `...` button) for more actions: `Duplicate...`, `Rename...` (`F2`), `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Copy Share Code`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag` and `Delete` (`Del`). A renamed preset keeps its backups, layout profiles, primary tags and preset hotkeys. Locked and loaded presets cannot be deleted, a locked preset cannot be renamed. Names reserved by Windows (`CON`, `NUL`, `AUX`, `PRN`, `COM1`...`LPT9`) are refused.
+Right-click a preset (or its `...` button) for more actions: `Duplicate...`, `Rename...` (`F2`), `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag` and `Delete` (`Del`). A renamed preset keeps its backups, layout profiles, primary tags and preset hotkeys. Locked and loaded presets cannot be deleted, a locked preset cannot be renamed. Names reserved by Windows (`CON`, `NUL`, `AUX`, `PRN`, `COM1`...`LPT9`) are refused.
 
 Overlay positions, overlays turned on or off and the lock state are saved automatically; options are saved with `Apply` or `Save` on their page. Hotkeys can load a given preset, or the next and previous preset: see [Getting Started](Getting-Started.md#hotkeys).
 
@@ -29,18 +29,20 @@ Overlay positions, overlays turned on or off and the lock state are saved automa
 
 A locked preset is never saved by the app: changes made while it is loaded are not written to its file. Useful for a reference layout. Locking does not stop you from editing or deleting the file by other means.
 
-### Share codes
-
-A share code is a whole preset as one line of text, to paste in a chat or a forum:
-
-1. Right-click a preset > `Copy Share Code`.
-2. To import one, `Import` > `Share Code...`, paste the code: the app shows the overlays and modules it contains, then asks for a name.
-
 ### Preset packages
 
-`Export Package...` saves a preset with its style presets and, if you want, its track and pace notes, in one `.zip` file. `Import` > `Preset Package (.zip)...` imports one. Imported presets never overwrite yours: they are renamed if needed.
+To share a preset, use a preset package: `Export Package...` saves a preset with its style presets and, if you want, its track and pace notes, in one `.zip` file. `Import` imports one. Imported presets never overwrite yours: they are renamed if needed.
 
-You can also drag a preset file, a preset package or a plugin `.zip` onto the main window to import it.
+You can also drag a preset file, a preset package, an overlay settings file or a plugin `.zip` onto the main window to import it.
+
+### Share overlay settings
+
+To share the look of one overlay or of a few, without a whole preset, save their settings as a file:
+
+- **Export**: on the `Overlays` page, `Share` > `Export Overlay Settings...` (or right-click an overlay > `Export Settings...`), or `Share` in `Overlay Options`. Tick the overlays to include (`All`, `None`, `Active`, `With changes`), then choose where to save the `.zip` file (`NeoPedal-overlay-<name>.zip` or `NeoPedal-overlays-<count>.zip`). Only options changed from default are written, with each overlay's position. From `Overlay Options`, unsaved values are exported as shown.
+- **Import**: `Share` > `Import Overlay Settings...` on the same pages, or drop the file on the main window. The file shows its overlays, how many options each changes and the NeoPedal version that made it. Untick overlays you don't want, and keep `Keep my positions` ticked to leave your overlays where they are (unticked, they move to the positions of the file, adapted to your screen size).
+
+Imported values become unsaved changes of `Overlay Options` in the loaded preset: check them on the live preview, undo them, then `Apply` to save. Options you never changed on these overlays go back to default, so they look the same as the sender's. Overlay state (on/off) and options pointing to your own files and folders are never changed. Overlays or options unknown to your version are skipped, and a locked preset refuses the import.
 
 ### Trash
 
@@ -74,7 +76,7 @@ When you get on track, the primary preset of the track is loaded first, else the
 
 ### Style presets
 
-Some settings are shared by all presets and edited with their own tools (`Tools` menu): brands (`Vehicle Brand Editor`), classes and class colors (`Vehicle Class Editor`), brakes (`Brake Editor`), tyre compounds (`Tyre Compound Editor`), heatmaps (`Heatmap Editor`) and track info (`Track Info Editor`). They are stored as `brands.json`, `classes.json`, `brakes.json`, `compounds.json`, `heatmap.json` and `tracks.json` in the `settings` folder.
+Some settings are shared by all presets and edited with their own tools (`Tools` menu): brands (`Vehicle Brand Editor`), classes and class colors (`Vehicle Class Editor`), brakes (`Brake Editor`), tyre compounds (`Tyre Compound Editor`), heatmaps (`Heatmap Editor`) and track info (`Track Info Editor`). They are stored as `brands.json`, `classes.json`, `brakes.json`, `compounds.json`, `heatmap.json` and `tracks.json` in the `settings` folder. Tyre compounds are colored by default soft white, medium yellow, hard red, wet blue, the same as in the race calculator and the broadcast director.
 
 ## Global config
 

@@ -20,27 +20,39 @@
 Standings Widget, modern design
 
 Running order, split by class (space between class groups, class name above each group) or combined.
-Widget height follows the number of cars shown.
+Widget height follows the number of cars shown. Gaps & intervals in class in split mode (option) and in
+single class mode.
 """
 
 from __future__ import annotations
 
 from math import ceil
+from typing import TYPE_CHECKING, Any
 
+from ...api_control import api
+from ...const_common import MAX_SECONDS
+from ...demo_state import drawing_demo
+from ...formatter import format_points
 from ...i18n import tr_overlay
 from ...module_info import minfo
 from ...template.widget.drivers_ui import STANDINGS_COLUMNS
 from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text
-from .rows import DASH, class_style
-from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+from .rows import DASH, class_style, laptime_text
+from .table import DELTAS, LAPTIME, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import StandingsConfig
 
 
 class Realtime(DriverTable):
     """Draw widget"""
 
+    wcfg: StandingsConfig
+
     COLUMNS = STANDINGS_COLUMNS
     options = (
         *DRIVER_OPTIONS,
+        "show_column_headers",
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
         "show_class_header", "class_order",
         "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
@@ -49,7 +61,9 @@ class Realtime(DriverTable):
         "column_time_interval", "show_time_interval_from_same_class", "decimal_places_time_interval",
         "time_interval_leader_text", "display_order_time_interval",
         "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap", "time_gap_leader_text",
-        "display_order_time_gap",
+        "display_order_time_gap", "column_track_limits",
+        "display_order_track_limits", "column_energy_per_lap", "show_energy_per_lap_average",
+        "display_order_energy_per_lap",
     )
 
     def __init__(self, config, widget_name):
@@ -58,8 +72,13 @@ class Realtime(DriverTable):
         self.gap_decimals = max(int(wcfg["decimal_places_time_gap"]), 0)
         self.int_decimals = max(int(wcfg["decimal_places_time_interval"]), 0)
         split = wcfg["enable_multi_class_split_mode"]
-        self.class_gap = split and wcfg["show_time_gap_from_same_class"]
-        self.class_interval = split and wcfg["show_time_interval_from_same_class"]
+        by_class = split or wcfg["enable_single_class_exclusive_mode"]  # cars shown grouped by class
+        self.class_gap = by_class and wcfg["show_time_gap_from_same_class"]
+        self.class_interval = by_class and wcfg["show_time_interval_from_same_class"]
+        self.limit = 0.0  # track limits points per penalty of session, 0 if none
+        self.demo = False  # overlay pictures & previews: simulated energy usage, nothing read from game
+        self.energy_usage: Any = None  # energy usage poller, see usages
+        self.usage_average = bool(wcfg["show_energy_per_lap_average"])
         self.delta_count = min(max(int(wcfg["number_of_delta_laptime"]), 2), 5)
         self.gap_leader = self.user_text("time_gap_leader_text", tr_overlay("Leader"))
         self.int_leader = self.user_text("time_interval_leader_text", DASH)
@@ -85,6 +104,10 @@ class Realtime(DriverTable):
             return Column(key, max(self.text_width("value", sample), self.text_width("label", self.int_leader)), RIGHT)
         if key == "delta_laptime":
             return Column(key, (self.text_width("small", "8.8") + self.unit * 0.3) * self.delta_count, RIGHT)
+        if key == "track_limits":
+            return Column(key, self.text_width("dim", "88.88"), RIGHT)
+        if key == "energy_per_lap":
+            return Column(key, self.text_width("dim", "88.8%"), RIGHT)
         return None
 
     def extra_cell(self, key: str, veh, ctx: Context, extra: dict) -> Cell:
@@ -100,7 +123,13 @@ class Realtime(DriverTable):
                 if self.int_leader == DASH:
                     return Cell(TEXT, DASH, "value", theme.text_faint)
                 return Cell(TEXT, self.int_leader, "label", theme.accent)
+            if not ctx.in_race and not 0 < veh.bestLapTime < MAX_SECONDS:  # best lap interval: no time yet
+                return Cell(TEXT, DASH, "value", theme.text_faint)
             return Cell(TEXT, gap_text(gap, self.int_decimals), "value", theme.text_dim)
+        if key == "track_limits":
+            return self.track_limits_cell(veh.trackLimitsPoints, ctx.in_race)
+        if key == "energy_per_lap":
+            return self.energy_per_lap_cell(veh)
         if key == "delta_laptime":
             if ctx.player is None or veh.isPlayer:
                 return Cell(DELTAS)
@@ -108,12 +137,18 @@ class Realtime(DriverTable):
         return Cell()
 
     def laptime_cell(self, veh, ctx: Context) -> Cell:
-        """Last lap in race (or if best lap column shown), else best lap"""
-        if ctx.in_race or self.wcfg["column_best_laptime"]:
+        """Last lap in race (or if best lap column shown, or running time shown), else best lap (purple if fastest
+        of class), sector bars of lap being driven"""
+        if ctx.in_race or self.wcfg["column_best_laptime"] or self.wcfg.get("show_running_lap_time", True):
             return super().laptime_cell(veh, ctx)
-        from .rows import laptime_text
-
-        return Cell(TEXT, laptime_text(veh.bestLapTime), "dim", self.theme.text_dim)
+        theme = self.theme
+        best, class_best = veh.bestLapTime, veh.classBestLapTime
+        valid = 0 < best < MAX_SECONDS
+        fastest = (self.wcfg.get("show_highlighted_fastest_last_laptime", True) and valid
+                   and abs(best - (veh.classBestLap or class_best)) < 0.0005)
+        sectors = self.sector_parts(veh, ctx) if self.wcfg.get("show_lap_sectors", True) else ()
+        return Cell(LAPTIME, laptime_text(best), "dim", theme.best if fastest else theme.text_dim,
+                    extra=self.laptime_extra(sectors))
 
     def gap_cell(self, veh, ctx: Context) -> Cell:
         """Gap to leader (race), or to leader best lap (other sessions)"""
@@ -126,7 +161,8 @@ class Realtime(DriverTable):
                 position, gap = veh.positionOverall, veh.gapBehindLeader
             if position == 1:
                 return leader_cell
-            return Cell(TEXT, gap_text(gap, self.gap_decimals), "strong", theme.text)
+            text = gap_text(gap, self.gap_decimals)
+            return Cell(TEXT, text if text == DASH else f"+{text}", "strong", theme.text)
         best = veh.bestLapTime
         leader_best = veh.classBestLapTime if self.class_gap else minfo.vehicles.leaderBestLapTime
         gap = best - leader_best
@@ -136,6 +172,36 @@ class Realtime(DriverTable):
             return Cell(TEXT, DASH, "strong", theme.text_faint)
         return Cell(TEXT, f"+{gap:.{self.gap_decimals}f}", "strong", theme.text)
 
+    def energy_per_lap_cell(self, veh) -> Cell:
+        """Virtual energy used in last lap (or average of last 5 laps) as game gives it, dash if unknown"""
+        theme = self.theme
+        if self.demo:
+            used = demo_energy_per_lap(veh)
+        else:
+            usage = self.usages().usage(veh.driverName)
+            used = -1.0 if usage is None else (usage.average if self.usage_average else usage.last)
+        if used <= 0:
+            return Cell(TEXT, DASH, "dim", theme.text_faint)
+        return Cell(TEXT, f"{used * 100:.1f}%", "dim", theme.text_dim)
+
+    def usages(self) -> Any:
+        """Energy usage poller (energy_usage module loaded only with energy per lap column)"""
+        if self.energy_usage is None:
+            from ...energy_usage import energy_usage
+
+            self.energy_usage = energy_usage
+        return self.energy_usage
+
+    def track_limits_cell(self, points: float, in_race: bool) -> Cell:
+        """Track limits points: amber once any, red one point before penalty (races only: no penalty in
+        practice & qualifying)"""
+        theme = self.theme
+        if points <= 0:
+            return Cell(TEXT, DASH, "dim", theme.text_faint)
+        limit = self.limit if in_race else 0.0
+        color = theme.negative if limit > 0 and points >= limit - 1 else theme.warning
+        return Cell(TEXT, format_points(points), "dim", color)
+
     def class_header(self, class_name: str) -> ClassHeader:
         """Header of a class group: class name (game name, words apart) on class color"""
         _, color = class_style(self.cfg, class_name, self.theme)
@@ -143,11 +209,17 @@ class Realtime(DriverTable):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        self.limit = api.read.session.limits_points()
+        self.demo = drawing_demo()
+        if self.wcfg["column_energy_per_lap"] and not self.demo:
+            self.usages().poll()
         self.show_rows(minfo.vehicles.dataSet, minfo.relative.standings, self.context())
 
     def show_field(self, field, ctx: Context):
         from .sample_field import sample_standings
 
+        self.limit = 5.0
+        self.demo = True
         self.show_rows(field.vehicles, sample_standings(field, self.wcfg), ctx)
 
     def show_rows(self, data_set, standings: list[int], ctx: Context):
@@ -168,8 +240,15 @@ class Realtime(DriverTable):
         while rows and rows[-1] is SEPARATOR:
             rows.pop()
         rows_tuple = tuple(rows)
-        if rows_tuple != self.state:
+        if self.refresh(rows_tuple):  # rows compared once: height follows changed rows
             height = self.table.content_height(rows_tuple) if rows_tuple else self.table.height(1)
             if ceil(height) != self.height():
                 self.set_size(self.table.width, height)
-        self.refresh(rows_tuple)
+                self.update()  # resized: whole widget
+
+
+def demo_energy_per_lap(veh) -> float:
+    """Simulated energy used per lap (overlay pictures & previews): cars with virtual energy only"""
+    if "LMP2" in veh.vehicleClass or "LMP3" in veh.vehicleClass:
+        return -1.0
+    return 0.031 + (veh.positionOverall * 7 % 9) * 0.0012

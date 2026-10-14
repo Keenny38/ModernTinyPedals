@@ -15,15 +15,15 @@ Item {
 
     component SmallText: Text {
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.8
+        font.pointSize: theme.fontCaption
         elide: Text.ElideRight
     }
     component ClassBar: Rectangle {
         property string tint: ""
         Layout.preferredWidth: Math.round(theme.em * 0.28)
         Layout.fillHeight: true
-        Layout.topMargin: theme.em * 0.35
-        Layout.bottomMargin: theme.em * 0.35
+        Layout.topMargin: theme.em * 0.4
+        Layout.bottomMargin: theme.em * 0.4
         radius: width / 2
         color: tint !== "" ? tint : theme.border
     }
@@ -31,7 +31,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.em * 0.6
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
 
         TpSegmented {
             objectName: "commentaryTabs"
@@ -41,7 +41,7 @@ Item {
                       i18n.tr("Battles") + (backend.battleCount > 0 ? "  " + backend.battleCount : ""),
                       i18n.tr("Classes"), i18n.tr("Pit Stops")]
             currentIndex: root.tab
-            onActivated: function(index) { root.tab = index }
+            onActivated: function(index) { backend.setCommentaryTab(index); root.tab = index }
         }
 
         StackLayout {
@@ -76,7 +76,7 @@ Item {
                         glyph: ""  // export
                         enabled: feed.count > 0
                         tip: i18n.tr("Export Events") + " (CSV)"
-                        onClicked: backend.exportEvents()
+                        onClicked: backend.log.exportEvents()
                     }
                 }
                 ListView {
@@ -89,7 +89,7 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
                     reuseItems: true
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                    displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
+                    displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
                     delegate: Rectangle {
                         id: entry
                         required property string key
@@ -105,7 +105,7 @@ Item {
                         required property bool canReplay
                         width: ListView.view.width - (feed.ScrollBar.vertical.visible ? feed.ScrollBar.vertical.width : 0)
                         height: Math.round(theme.em * 2.8)
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: entryArea.containsMouse ? theme.hover : "transparent"
                         opacity: live ? 1 : 0.6
                         MouseArea {
@@ -117,17 +117,17 @@ Item {
                         ToolTip.visible: entryArea.containsMouse
                         ToolTip.text: backend.replayActive ? i18n.tr("Replay goes to this moment, camera on the car")
                                                            : i18n.tr("Camera on the car")
-                        ToolTip.delay: 900
+                        ToolTip.delay: theme.tipDelay
                         RowLayout {
                             anchors.fill: parent
                             anchors.rightMargin: theme.em * 0.3
-                            spacing: theme.em * 0.45
+                            spacing: theme.em * 0.5
                             ClassBar { tint: entry.classColor }
                             Text {
                                 Layout.preferredWidth: theme.em * 3.6
                                 text: entry.timeText
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.82
+                                font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                             }
                             Icon { glyph: entry.glyph; color: root.tone(entry.tone); size: theme.em * 0.95 }
@@ -181,11 +181,11 @@ Item {
                 id: battles
                 objectName: "battleList"
                 clip: true
-                model: backend.battleRows
+                model: root.tab === 1 ? backend.battleRows : null  // hidden tab: no delegate kept up to date
                 spacing: theme.em * 0.3
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
+                displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
                 delegate: Rectangle {
                     id: fight
                     required property string key
@@ -203,7 +203,7 @@ Item {
                     required property string trendText
                     width: ListView.view.width - (battles.ScrollBar.vertical.visible ? battles.ScrollBar.vertical.width : 0)
                     height: Math.round(theme.em * 3.6)
-                    radius: theme.em * 0.45
+                    radius: theme.radiusMd
                     color: fightArea.containsMouse ? theme.hover : onAir ? Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.12) : theme.raised
                     border.width: 1
                     border.color: onAir ? theme.loss : theme.border
@@ -225,7 +225,7 @@ Item {
                                 text: "P" + fight.position
                                 color: theme.text
                                 font.weight: Font.Bold
-                                font.pointSize: theme.fontPoint * 1.1
+                                font.pointSize: theme.fontSubtitle
                             }
                             SmallText { Layout.fillWidth: true; text: fight.carClass }
                         }
@@ -239,7 +239,7 @@ Item {
                             spacing: 0
                             Row {
                                 Layout.alignment: Qt.AlignRight
-                                spacing: theme.em * 0.25
+                                spacing: theme.em * 0.3
                                 Icon {
                                     visible: fight.trend !== 0
                                     glyph: fight.trend < 0 ? "" : ""  // closing: chevron down, opening: up
@@ -276,7 +276,7 @@ Item {
             ListView {
                 id: classList
                 clip: true
-                model: backend.classRows
+                model: root.tab === 2 ? backend.classRows : null
                 spacing: theme.em * 0.3
                 boundsBehavior: Flickable.StopAtBounds
                 delegate: Rectangle {
@@ -291,7 +291,7 @@ Item {
                     required property int battles
                     width: ListView.view.width
                     height: Math.round(theme.em * 3.6)
-                    radius: theme.em * 0.45
+                    radius: theme.radiusMd
                     border.width: 1
                     border.color: theme.border
                     color: theme.raised
@@ -336,7 +336,7 @@ Item {
                 id: pitList
                 objectName: "pitList"
                 clip: true
-                model: backend.pitRows
+                model: root.tab === 3 ? backend.pitRows : null
                 boundsBehavior: Flickable.StopAtBounds
                 reuseItems: true
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -353,7 +353,7 @@ Item {
                     required property string status
                     width: ListView.view.width - (pitList.ScrollBar.vertical.visible ? pitList.ScrollBar.vertical.width : 0)
                     height: Math.round(theme.em * 2.7)
-                    radius: theme.em * 0.4
+                    radius: theme.radiusMd
                     color: pitArea.containsMouse ? theme.hover : inPit ? Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.12) : "transparent"
                     MouseArea {
                         id: pitArea
@@ -365,7 +365,7 @@ Item {
                     RowLayout {
                         anchors.fill: parent
                         anchors.rightMargin: theme.em * 0.4
-                        spacing: theme.em * 0.45
+                        spacing: theme.em * 0.5
                         ClassBar { tint: pitRow.classColor }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -388,7 +388,7 @@ Item {
                                 Layout.alignment: Qt.AlignRight
                                 text: i18n.tr("%1 stops").arg(pitRow.stops)
                                 color: theme.text
-                                font.pointSize: theme.fontPoint * 0.88
+                                font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                             }
                             SmallText {
@@ -413,7 +413,7 @@ Item {
         // Sheet of car picked in car list
         DirectorSheet {
             Layout.fillWidth: true
-            visible: backend.sheet.slot !== undefined
+            visible: backend.sheetCar.slot !== undefined
         }
     }
 }

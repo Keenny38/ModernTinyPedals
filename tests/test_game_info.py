@@ -314,6 +314,13 @@ class FakeGame:
 
             def __init__(self):
                 self.answered = False
+                self.address = kwargs.get("address") or ("localhost", 6397)
+
+            def request(self, method, resource, body=None):
+                """Raw request (Broadcast Director, answers shared through game_rest_cache)"""
+                if self.get(resource) is None and not self.answered:
+                    return 0, b""
+                return 200, json.dumps(game.answers.get(resource)).encode()
 
             def __enter__(self):
                 return self
@@ -324,7 +331,7 @@ class FakeGame:
             def close(self):
                 pass
 
-            def get(self, resource):
+            def get(self, resource, decode=None):
                 game.asked.append(resource)
                 self.answered = bool(game.answers)
                 return game.answers.get(resource)
@@ -336,18 +343,30 @@ class FakeGame:
         return Connection()
 
 
+class ReplaysPage:
+    """Results & replays page seen from its replay tab: backend is the replays backend"""
+
+    def __init__(self, page, game):
+        self.page, self.game, self.sent = page, game, game.sent
+        self.backend = page.replays
+
+    def __getattr__(self, name):
+        return getattr(self.page, name)
+
+
 @pytest.fixture
 def replays_page(ui_env, monkeypatch):
-    from neopedal.ui import game_replays, game_rest
+    from neopedal.ui import game_rest, race_results_viewer
     from neopedal.ui._common import BaseDialog
+    from neopedal.ui.quick.results_backend import REPLAY_TAB
 
     game = FakeGame()
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(game_rest, "GameConnection", game.connection)
-    page = game_replays.GameReplays(None)
-    page.game = game
-    page.sent = game.sent
-    yield page
+    page = race_results_viewer.RaceResultsViewer(None)
+    page.backend.setTab(REPLAY_TAB)  # replay tab: game asked while page shows, replay view built
+    page.backend.setListMode(1)  # replays list
+    yield ReplaysPage(page, game)
     page.close()
     page.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -578,7 +597,7 @@ def test_game_replays_standings_and_camera(replays_page):
     assert kevin["gap"] == "" and kevin["status"] == "Finished" and kevin["statusTone"] == "gain"
     assert kevin["onCamera"] and not kevin_other["onCamera"]  # same name: camera by slot
     assert kevin["fastest"] and kevin["incidents"] == 1 and kevin["vehicle"] == "Oreca 07"
-    assert zaac["gap"] == "+1 Lap" and zaac["status"] == "In Pits" and zaac["last"] == "-"
+    assert zaac["gap"] == "+1 lap" and zaac["status"] == "In Pits" and zaac["last"] == "-"
     assert kevin_other["status"] == "Garage" and kevin_other["statusTone"] == "dim"
     assert zaac["player"] and zaac["number"] == "7" and zaac["vehicle"] == "Team Z" and zaac["classPosition"] == 1
     assert [car["name"] for car in backend.classes] == ["LMP2", "Hypercar"]
@@ -856,7 +875,7 @@ def test_game_replays_settings_kept(replays_page):
     backend.setSort("size")
     backend.setSessionFilter(3)
     backend.setIncidentFilter(1)
-    again = GameReplaysBackend(replays_page)
+    again = GameReplaysBackend(replays_page.page)
     assert (again.secondsBefore, again.panelIndex, again.sortKey, again.sessionFilter, again.incidentFilter) == (
         12, 1, "size", 3, 1)
     assert again._midnight.isActive()  # Today / Yesterday updated at midnight
@@ -1123,13 +1142,19 @@ def test_game_replays_shown_as_app_page(window):  # noqa: F811
     try:
         view = window.centralWidget()
         window.show()
-        dialog = open_tool("game_replays.GameReplays", window)
-        assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["GameReplays"]
-        assert not dialog.view.errors() and dialog.backend._shown
-        wait_requests(dialog.backend.request_replays, dialog.backend.request_state)
-        assert dialog.backend._timer.isActive()
+        dialog = open_tool("game_replays.GameReplays", window)  # former page: replays list of results & replays
+        assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["RaceResultsViewer"]
+        replays = dialog.replays
+        assert not dialog.view.errors() and dialog.backend.listMode == 1 and replays._shown
+        wait_requests(replays.request_replays, replays.request_state)
+        assert replays._timer.isActive()
+        dialog.backend.setListMode(0)  # sessions list & classification tab: game no longer asked
+        dialog.backend.setTab(0)
+        assert not replays._shown and not replays._timer.isActive()
+        dialog.backend.setTab(4)  # replay tab: asked again
+        assert replays._shown
         view.set_current_index(1)  # another page: game no longer asked
-        assert not dialog.backend._shown and not dialog.backend._timer.isActive()
+        assert not replays._shown and not replays._timer.isActive()
         dialog.close()
         assert not view.dialog_pages()
         window.hide()
@@ -1182,7 +1207,7 @@ def test_game_connection_keeps_connection(monkeypatch):
 
 
 def test_game_request_thread_kept(ui_env, monkeypatch):
-    """Requests of a game request done on one thread, kept for next ones; failed job: next one can start"""
+    """Requests of a game request done on shared game request workers (never the UI thread); failed job: next one can start"""
     import threading
 
     from PySide6.QtCore import QObject
@@ -1203,7 +1228,7 @@ def test_game_request_thread_kept(ui_env, monkeypatch):
     wait_requests(request)
     request.start(lambda: threading.current_thread().ident)
     wait_requests(request)
-    assert results[0] == results[1] != threading.current_thread().ident
+    assert threading.current_thread().ident not in results[:2]
     request.start(lambda: 1 / 0)
     wait_requests(request)
     assert request.start(lambda: "next")
@@ -1352,3 +1377,36 @@ def test_lap_info_tyre_compound(monkeypatch):
     info = module_recorder.lap_info("lap", [])
     assert info["compound"] == ["Medium", "Soft"]  # lap viewer groups stints by compound
     assert lap_compound(info) == "Medium/Soft"
+
+
+def test_game_replays_action_after_replay_opened(replays_page, monkeypatch):
+    """Replay asked from results (event, lap): done once the game accepted to open it and answered again, camera
+    on a driver of the car, replay before the time; replay already open from page: at once, no confirmation"""
+    from neopedal.ui.quick import replays_backend
+    from neopedal.ui.quick.replays_backend import ReplayAction
+
+    monkeypatch.setattr(replays_backend, "ACTION_SETTLE", 0.0)
+    backend = answered(replays_page, GAME_ANSWERS)
+    replays_page.sent.clear()
+    backend.setSecondsBefore(5)
+    backend.watch_named("Algarve P1 1", ReplayAction("Algarve P1 1", 1500.0, ("Nobody", "Zaac Latta")))
+    wait_commands(backend)
+    assert backend.action is not None and backend.play_command is None  # opened: waits for a new answer
+    backend.refresh_state()  # page shown: asked after each command
+    wait_requests(backend.request_state)
+    assert backend.action is None  # done with the state asked after the replay opened
+    assert replays_page.sent == [
+        ("GET", "/rest/watch/play/0"),
+        ("PUT", "/rest/watch/focus/4"), ("PUT", "/rest/watch/replaytime/1495"),
+    ]
+    replays_page.sent.clear()
+    monkeypatch.setattr(type(backend._window), "confirm_operation", lambda *args, **kwargs: False)
+    backend.watch_named("Algarve P1 1", ReplayAction("Algarve P1 1", -1.0, ("Zaac Latta",), lap=3, lead=1.0))
+    wait_commands(backend)
+    assert replays_page.sent and replays_page.sent[0] == ("PUT", "/rest/watch/focus/4")  # lap looked for at once
+    # Game refused to open the replay: action dropped
+    monkeypatch.setattr(type(backend._window), "confirm_operation", lambda *args, **kwargs: True)
+    replays_page.game.refused = {"/rest/watch/play/1"}
+    backend.watch_named("Bahrain R1", ReplayAction("Bahrain R1", 10.0, ("Zaac Latta",)))
+    wait_commands(backend)
+    assert backend.action is None and backend.play_command is None

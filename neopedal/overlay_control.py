@@ -21,15 +21,24 @@ Overlay Control
 """
 
 import logging
+import sys
 import threading
 
 from . import app_signal, overlay_signal, realtime_state
 from .api_control import api
 from .setting import cfg
-from .stream_overlay import streamoverlay
 from .thread_guard import run_supervised, wait_stopped
 
 logger = logging.getLogger(__name__)
+UPDATE_INTERVAL = 0.2  # seconds between state reads while game data updates
+FROZEN_WAIT = 1.0  # longest wait while game data frozen (game closed, menus), woken earlier on activity change
+
+
+def stream_on_air() -> bool:
+    """Stream overlay on air (see StreamOverlay.on_air): its module (http.server...) imported only once used,
+    never imported means never started"""
+    module = sys.modules.get(f"{__package__}.stream_overlay")
+    return module is not None and module.streamoverlay.on_air()
 
 
 class OverlayToggle:
@@ -72,6 +81,7 @@ class OverlayControl:
         "toggle",
         "_thread",
         "_event",
+        "_wake",
         "_last_active_state",
         "_last_shown_state",
         "_last_hide_state",
@@ -81,6 +91,7 @@ class OverlayControl:
         self.toggle = OverlayToggle()
         self._thread: threading.Thread | None = None
         self._event = threading.Event()
+        self._wake = threading.Event()  # activity change (realtime_state) or stop
 
         self._last_active_state = None
         self._last_shown_state = None
@@ -95,30 +106,56 @@ class OverlayControl:
         # A previous thread still stopping (event set) is replaced, it exits on its own event
         if self._stopped() or self._event.is_set():
             self._event = threading.Event()
+            self._wake = threading.Event()
             self._thread = threading.Thread(
-                target=self.__updating, args=(self._event,), daemon=True, name="Overlay control")
+                target=self.__updating, args=(self._event, self._wake), daemon=True, name="Overlay control")
             self._thread.start()
             logger.info("ENABLED: overlay control")
 
-    def disable(self):
-        """Disable overlay control, wait (bounded) until stopped"""
+    def disable(self, wait: bool = True):
+        """Disable overlay control, wait (bounded) until stopped, else only signalled (see enable)"""
         self._event.set()
-        wait_stopped(self._stopped, "overlay control")
+        self._wake.set()
+        if wait:
+            wait_stopped(self._stopped, "overlay control")
 
-    def __updating(self, event: threading.Event):
+    def __updating(self, event: threading.Event, wake: threading.Event):
         """Run update loop"""
-        run_supervised(lambda: self.__update_loop(event), "overlay control", event)
+        realtime_state.subscribe(wake)
+        try:
+            run_supervised(lambda: self.__update_loop(event, wake), "overlay control", event)
+        finally:
+            realtime_state.unsubscribe(wake)
 
-    def __update_loop(self, event: threading.Event):
-        """Update global state"""
+    def __update_loop(self, event: threading.Event, wake: threading.Event | None = None):
+        """Update global state
+
+        Game data frozen (game closed, menus) & overlays not shown: nothing to read until connector resumes
+        (activity change notified), so state read every FROZEN_WAIT instead of every UPDATE_INTERVAL.
+
+        Args:
+            event: stop event.
+            wake: activity change wake (subscribed to realtime_state), also set on stop.
+        """
+        if wake is None:  # not subscribed (tests): first frozen wait not held
+            wake = threading.Event()
+            wake.set()
         _event_wait = event.wait
-        while not _event_wait(0.2):
+        _wait_change = realtime_state.wait_change
+        last_activity = None
+        while True:
+            if last_activity is not None and realtime_state.paused and not realtime_state.shown:
+                _wait_change(FROZEN_WAIT, wake)
+                if _event_wait(0):
+                    break
+            elif _event_wait(UPDATE_INTERVAL):
+                break
             # Read state
             active = api.read.state.active()
             paused = api.read.state.paused()
             resets = api.read.state.resets()
             # Overlays shown & updated: driving, or spectating / replay streamed (overlays only, see on_air)
-            shown = active or (not paused and api.read.vehicle.total_vehicles() > 0 and streamoverlay.on_air())
+            shown = active or (not paused and api.read.vehicle.total_vehicles() > 0 and stream_on_air())
             hidden = cfg.overlay["auto_hide"] and not shown
             if active:
                 session_type = api.read.session.session_type()
@@ -130,6 +167,11 @@ class OverlayControl:
             realtime_state.shown = shown
             realtime_state.paused = paused
             realtime_state.resets = resets
+            # Threads idle until activity changes (modules, RestAPI) woken
+            activity = (active, paused, shown, resets)
+            if last_activity != activity:
+                last_activity = activity
+                realtime_state.notify_change()
             # Auto hide state check
             if self._last_hide_state != hidden:
                 self._last_hide_state = hidden

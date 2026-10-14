@@ -30,13 +30,17 @@ from . import regex_pattern as rxp
 from . import version
 from .const_common import VERSION_NA
 from .hotkey.common import validate_hotkey
-from .setting_preupdate import preupdate_global_setting, preupdate_user_setting
+from .setting_preupdate import PENDING_STYLE_UPDATES, preupdate_global_setting, preupdate_user_setting
 from .validator import is_clock_format, is_finite_number, is_hex_color
 from .version_check import parse_version_string
 
 
 def _get_preset_version(dict_user: dict, version_current: str) -> tuple[int, int, int]:
-    """Get stored preset version, and update to current running version"""
+    """Get stored preset version, and update to current running version (never lowered)
+
+    A file saved by a newer build (installed & source copies share settings folder) keeps its
+    version: otherwise the newer build would run its one-time updates again on it.
+    """
     # Check preset version
     preset_info = dict_user.get("preset")
     if not isinstance(preset_info, dict):
@@ -44,8 +48,14 @@ def _get_preset_version(dict_user: dict, version_current: str) -> tuple[int, int
         preset_info = dict_user["preset"]
     preset_version = parse_version_string(preset_info.get("version", "0.0.0"))
     # Update preset version
-    dict_user["preset"]["version"] = version_current
+    if not is_newer_version(preset_version, version_current):
+        dict_user["preset"]["version"] = version_current
     return preset_version
+
+
+def is_newer_version(preset_version: tuple[int, int, int], version_current: str) -> bool:
+    """Preset saved by a newer build than this one"""
+    return preset_version != VERSION_NA and preset_version > parse_version_string(version_current)
 
 
 def _validate_style(dict_user: dict[str, dict], dict_def: Mapping[str, dict], info_def: Mapping[str, Any]) -> bool:
@@ -80,6 +90,30 @@ def _validate_style(dict_user: dict[str, dict], dict_def: Mapping[str, dict], in
     return save_change
 
 
+def update_former_compound_colors(dict_user: dict[str, dict]) -> bool:
+    """Compounds still at their former default color (by symbol, or gray of compounds added on the fly) take
+    the color of their name, colors you chose kept
+
+    Returns:
+        True if a color changed (file saved, old one backed up).
+    """
+    from .template.setting_compounds import FORMER_DEFAULT_COLORS, UNKNOWN_COMPOUND_COLOR, name_color
+
+    changed = False
+    for name, data in dict_user.items():
+        symbol = data.get("symbol", "")
+        color = data.get("color", "")
+        if not isinstance(symbol, str) or not isinstance(color, str):
+            continue
+        if color.upper() not in (FORMER_DEFAULT_COLORS.get(symbol), UNKNOWN_COMPOUND_COLOR):
+            continue
+        new_color = name_color(name)
+        if new_color != color.upper():
+            data["color"] = new_color
+            changed = True
+    return changed
+
+
 class StyleValidator:
     """Style validator"""
 
@@ -89,6 +123,14 @@ class StyleValidator:
         from .template.setting_classes import CLASSES_DEFAULT, CLASSINFO_DEFAULT
 
         return _validate_style(dict_user, CLASSES_DEFAULT, CLASSINFO_DEFAULT)
+
+    @staticmethod
+    def brands(dict_user: dict[str, Any]) -> bool:
+        """Brands validator: vehicle name to brand name, other entries removed"""
+        invalid = [key for key, value in dict_user.items() if not isinstance(key, str) or not isinstance(value, str)]
+        for key in invalid:
+            del dict_user[key]
+        return bool(invalid)
 
     @staticmethod
     def brakes(dict_user: dict[str, dict]) -> bool:
@@ -102,7 +144,11 @@ class StyleValidator:
         """Compounds style validator"""
         from .template.setting_compounds import COMPOUNDINFO_DEFAULT, COMPOUNDS_DEFAULT
 
-        return _validate_style(dict_user, COMPOUNDS_DEFAULT, COMPOUNDINFO_DEFAULT)
+        save_change = _validate_style(dict_user, COMPOUNDS_DEFAULT, COMPOUNDINFO_DEFAULT)
+        if "compound_colors" in PENDING_STYLE_UPDATES:
+            PENDING_STYLE_UPDATES.discard("compound_colors")
+            save_change = update_former_compound_colors(dict_user) or save_change
+        return save_change
 
     @staticmethod
     def heatmap(dict_user: dict[str, dict]) -> bool:
@@ -239,14 +285,19 @@ class PresetValidator:
     )
 
     @classmethod
-    def remove_invalid_key(cls, dict_user: dict, dict_def: dict) -> None:
-        """Remove invalid key & value from user dictionary"""
+    def remove_invalid_key(cls, dict_user: dict, dict_def: dict, keep_unknown: bool = False) -> None:
+        """Remove invalid key & value from user dictionary
+
+        Args:
+            keep_unknown: keep keys unknown to this build (options of a newer build), as they are.
+        """
         key_list_user = tuple(dict_user)  # create user key list
 
         for key in key_list_user:  # loop through user key list
             # Remove invalid key
             if key not in dict_def:  # check in default list
-                dict_user.pop(key)
+                if not keep_unknown:
+                    dict_user.pop(key)
                 continue
             # Skip sub_level dict, remove dict set in place of a value (default restored later)
             if isinstance(dict_user[key], dict):
@@ -283,9 +334,9 @@ class PresetValidator:
             dict_user[d_key] = dict_user.pop(d_key)  # append user key at the end
 
     @classmethod
-    def validate_key_pair(cls, dict_user: dict, dict_def: dict) -> None:
+    def validate_key_pair(cls, dict_user: dict, dict_def: dict, keep_unknown: bool = False) -> None:
         """Create key-only check list, then validate key"""
-        cls.remove_invalid_key(dict_user, dict_def)
+        cls.remove_invalid_key(dict_user, dict_def, keep_unknown)
         cls.add_missing_key(dict_user, dict_def)
         cls.sort_key_order(dict_user, dict_def)
 
@@ -297,8 +348,8 @@ class PresetValidator:
         build_version = parse_version_string(version.SETTING_VERSION)
         if preset_version == VERSION_NA or preset_version < build_version:
             preupdate_global_setting(preset_version, dict_user)
-        # Validate preset
-        return cls._validate(dict_user, dict_def)
+        # Validate preset, options of a newer build kept
+        return cls._validate(dict_user, dict_def, preset_version > build_version)
 
     @classmethod
     def user_preset(cls, dict_user: dict, dict_def: dict) -> dict:
@@ -308,8 +359,8 @@ class PresetValidator:
         build_version = parse_version_string(version.SETTING_VERSION)
         if preset_version == VERSION_NA or preset_version < build_version:
             preupdate_user_setting(preset_version, dict_user)
-        # Validate preset
-        return cls._validate(dict_user, dict_def)
+        # Validate preset, options of a newer build kept
+        return cls._validate(dict_user, dict_def, preset_version > build_version)
 
     @classmethod
     def shortcuts_preset(cls, dict_user: dict, dict_def: dict) -> dict:
@@ -320,16 +371,20 @@ class PresetValidator:
         return dict_user
 
     @classmethod
-    def _validate(cls, dict_user: dict, dict_def: dict) -> dict:
-        """Validate setting, invalid section (not a dict) reset to default (rest of preset kept)"""
+    def _validate(cls, dict_user: dict, dict_def: dict, keep_unknown: bool = False) -> dict:
+        """Validate setting, invalid section (not a dict) reset to default (rest of preset kept)
+
+        Args:
+            keep_unknown: keep keys & sections unknown to this build (preset of a newer build), as they are.
+        """
         # Check top-level key
-        cls.validate_key_pair(dict_user, dict_def)
+        cls.validate_key_pair(dict_user, dict_def, keep_unknown)
         # Check sub-level key
         for item in dict_user:
-            if not isinstance(dict_def[item], dict):
+            if item not in dict_def or not isinstance(dict_def[item], dict):
                 continue
             if not isinstance(dict_user[item], dict):
                 dict_user[item] = dict_def[item].copy()
                 continue
-            cls.validate_key_pair(dict_user[item], dict_def[item])
+            cls.validate_key_pair(dict_user[item], dict_def[item], keep_unknown)
         return dict_user

@@ -26,6 +26,9 @@ input: rim with top center stripe, three spokes, hub. Rotation arc from top arou
 
 from __future__ import annotations
 
+from math import radians
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -35,11 +38,16 @@ from ...userfile.custom_image import image_exists, load_custom_image
 from .base import CENTER, ModernOverlay
 from .draw import disc, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SteeringWheelConfig
+
 SPOKES = (90.0, 180.0, 270.0)  # right, bottom, left (degrees clockwise from top)
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: SteeringWheelConfig
 
     options = (
         "font_size", "display_size", "show_custom_steering_wheel", "custom_steering_wheel_image_file",
@@ -94,12 +102,16 @@ class Realtime(ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         if self.wcfg["manual_steering_range"] > 0:
-            steering_range = self.wcfg["manual_steering_range"]
+            steering_range: float = self.wcfg["manual_steering_range"]
         else:
             steering_range = api.read.inputs.steering_range_physical()
         angle = round(api.read.inputs.steering_raw() * steering_range * 0.5, 1)
         show_arc = self.show_rotation and (not self.stationary_only or api.read.vehicle.speed() < 1)
-        self.refresh((angle, show_arc))
+        # Repaint when drawn: rotation in device pixels at outer radius (arc), reading text
+        self.refresh_keyed((angle, show_arc), (
+            self.pixel_steps(radians(angle), self.arc_radius),
+            f"{abs(angle):.{self.decimals}f}" if self.show_angle else "", show_arc,
+        ))
 
     def paint_static(self, painter: QPainter):
         disc(painter, self.dial, self.theme, self.depth_effects)

@@ -24,6 +24,8 @@ Battery charge (ready, cooldown, draining, regen) & activation timer.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
@@ -32,9 +34,14 @@ from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import PushToPassConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: PushToPassConfig
 
     options = (
         "font_size", "layout", "show_battery_charge", "show_activation_timer", "activation_threshold_gear",
@@ -92,4 +99,5 @@ class Realtime(StatsMixin, ModernOverlay):
             elif key == "timer":
                 active = hybrid.motorState == 2
                 values.append(Value(f"{hybrid.motorActiveTimer:.1f}", theme.accent if active else theme.text_dim))
-        self.refresh(tuple(values))
+        shown = tuple(values)
+        self.refresh_keyed(shown, self.pixel_key(shown, [slot.value.width() for slot in self.slots], "bar"))

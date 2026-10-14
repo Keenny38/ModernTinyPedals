@@ -20,12 +20,18 @@
 Flag Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import minfo
 from ._base import Overlay
+from ._data import run_laps
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import FlagConfig
 
 # Full course yellow state (game) -> text after prefix: 1 pending, 2 pits closed, 3 pits open
 # for lead lap cars, 4 pits open, 5 last lap, 6 resume, 7 race halt (red flag)
@@ -34,6 +40,8 @@ FCY_PHASES = {1: "", 2: "", 3: " LDR", 4: " PIT", 5: " END", 6: " GO", 7: " RED"
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "FlagConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -413,17 +421,20 @@ class Realtime(Overlay):
                 target.setHidden(hidden)
 
     def update_limiter(self, target, data, show_speed: bool):
-        """Speed limiter"""
-        if target.last != data:
-            target.last = data
+        """Speed limiter, keyed on text shown (speed changes too small to show never repaint)"""
+        text_limiter = ""
+        if data and show_speed:
+            speed = f"{self.unit_speed(data):.{self.decimals_speed}f}"
+            prefix = self.wcfg["speed_limiter_text"]
+            if prefix:
+                text_limiter = f"{prefix}{speed:>6.6}"
+            else:
+                text_limiter = f"{speed:.7}"
+        shown = (bool(data), text_limiter)
+        if target.last != shown:
+            target.last = shown
             if data:
                 if show_speed:
-                    speed = f"{self.unit_speed(data):.{self.decimals_speed}f}"
-                    prefix = self.wcfg["speed_limiter_text"]
-                    if prefix:
-                        text_limiter = f"{prefix}{speed:>6.6}"
-                    else:
-                        text_limiter = f"{speed:.7}"
                     target.text = text_limiter
                     target.update()
                 hidden = False
@@ -645,10 +656,7 @@ class Realtime(Overlay):
         if not api.read.vehicle.pit_request():
             return ""
 
-        if minfo.energy.available:
-            est_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
-        else:
-            est_laps = minfo.fuel.estimatedLaps
+        est_laps = run_laps(minfo.fuel, minfo.energy)
         safe_laps = calc.pit_in_countdown_laps(est_laps, api.read.lap.progress())
 
         safe_text = f"{safe_laps:.0f}" if safe_laps > 9.94 else f"{safe_laps:.1f}"
@@ -675,7 +683,7 @@ class GreenFlagTimer:
         "_green_flag_duration",
     )
 
-    def __init__(self, green_flag_duration: bool):
+    def __init__(self, green_flag_duration: float):
         self._last_lap_stime = -1.0
         self._green_flag_duration = green_flag_duration
 
@@ -710,7 +718,7 @@ class TrafficTimer:
         "_show_off_track",
     )
 
-    def __init__(self, max_time_gap: bool, pitout_duration: float, low_speed_threshold: float, show_off_track: bool):
+    def __init__(self, max_time_gap: float, pitout_duration: float, low_speed_threshold: float, show_off_track: bool):
         self._timer_start = 0.0
         self._last_in_pits = 0
         self._max_time_gap = max_time_gap

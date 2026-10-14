@@ -11,6 +11,7 @@ import urllib.request
 
 import pytest
 
+from neopedal.command_server import wait_servers_stopped
 from neopedal.setting import cfg
 from neopedal.userfile import tls_cert
 from neopedal.web_dashboard import (
@@ -442,6 +443,7 @@ def test_reload_applies_dashboard_setting(ui_env, monkeypatch):
         setting["web_dashboard_port"] = new_port
         loader.reload()
         assert port_get(new_port, "/api/telemetry") == 401
+        assert wait_servers_stopped()  # old server closed by a worker thread
         with pytest.raises(urllib.error.URLError):
             port_get(port, "/api/telemetry")
         setting["enable_lan_access"] = True

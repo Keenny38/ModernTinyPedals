@@ -26,6 +26,8 @@ with filling bar, planned services. Nothing drawn while hidden.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...i18n import tr_overlay as tr
@@ -34,9 +36,14 @@ from ..pit_lane_helper import DANGER, DASH, OK, WARNING, PitLaneMixin, PitReadin
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import PitLaneHelperConfig
+
 
 class Realtime(HiddenPreview, PitLaneMixin, StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: PitLaneHelperConfig
 
     options = (
         "font_size", "show_always", "approach_distance", "show_speed", "show_limiter_state",

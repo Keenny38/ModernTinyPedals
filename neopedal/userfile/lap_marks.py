@@ -28,7 +28,7 @@ import json
 import logging
 import os
 
-from . import atomic_write
+from . import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +65,7 @@ def save_marks(folder: str, marks: dict[str, dict]) -> bool:
             if os.path.exists(path):
                 os.remove(path)
             return True
-        with atomic_write(path) as file:
-            json.dump(cleaned, file, indent=1, ensure_ascii=False)
-        return True
+        return write_json(path, cleaned, indent=1, ensure_ascii=False)
     except OSError as error:
         logger.error("LAP MARKS: unable to save %s: %s", path, error)
         return False

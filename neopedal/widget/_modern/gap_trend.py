@@ -25,6 +25,8 @@ being caught), gap of each lap as a small line chart in same color.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -34,9 +36,14 @@ from .base import ModernOverlay
 from .draw import panel, rounded
 from .table import CENTER, LEFT, RIGHT, TEXT, Cell, Column, Row, TableMixin
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import GapTrendConfig
+
 
 class Realtime(GapTrendMixin, TableMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: GapTrendConfig
 
     options = (
         "font_size", "number_of_laps", "decimal_places", "show_gaps_in_class", "show_driver_name",

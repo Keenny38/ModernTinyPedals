@@ -23,13 +23,15 @@ Item {
     readonly property real wPit: theme.em * 3.0
     readonly property real wUsage: usage ? theme.em * 5.0 : 0
     readonly property real wWear: wear ? theme.em * 4.6 : 0
+    readonly property bool replay: (backend.sessionHeader.replay || "") !== ""  // session replay (LMU)
+    readonly property real wWatch: replay ? theme.em * 2.6 : 0
 
     component HeaderText: Text {
         property real cellWidth: 0
         width: cellWidth
         visible: cellWidth > 0
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.8
+        font.pointSize: theme.fontCaption
         font.capitalization: Font.AllUppercase
         font.letterSpacing: 0.3
         horizontalAlignment: Text.AlignRight
@@ -63,7 +65,8 @@ Item {
             spacing: theme.em * 0.6
             TpCombo {
                 Layout.preferredWidth: theme.em * 16
-                model: backend.driverOptions.map(function(option) { return option.text })
+                model: backend.driverOptions
+                textRole: "text"
                 currentIndex: backend.driverIndex
                 tip: i18n.tr("Car")
                 onActivated: function(index) { backend.selectEntry(backend.driverOptions[index].key) }
@@ -108,7 +111,7 @@ Item {
                     Text {
                         text: modelData.label
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.78
+                        font.pointSize: theme.fontCaption
                         font.capitalization: Font.AllUppercase
                         font.letterSpacing: 0.3
                     }
@@ -116,7 +119,7 @@ Item {
                         text: modelData.value
                         color: theme.text
                         font.weight: Font.DemiBold
-                        font.pointSize: theme.fontPoint * 1.08
+                        font.pointSize: theme.fontSubtitle
                         font.features: { "tnum": 1 }
                     }
                 }
@@ -145,7 +148,7 @@ Item {
 
                     Row {
                         Layout.leftMargin: laps.pad
-                        Layout.bottomMargin: theme.em * 0.35
+                        Layout.bottomMargin: theme.em * 0.4
                         HeaderText { cellWidth: laps.wLap; text: i18n.tr("Lap") }
                         HeaderText { cellWidth: laps.wPos; text: i18n.tr("Pos") }
                         HeaderText { cellWidth: laps.wTime; text: i18n.tr("Time") }
@@ -158,6 +161,7 @@ Item {
                         HeaderText { cellWidth: laps.wPit; text: i18n.tr("Pit") }
                         HeaderText { cellWidth: laps.wUsage; text: i18n.tr("Used") }
                         HeaderText { cellWidth: laps.wWear; text: i18n.tr("Tread") }
+                        HeaderText { cellWidth: laps.wWatch; text: "" }
                     }
                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border; opacity: 0.6 }
 
@@ -166,7 +170,8 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.preferredWidth: laps.pad + laps.wLap + laps.wPos + laps.wTime + laps.wDelta + laps.wSector * 3
-                                               + laps.wSpeed + laps.wTyre + laps.wPit + laps.wUsage + laps.wWear + laps.scrollWidth
+                                               + laps.wSpeed + laps.wTyre + laps.wPit + laps.wUsage + laps.wWear + laps.wWatch
+                                               + laps.scrollWidth
                         clip: true
                         model: backend.lapModel
                         boundsBehavior: Flickable.StopAtBounds
@@ -207,7 +212,24 @@ Item {
                                 Cell { cellWidth: laps.wSector; text: row.s2; tone: row.s2Tone }
                                 Cell { cellWidth: laps.wSector; text: row.s3; tone: row.s3Tone }
                                 Cell { cellWidth: laps.wSpeed; text: row.speedText }
-                                Cell { cellWidth: laps.wTyre; text: row.compound; tone: "dim" }
+                                Item {  // compound badge (as overlays) & name, right aligned
+                                    width: laps.wTyre
+                                    height: parent.height
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: theme.em * 0.6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: theme.em * 0.3
+                                        TpCompound { name: row.compound; anchors.verticalCenter: parent.verticalCenter }
+                                        Text {
+                                            text: row.compound
+                                            color: theme.dimText
+                                            width: Math.min(implicitWidth, laps.wTyre - theme.em * 2)
+                                            elide: Text.ElideRight
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+                                }
                                 Item {
                                     width: laps.wPit
                                     height: parent.height
@@ -218,20 +240,33 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: pitText.implicitWidth + theme.em * 0.7
                                         height: Math.round(theme.em * 1.4)
-                                        radius: theme.em * 0.3
+                                        radius: theme.radiusSm
                                         color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.18)
                                         Text {
                                             id: pitText
                                             anchors.centerIn: parent
                                             text: i18n.tr("PIT")
                                             color: theme.warning
-                                            font.pointSize: theme.fontPoint * 0.72
+                                            font.pointSize: theme.fontTiny
                                             font.weight: Font.Bold
                                         }
                                     }
                                 }
                                 Cell { cellWidth: laps.wUsage; text: row.usageText }
                                 Cell { cellWidth: laps.wWear; text: row.wearText }
+                                Item {
+                                    width: laps.wWatch
+                                    height: parent.height
+                                    visible: laps.replay
+                                    TpButton {  // replay of session at start of this lap, camera on car
+                                        anchors.centerIn: parent
+                                        flat: true
+                                        glyph: "\uE768"  // play
+                                        implicitHeight: Math.round(theme.em * 1.8)
+                                        tip: i18n.tr("Watch lap in replay")
+                                        onClicked: backend.watchLap(row.lap)
+                                    }
+                                }
                             }
                         }
                     }

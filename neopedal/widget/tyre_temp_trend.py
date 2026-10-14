@@ -26,7 +26,7 @@ Surface temperature of each tyre over the last seconds (or average of each of th
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen, QPolygonF
@@ -38,6 +38,9 @@ from ._base import Overlay
 from ._modern.quad import heat_color
 from ._modern.wheels import TyreCompounds
 from ._race_aids import LEFT, RIGHT, ClassicCells, finite, line_polygons, option_colors, scale_y, value_range
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TyreTempTrendConfig
 
 DASH = chr(0x2013)
 WHEELS = ("FL", "FR", "RL", "RR")
@@ -122,7 +125,7 @@ class WheelChart(NamedTuple):
 class TyreTrendMixin:
     """Temperature samples & chart geometry, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: TyreTempTrendConfig
     cfg: Any
 
     def setup_trend(self):
@@ -136,11 +139,12 @@ class TyreTrendMixin:
         self.sign = "°" if wcfg["show_degree_sign"] else ""
         self.compounds = TyreCompounds(wcfg["enable_heatmap_auto_matching"], wcfg["heatmap_name"])
         self.chart_key: tuple = ()
+        self.chart_serial = 0  # changed when charts rebuilt (samples, optimal temperature, heatmap)
         self.charts: tuple[WheelChart, ...] = (WheelChart(),) * 4
         self.line_width = 1.5
 
     def read_trend(self, chart_rects: tuple[QRectF, ...]) -> tuple:
-        """Sample temperatures, charts if changed; state: (version, texts, heat colors)"""
+        """Sample temperatures, charts if changed; state: (chart serial, texts, heat colors)"""
         self.compounds.update()
         temperatures = api.read.tyre.surface_temperature_avg()
         self.trend.update(api.read.timing.elapsed(), api.read.lap.completed_laps(), temperatures)
@@ -152,6 +156,7 @@ class TyreTrendMixin:
         if key != self.chart_key:
             self.chart_key = key
             self.charts = self.build_charts(chart_rects, optimal)
+            self.chart_serial += 1
         texts = []
         colors: list[QColor | None] = []
         for wheel in range(4):
@@ -162,7 +167,7 @@ class TyreTrendMixin:
             else:
                 texts.append(DASH)
                 colors.append(None)
-        return self.trend.version, tuple(texts), tuple(colors)
+        return self.chart_serial, tuple(texts), tuple(colors)
 
     def build_charts(self, rects: tuple[QRectF, ...], optimal: tuple[float, ...]) -> tuple[WheelChart, ...]:
         """Line of each tyre in its chart, all tyres on same scale"""
@@ -194,6 +199,8 @@ class TyreTrendMixin:
 
 class Realtime(TyreTrendMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: TyreTempTrendConfig
 
     update_while_hidden = True  # trend kept while hidden
 

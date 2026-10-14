@@ -32,7 +32,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from time import monotonic
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QRegion
@@ -42,8 +42,13 @@ from .._painter import DirtyRegion
 from .common import REAR_MAX_STEER
 from .status import icon_glow_rect
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
+
 PART_MARGIN = 2  # widget pixels around a part: antialiased edges, rounding of scaled rects
 WHEEL_PARTS = ("wheel0", "wheel1", "wheel2", "wheel3")
+WHOLE_REPAINT_SHARE = 0.5  # changed parts covering more of the widget: whole widget repainted
+PULSE_STEPS = 40  # visible steps of alert pulse strength (damage panel repainted only on step change)
 
 
 class RegionMixin:
@@ -81,6 +86,7 @@ class RegionMixin:
     delta_best: Any
     delta_shown: Any
     depth_effects: Any
+    displayed_incident: Any
     devicePixelRatioF: Any
     energy: Any
     energy_available: Any
@@ -118,6 +124,7 @@ class RegionMixin:
     oil_temp: Any
     outline_width: Any
     presence: Any
+    pulse: Any
     recorder: Any
     rect: Any
     rect_battery: Any
@@ -140,7 +147,11 @@ class RegionMixin:
     shadow_offset: Any
     show_battery_bar: Any
     show_damage_panel: Any
+    setting_popup_fading: Any
+    setting_popup_key: Any
+    setting_popup_rect: Any
     show_event_log: Any
+    show_setting_popup: Any
     show_recorder: Any
     show_suspension: Any
     showing_incident: Any
@@ -150,6 +161,7 @@ class RegionMixin:
     smooth_transition: Any
     speed: Any
     status_icon_boxes: Any
+    status_icon_layout: Any
     status_key: Any
     stint_has_previous: Any
     stint_pressure: Any
@@ -171,7 +183,7 @@ class RegionMixin:
     unit: Any
     update: Any
     water_temp: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     wheel_key: Any
     wheel_pad_front: Any
     wheel_pad_rear: Any
@@ -202,6 +214,12 @@ class RegionMixin:
         if changed:
             rects = self.part_rects()
             dirty = [rects[name] for name in changed if not rects[name].isEmpty()]
+            bounding = QRect()
+            for rect in dirty:
+                bounding = bounding.united(rect)
+            if bounding.width() * bounding.height() > self.width() * self.height() * WHOLE_REPAINT_SHARE:
+                self.update()  # most of the widget: whole repaint, no clip (clipped drawing is slower)
+                return
             self.dirty_region.update(cast(QWidget, self), dirty, self.uncut_cached)
 
     def uncut_cached(self, rects: list[QRect]) -> list[QRect]:
@@ -274,27 +292,24 @@ class RegionMixin:
             left, right = next(rows)
             states["damper"] = self.damper_key(left.united(right))
         if self.show_damage_panel:
-            states["damage"] = self.damage_key()
+            states["damage"] = (self.damage_key(), self.damage_pulse_step())
         if self.show_recorder:
-            showing = self.showing_incident()
+            shown = self.displayed_incident()  # by time: a new incident in a full list keeps the count
             states["trace"] = (
-                -1 if showing else self.trace_version, len(self.recorder.incidents), showing,
+                -1 if shown is not None else self.trace_version, len(self.recorder.incidents),
+                shown.time if shown is not None else None,
                 self.browse_incident.time if self.browse_incident is not None else None,
             )
         if self.show_event_log:
             states["events"] = tuple(self.event_log.events)  # same event logged again: rows shift
+        if self.show_setting_popup:
+            states["popup"] = self.setting_popup_key()
         return states
 
     def animating_parts(self) -> set[str]:
-        """Parts moving on screen without data change: shift flash, color fades, pulsing alerts,
-        battery flow, incident replay cursor"""
-        wcfg = self.wcfg
+        """Parts moving on screen without data change: color fades, pulsing alerts, incident replay cursor,
+        setting pop-up fade (shift flash & battery flow: in their keys)"""
         parts: set[str] = set()
-        if self.rpm_max > 0 and self.rpm / self.rpm_max >= wcfg["rpm_redline_ratio"]:
-            if self.led_h:
-                parts.add("leds")
-            if "gear" in self.center_order and wcfg["enable_gear_rpm_color"] and wcfg["enable_shift_flash"]:
-                parts.add("center")
         if self.smooth_transition:
             now = monotonic()
             for name, tyre_fade, brake_fade in zip(WHEEL_PARTS, self.tyre_fades, self.brake_fades):
@@ -310,13 +325,18 @@ class RegionMixin:
                     parts.add(name)
             if self.gauge_low():
                 parts.update(("fuel", "energy"))
-            if self.show_damage_panel and (
-                any(self.damage_detached) or any(self.damage_puncture) or max(self.body_damage, default=0) >= 3
-            ):
-                parts.add("damage")
-        if self.show_battery_bar and wcfg["enable_battery_bar_animation"] and self.battery_state in (2, 3):
-            parts.add("battery")
+        if self.show_setting_popup and self.setting_popup_fading():
+            parts.add("popup")
         return parts
+
+    def damage_pulse_step(self) -> int:
+        """Visible step of damage panel alert pulse (detached part, puncture): in damage state, repainted only when
+        pulse changes visibly (PULSE_STEPS), not every update; 0 if not pulsing"""
+        if self.alert_pulse and self.show_damage_panel and (
+            any(self.damage_detached) or any(self.damage_puncture) or max(self.body_damage, default=0) >= 3
+        ):
+            return round(self.pulse() * PULSE_STEPS)
+        return 0
 
     def animating(self) -> bool:
         """Something moves on screen without data change"""
@@ -374,7 +394,7 @@ class RegionMixin:
                     shapes.append(left.united(right))
         if self.show_damage_panel:
             shapes.append(self.rect_damage)
-        for box in self.status_icon_boxes()[:2]:
+        for box in self.status_icon_layout()[:3]:  # icons with glow: headlights, wipers, engine
             if box is not None:
                 shapes.append(icon_glow_rect(box))
         turned = len(shapes)
@@ -436,6 +456,8 @@ class RegionMixin:
             for row in self.event_rows:
                 events = events.united(row)
             bounds["events"] = self.inflated(events, extra)
+        if self.show_setting_popup:
+            bounds["popup"] = self.setting_popup_rect().adjusted(-extra, -extra, extra, extra)
         return bounds
 
     def wheel_bound(self, index: int) -> QRectF:
@@ -457,7 +479,8 @@ class RegionMixin:
     def status_bound(self) -> QRectF:
         """Headlights & engine icons, with their glow (reaches beyond side gap)"""
         wcfg = self.wcfg
-        if not self.rects_tyre or not (wcfg["show_headlights_indicator"] or wcfg["show_engine_status"]):
+        if not self.rects_tyre or not (wcfg["show_headlights_indicator"] or wcfg["show_wipers_indicator"]
+                                       or wcfg["show_engine_status"]):
             return QRectF()
         gap = self.side_gap(wcfg["status_icons_side"] == "Right")
         if gap.isNull():

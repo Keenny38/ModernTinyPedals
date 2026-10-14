@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import random
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 
 from .regex_pattern import ABBR_PATTERN, rex_invalid_char
@@ -39,11 +40,25 @@ def upper_matched_abbr(matchobj: re.Match) -> str:
     return matchobj.group().upper()
 
 
+# Display names differing from their setting key: key -> shown name (as a key), also as part of other keys
+# (hotkeys "black_box_xxx", "widget_black_box"). Setting keys kept, so presets, settings & shortcuts keep working.
+DISPLAY_RENAMES: Mapping[str, str] = {
+    "black_box": "dashboard_hud",
+}
+
+
+def display_key(name: str, renames: Mapping[str, str] = DISPLAY_RENAMES) -> str:
+    """Key of shown name: renamed key replaced where whole words of name (between "_"), other keys unchanged"""
+    for old, new in renames.items():
+        if old in name:
+            name = re.sub(rf"(?<![^_]){old}(?![^_])", new, name)
+    return name
+
+
 def format_module_name(name: str) -> str:
     """Format widget & module name"""
     return uppercase_abbr(
-        name
-        .replace("module_", "")
+        display_key(name.replace("module_", ""))
         .replace("_", " ")
         .title()
     )
@@ -52,7 +67,7 @@ def format_module_name(name: str) -> str:
 def format_option_name(name: str) -> str:
     """Format option name ("neopedal" in option keys shown as app name)"""
     return uppercase_abbr(
-        name
+        display_key(name)
         .replace("_", " ")
         .title()
         .replace("Neopedal", "NeoPedal")
@@ -112,13 +127,19 @@ def random_color_class(name: str) -> str:
     return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
 
 
-@lru_cache(maxsize=128)
+def driver_display_name(name: str) -> str:
+    """Driver name without online tag ("Tobias Mueller#7949" -> "Tobias Mueller"), as every page shows it"""
+    return name.split("#", 1)[0].strip() or name.strip()
+
+
+@lru_cache(maxsize=256)
 def shorten_driver_name(name: str) -> str:
-    """Shorten driver name"""
-    name_split = name.strip(" ").split(" ")
-    if len(name_split) > 1:
-        return f"{name_split[0][:1]}.{name_split[-1]}".title()
-    return name_split[-1]
+    """Short driver name of overlays, pages & stream graphics: "Lena Hartmann" -> "L. Hartmann", "Jan van Dijk" ->
+    "J. van Dijk", online tag dropped, case kept ("McLaren" stays)"""
+    parts = driver_display_name(name).split()
+    if len(parts) > 1:
+        return f"{parts[0][:1]}. {' '.join(parts[1:])}"
+    return parts[0] if parts else ""
 
 
 def strip_invalid_char(name: str) -> str:
@@ -132,8 +153,26 @@ def strip_invalid_char(name: str) -> str:
     return "unknown"
 
 
-def laptime_string_to_seconds(laptime: str) -> float:
-    """Convert laptime "minutes:seconds" string to seconds"""
-    string = laptime.split(":")
-    split = [0] * (2 - len(string)) + string
-    return float(split[0]) * 60 + float(split[1])
+def class_style(car_class: str, classes: Mapping | None = None) -> tuple[str, str]:
+    """Alias & color of vehicle class (vehicle class editor), same on overlays, pages & stream graphics:
+    alias is class name if not set, color made from name if not set"""
+    if classes is None:
+        from .setting import cfg
+
+        classes = cfg.user.classes
+    style = classes.get(car_class) if isinstance(classes, Mapping) else None
+    if not isinstance(style, Mapping):
+        return car_class, random_color_class(car_class)
+    alias = style.get("alias")
+    color = style.get("color")
+    return (str(alias) if alias else car_class), (str(color) if color else random_color_class(car_class))
+
+
+def class_color(car_class: str, classes: Mapping | None = None) -> str:
+    """Color of vehicle class (vehicle class editor), made from name if not set"""
+    return class_style(car_class, classes)[1]
+
+
+def class_alias(car_class: str, classes: Mapping | None = None) -> str:
+    """Alias of vehicle class (vehicle class editor), class name if not set"""
+    return class_style(car_class, classes)[0] if car_class else ""

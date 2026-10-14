@@ -26,15 +26,15 @@ Card {
         anchors.verticalCenter: parent.verticalCenter
         color: tile.tint
         opacity: tile.empty ? 0.3 : 0.9
-        Behavior on color { ColorAnimation { duration: 250 } }
+        Behavior on color { ColorAnimation { duration: theme.motionSlow } }
     }
 
     ColumnLayout {
         id: column
         anchors { left: parent.left; right: parent.right; top: parent.top }
         anchors.leftMargin: theme.em * 0.9
-        anchors.rightMargin: theme.em * 0.65
-        anchors.topMargin: theme.em * 0.65
+        anchors.rightMargin: theme.em * 0.7
+        anchors.topMargin: theme.em * 0.7
         spacing: 1
         RowLayout {
             spacing: theme.em * 0.4
@@ -43,13 +43,13 @@ Card {
             Text {
                 text: tile.figure.title || ""
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.88
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
         }
         RowLayout {
-            spacing: theme.em * 0.45
+            spacing: theme.em * 0.5
             Layout.fillWidth: true
             Rectangle {  // level letter: level told without color
                 visible: (tile.figure.letter || "") !== ""
@@ -57,12 +57,12 @@ Card {
                 Layout.preferredHeight: theme.em * 1.45
                 radius: width / 2
                 color: tile.tint
-                Behavior on color { ColorAnimation { duration: 250 } }
+                Behavior on color { ColorAnimation { duration: theme.motionSlow } }
                 Text {
                     anchors.centerIn: parent
                     text: tile.figure.letter || ""
-                    color: "white"
-                    font.pointSize: theme.fontPoint * 0.85
+                    color: theme.inkOn(tile.tint)  // readable on level color
+                    font.pointSize: theme.fontSmall
                     font.weight: Font.Bold
                 }
             }
@@ -70,20 +70,20 @@ Card {
                 id: valueText
                 text: tile.figure.value || "-"
                 color: tile.figure.color ? tile.figure.color : tile.empty ? theme.dimText : theme.text
-                font.pointSize: theme.fontPoint * 1.55
+                font.pointSize: theme.fontTitle
                 font.weight: Font.DemiBold
                 font.features: { "tnum": 1 }
                 elide: Text.ElideRight
                 Layout.fillWidth: true
-                Behavior on color { ColorAnimation { duration: 250 } }
+                Behavior on color { ColorAnimation { duration: theme.motionSlow } }
                 onTextChanged: valueFade.restart()
-                NumberAnimation { id: valueFade; target: valueText; property: "opacity"; from: 0.25; to: 1; duration: 260 }
+                NumberAnimation { id: valueFade; target: valueText; property: "opacity"; from: 0.25; to: 1; duration: theme.motionSlow }
             }
         }
         Text {
             text: (tile.figure.detail || "") !== "" ? tile.figure.detail : " "
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.86
+            font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
             elide: Text.ElideRight
             Layout.fillWidth: true
@@ -102,7 +102,7 @@ Card {
                     height: parent.height
                     radius: height / 2
                     color: tile.tint
-                    Behavior on width { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: theme.animate ? 350 : 0; easing.type: Easing.OutCubic } }
                 }
             }
         }
@@ -111,5 +111,5 @@ Card {
     HoverHandler { id: hover; enabled: (tile.figure.tip || "") !== "" }
     ToolTip.visible: hover.hovered
     ToolTip.text: tile.figure.tip || ""
-    ToolTip.delay: 600
+    ToolTip.delay: theme.tipDelay
 }

@@ -29,6 +29,7 @@ the race planned again at each lap & stop of a race (live replan).
 from __future__ import annotations
 
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
@@ -44,6 +45,9 @@ from ..race_plan import Realtime as ClassicPlan
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RacePlanConfig
+
 # What ends stints of plan (Strategy.limit) -> label (English, translated)
 LIMIT_LABELS = {"fuel": "Fuel", "energy": "Energy", "stint": "Driver", "stops": "Stops", "tyres": "Tyres"}
 # Consumption estimate of fuel & energy modules (consumptionMethod) -> label
@@ -52,6 +56,8 @@ ESTIMATE_LABELS = {"game": "Game", "last_lap": "Last lap", "median": "Median"}
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: RacePlanConfig
 
     options = (
         "font_size", "layout", "pit_window_laps", "enable_live_replan", "show_next_stop", "show_refuel",

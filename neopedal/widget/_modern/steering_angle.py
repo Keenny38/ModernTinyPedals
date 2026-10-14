@@ -25,6 +25,8 @@ difference (oversteer blue, understeer orange), yaw rate, turning radius (and un
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -33,6 +35,9 @@ from ...api_control import api
 from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SteeringAngleConfig
 
 ITEMS = (
     ("steering_angle", "Steering", "+888°"),
@@ -48,6 +53,8 @@ ITEMS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SteeringAngleConfig
 
     options = (
         "font_size", "layout", "wheel_track_front", "wheelbase", "manual_steering_range",
@@ -87,7 +94,7 @@ class Realtime(StatsMixin, ModernOverlay):
         theme = self.theme
         wheels = minfo.wheels
         if wcfg["manual_steering_range"] > 0:
-            steering_range = wcfg["manual_steering_range"]
+            steering_range: float = wcfg["manual_steering_range"]
         else:
             steering_range = api.read.inputs.steering_range_physical()
         steer = api.read.inputs.steering_raw() * steering_range * 0.5

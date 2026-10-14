@@ -25,7 +25,7 @@ Widget key name must match corresponding file name in 'widget' folder
 WIDGET_FUEL = {
     "fuel": {
         "enable": True,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 713,
         "position_y": 564,
         "font_name": "Consolas",
@@ -143,7 +143,7 @@ WIDGET_FUEL = {
     },
     "virtual_energy": {
         "enable": True,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 949,
         "position_y": 564,
         "font_name": "Consolas",

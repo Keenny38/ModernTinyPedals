@@ -25,6 +25,8 @@ on heatmap colored pill, line chart of trend colored by heatmap, dashed optimal 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -33,9 +35,14 @@ from ..tyre_temp_trend import DASH, WHEELS, TyreTrendMixin
 from .base import CENTER, LEFT, ModernOverlay
 from .draw import panel, readable_on, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreTempTrendConfig
+
 
 class Realtime(TyreTrendMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TyreTempTrendConfig
 
     options = (
         "font_size", "display_width", "display_height", "trend_duration", "show_trend_by_lap", "number_of_laps",

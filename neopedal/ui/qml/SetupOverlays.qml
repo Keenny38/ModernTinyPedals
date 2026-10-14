@@ -52,7 +52,7 @@ SetupStep {
                     text: backend.nameError
                     color: theme.loss
                     wrapMode: Text.WordWrap
-                    font.pointSize: theme.fontPoint * 0.92
+                    font.pointSize: theme.fontLabel
                 }
             }
 
@@ -88,7 +88,7 @@ SetupStep {
         Text {
             text: i18n.tr("Overlays to show")
             color: theme.text
-            font.pointSize: theme.fontPoint * 1.05
+            font.pointSize: theme.fontSubtitle
             font.weight: Font.DemiBold
         }
         Pill {
@@ -119,7 +119,7 @@ SetupStep {
         text: i18n.tr("Overlays not listed here keep their state in this preset.")
         color: theme.dimText
         wrapMode: Text.WordWrap
-        font.pointSize: theme.fontPoint * 0.92
+        font.pointSize: theme.fontLabel
     }
 
     Flow {
@@ -144,15 +144,15 @@ SetupStep {
                 required property int previewState
                 width: grid.tileWidth
                 height: picture.height + info.implicitHeight + theme.em * 1.3
-                radius: theme.em * 0.75
+                radius: theme.radiusXl
                 color: tileArea.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.18) : Qt.darker(theme.base, 1.025)) : theme.base
                 border.width: checked ? 2 : 1
                 border.color: checked ? theme.accent : (theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border)
                 scale: tileArea.pressed ? 0.98 : 1
                 activeFocusOnTab: true
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Behavior on border.color { ColorAnimation { duration: 150 } }
-                Behavior on scale { NumberAnimation { duration: 90 } }
+                Behavior on color { ColorAnimation { duration: theme.motionFast } }
+                Behavior on border.color { ColorAnimation { duration: theme.motionBase } }
+                Behavior on scale { NumberAnimation { duration: theme.motionFast } }
                 Accessible.role: Accessible.CheckBox
                 Accessible.name: label
                 Accessible.checkable: true
@@ -187,14 +187,14 @@ SetupStep {
                     Rectangle {  // check mark
                         anchors.top: parent.top
                         anchors.right: parent.right
-                        anchors.margins: theme.em * 0.35
+                        anchors.margins: theme.em * 0.4
                         width: Math.round(theme.em * 1.3)
                         height: width
-                        radius: theme.em * 0.3
-                        color: tile.checked ? theme.accent : Qt.rgba(0, 0, 0, 0.35)
+                        radius: theme.radiusSm
+                        color: tile.checked ? theme.accentFill : Qt.rgba(0, 0, 0, 0.35)
                         border.width: tile.checked ? 0 : 1.5
                         border.color: Qt.rgba(1, 1, 1, 0.7)
-                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionBase } }
                         Icon {
                             anchors.centerIn: parent
                             visible: tile.checked
@@ -211,7 +211,7 @@ SetupStep {
                     anchors.right: parent.right
                     anchors.top: picture.bottom
                     anchors.margins: theme.em * 0.6
-                    anchors.topMargin: theme.em * 0.45
+                    anchors.topMargin: theme.em * 0.5
                     spacing: theme.em * 0.3
                     Text {
                         Layout.fillWidth: true

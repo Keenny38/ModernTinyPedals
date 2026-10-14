@@ -25,6 +25,7 @@ Session type, system clock, remaining session time, estimated remaining laps.
 from __future__ import annotations
 
 from time import strftime
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
@@ -35,6 +36,9 @@ from ...module_info import minfo
 from .base import ModernOverlay, clock_samples
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SessionConfig
+
 SESSION_NAMES = ("TEST", "PRACTICE", "QUALIFY", "WARMUP", "RACE")
 # Custom session name options (classic), same order as SESSION_NAMES
 SESSION_TEXT_OPTIONS = (
@@ -44,6 +48,8 @@ SESSION_TEXT_OPTIONS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SessionConfig
 
     options = (
         "font_size", "layout", "show_session_name", *SESSION_TEXT_OPTIONS, "show_system_clock",

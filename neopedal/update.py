@@ -638,7 +638,7 @@ def verify_installer(path: str, repository: str | None = None) -> None:
     """Refuse installer with a broken signature (raise ValueError), unsigned one is logged
 
     Official releases are unsigned (sha256 hash checked), installer of another
-    update repository must be signed (raise UnsignedInstallerError).
+    update repository must be signed (raise UnsignedInstallerError), also if signature can not be checked.
 
     Args:
         repository: update repository the installer was downloaded from (found at check time),
@@ -649,8 +649,8 @@ def verify_installer(path: str, repository: str | None = None) -> None:
         raise ValueError("installer signature is not valid")
     if repository is None:
         repository = update_repository()
-    if signature == SIGNATURE_UNSIGNED and not is_official_repository(repository):
-        raise UnsignedInstallerError("installer of a custom update repository is not signed")
+    if signature in (SIGNATURE_UNSIGNED, SIGNATURE_UNKNOWN) and not is_official_repository(repository):
+        raise UnsignedInstallerError(f"installer of a custom update repository is not signed ({signature})")
     if signature == SIGNATURE_UNSIGNED:
         logger.warning("UPDATES: installer is not signed, sha256 hash verified only")
     else:

@@ -116,6 +116,8 @@ def test_cells_dimmed_and_level_pill(backend):  # noqa: F811
     assert theory["dim"] and not theory["pill"]  # no sector best: unknown
     assert level["pill"] and not level["dim"] and level["color"]
     assert row[columns.index("pb")]["bold"]
+    extras = {column["key"]: column["extras"] for column in backend.columns}
+    assert extras["level"] and not extras["pb"] and not extras["theory"]  # decorations made only where any
 
 
 def test_history_read_only_when_changed(backend, monkeypatch):  # noqa: F811
@@ -195,3 +197,41 @@ def test_page_without_qml_warnings(page):  # noqa: F811
     finally:
         qInstallMessageHandler(previous)
     assert not [text for text in messages if ".qml" in text], messages
+
+
+def test_track_switch_keeps_rows_of_shared_vehicles(backend):  # noqa: F811
+    """Other track with the same vehicles: rows changed in place (delegates kept), page told to go back to top;
+    few vehicles in common or All Tracks: rows made again"""
+    backend.stats_temp["Imola"] = {OREGA: {"pb": 100.0}, "Hyper - Ferrari": {"pb": 99.0}}
+    backend.selectTrack(SPA)
+    resets, switched = [], []
+    backend.rows.modelReset.connect(lambda: resets.append(True))
+    backend.rowsSwitched.connect(lambda: switched.append(True))
+    backend.selectTrack("Imola")
+    assert not resets and switched == [True]
+    assert backend.rows.rows[backend.row_keys().index(OREGA)]["cells"][1]["text"] == "1:40.000"  # new track values
+    backend.selectTrack("Monza")  # no vehicle in common
+    assert resets == [True] and switched == [True]
+    backend.selectTrack("")  # All Tracks
+    assert resets == [True, True] and switched == [True]
+
+
+def test_live_track_marker_follows_game_session(backend, monkeypatch):  # noqa: F811
+    """Game session on another track: track list marker & Live badge shown again without waiting for a lap"""
+    from neopedal.api_control import api
+
+    def current(tracks):
+        return [entry["key"] for entry in tracks if entry["current"]]
+
+    backend.selectTrack("Monza")
+    assert current(backend.tracks) == [SPA] and not backend.trackInfo["live"]
+    signals = []
+    backend.tracksChanged.connect(lambda: signals.append(True))
+    backend.check_live_track()
+    assert not signals  # same game track: nothing made again
+    monkeypatch.setattr(type(api.read.session), "track_name", lambda self: "Monza", raising=False)
+    backend.check_live_track()
+    assert signals == [True] and current(backend.tracks) == ["Monza"] and backend.trackInfo["live"]
+    monkeypatch.setattr(type(api.read.session), "track_name", lambda self: "", raising=False)
+    backend.check_live_track()  # session ended
+    assert current(backend.tracks) == [] and not backend.trackInfo["live"]

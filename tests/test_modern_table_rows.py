@@ -101,10 +101,10 @@ def test_only_changed_rows_invalidated(ui_env, bundled_fonts, monkeypatch):
     car = field.vehicles[0]
     car.lastLapTime += 1.0
     widget.show_field(field, context)
-    assert len(updates) == 1 and len(updates[0]) == 1  # one row
+    assert len(updates) == 1 and len(updates[0]) == 1  # one cell
     rect = updates[0][0]
-    assert sum(1 for top in rows if widget.row_update_rect(top) == rect) == 1
-    assert rect.width() == widget.width() and rect.height() < widget.table.row_height + 4
+    assert sum(1 for top in rows if widget.row_update_rect(top).contains(rect)) == 1
+    assert rect.width() < widget.width() / 2 and rect.height() < widget.table.row_height + 4
 
 
 def test_rows_skipped_outside_paint_region(ui_env, bundled_fonts, monkeypatch):

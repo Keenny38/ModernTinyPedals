@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from array import array
 from math import nan
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
@@ -39,6 +39,9 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._common import delta_shown
 from ._race_aids import LEFT, RIGHT, ClassicCells, finite, line_polygons, option_colors, sample_runs, scale_y
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import DeltaGraphConfig
 
 SAMPLE_SPACING = 2  # chart pixels per sample along lap
 MAX_SAMPLES = 1000
@@ -61,6 +64,14 @@ class DeltaTrace:
         self.last_slot = -1
         self.wrapped = False  # lap distance went past finish line before lap counter
         self.version = 0  # changed when samples change
+        self.changed_from = 0  # first current lap slot changed since shapes were built (samples: none)
+        self.previous_version = 0  # changed when previous lap samples change
+
+    def take_changed(self) -> int:
+        """First current lap slot changed since last call (samples if none)"""
+        changed = self.changed_from
+        self.changed_from = self.samples
+        return changed
 
     def slot(self, progress: float) -> int:
         """Sample slot of lap progress (0 to 1)"""
@@ -70,6 +81,8 @@ class DeltaTrace:
         """Lap completed: current lap becomes previous lap"""
         self.previous[:] = self.current
         self.current[:] = self.empty
+        self.changed_from = 0
+        self.previous_version += 1
 
     def update(self, lap: int, progress: float, delta: float) -> bool:
         """Sample delta at lap progress (lap: completed laps), True if trace changed"""
@@ -80,6 +93,8 @@ class DeltaTrace:
             if lap != self.last_lap + 1:  # new session, or lap counter went back
                 self.previous[:] = self.empty
                 self.current[:] = self.empty
+                self.changed_from = 0
+                self.previous_version += 1
                 self.last_slot = -1
             elif not self.wrapped:
                 self.next_lap()
@@ -97,13 +112,16 @@ class DeltaTrace:
                 self.wrapped = True
             else:  # garage, reset: lap restarted
                 self.current[:] = self.empty
+                self.changed_from = 0
         elif 0 <= self.last_slot < slot <= self.last_slot + FILL_GAP:  # skipped slots: linear fill
             start = self.current[self.last_slot]
             if finite(start):
                 steps = slot - self.last_slot
                 for index in range(1, steps):
                     self.current[self.last_slot + index] = start + (delta - start) * index / steps
+                self.changed_from = min(self.changed_from, self.last_slot + 1)
         self.current[slot] = delta
+        self.changed_from = min(self.changed_from, slot)
         self.last_slot = slot
         self.version += 1
         return True
@@ -116,6 +134,81 @@ class GraphShapes(NamedTuple):
     loss: tuple[QPolygonF, ...] = ()  # areas above zero line
     line: tuple[QPolygonF, ...] = ()  # current lap
     previous: tuple[QPolygonF, ...] = ()  # previous lap
+
+
+class LapShapes:
+    """Chart shapes of current lap (as area_polygons & line_polygons): polygons of each run of samples kept,
+    runs from first changed sample built again, last run extended sample by sample"""
+
+    def __init__(self, rect: QRectF, span: float, samples: int):
+        self.rect = rect
+        self.span = span
+        self.step = rect.width() / max(samples - 1, 1)
+        self.base = rect.center().y()
+        self.runs: list[list] = []  # first, last, line, gain area, loss area
+
+    def update(self, values, changed_from: int) -> tuple[tuple[QPolygonF, ...], ...]:
+        """Shapes after samples changed from changed_from: gain areas, loss areas, lines"""
+        runs = self.runs
+        while runs and runs[-1][0] >= changed_from:
+            runs.pop()
+        index = changed_from
+        extended = None
+        if runs and runs[-1][1] >= changed_from - 1:  # last run reaches first changed sample: cut there
+            run = runs[-1]
+            kept = changed_from - run[0]
+            if kept < 2:  # single sample line drawn differently: built again
+                runs.pop()
+                index = run[0]
+            else:
+                run[1] = changed_from - 1
+                run[2].resize(kept)
+                run[3].resize(kept + 1)  # bottom point at end removed
+                run[4].resize(kept + 1)
+                extended = run
+        count = len(values)
+        if extended is not None:
+            while index < count and finite(values[index]):
+                self.add_point(extended, index, values[index])
+                index += 1
+            extended[1] = index - 1
+            base_x = self.rect.left() + extended[1] * self.step
+            extended[3].append(QPointF(base_x, self.base))
+            extended[4].append(QPointF(base_x, self.base))
+        while index < count:
+            if not finite(values[index]):
+                index += 1
+                continue
+            first = index
+            while index < count and finite(values[index]):
+                index += 1
+            runs.append(self.new_run(values, first, index - 1))
+        return (tuple(run[3] for run in runs), tuple(run[4] for run in runs), tuple(run[2] for run in runs))
+
+    def add_point(self, run: list, index: int, value: float):
+        """Sample at end of run"""
+        rect, span = self.rect, self.span
+        x = rect.left() + index * self.step
+        run[2].append(QPointF(x, scale_y(value, rect, -span, span)))
+        run[3].append(QPointF(x, scale_y(min(value, 0.0), rect, -span, span)))
+        run[4].append(QPointF(x, scale_y(max(value, 0.0), rect, -span, span)))
+
+    def new_run(self, values, first: int, last: int) -> list:
+        """Shapes of samples first to last"""
+        rect, step, base = self.rect, self.step, self.base
+        start = QPointF(rect.left() + first * step, base)
+        run: list = [first, first, QPolygonF(), QPolygonF([start]), QPolygonF([start])]
+        for index in range(first, last + 1):
+            self.add_point(run, index, values[index])
+        run[1] = last
+        end = QPointF(rect.left() + last * step, base)
+        run[3].append(end)
+        run[4].append(end)
+        if first == last:  # single sample: short flat line, still visible
+            x = rect.left() + first * step
+            y = run[2].first().y()
+            run[2] = QPolygonF((QPointF(max(x - step * 0.3, rect.left()), y), QPointF(x, y)))
+        return run
 
 
 def area_polygons(values, rect: QRectF, span: float, sign: int) -> tuple[QPolygonF, ...]:
@@ -137,8 +230,9 @@ def area_polygons(values, rect: QRectF, span: float, sign: int) -> tuple[QPolygo
 class DeltaGraphMixin:
     """Delta trace & chart geometry, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: DeltaGraphConfig
     chart: QRectF
+    devicePixelRatioF: Any
 
     def setup_graph(self, chart: QRectF):
         """Chart area, options"""
@@ -153,6 +247,9 @@ class DeltaGraphMixin:
         self.trace = DeltaTrace(int(chart.width() / SAMPLE_SPACING) + 1)
         self.shapes = GraphShapes()
         self.shapes_version = -1
+        self.lap_shapes = LapShapes(chart, self.delta_range, self.trace.samples)
+        self.previous_shapes: tuple[QPolygonF, ...] = ()
+        self.previous_version = -1  # previous lap shapes built from this trace previous_version
 
     def read_graph(self) -> tuple:
         """Sample delta, chart geometry if trace changed; state: (trace version, mark x, mark y, delta)"""
@@ -166,26 +263,26 @@ class DeltaGraphMixin:
             self.shapes_version = trace.version
             self.shapes = self.build_shapes()
         chart = self.chart
+        # Mark position in device pixels: unchanged until it moves visibly (no repaint every update)
+        dpr = self.devicePixelRatioF()
         reading: float | None = None  # None, not nan: unchanged state compares equal (no repaint)
         mark_y = chart.center().y()
         if finite(delta):
             reading = round(calc.sym_max(delta, 99.99), self.decimals)
-            mark_y = round(scale_y(reading, chart, -self.delta_range, self.delta_range), 1)
-        mark_x = round(chart.left() + min(max(progress, 0.0), 1.0) * chart.width(), 1) if finite(progress) else chart.left()
+            mark_y = round(scale_y(reading, chart, -self.delta_range, self.delta_range) * dpr) / dpr
+        mark_x = chart.left()
+        if finite(progress):
+            mark_x = round((chart.left() + min(max(progress, 0.0), 1.0) * chart.width()) * dpr) / dpr
         return trace.version, mark_x, mark_y, reading
 
     def build_shapes(self) -> GraphShapes:
-        """Chart shapes of current trace"""
+        """Chart shapes of current trace: current lap from first changed sample on, previous lap once per lap"""
         trace = self.trace
-        chart = self.chart
-        span = self.delta_range
-        current = trace.current
-        return GraphShapes(
-            gain=area_polygons(current, chart, span, -1),
-            loss=area_polygons(current, chart, span, 1),
-            line=line_polygons(current, chart, -span, span),
-            previous=line_polygons(trace.previous, chart, -span, span) if self.show_previous else (),
-        )
+        gain, loss, line = self.lap_shapes.update(trace.current, trace.take_changed())
+        if self.show_previous and self.previous_version != trace.previous_version:
+            self.previous_version = trace.previous_version
+            self.previous_shapes = line_polygons(trace.previous, self.chart, -self.delta_range, self.delta_range)
+        return GraphShapes(gain=gain, loss=loss, line=line, previous=self.previous_shapes)
 
     def delta_text(self, delta: float | None) -> str:
         """Delta reading"""
@@ -196,6 +293,8 @@ class DeltaGraphMixin:
 
 class Realtime(DeltaGraphMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: DeltaGraphConfig
 
     update_while_hidden = True  # lap trace kept while hidden
 

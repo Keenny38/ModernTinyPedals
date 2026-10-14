@@ -106,7 +106,8 @@ def test_sections_of_every_overlay_hold_every_shown_option_once(ui_env):
             set_classic(name, classic)
             layout = build_layout(name, cfg.user.setting[name])
             shown = design_option_keys(cfg, name, list(cfg.user.setting[name]))
-            assert sorted(layout.keys) == sorted(shown), name
+            hidden = layout.option_ui.hidden if layout.option_ui is not None else ()  # held by page tools
+            assert sorted(layout.keys) == sorted(key for key in shown if key not in hidden), name
             assert all(section.keys for section in layout.sections), name
             for key, control in layout.dependencies.items():  # options depend on an on/off option of the overlay
                 assert isinstance(cfg.user.setting[name][control], bool), (name, key, control)
@@ -351,10 +352,50 @@ def test_black_box_tools(options):
     options.setAdvanced(True)
     assert len(rows(options)) > len(simple) and "Size & Layout" in [entry["title"] for entry in rows(options, "header")]
     options.setChoice("black_box/display_profile", row(options, "black_box/display_profile")["choices"].index("Minimal"))
-    locked = [entry for entry in rows(options) if entry["locked"]]
-    assert locked and all(entry["note"].startswith("Set by") for entry in locked)
+    profiled = [entry for entry in rows(options) if entry["note"].startswith("Set by")]
+    assert profiled and not any(entry["locked"] for entry in profiled)  # editable: profile switched to Custom
     options.applyColorTheme("Colorblind Safe")
     assert options.value("black_box", "wheel_lock_color") != cfg.default.setting["black_box"]["wheel_lock_color"]
+
+
+def test_black_box_option_set_by_profile_switches_to_custom(options):
+    from neopedal.template.widget.black_box_ui import DISPLAY_PROFILES
+
+    options.selectOverlay("black_box")
+    options.setAdvanced(True)
+    options.setBool("black_box/show_fuel_gauge", True)
+    options.setChoice("black_box/display_profile", row(options, "black_box/display_profile")["choices"].index("Sprint"))
+    fuel = row(options, "black_box/show_fuel_gauge")
+    assert not fuel["checked"] and not fuel["locked"] and "Sprint" in fuel["note"]  # profile value shown
+    options.setBool("black_box/show_fuel_gauge", not fuel["checked"])  # one click, one undo step
+    assert options.value("black_box", "display_profile") == "Custom"
+    assert options.value("black_box", "show_fuel_gauge") is True
+    for key, value in DISPLAY_PROFILES["Sprint"].items():  # other profile values kept
+        if key != "show_fuel_gauge":
+            assert options.value("black_box", key) == value, key
+    assert not row(options, "black_box/show_fuel_gauge")["note"]
+    options.undo()
+    assert options.value("black_box", "display_profile") == "Sprint"
+    # Hidden by auto compact mode: stays locked (profile change cannot show it)
+    options.setNumber("black_box/display_scale", 0.6)
+    options.setNumber("black_box/auto_compact_display_scale", 0.8)
+    compound = row(options, "black_box/show_tyre_compound")
+    assert compound["locked"] and "Changing" not in compound["note"]
+    options.setBool("black_box/show_tyre_compound", True)  # not reachable from page: profile left as is
+    assert options.value("black_box", "display_profile") == "Sprint"
+
+
+def test_header_names_display_profile(options):
+    options.selectOverlay("black_box")
+    assert options.overlayInfo["profile"] == ""  # default profile (Custom): nothing to tell
+    options.setChoice("black_box/display_profile", row(options, "black_box/display_profile")["choices"].index("Sprint"))
+    info = options.overlayInfo
+    assert info["profile"].endswith(": Sprint") and info["profileOption"] == "black_box/display_profile"
+    options.setAllCollapsed(True)
+    options.showOption(info["profileOption"])
+    assert options.highlightKey == "black_box/display_profile" and options.rowIndex("black_box/display_profile") >= 0
+    options.selectOverlay("speedometer")
+    assert options.overlayInfo["profile"] == ""  # overlay without profile
 
 
 def test_black_box_sections_order_list_and_dependency_chain(options):
@@ -825,3 +866,54 @@ def test_decimal_typed_in_whole_number_field(window):
     QTest.keyClick(page.view, Qt.Key.Key_Return)
     flush()
     assert page.backend.value("speedometer", key) == 4.6
+
+
+def test_black_box_user_profile_saved_and_selected(options):
+    from neopedal.template.widget.black_box_ui import display_overrides, parse_user_profile
+
+    options.selectOverlay("black_box")
+    assert [entry["name"] for entry in options.overlayInfo["userProfiles"]] == ["User 1", "User 2", "User 3"]
+    assert options.rowIndex("black_box/user_profile_1") < 0  # held by profile tool, no row
+    options.setBool("black_box/show_rpm", False)
+    options.setBool("black_box/show_damage_panel", True)
+    options.saveUserProfile("User 2")
+    assert options.value("black_box", "display_profile") == "User 2"
+    saved = parse_user_profile(options.value("black_box", "user_profile_2"))
+    assert saved["show_rpm"] is False and saved["show_damage_panel"] is True
+    options.setBool("black_box/show_rpm", True)  # profile option edited: back to Custom, profile values kept
+    assert options.value("black_box", "display_profile") == "Custom"
+    assert options.value("black_box", "show_damage_panel") is True and options.value("black_box", "show_rpm") is True
+    values = {**options.values("black_box"), "display_profile": "User 2"}
+    assert display_overrides(values)["show_rpm"] is False  # widget follows the saved profile
+    assert display_overrides({**values, "display_profile": "User 3"}) == {}  # not saved: like Custom
+    options.saveUserProfile("Nope")  # unknown profile: nothing
+    assert options.value("black_box", "display_profile") == "Custom"
+
+
+def test_black_box_simple_mode_main_switches_only(options):
+    options.selectOverlay("black_box")
+    simple = {entry["option"] for entry in rows(options)}
+    assert {"show_tyre_pressure", "show_setting_change_popup", "display_profile", "layout"} <= simple
+    assert not {"show_tyre_temperature_trend", "show_flag_events", "enable_shift_flash"} & simple
+    options.setAdvanced(True)
+    advanced = {entry["option"] for entry in rows(options)}
+    assert "show_tyre_temperature_trend" in advanced and len(advanced) > len(simple) * 3
+    options.setAdvanced(False)
+    options.setSearch("trend")  # search finds every option, simple mode or not
+    assert any(entry["option"] == "show_tyre_temperature_trend" for entry in rows(options))
+
+
+def test_black_box_preview_click_shows_part_options(options):
+    from neopedal.ui.widget_preview import widget_part_rects
+
+    options.selectOverlay("black_box")
+    assert options.overlayInfo["previewParts"]
+    size, rects = widget_part_rects(cfg, "black_box", options.values("black_box"))
+    for part, key in (("wheel0", "show_tyre_temperature"), ("leds", "show_rpm_leds"),
+                      ("center", "center_column_alignment")):
+        middle = rects[part].center()
+        options.previewClicked(middle.x() / size.width(), middle.y() / size.height())
+        assert options.highlightKey == f"black_box/{key}", part
+    assert options.preview_part_option(1.5, 0.5) == ""  # outside the picture
+    options.selectOverlay("speedometer")
+    assert not options.overlayInfo["previewParts"] and options.preview_part_option(0.5, 0.5) == ""

@@ -11,24 +11,24 @@ import NeoPedal
 Item {
     id: root
 
-    readonly property var view: backend.mapView
+    readonly property var view: replays.mapView
     readonly property bool loaded: view.road !== undefined
     // Glide well under the time between game answers (about 1.9 s replay, 4.8 s live): cars stop before the next
     // answer, scene idle (no redraw) in between. No glide while page or panel hidden: positions jump, nothing animates.
-    readonly property int glide: backend.replayActive ? 1150 : 2900
+    readonly property int glide: replays.replayActive ? 1150 : 2900
     readonly property bool gliding: pageState.active && root.visible
     // Positions from shared memory (slot: [x, y]), {} if not read: each glides linearly to the next (0.25 s)
-    readonly property var live: backend.mapLive
+    readonly property var live: replays.mapLive
     readonly property bool liveTracking: Object.keys(live).length > 0
 
     // Track path & playback clock (session time now: replay time while a replay plays)
-    readonly property var path: backend.mapPath
+    readonly property var path: replays.mapPath
     readonly property bool hasPath: path.s !== undefined && path.s.length > 1
-    readonly property bool replay: backend.replayActive
-    readonly property real replayTime: backend.replayTime
-    readonly property real replayRate: backend.replayRate
-    readonly property real liveTime: backend.liveTime
-    readonly property real timeReceived: backend.timeReceived
+    readonly property bool replay: replays.replayActive
+    readonly property real replayTime: replays.replayTime
+    readonly property real replayRate: replays.replayRate
+    readonly property real liveTime: replays.liveTime
+    readonly property real timeReceived: replays.timeReceived
     property double now: Date.now()
     property real clock: 0
     function tick() {
@@ -40,13 +40,25 @@ Item {
     onReplayTimeChanged: tick()
     onLiveTimeChanged: tick()
     Component.onCompleted: tick()
-    FrameAnimation {  // cars on track moved every frame while the clock runs (page & map shown)
-        running: root.gliding && root.loaded && root.hasPath && !root.liveTracking
-                 && (root.replay ? root.replayRate !== 0 : root.liveTime >= 0)
-        onTriggered: root.tick()
+    // Shared memory positions: Date.now() of last car move (unchanged positions: no glide, no frame)
+    property double liveMovedAt: 0
+    readonly property int liveGlide: 250
+    Timer {  // cars moved 30 times a second while the clock runs or shared memory cars glide (page & map shown)
+        interval: 33
+        repeat: true
+        running: root.gliding && root.loaded
+                 && (root.liveTracking ? root.now - root.liveMovedAt < root.liveGlide
+                     : root.hasPath && (root.replay ? root.replayRate !== 0 : root.liveTime >= 0))
+        onTriggered: if (root.liveTracking) root.now = Date.now(); else root.tick()
     }
-    function pointAt(distance) {  // map position of distance along track path
+    // Map position of distance along track path written in spot (x, y) and returned: no array made per car & tick,
+    // worked out once for worldX & worldY (same distance & path: spot as is)
+    function place(spot, distance) {
         var p = root.path
+        if (spot.s === distance && spot.path === p)
+            return spot
+        spot.s = distance
+        spot.path = p
         var s = p.s
         var n = s.length
         if (p.closed && p.length > 0) {
@@ -68,7 +80,9 @@ Item {
         var next = low + 1 < n ? low + 1 : 0
         var span = (low + 1 < n ? s[low + 1] : p.length) - s[low]
         var ratio = span > 0 ? (distance - s[low]) / span : 0
-        return [p.xs[low] + (p.xs[next] - p.xs[low]) * ratio, p.ys[low] + (p.ys[next] - p.ys[low]) * ratio]
+        spot.x = p.xs[low] + (p.xs[next] - p.xs[low]) * ratio
+        spot.y = p.ys[low] + (p.ys[next] - p.ys[low]) * ratio
+        return spot
     }
 
     MapCanvas {
@@ -82,29 +96,35 @@ Item {
         minY: root.view.minY || 0
         maxX: root.view.maxX || 1
         maxY: root.view.maxY || 1
-        onSettled: if (root.loaded) backend.setMapScale(canvas.metersPerPixel)
+        onSettled: if (root.loaded) replays.setMapScale(canvas.metersPerPixel)
 
-        GpuShape {
-            key: root.view.edge || ""
-            color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
-            revision: backend.mapRevision
-            transform: Matrix4x4 { matrix: canvas.matrix }
-        }
-        GpuShape {
-            key: root.view.road || ""
-            color: theme.dark ? Qt.lighter(theme.base, 1.6) : Qt.darker(theme.base, 1.1)
-            revision: backend.mapRevision
-            transform: Matrix4x4 { matrix: canvas.matrix }
-        }
-        GpuShape {
-            key: root.view.pit || ""
-            color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.35)
-            revision: backend.mapRevision
-            transform: Matrix4x4 { matrix: canvas.matrix }
+        Item {  // track in a multisampled layer while shown (smooth edges, window without MSAA), cars outside
+            objectName: "mapLines"
+            anchors.fill: parent
+            layer.enabled: root.gliding && root.loaded
+            layer.samples: 4
+            GpuShape {
+                key: root.view.edge || ""
+                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
+                revision: replays.mapRevision
+                transform: Matrix4x4 { matrix: canvas.matrix }
+            }
+            GpuShape {
+                key: root.view.road || ""
+                color: theme.dark ? Qt.lighter(theme.base, 1.6) : Qt.darker(theme.base, 1.1)
+                revision: replays.mapRevision
+                transform: Matrix4x4 { matrix: canvas.matrix }
+            }
+            GpuShape {
+                key: root.view.pit || ""
+                color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.35)
+                revision: replays.mapRevision
+                transform: Matrix4x4 { matrix: canvas.matrix }
+            }
         }
 
         Repeater {
-            model: root.loaded ? backend.mapCars : null
+            model: root.loaded ? replays.mapCars : null
             Item {
                 id: car
                 required property string key
@@ -129,17 +149,53 @@ Item {
                 readonly property var livePoint: root.live[key]
                 readonly property bool tracked: livePoint !== undefined
                 readonly property real ease: correction * Math.max(0, 1 - (root.now - receivedMs) / 600)
-                readonly property var trackPoint: !tracked && onTrack && root.hasPath
-                    ? root.pointAt(pathS + speed * Math.max(-2, Math.min(4, root.clock - sampleTime)) + ease) : null
-                property real worldX: tracked ? livePoint[0] : trackPoint ? trackPoint[0] : mapX
-                property real worldY: tracked ? livePoint[1] : trackPoint ? trackPoint[1] : mapY
+                readonly property var spot: ({ "s": NaN, "path": null, "x": 0, "y": 0 })  // root.place result
+                readonly property var trackPoint: !liveMode && onTrack && root.hasPath ? spot : null
+                readonly property real trackS: trackPoint
+                    ? pathS + speed * Math.max(-2, Math.min(4, root.clock - sampleTime)) + ease : 0
+                // Shared memory position: glides linearly from shown place to each new one on root ticks (no
+                // animation restarted every answer: page idle once cars stop). Set by followLive only (tracked
+                // binding may update after livePoint handlers): liveMode first, Behavior off before positions change
+                property bool liveMode: false
+                property real liveFromX: 0
+                property real liveFromY: 0
+                property real liveToX: 0
+                property real liveToY: 0
+                property double liveAt: 0  // Date.now() of last new position, 0: none
+                readonly property real liveStep: Math.max(0, Math.min(1, (root.now - liveAt) / root.liveGlide))
+                function followLive(animated) {
+                    var point = livePoint
+                    if (point === undefined) {
+                        liveMode = false
+                        liveAt = 0
+                        return
+                    }
+                    var x = point[0], y = point[1]
+                    if (liveAt > 0 && x === liveToX && y === liveToY) return
+                    var glide = animated && root.gliding
+                    var fromX = liveAt > 0 ? liveFromX + (liveToX - liveFromX) * liveStep : worldX  // shown place
+                    var fromY = liveAt > 0 ? liveFromY + (liveToY - liveFromY) * liveStep : worldY
+                    liveMode = true
+                    liveFromX = glide ? fromX : x
+                    liveFromY = glide ? fromY : y
+                    liveToX = x
+                    liveToY = y
+                    liveAt = Date.now()
+                    if (glide) root.liveMovedAt = liveAt
+                }
+                onLivePointChanged: followLive(true)
+                Component.onCompleted: followLive(false)
+                property real worldX: liveAt > 0 ? liveFromX + (liveToX - liveFromX) * liveStep
+                                                 : trackPoint ? root.place(trackPoint, trackS).x : mapX
+                property real worldY: liveAt > 0 ? liveFromY + (liveToY - liveFromY) * liveStep
+                                                 : trackPoint ? root.place(trackPoint, trackS).y : mapY
                 Behavior on worldX {
-                    enabled: root.gliding && (car.tracked || !car.onTrack)
-                    NumberAnimation { duration: car.tracked ? 250 : root.glide; easing.type: car.tracked ? Easing.Linear : Easing.OutSine }
+                    enabled: root.gliding && !car.liveMode && !car.onTrack
+                    NumberAnimation { duration: root.glide; easing.type: Easing.OutSine }
                 }
                 Behavior on worldY {
-                    enabled: root.gliding && (car.tracked || !car.onTrack)
-                    NumberAnimation { duration: car.tracked ? 250 : root.glide; easing.type: car.tracked ? Easing.Linear : Easing.OutSine }
+                    enabled: root.gliding && !car.liveMode && !car.onTrack
+                    NumberAnimation { duration: root.glide; easing.type: Easing.OutSine }
                 }
                 z: onCamera ? 3 : player ? 2 : 1
 
@@ -154,14 +210,14 @@ Item {
                     opacity: car.inPit ? 0.45 : 1
                     border.width: car.onCamera || car.player ? 2 : 1
                     border.color: car.onCamera ? theme.accent : car.player ? "white" : Qt.rgba(0, 0, 0, 0.45)
-                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                     Text {
                         anchors.centerIn: parent
                         text: car.number
                         color: "white"
                         style: Text.Outline
                         styleColor: Qt.rgba(0, 0, 0, 0.5)
-                        font.pointSize: theme.fontPoint * 0.6
+                        font.pointSize: theme.fontMicro
                         font.weight: Font.Bold
                     }
                     MouseArea {
@@ -169,13 +225,13 @@ Item {
                         anchors.fill: parent
                         anchors.margins: -3
                         hoverEnabled: true
-                        cursorShape: backend.inSession ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: backend.watchCar(car.key)
+                        cursorShape: replays.inSession ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: replays.watchCar(car.key)
                     }
                     ToolTip.visible: carArea.containsMouse
                     ToolTip.text: carArea.containsMouse  // text built only while hovered, not for every car on each answer
-                        ? car.position + ". " + car.driver + (backend.inSession ? "\n" + i18n.tr("Camera on This Car") : "") : ""
-                    ToolTip.delay: 200
+                        ? car.position + ". " + car.driver + (replays.inSession ? "\n" + i18n.tr("Camera on This Car") : "") : ""
+                    ToolTip.delay: theme.tipDelay
                 }
             }
         }
@@ -194,7 +250,7 @@ Item {
             }
             Text {
                 width: parent.width
-                text: backend.inSession ? i18n.tr("Asking game...")
+                text: replays.inSession ? i18n.tr("Asking game...")
                     : i18n.tr("Track map shows once a session or a replay is loaded in the game.")
                 color: theme.dimText
                 wrapMode: Text.WordWrap
@@ -203,7 +259,7 @@ Item {
         }
     }
     Connections {
-        target: backend
+        target: replays
         function onMapChanged() { canvas.reset(false) }
     }
 }

@@ -20,14 +20,21 @@
 Engine temperature Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import EngineTemperatureConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "EngineTemperatureConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -211,7 +218,7 @@ class Realtime(Overlay):
         lap_stime = api.read.timing.start()
         lap_etime = api.read.timing.elapsed()
 
-        interval = 0
+        interval: float = 0
         if self.last_lap_etime > lap_etime:  # new session
             self.last_lap_etime = lap_etime
             self.reset_rates()

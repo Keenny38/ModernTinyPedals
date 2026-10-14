@@ -16,16 +16,16 @@ Card {
         id: column
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: theme.em * 0.6 }
         spacing: 2
-        Text { text: card.title; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+        Text { text: card.title; color: theme.dimText; font.pointSize: theme.fontSmall }
         Text {
             width: parent.width
             text: card.value
             color: card.accentColor
-            font.pointSize: theme.fontPoint * 1.6
+            font.pointSize: theme.fontTitle
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
             elide: Text.ElideRight
-            Behavior on color { ColorAnimation { duration: 200 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
         }
         // Keyed on line count: new texts every update (playback: every frame) keep the same Text items
         Repeater {

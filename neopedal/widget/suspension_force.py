@@ -20,14 +20,21 @@
 Suspension force Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..api_control import api
 from ._base import Overlay
 from ._painter import WheelGaugeBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SuspensionForceConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SuspensionForceConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

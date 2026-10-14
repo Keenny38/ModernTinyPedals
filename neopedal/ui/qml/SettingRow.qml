@@ -78,20 +78,20 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: theme.em * 0.2
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: theme.em * 0.45
+            anchors.bottomMargin: theme.em * 0.5
             text: row.group
             color: theme.text
-            font.pointSize: theme.fontPoint * 1.05
+            font.pointSize: theme.fontSubtitle
             font.weight: Font.DemiBold
         }
         Rectangle {
             visible: row.preview !== null && row.preview !== undefined
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: theme.em * 0.35
+            anchors.bottomMargin: theme.em * 0.4
             height: Math.round(theme.em * 1.6)
             width: previewText.implicitWidth + theme.em * 1.4
-            radius: theme.em * 0.3
+            radius: theme.radiusSm
             color: row.preview && row.preview.background !== "" ? row.preview.background : "transparent"
             border.width: 1
             border.color: theme.border
@@ -100,12 +100,12 @@ Item {
                 anchors.centerIn: parent
                 text: row.preview ? row.preview.text : ""
                 color: row.preview && row.preview.color !== "" ? row.preview.color : theme.text
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
             }
             MouseArea { id: previewArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             ToolTip.visible: previewArea.containsMouse
             ToolTip.text: i18n.tr("Preview of the notice")
-            ToolTip.delay: 500
+            ToolTip.delay: theme.tipDelay
         }
     }
 
@@ -114,7 +114,7 @@ Item {
         y: header.height
         width: parent.width
         height: Math.max(content.implicitHeight + theme.em * 1.0, theme.em * 3)
-        radius: theme.em * 0.7
+        radius: theme.radiusXl
         color: theme.base
 
         // Square corners between rows of a card
@@ -156,9 +156,9 @@ Item {
             opacity: 0
             SequentialAnimation {
                 id: flashAnimation
-                NumberAnimation { target: flashRect; property: "opacity"; to: 0.28; duration: 180 }
-                PauseAnimation { duration: 350 }
-                NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { target: flashRect; property: "opacity"; to: 0.28; duration: theme.motionBase }
+                PauseAnimation { duration: theme.animate ? 350 : 0 }  // animations off: no flash
+                NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: theme.animate ? 700 : 0; easing.type: Easing.InOutQuad }
             }
         }
 
@@ -202,21 +202,21 @@ Item {
                     visible: row.help !== ""
                     text: row.help
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     wrapMode: Text.WordWrap
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     MouseArea { id: helpArea; anchors.fill: parent; hoverEnabled: helpText.truncated; acceptedButtons: Qt.NoButton }
                     ToolTip.visible: helpText.truncated && helpArea.containsMouse
                     ToolTip.text: row.help
-                    ToolTip.delay: 500
+                    ToolTip.delay: theme.tipDelay
                 }
                 Text {
                     Layout.fillWidth: true
                     visible: row.error !== ""
                     text: "⚠ " + row.error
                     color: theme.loss
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     wrapMode: Text.WordWrap
                 }
             }
@@ -299,6 +299,9 @@ Item {
                 maximum: row.maximum
                 tip: row.label
                 onEdited: function(value) { backend.setNumber(row.key, value) }
+                // Typed text marked invalid, clamped back to the value shown (no edit sent by field): mark cleared
+                // (runs after field's own commit, which already cleared it when the number changed)
+                onEditingFinished: if (row.error !== "") backend.setNumber(row.key, numberField.value)
                 // Number taken while typing (unsaved changes bar, Apply): out of range marked, clamped when left
                 Keys.onEscapePressed: backend.revertOption(row.key)  // saved value back (field handles Esc too)
                 onTextEdited: {
@@ -319,7 +322,7 @@ Item {
             Rectangle {
                 Layout.preferredWidth: Math.round(theme.em * 2.05)
                 Layout.preferredHeight: Layout.preferredWidth
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: row.color !== "" ? row.color : "transparent"
                 border.width: 1
                 border.color: swatchArea.containsMouse ? theme.accent : theme.border
@@ -338,7 +341,7 @@ Item {
                 }
                 ToolTip.visible: swatchArea.containsMouse
                 ToolTip.text: i18n.tr("Select Color")
-                ToolTip.delay: 500
+                ToolTip.delay: theme.tipDelay
                 Accessible.role: Accessible.Button
                 Accessible.name: i18n.tr("Select Color")
             }

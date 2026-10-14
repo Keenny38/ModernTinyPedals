@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 
 from ... import calculation as calc
 from .._painter import fill_chip, fill_chip_gradient
@@ -194,6 +194,11 @@ class DamagePainter:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(wheel_rect, radius, radius)
 
+    def panel_font(self) -> QFont:
+        """Widget font: kept one in black box (font() returns a new copy every call), Damage widget has none"""
+        widget_font = getattr(self, "widget_font", None)
+        return widget_font() if widget_font is not None else self.font()
+
     def draw_integrity(self, painter: QPainter, shapes: DamageGeometry):
         """Integrity value colored by level, its source, and a gauge"""
         wcfg = self.wcfg
@@ -205,7 +210,7 @@ class DamagePainter:
         self.draw_fit_text(painter, shapes.caption, self.text[source], self.font_label, align)
         painter.setPen(color)
         self.draw_fit_text(painter, shapes.integrity, self.integrity_text(value),
-                           self.grown_font(self.font(), shapes.integrity), align)
+                           self.grown_font(self.panel_font(), shapes.integrity), align)
         gauge = shapes.gauge
         fill_chip(painter, gauge, wcfg["indicator_inactive_color"])
         if value > 0.005:

@@ -23,14 +23,6 @@ Item {
     readonly property real leftWidth: theme.em * 21
     readonly property var wheels: [i18n.tr("Front Left"), i18n.tr("Front Right"), i18n.tr("Rear Left"), i18n.tr("Rear Right")]
 
-    function compoundColor(name) {
-        var key = String(name).split("#")[0].trim().replace(/^Q-/, "")
-        return {
-            Ultrasoft: "#C084FC", Supersoft: "#F43F5E", Soft: "#EF4444", Medium: "#FACC15", Hard: "#E5E7EB",
-            Intermediate: "#22C55E", Wet: "#3B82F6"
-        }[key] || theme.dimText
-    }
-
     component StatusChip: Rectangle {
         property string text: ""
         property bool warning: false
@@ -43,7 +35,7 @@ Item {
             anchors.centerIn: parent
             text: parent.text
             color: parent.warning ? theme.loss : theme.text
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
         }
     }
@@ -127,7 +119,7 @@ Item {
                             Layout.preferredWidth: theme.em * 8.5
                             model: backend.measuredCompounds
                             currentIndex: Number(tab.store.inputs.input_measured_compound)
-                            dotColor: tab.compoundColor
+                            compounds: true
                             tip: i18n.tr("Compound of measured wear per lap: wear of other compounds scaled by their wear per stint")
                             onActivated: function(index) {
                                 backend.setInput("input_measured_compound", index)
@@ -157,12 +149,13 @@ Item {
                         columnSpacing: theme.em * 0.6
                         rowSpacing: theme.em * 0.3
                         Repeater {
+                            // Values read from tab.life by key: tiles kept when the values change
                             model: [
-                                { label: i18n.tr("Laps"), value: tab.life.laps, warning: false, tip: "" },
-                                { label: i18n.tr("Minutes"), value: tab.life.minutes, warning: false, tip: "" },
-                                { label: i18n.tr("Stints"), value: tab.life.stints, warning: tab.life.stintsWarning === true,
+                                { label: i18n.tr("Laps"), key: "laps", warn: "", tip: "" },
+                                { label: i18n.tr("Minutes"), key: "minutes", warn: "", tip: "" },
+                                { label: i18n.tr("Stints"), key: "stints", warn: "stintsWarning",
                                   tip: i18n.tr("Longest stints a set of tyres lasts") },
-                                { label: i18n.tr("Wear per Stint"), value: tab.life.wearStint, warning: tab.life.wearWarning === true,
+                                { label: i18n.tr("Wear per Stint"), key: "wearStint", warn: "wearWarning",
                                   tip: i18n.tr("Tread used over the longest stint") },
                             ]
                             Column {
@@ -172,16 +165,17 @@ Item {
                                 Text {
                                     text: parent.modelData.label
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     HoverHandler { id: lifeHover; enabled: parent.parent.modelData.tip !== "" }
                                     ToolTip.visible: lifeHover.hovered
                                     ToolTip.text: parent.modelData.tip
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: theme.tipDelay
                                 }
                                 Text {
-                                    text: parent.modelData.value || "-"
-                                    color: parent.modelData.warning ? theme.loss : theme.text
-                                    font.pointSize: theme.fontPoint * 1.15
+                                    text: tab.life[parent.modelData.key] || "-"
+                                    color: parent.modelData.warn !== "" && tab.life[parent.modelData.warn] === true
+                                           ? theme.loss : theme.text
+                                    font.pointSize: theme.fontSubtitle
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                 }
@@ -213,11 +207,11 @@ Item {
                     Text {
                         text: i18n.tr("Change Time")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.88
+                        font.pointSize: theme.fontSmall
                         HoverHandler { id: changeHover }
                         ToolTip.visible: changeHover.hovered
                         ToolTip.text: i18n.tr("Time added to the stop, by number of tyres changed")
-                        ToolTip.delay: 500
+                        ToolTip.delay: theme.tipDelay
                     }
                     Repeater {
                         model: 4
@@ -285,7 +279,7 @@ Item {
                     text: tab.plan.name || ""
                     color: theme.text
                     selectByMouse: true
-                    selectionColor: theme.accent
+                    selectionColor: theme.accentFill
                     selectedTextColor: "white"
                     leftPadding: theme.em * 0.6
                     placeholderText: i18n.tr("Untitled plan")
@@ -293,7 +287,7 @@ Item {
                     validator: RegularExpressionValidator { regularExpression: /[^\\/:*?"<>|]*/ }
                     Accessible.name: i18n.tr("Plan name")
                     background: Rectangle {
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
                         border.width: planName.activeFocus ? 1.5 : 1
                         border.color: planName.activeFocus ? theme.accent : theme.border
@@ -313,7 +307,7 @@ Item {
                           ? i18n.tr("One row per stint of the strategy: tyre change time added to the stop, wear = wear per lap x stint laps (compound wear per stint without wear per lap).")
                           : i18n.tr("Drag a tyre onto a wheel of the plan.")
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.88
+                    font.pointSize: theme.fontSmall
                     wrapMode: Text.Wrap
                 }
                 Text {
@@ -339,7 +333,7 @@ Item {
                             text: modelData
                             color: theme.dimText
                             font.weight: Font.DemiBold
-                            font.pointSize: theme.fontPoint * 0.85
+                            font.pointSize: theme.fontSmall
                             horizontalAlignment: index > 0 && index < 6 ? Text.AlignHCenter : Text.AlignLeft
                             elide: Text.ElideRight
                             Layout.fillWidth: index > 0 && index < 5
@@ -373,14 +367,13 @@ Item {
                                     corner: slot.column - 1
                                     info: slot.rowData ? slot.rowData.cells[slot.column - 1] : ({})
                                     menu: wheelMenu
-                                    compoundColor: tab.compoundColor
                                 }
                             }
                             Component {
                                 id: changeText
                                 Text {
                                     text: slot.rowData ? slot.rowData.change : ""
-                                    color: slot.rowData && slot.rowData.changes > 0 ? "#F5B342" : theme.dimText
+                                    color: slot.rowData && slot.rowData.changes > 0 ? theme.seriesTyre : theme.dimText
                                     font.features: { "tnum": 1 }
                                     horizontalAlignment: Text.AlignHCenter
                                     width: theme.em * 3.6
@@ -419,7 +412,7 @@ Item {
                 }
                 Flow {
                     Layout.fillWidth: true
-                    spacing: theme.em * 0.35
+                    spacing: theme.em * 0.4
                     StatusChip {
                         text: i18n.trm("Stock: " + tab.stockCount + " / " + tab.maximumCount + (tab.stockCount > tab.maximumCount ? " (" + i18n.tr("invalid") + ")" : ""))
                         warning: tab.stockCount > tab.maximumCount
@@ -428,7 +421,7 @@ Item {
                     StatusChip { text: i18n.trm("Stints: " + tab.stintCount) }
                     StatusChip { text: i18n.trm("Pits: " + tab.pitCount) }
                     StatusChip { text: i18n.trm("Changes: " + tab.changeCount) }
-                    StatusChip { text: i18n.trm("Time: " + (tab.changeTime >= 0 ? "+" : "") + tab.changeTime.toFixed(2) + "s") }
+                    StatusChip { text: i18n.trm("Time: " + (tab.changeTime >= 0 ? "+" : "") + tab.changeTime.toFixed(2).replace(".", theme.decimalPoint) + "s") }
                 }
             }
 
@@ -478,7 +471,7 @@ Item {
                         Layout.fillWidth: true
                         model: tab.plan.compounds || []
                         currentIndex: (tab.plan.compounds || []).indexOf(tab.plan.compound)
-                        dotColor: tab.compoundColor
+                        compounds: true
                         tip: i18n.tr("Compound added to stock, and of proposed tyre changes")
                         onActivated: function(index) {
                             backend.setStockCompound(tab.plan.compounds[index])
@@ -504,7 +497,7 @@ Item {
                     Layout.fillWidth: true
                     text: (tab.plan.stock || []).length ? i18n.tr("Drag a tyre onto a wheel of the plan.") : i18n.tr("No tyre in stock: add tyres to the stock first")
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.88
+                    font.pointSize: theme.fontSmall
                     wrapMode: Text.Wrap
                 }
                 Flow {
@@ -518,7 +511,7 @@ Item {
                             readonly property string tyreName: modelData.name
                             implicitHeight: Math.round(theme.em * 1.9)
                             implicitWidth: chipRow.implicitWidth + theme.em * 0.9 + (removeButton.visible ? removeButton.width : 0)
-                            radius: theme.em * 0.4
+                            radius: theme.radiusMd
                             color: chipArea.containsMouse ? theme.hover : theme.raised
                             border.width: 1
                             border.color: modelData.stints > 0 ? Qt.rgba(0.96, 0.7, 0.26, 0.7) : theme.border
@@ -527,19 +520,16 @@ Item {
                                 x: theme.em * 0.45
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: theme.em * 0.3
-                                Rectangle {
-                                    width: Math.round(theme.em * 0.55); height: width; radius: width / 2
-                                    color: tab.compoundColor(chip.tyreName)
-                                    border.width: 1
-                                    border.color: Qt.rgba(0, 0, 0, 0.25)
+                                TpCompound {
+                                    name: chip.tyreName
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
-                                Text { text: chip.tyreName; color: theme.text; font.pointSize: theme.fontPoint * 0.9 }
+                                Text { text: chip.tyreName; color: theme.text; font.pointSize: theme.fontLabel }
                                 Text {  // used tyre of the game: tread left
                                     visible: (chip.modelData.tread || "") !== ""
                                     text: chip.modelData.tread || ""
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.pointSize: theme.fontCaption
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Rectangle {
@@ -554,7 +544,7 @@ Item {
                                         anchors.centerIn: parent
                                         text: chip.modelData.stints
                                         color: theme.text
-                                        font.pointSize: theme.fontPoint * 0.78
+                                        font.pointSize: theme.fontCaption
                                     }
                                 }
                             }

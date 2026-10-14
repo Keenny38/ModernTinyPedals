@@ -115,6 +115,11 @@ def font_families() -> tuple[str, ...]:
     return tuple(QFontDatabase.families())
 
 
+def choice_values(kind: OptionKind) -> tuple[str, ...]:
+    """Saved values of a choice list (installed font families for a font)"""
+    return font_families() if kind.kind == KIND_FONT else kind.choices
+
+
 def choice_label(kind: OptionKind, value: Any) -> str:
     """Shown text of a choice value"""
     return tr(str(value)) if kind.translate else str(value)
@@ -145,6 +150,13 @@ def display_text(kind: OptionKind, value: Any) -> str:
         return tr("On") if value else tr("Off")
     if kind.kind == KIND_CHOICE:
         return choice_label(kind, value)
+    if kind.kind in NUMBER_KINDS:
+        return number_text(value)
+    return str(value)
+
+
+def display_value(kind: OptionKind, value: Any) -> str:
+    """Editable text of value (text fields)"""
     if kind.kind in NUMBER_KINDS:
         return number_text(value)
     return str(value)

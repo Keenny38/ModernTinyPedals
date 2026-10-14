@@ -20,15 +20,19 @@
 Trailing Widget
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QPointF, QRect, Qt
-from PySide6.QtGui import QPainter, QPen, QPixmap
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
+from ._pedal_alert import PedalAlertMixin
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TrailingConfig
 
 PLOT_NAMES = (
     "tc_activation",
@@ -43,13 +47,15 @@ PLOT_NAMES = (
     "wheel_slip",
     "slip_angle_difference",
 )
+
 HIDDEN = -999.0  # plot value of mark not shown (wheel lock, slip, TC & ABS activation)
+PEDAL_BARS = ("ffb", "clutch", "brake", "throttle")  # pedal bars, in drawn order
 
 
-class TrailingMixin:
-    """Input sampling & time scale, for classic & modern widget"""
+class TrailingMixin(PedalAlertMixin):
+    """Input sampling & time scale, pedal bars, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "TrailingConfig"
     cfg: Any
 
     def setup_trailing(self):
@@ -67,10 +73,19 @@ class TrailingMixin:
         self.max_slip_angle = max(self.wcfg["maximum_slip_angle_difference"], 1) * 2
         self.max_paused_frames = max(self.wcfg["maximum_paused_frames"], 0)
         self.plot_names = tuple(name for name in PLOT_NAMES if self.wcfg[f"show_{name}"])
+        # Pedal bars beside newest samples
+        self.bar_keys = tuple(
+            name for name in PEDAL_BARS if self.wcfg["show_pedal_bars"] and self.wcfg[f"show_{name}_bar"])
+        self.setup_alerts(self.bar_keys)
+        self.max_brake_pressure = 0.01
         self.max_speed = 0.0
         # Last data
         self.last_lap_etime = -1.0
         self.update_plot = 0
+
+    def post_update(self):
+        """Peak brake pressure found again for next car"""
+        self.max_brake_pressure = 0.01
 
     def plot_paused(self) -> bool:
         """Whether plot stops: elapsed time unchanged (game paused) for more than max paused frames"""
@@ -138,9 +153,38 @@ class TrailingMixin:
                 values.append(minfo.wheels.slipAngleDifference / self.max_slip_angle + 0.5)
         return values
 
+    def read_bars(self) -> tuple[tuple[float, float, str], ...]:
+        """Pedal bars (bar_keys order): (input as plotted or brake pressure share of peak, raw input,
+        alert lit), force feedback absolute"""
+        wcfg = self.wcfg
+        inputs = api.read.inputs
+        values = []
+        for name in self.bar_keys:
+            if name == "throttle":
+                raw = inputs.throttle_raw()
+                values.append((raw if wcfg["show_raw_throttle"] else inputs.throttle(), raw))
+            elif name == "brake":
+                raw = inputs.brake_raw()
+                if wcfg["show_pedal_bar_brake_pressure"]:
+                    pressure = sum(api.read.brake.pressure())
+                    self.max_brake_pressure = max(self.max_brake_pressure, pressure)
+                    values.append((pressure / self.max_brake_pressure, raw))
+                else:
+                    values.append((raw if wcfg["show_raw_brake"] else inputs.brake(), raw))
+            elif name == "clutch":
+                raw = inputs.clutch_raw()
+                values.append((raw if wcfg["show_raw_clutch"] else inputs.clutch(), raw))
+            else:
+                ffb = abs(inputs.force_feedback())
+                values.append((ffb, ffb))
+        return tuple((round(filtered, 3), round(raw, 3), alert)
+                     for (filtered, raw), alert in zip(values, self.read_alerts()))
+
 
 class Realtime(TrailingMixin, Overlay):
     """Draw widget"""
+
+    wcfg: "TrailingConfig"
 
     update_while_hidden = True  # input history keeps recording
 
@@ -159,8 +203,67 @@ class Realtime(TrailingMixin, Overlay):
         max_samples = 3 + max_line_width  # 3 offset + max line width
         self.samples_offset = max_samples - 2
 
+        # Pedal bars: beside newest samples (right side while trailing inverted), over plot range;
+        # maximum indicator beyond full input end, readings beyond empty end (grow widget if margin too small)
+        count = len(self.bar_keys)
+        self.bar_raw_width = max(int(self.wcfg["pedal_bar_width_unfiltered"]), 1)
+        self.bar_width = self.bar_raw_width + max(int(self.wcfg["pedal_bar_width_filtered"]), 1)
+        bar_gap = max(int(self.wcfg["pedal_bar_gap"]), 0)
+        self.max_height = max(int(self.wcfg["pedal_bar_maximum_indicator_height"]), 0) if count else 0
+        max_gap = max(int(self.wcfg["pedal_bar_inner_gap"]), 0) if self.max_height else 0
+        self.show_bar_readings = bool(count and self.wcfg["show_pedal_bar_readings"])
+        column = self.bar_width
+        reading_height = 0
+        reading_offset = 0
+        if self.show_bar_readings:
+            self.bar_font = self.config_font(
+                self.wcfg["font_name"], self.wcfg["font_size"], self.wcfg["font_weight"])
+            font_m = self.get_font_metrics(self.bar_font)
+            column = max(column, font_m.width * 3 + 2)
+            reading_height = font_m.height
+            reading_offset = font_m.voffset
+        full_end = self.max_height + max_gap if self.max_height else 0
+        empty_end = reading_height
+        from_top = bool(self.wcfg["show_inverted_pedal"])  # full input at bottom
+        top_end, bottom_end = (empty_end, full_end) if from_top else (full_end, empty_end)
+        self.extra_top = max(top_end - self.margin, 0)
+        extra_bottom = max(bottom_end - self.margin, 0)
+        height = self.area_height + self.extra_top + extra_bottom
+        side = count * column + (count + 1) * bar_gap if count else 0
+        newest_right = bool(self.wcfg["show_inverted_trailing"])
+        self.chart_offset = 0 if newest_right else side
+        self.rect_bars = QRectF(self.area_width if newest_right else 0, 0, side, height)
+        track_top = self.extra_top + self.margin
+        self.bar_left = tuple(self.rect_bars.left() + bar_gap + index * (column + bar_gap) + (column - self.bar_width) // 2
+                              for index in range(count))
+        self.bar_tracks = tuple(QRectF(left, track_top, self.bar_width, self.display_height) for left in self.bar_left)
+        if from_top:
+            max_top = track_top + self.display_height + max_gap
+            reading_top = track_top - reading_height
+        else:
+            max_top = track_top - max_gap - self.max_height
+            reading_top = track_top + self.display_height
+        self.max_rects = tuple(QRectF(left, max_top, self.bar_width, self.max_height) for left in self.bar_left)
+        self.reading_rects = tuple(
+            QRectF(left + (self.bar_width - column) / 2, reading_top + reading_offset, column, reading_height)
+            for left in self.bar_left)
+        # Background strips above & below plot when widget grown
+        self.rect_strips = tuple(rect for rect in (
+            QRectF(self.chart_offset, 0, self.area_width, self.extra_top),
+            QRectF(self.chart_offset, self.extra_top + self.area_height, self.area_width, extra_bottom),
+        ) if rect.height() > 0)
+        self.bar_colors = tuple(QColor(self.wcfg[f"{name}_color"]) for name in self.bar_keys)
+        self.alert_colors = {
+            alert: QColor(self.wcfg[f"{alert}_color"])
+            for alert in ("tc_activation", "abs_activation", "wheel_lock", "wheel_slip")}
+        self.ffb_clipping_color = QColor(self.wcfg["ffb_clipping_color"])
+        self.bar_track_color = QColor(0, 0, 0, 90)
+        self.bar_background_color = QColor(self.wcfg["background_color"])
+        self.bar_reading_color = QColor(self.wcfg["font_color_pedal_bar_readings"])
+        self.bar_values: tuple[tuple[float, float, str], ...] = ()
+
         # Config canvas
-        self.resize(self.area_width, self.area_height)
+        self.resize(self.area_width + side, height)
         self.rect_viewport = self.set_viewport_orientation()
 
         self.pixmap_background = QPixmap(self.area_width, self.area_height)
@@ -176,8 +279,15 @@ class Realtime(TrailingMixin, Overlay):
         self.draw_background()
 
     def timerEvent(self, event):
-        """Update when vehicle on track"""
+        """Update when vehicle on track (pedal bars while plot paused too)"""
+        bars_changed = False
+        if self.bar_keys:
+            bar_values = self.read_bars()
+            bars_changed = bar_values != self.bar_values
+            self.bar_values = bar_values
         if self.plot_paused():
+            if bars_changed:
+                self.update()
             return
         for plot_name, value in zip(self.plot_names, self.read_inputs()):
             self.update_sample(getattr(self, f"data_{plot_name}"), value)
@@ -190,9 +300,47 @@ class Realtime(TrailingMixin, Overlay):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
+        if self.bar_keys:
+            self.draw_bars(painter)
         painter.setViewport(self.rect_viewport)
+        painter.setWindow(0, 0, self.area_width, self.area_height)
         painter.drawPixmap(0, 0, self.pixmap_background)
         painter.drawPixmap(0, 0, self.pixmap_plot)
+
+    def draw_bars(self, painter: QPainter):
+        """Pedal bars over plot range: raw input (narrow part) & input as plotted, as pedal widget;
+        flashing alert color, force feedback clipping color, maximum indicator lit at full travel, readings"""
+        background = self.bar_background_color
+        painter.fillRect(self.rect_bars, background)
+        for strip in self.rect_strips:
+            painter.fillRect(strip, background)
+        height = self.display_height
+        from_top = self.wcfg["show_inverted_pedal"]  # full input at bottom
+        raw_width = self.bar_raw_width
+        if self.show_bar_readings:
+            painter.setFont(self.bar_font)
+            painter.setPen(self.bar_reading_color)
+        values = self.bar_values or ((0.0, 0.0, ""),) * len(self.bar_keys)
+        for index, (key, track, color, (filtered, raw, alert)) in enumerate(
+                zip(self.bar_keys, self.bar_tracks, self.bar_colors, values)):
+            clipping = key == "ffb" and filtered >= 1
+            if alert:
+                color = self.alert_colors[alert]
+            elif clipping:
+                color = self.ffb_clipping_color
+            painter.fillRect(track, self.bar_track_color)
+            left, top = track.left(), track.top()
+            for x, width, value in (
+                    (left, raw_width, raw), (left + raw_width, self.bar_width - raw_width, filtered)):
+                length = height * min(max(value, 0.0), 1.0)
+                if length > 0:
+                    y = top if from_top else top + height - length
+                    painter.fillRect(QRectF(x, y, width, length), color)
+            if self.max_height:
+                lit = raw >= 1 or clipping
+                painter.fillRect(self.max_rects[index], color if lit else self.bar_track_color)
+            if self.show_bar_readings:
+                painter.drawText(self.reading_rects[index], Qt.AlignmentFlag.AlignCenter, f"{filtered * 100:.0f}")
 
     def draw_background(self):
         """Draw background"""
@@ -271,6 +419,8 @@ class Realtime(TrailingMixin, Overlay):
         else:
             x_pos = 0
             width = self.area_width
+        x_pos += self.chart_offset  # pedal bars on left side
+        y_pos += self.extra_top  # room for bar maximum indicator or readings
         return QRect(x_pos, y_pos, width, height)
 
     def config_display_order(self, plot_names):

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 from time import monotonic
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QRegion
@@ -35,7 +35,11 @@ from .state import (
     LAPS_LABEL,
 )
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
+
 HIGHLIGHT_COLOR = QColor(255, 255, 255, 28)
+FLOW_FPS = 25  # battery flow animation frames per second (repaints of the bar)
 
 
 class Gauge(NamedTuple):
@@ -61,6 +65,7 @@ class PanelPainter:
     battery_warning: Any
     bottom_rows: Any
     depth_effects: Any
+    device_scale: Any
     draw_fit_text: Any
     energy: Any
     energy_available: Any
@@ -100,8 +105,9 @@ class PanelPainter:
     unit: Any
     unit_fuel: Any
     unit_pres: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     wheels: Any
+    widget_font: Any
 
     def draw_battery_bar(self, painter: QPainter, rect: QRectF):
         """Full-height battery charge gauge, with a flowing highlight while charging or draining"""
@@ -153,10 +159,16 @@ class PanelPainter:
     def battery_key(self, rect: QRectF) -> tuple:
         """What battery gauge shows, see drawn"""
         charge, fill_h = self.battery_fill(rect)
-        fill = (fill_h, self.battery_color(), self.battery_state) if fill_h >= 1 else None
+        fill = (fill_h, self.battery_color(), self.battery_state, self.battery_flow_frame()) if fill_h >= 1 else None
         if not self.wcfg["show_battery_percentage"]:
             return (fill,)
         return fill, self.battery_label_rect(rect, charge).top(), self.battery_text()
+
+    def battery_flow_frame(self) -> int:
+        """Frame of battery flow animation (FLOW_FPS per second), -1 while not flowing"""
+        if self.wcfg["enable_battery_bar_animation"] and self.battery_state in (2, 3):
+            return int(monotonic() * FLOW_FPS)
+        return -1
 
     def draw_battery_flow(self, painter: QPainter, rect: QRectF, charging: bool):
         """Translucent bands scrolling up while charging, down while draining, suggesting flow"""
@@ -164,7 +176,7 @@ class PanelPainter:
         spacing = band_h * 2.4
         speed = max(self.wcfg["battery_bar_animation_speed"], 0) * 40  # pixels per second
         direction = -1 if charging else 1
-        phase = (monotonic() * speed * direction) % spacing
+        phase = (self.battery_flow_frame() / FLOW_FPS * speed * direction) % spacing  # frame of key
         painter.save()
         painter.setClipRect(rect)
         glow = QColor(255, 255, 255, 55)
@@ -227,7 +239,7 @@ class PanelPainter:
             area = group.adjusted(unit * 0.2, label_h, -unit * 0.2, -unit * 0.08)
             bar_w = area.width() / 4
             for bin_index, (share, color) in enumerate(zip(wheel.damper_shares, colors)):
-                height = damper_bar_height(area.height(), share)
+                height = self.damper_grid(damper_bar_height(area.height(), share))
                 if height >= 0.5:
                     painter.fillRect(QRectF(area.left() + bin_index * bar_w + bar_w * 0.1, area.bottom() - height,
                                             bar_w * 0.8, height), color)
@@ -237,8 +249,14 @@ class PanelPainter:
         area_h = row.adjusted(0, row.height() * 0.35, 0, -self.unit * 0.08).height()
         return tuple(
             height if height >= 0.5 else None
-            for wheel in self.wheels for height in (damper_bar_height(area_h, share) for share in wheel.damper_shares)
+            for wheel in self.wheels
+            for height in (self.damper_grid(damper_bar_height(area_h, share)) for share in wheel.damper_shares)
         )
+
+    def damper_grid(self, height: float) -> float:
+        """Bar height on the device pixel grid (as drawn & keyed)"""
+        scale = self.device_scale()
+        return round(height * scale) / scale if scale > 0 else height
 
     def fuel_gauge(self) -> Gauge:
         return Gauge(
@@ -299,7 +317,7 @@ class PanelPainter:
         value_rect = QRectF(inner.left() + label_w, inner.top(),
                             max(needed_rect.left() - unit * 0.3 - inner.left() - label_w, 1), inner.height())
         painter.setPen(qcolor(wcfg["gauge_low_color"]) if low else self.pen_text)
-        self.draw_fit_text(painter, value_rect, gauge.text, self.font(), align_right)
+        self.draw_fit_text(painter, value_rect, gauge.text, self.widget_font(), align_right)
 
     def gauge_is_low(self, gauge: Gauge) -> bool:
         return 0 < gauge.laps <= self.wcfg["gauge_low_lap_threshold"]
@@ -356,7 +374,7 @@ class PanelPainter:
         label_w = painter.fontMetrics().horizontalAdvance(label)
         painter.setPen(qcolor(color) if color else self.pen_text)
         value_rect = inner.adjusted(label_w + unit * 0.3, 0, 0, 0)
-        self.draw_fit_text(painter, value_rect, value, self.font(),
+        self.draw_fit_text(painter, value_rect, value, self.widget_font(),
                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
 

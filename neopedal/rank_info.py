@@ -41,9 +41,10 @@ def locate() -> dr.Located:
     for folder in rf.results_folders(rf.chosen_results_folder(cfg.path.config)):
         if rf.game_of_path(folder) != GAME:
             continue
-        users = pp.recent_steam_users(rf.steam_folder())
-        return dr.Located(os.path.join(rf.game_root(folder), dr.STORAGE_FILE), users[0] if users else "",
-                          tuple(rf.profile_player_names(folder)))
+        accounts = pp.steam_accounts(rf.steam_folder())
+        return dr.Located(os.path.join(rf.game_root(folder), dr.STORAGE_FILE),
+                          accounts[0].steam_id if accounts else "", tuple(rf.profile_player_names(folder)),
+                          tuple((account.steam_id, account.name, account.avatar) for account in accounts))
     return dr.Located("", "", ())
 
 
@@ -51,4 +52,4 @@ def history_path() -> str:
     return os.path.join(cfg.path.config, dr.HISTORY_FILE)
 
 
-ranks = dr.RankWatcher(locate, history_path)
+ranks = dr.RankWatcher(locate, history_path, active_account=pp.active_steam_user)

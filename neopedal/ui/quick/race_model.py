@@ -17,32 +17,30 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Race calculator inputs: saved inputs & their ranges, race clock texts, plan export & share code
+Race calculator inputs: saved inputs & their ranges, race clock texts, plan export
 
 No Qt widget: used by the race calculator backend (race_backend.py) and its tests.
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
 import csv
-import json
-import zlib
 from collections.abc import Sequence
 from math import isfinite
 from typing import NamedTuple
 
+from ... import calculation as calc
 from ... import units
 from ...api_control import api
+from ...const_app import FORMAT_PREFIX, LEGACY_FORMAT_PREFIX
 from ...fuel_strategy import MARGIN_UNITS, MAX_DRIVERS, driver_table_text, parse_driver_table
 from ...i18n import tr
-from ...validator import load_json_strict
+from ...template.setting_global import FUEL_CALCULATOR_INPUTS
 
 RACE_SESSION = 4
-RACE_PLAN_FORMAT = "modern-tiny-pedals-race-plan"
+RACE_PLAN_FORMAT = f"{FORMAT_PREFIX}-race-plan"
+RACE_PLAN_FORMATS = (RACE_PLAN_FORMAT, f"{LEGACY_FORMAT_PREFIX}-race-plan")  # plans of versions until 0.23.0 too
 RACE_PLAN_VERSION = 1
-SHARE_CODE_PREFIX = "TPRP1:"  # race plan share code, version 1
 PLAN_FILE = "race_calculator_plan.json"  # plan input of race plan widget (config folder)
 
 DRIVER_COLORS = ("#4C9AFF", "#F5A623", "#7ED321", "#BD10E0", "#50E3C2", "#E94B3C", "#B8E986", "#9013FE", "#F8E71C")
@@ -52,58 +50,7 @@ INVALID_COLOR = "#FF4400"  # invalid lap & values out of range (tank too small, 
 TYRE_COLOR = "#F5B342"  # tyre change marks
 
 # Saved inputs (config "fuel_calculator"): key, default
-SAVED_INPUTS = {
-    "input_lap_time": 0.0,
-    "input_fuel_per_lap": 0.0,
-    "input_energy_per_lap": 0.0,
-    "input_tank_capacity": 0.0,
-    "enable_lap_race": False,
-    "input_race_minutes": 0,
-    "input_race_laps": 0,
-    "input_formation_laps": 0.0,
-    "input_pit_seconds": 0.0,
-    "input_safety_margin": 0.0,
-    "input_fuel_start": 0.0,
-    "input_energy_start": 0.0,
-    "input_tread_start": 100.0,
-    "input_wear_per_lap": 0.0,
-    "input_minimum_tread": 0.0,
-    "input_refuel_rate": 0.0,
-    "input_energy_rate": 0.0,
-    "enable_tyres_during_refuel": False,
-    "enable_driver_change_during_refuel": False,
-    "input_driver_change_seconds": 0.0,
-    "input_minimum_stops": 0,
-    "input_max_stint_minutes": 0.0,
-    "input_drivers": 1,
-    "input_fuel_effect": 0.0,
-    "input_track_evolution": 0.0,
-    "input_target_stint_laps": 0,
-    "input_safety_margin_kind": 0,  # see fuel_strategy.MARGIN_UNITS
-    "enable_balanced_stints": False,
-    "input_stints_per_driver": 1,
-    "input_driver_table": "",  # pace:min:max of each driver, see fuel_strategy.parse_driver_table
-    "input_saving_cost": 0.0,
-    "input_race_start_minutes": -1,
-    "enable_safety_car": False,
-    "input_sc_lap": 1,
-    "input_sc_laps": 3,
-    "input_sc_consumption": 50.0,
-    "input_sc_laptime": 150.0,
-    "enable_sc_pit": False,
-    "input_sc_pit_saving": 50.0,
-    "input_sc_wear": 50.0,
-    "enable_rain": False,
-    "input_rain_lap": 1,
-    "input_rain_laps": 0,
-    "input_rain_consumption": 100.0,
-    "input_rain_laptime": 110.0,
-    "enable_rain_tyres": True,
-    "input_pit_lap_consumption": 100.0,
-    "enable_leader_finish": False,
-    "input_tyre_set_laps": 0,
-    "enable_tyre_life_stints": False,
-}
+SAVED_INPUTS = FUEL_CALCULATOR_INPUTS
 FUEL_INPUTS = ("input_fuel_per_lap", "input_tank_capacity", "input_fuel_start", "input_refuel_rate")  # fuel unit
 INPUT_LIMIT = 1e6  # beyond every input range: huge numbers of a file clamped to it
 
@@ -288,9 +235,8 @@ def live_race_length() -> tuple[str, int] | None:
 
 # Lap time & time of day typed as text
 def laptime_text(seconds: float) -> str:
-    """Lap time as m:ss.mmm"""
-    milliseconds = round(max(seconds, 0) * 1000)
-    return f"{milliseconds // 60000}:{milliseconds // 1000 % 60:02d}.{milliseconds % 1000:03d}"
+    """Lap time as m:ss.mmm (same format as every lap time)"""
+    return calc.sec2laptime_full(max(seconds, 0.0))
 
 
 def parse_laptime(text: str) -> float | None:
@@ -376,24 +322,3 @@ def write_plan_csv(filename: str, header: Sequence[str], rows: Sequence[Sequence
         writer = csv.writer(file)
         writer.writerow(header)
         writer.writerows(rows)
-
-
-# Share code: race plan in one line of text
-def encode_share_code(data: dict) -> str:
-    """Race plan as one line of text, to paste in a chat"""
-    raw = zlib.compress(json.dumps(data, separators=(",", ":")).encode("utf-8"), 9)
-    return SHARE_CODE_PREFIX + base64.urlsafe_b64encode(raw).decode("ascii")
-
-
-def decode_share_code(text: str) -> dict:
-    """Race plan of a share code, ValueError when not a race plan code"""
-    text = "".join(str(text).split())  # line breaks of a chat left out
-    if not text.startswith(SHARE_CODE_PREFIX):
-        raise ValueError("not a race plan share code")
-    try:  # nan & infinity refused: never reach the inputs
-        data = load_json_strict(zlib.decompress(base64.urlsafe_b64decode(text[len(SHARE_CODE_PREFIX):])))
-    except (binascii.Error, zlib.error, ValueError, RecursionError) as error:
-        raise ValueError("damaged race plan share code") from error
-    if not isinstance(data, dict):
-        raise ValueError("not a race plan")
-    return data

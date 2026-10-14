@@ -24,12 +24,19 @@ Slip ratio per tyre (percent) with gauge, highlighted beyond optimal range.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...module_info import minfo
 from .gauge_quad import GaugeQuad
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SlipRatioConfig
 
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: SlipRatioConfig
 
     options = (*GaugeQuad.common_options, "slip_ratio_optimal_range", "slip_ratio_maximum_range")
     label = "Slip ratio"

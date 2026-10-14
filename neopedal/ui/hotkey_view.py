@@ -193,14 +193,17 @@ class HotkeyList(QWidget):
             for options in cfg.user.shortcuts.values():
                 options["bind"] = ""
             cfg.save(0, config_type=ConfigType.SHORTCUTS)
-            # Refresh button
-            listbox_hotkey = self.listbox_hotkey
-            for row_index in range(listbox_hotkey.count()):
-                item = listbox_hotkey.itemWidget(listbox_hotkey.item(row_index))
-                if isinstance(item, HotkeyConfigItem):
-                    item.reload_hotkey()
+            self.reload_items()
             # Reload
             kctrl.reload()
+
+    def reload_items(self):
+        """Key binding buttons read again (cleared)"""
+        listbox_hotkey = self.listbox_hotkey
+        for row_index in range(listbox_hotkey.count()):
+            item = listbox_hotkey.itemWidget(listbox_hotkey.item(row_index))
+            if isinstance(item, HotkeyConfigItem):
+                item.reload_hotkey()
 
 
 class HotkeyConfigItem(QWidget):

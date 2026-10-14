@@ -24,7 +24,8 @@ Request saved in config folder ("import_request.json"), applied on next start be
 are loaded (a running app would save its settings over imported ones), see apply_pending_import.
 Source folder is copied, never moved nor modified. Current folder is never deleted: it is
 renamed next to it ("<folder>.before-import-<time>") before the copy, and put back if the copy
-fails. Runtime files of a running app (pid.log, lock & temporary files) are not copied.
+fails; only the most recent folder set aside is kept. Runtime files of a running app (pid.log,
+lock & temporary files) and lap cache (rebuilt from laps) are not copied.
 
 Linux: data folder of same name next to source (XDG data home) is imported too, and
 "user_path" values of copied config.json pointing inside source folders are updated.
@@ -40,13 +41,16 @@ import os
 import shutil
 from datetime import datetime
 
+from . import atomic_replace, encode_text, read_json
+
 logger = logging.getLogger(__name__)
 
 REQUEST_FILE = "import_request.json"
 CONFIG_FILE = "config.json"
 SETTINGS_FILES = (CONFIG_FILE, "shortcuts.json")  # one of them: a global settings folder
-SKIPPED_FILES = ("pid.log", "*.lock", "*.tmp", "startup.marker", REQUEST_FILE)
+SKIPPED_FILES = ("pid.log", "*.lock", "*.tmp", "startup.marker", REQUEST_FILE, ".lap_cache")
 TEMP_SUFFIX = ".importing"
+ASIDE_SUFFIX = ".before-import-"  # + time stamp: previous folder set aside
 
 _report: list[tuple[int, str]] = []  # (log level, message)
 
@@ -78,12 +82,9 @@ def is_settings_folder(path: str, config_folder: str) -> bool:
 def request_import(config_folder: str, source: str) -> bool:
     """Save import request, applied on next start; False if not saved"""
     filename = os.path.join(config_folder, REQUEST_FILE)
-    temp_file = f"{filename}{TEMP_SUFFIX}"
     data = {"source": os.path.abspath(source), "requested": datetime.now().isoformat(timespec="seconds")}
     try:
-        with open(temp_file, "w", encoding="utf-8") as jsonfile:
-            json.dump(data, jsonfile, indent=4)
-        os.replace(temp_file, filename)
+        atomic_replace(filename, encode_text(json.dumps(data, indent=4)))
     except OSError as error:
         logger.error("IMPORT: request not saved in %s: %s", filename, error)
         return False
@@ -93,12 +94,8 @@ def request_import(config_folder: str, source: str) -> bool:
 
 def read_request(config_folder: str) -> str:
     """Source folder of pending import request, empty if none"""
-    try:
-        with open(os.path.join(config_folder, REQUEST_FILE), encoding="utf-8") as jsonfile:
-            data = json.load(jsonfile)
-    except (OSError, ValueError):
-        return ""
-    source = data.get("source") if isinstance(data, dict) else None
+    data = read_json(os.path.join(config_folder, REQUEST_FILE), strict=False, default={}, dict_only=True)
+    source = data.get("source")
     return source if isinstance(source, str) else ""
 
 
@@ -113,7 +110,7 @@ def clear_request(config_folder: str) -> None:
 
 def rewrite_config_paths(config_file: str, path_map: dict[str, str]) -> int:
     """Point "user_path" values inside source folders to new folders, return changed count"""
-    with open(config_file, encoding="utf-8") as jsonfile:
+    with open(config_file, encoding="utf-8-sig") as jsonfile:
         config = json.load(jsonfile)
     user_path = config.get("user_path") if isinstance(config, dict) else None
     if not isinstance(user_path, dict):
@@ -130,11 +127,24 @@ def rewrite_config_paths(config_file: str, path_map: dict[str, str]) -> int:
                 changed += 1
                 break
     if changed:
-        temp_file = f"{config_file}{TEMP_SUFFIX}"
-        with open(temp_file, "w", encoding="utf-8") as jsonfile:
-            json.dump(config, jsonfile, indent=4)
-        os.replace(temp_file, config_file)
+        atomic_replace(config_file, encode_text(json.dumps(config, indent=4)))
     return changed
+
+
+def remove_old_asides(target: str, keep: str) -> None:
+    """Remove folders set aside by previous imports of target, except keep (or most recent if empty)"""
+    parent, name = os.path.split(target)
+    prefix = f"{name}{ASIDE_SUFFIX}"
+    try:
+        asides = sorted(entry.path for entry in os.scandir(parent or ".")
+                        if entry.name.startswith(prefix) and entry.is_dir(follow_symlinks=False))
+    except OSError:
+        return
+    if not keep and asides:
+        keep = asides[-1]  # time stamp in name: most recent last
+    for path in asides:
+        if not same_folder(path, keep):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def replace_folder(source: str, target: str, stamp: str) -> str:
@@ -155,15 +165,21 @@ def replace_folder(source: str, target: str, stamp: str) -> str:
         shutil.rmtree(temp_folder, ignore_errors=True)
         raise
     aside = ""
-    if os.path.exists(target):
-        aside = f"{target}.before-import-{stamp}"
-        os.rename(target, aside)
     try:
-        os.rename(temp_folder, target)
+        if os.path.exists(target):
+            aside = f"{target}{ASIDE_SUFFIX}{stamp}"
+            os.rename(target, aside)  # fails if files are in use (another app running): nothing changed
+            try:
+                os.rename(temp_folder, target)
+            except OSError:
+                os.rename(aside, target)
+                raise
+        else:
+            os.rename(temp_folder, target)
     except OSError:
-        if aside:
-            os.rename(aside, target)
+        shutil.rmtree(temp_folder, ignore_errors=True)
         raise
+    remove_old_asides(target, aside)
     return aside
 
 

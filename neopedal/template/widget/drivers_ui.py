@@ -31,18 +31,18 @@ from .black_box_ui import ORDER_LIST, OptionUI
 # Columns of modern design, in design order (shown left to right while no display order was changed)
 RELATIVE_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-    "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "energy_remaining",
+    "pit_status", "laptime", "best_laptime", "average_laptime", "energy_remaining",
     "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time", "time_gap", "gap_trend",
 )
 STANDINGS_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-    "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
-    "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
-    "time_interval", "time_gap",
+    "pit_status", "laptime", "best_laptime", "average_laptime", "delta_laptime",
+    "energy_remaining", "energy_per_lap", "vehicle_integrity", "incidents", "track_limits", "stint_laps",
+    "speed_trap", "lift_and_coast_time", "time_interval", "time_gap",
 )
 RIVALS_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-    "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
+    "pit_status", "laptime", "best_laptime", "average_laptime", "delta_laptime",
     "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
     "time_interval",
 )
@@ -58,15 +58,16 @@ COLUMN_TITLES = {
     "vehicle_name": "Vehicle Name",
     "brand_logo": "Brand Logo",
     "tyre_compound": "Tyre Compound",
-    "pit_status": "Pit Status",
-    "pitstop_count": "Pit Stops",
+    "pit_status": "Pit Status & Stops",
     "laptime": "Last Lap Time",
     "best_laptime": "Best Lap Time",
     "average_laptime": "Average Lap Time",
     "delta_laptime": "Delta Lap Time",
     "energy_remaining": "Energy Remaining",
+    "energy_per_lap": "Energy per Lap",
     "vehicle_integrity": "Vehicle Integrity",
     "incidents": "Incidents",
+    "track_limits": "Track limits",
     "stint_laps": "Stint Laps",
     "speed_trap": "Speed Trap",
     "lift_and_coast_time": "Lift & Coast",
@@ -81,11 +82,15 @@ COLUMN_OPTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("vehicle_name", ("show_vehicle_brand_as_name", "vehicle_name_width")),
     ("brand_logo", ("brand_logo_width",)),
     ("tyre_compound", ("show_compound_for_each_wheel",)),
-    ("pit_status", ("pit_status_text", "garage_status_text", "yellow_flag_status_text", "finish_status_text")),
-    ("pitstop_count", ("show_pit_request",)),
-    ("laptime", ("show_highlighted_fastest_last_laptime", "show_pitstop_duration_while_requested_pitstop")),
+    ("pit_status", ("pit_status_text", "garage_status_text", "yellow_flag_status_text", "finish_status_text",
+                    "show_pit_request")),
+    ("laptime", ("show_highlighted_fastest_last_laptime", "show_pitstop_duration_while_requested_pitstop",
+                 "show_lap_sectors", "show_lap_delta", "show_out_and_in_laps", "show_invalid_lap_in_red",
+                 "show_lap_trend", "show_running_lap_time")),
     ("best_laptime", ("show_best_laptime_from_recent_laps_in_race",)),
     ("delta_laptime", ("number_of_delta_laptime",)),
+    ("energy_remaining", ("decimal_places_energy_remaining",)),
+    ("energy_per_lap", ("show_energy_per_lap_average",)),
     ("incidents", ("incidents_high_threshold", "incidents_extreme_threshold")),
     ("lift_and_coast_time", ("lift_and_coast_reset_threshold", "lift_and_coast_highlight_threshold")),
     ("time_interval", ("show_time_interval_from_same_class", "decimal_places_time_interval",
@@ -128,7 +133,7 @@ RELATIVE_UI = driver_list_ui(RELATIVE_COLUMNS, (
     ("Rows", ("additional_players_front", "additional_players_behind", "show_vehicle_in_garage", *ROW_OPTIONS)),
 ))
 STANDINGS_UI = driver_list_ui(STANDINGS_COLUMNS, (
-    ("Rows", ROW_OPTIONS),
+    ("Rows", ("show_column_headers", *ROW_OPTIONS)),
     ("Classes & Number of Cars", (
         "enable_multi_class_split_mode", "show_class_header", "class_order", "maximum_vehicles_split_mode", "maximum_vehicles_per_split_player",
         "maximum_vehicles_per_split_others", "enable_single_class_exclusive_mode", "maximum_vehicles_exclusive_mode",

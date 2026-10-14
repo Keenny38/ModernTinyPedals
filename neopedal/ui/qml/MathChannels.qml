@@ -19,10 +19,10 @@ Popup {
     height: Math.min((parent ? parent.height : theme.em * 40) - theme.em * 4, theme.em * 40)
     x: parent ? (parent.width - width) / 2 : 0
     y: parent ? (parent.height - height) / 2 : 0
-    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 } }
-    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
+    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
     background: Rectangle {
-        radius: theme.em * 0.8
+        radius: theme.radiusXl
         color: theme.raised
         border.width: 1
         border.color: theme.border
@@ -40,10 +40,10 @@ Popup {
     }
     function check() {
         error = nameField.text === "" && expressionField.text === "" ? ""
-              : backend.checkMathChannel(editing, nameField.text, expressionField.text)
+              : backend.math.check(editing, nameField.text, expressionField.text)
     }
     function save() {
-        var refused = backend.saveMathChannel(editing, nameField.text, expressionField.text, unitField.text)
+        var refused = backend.math.save(editing, nameField.text, expressionField.text, unitField.text)
         if (refused === "") editing = nameField.text
         error = refused
     }
@@ -59,7 +59,7 @@ Popup {
         placeholderTextColor: theme.dimText
         selectByMouse: true
         background: Rectangle {
-            radius: theme.em * 0.45
+            radius: theme.radiusMd
             color: theme.base
             border.width: 1
             border.color: field.activeFocus ? theme.accent : theme.border
@@ -67,24 +67,24 @@ Popup {
     }
 
     contentItem: ColumnLayout {
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
 
-        Text { text: i18n.tr("Math Channels"); color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontPoint * 1.15 }
+        Text { text: i18n.tr("Math Channels"); color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontSubtitle }
         Text {
             Layout.fillWidth: true
             text: i18n.tr("Expression over channel names: + - * / ( ), abs(x), min(a, b), max(a, b), d(x) change per second, numbers, pi, g, deg. Values in recorded units (km/h, °C, pedals & steering 0 to 1).")
             color: theme.dimText
             wrapMode: Text.WordWrap
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
         }
 
         // Math channels: click to change or remove
         Flow {
             Layout.fillWidth: true
             spacing: theme.em * 0.3
-            visible: backend.mathChannels.length > 0
+            visible: backend.math.items.length > 0
             Repeater {
-                model: backend.mathChannels
+                model: backend.math.items
                 TpButton {
                     text: modelData.name + (modelData.unit ? " (" + modelData.unit + ")" : "")
                     flat: true
@@ -101,13 +101,13 @@ Popup {
             spacing: theme.em * 0.3
             Text { text: i18n.tr("Built-in:"); color: theme.dimText; height: theme.em * 1.8; verticalAlignment: Text.AlignVCenter }
             Repeater {
-                model: backend.mathPresets
+                model: backend.math.presets
                 TpButton {
                     text: "+ " + modelData.title
                     flat: true
                     implicitHeight: theme.em * 1.8
                     tip: modelData.expression
-                    onClicked: editor.error = backend.addMathPreset(index)
+                    onClicked: editor.error = backend.math.addPreset(index)
                 }
             }
         }
@@ -123,7 +123,7 @@ Popup {
             Field {
                 id: expressionField
                 placeholderText: "max(-d(brake), 0) * 100"
-                font.family: "monospace"
+                font.family: theme.monoFont
                 onTextEdited: editor.check()
                 onAccepted: if (editor.error === "") editor.save()
             }
@@ -139,7 +139,7 @@ Popup {
         }
 
         // Channel names usable in expression
-        Text { text: i18n.tr("Channels (click to insert):"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+        Text { text: i18n.tr("Channels (click to insert):"); color: theme.dimText; font.pointSize: theme.fontSmall }
         Flickable {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -151,9 +151,9 @@ Popup {
             Flow {
                 id: names
                 width: parent.width
-                spacing: theme.em * 0.25
+                spacing: theme.em * 0.3
                 Repeater {
-                    model: backend.mathInputs
+                    model: backend.math.inputs
                     Rectangle {
                         width: nameText.implicitWidth + theme.em * 0.7
                         height: theme.em * 1.5
@@ -166,7 +166,7 @@ Popup {
                             anchors.centerIn: parent
                             text: modelData
                             color: theme.text
-                            font.pointSize: theme.fontPoint * 0.78
+                            font.pointSize: theme.fontCaption
                         }
                         MouseArea {
                             id: nameArea
@@ -188,7 +188,14 @@ Popup {
                 text: i18n.tr("Remove")
                 flat: true
                 enabled: editor.editing !== ""
-                onClicked: { backend.removeMathChannel(editor.editing); editor.edit(null) }
+                onClicked: removeDialog.open()
+                TpConfirmDialog {
+                    id: removeDialog
+                    title: i18n.tr("Remove this math channel?")
+                    text: i18n.tr("Its formula is deleted and it leaves the charts.")
+                    acceptText: i18n.tr("Remove")
+                    onAccepted: { backend.math.remove(editor.editing); editor.edit(null) }
+                }
             }
             Item { Layout.fillWidth: true }
             TpButton {

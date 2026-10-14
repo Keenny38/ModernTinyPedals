@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from itertools import islice
 from time import monotonic
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QPainter
@@ -39,6 +39,9 @@ from PySide6.QtGui import QColor, QPainter
 from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import HiddenPreview, finite
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SpotterConfig
 
 PRECISION = 2  # overlap fraction decimals (bar redrawn only when lit part moves visibly)
 CLEAR_STEPS = 10  # fade steps of clear signal (widget redrawn only on step change)
@@ -149,7 +152,7 @@ def side_approach(cars, length: float, nearby: float, distance: float, min_side:
 class SpotterMixin:
     """Side overlap, clear signal & cars coming up behind, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: SpotterConfig
 
     def setup_spotter(self):
         """Options, last state"""
@@ -188,6 +191,17 @@ class SpotterMixin:
         )
         return SpotterState(self.sides[0], self.sides[1], (left, right), self.approach)
 
+    def post_update(self):
+        """Updates paused (garage, monitor): bars cleared, not left lit until next update"""
+        super().post_update()  # type: ignore[misc]
+        self.sides = (NO_CAR, NO_CAR)
+        self.approach = (0.0, 0.0)
+        self.clear_until = [0.0, 0.0]
+        self.last_version = None
+        if self.state != NO_STATE:  # type: ignore[has-type]
+            self.state = NO_STATE
+            self.update()  # type: ignore[attr-defined]
+
     @staticmethod
     def nearby_cars():
         """Relative position of other cars on track (garage left out)"""
@@ -201,6 +215,8 @@ class SpotterMixin:
 
 class Realtime(HiddenPreview, SpotterMixin, Overlay):
     """Draw widget"""
+
+    wcfg: SpotterConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

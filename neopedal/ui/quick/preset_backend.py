@@ -23,7 +23,7 @@ Each preset row tells its primary tags (car classes, tracks), lock, preset hotke
 how many overlays & modules it turns on. Preset files are read only when they changed (size & time
 cache), in background (rows show their last change only until read), and only while the page is shown:
 a refresh while hidden is done when the page shows again.
-Actions with dialogs (files, share codes, other pages) are run by the page hosting the backend.
+Actions with dialogs (files, other pages) are run by the page hosting the backend.
 """
 
 from __future__ import annotations
@@ -47,13 +47,12 @@ from ...module_control import mctrl, wctrl
 from ...setting import cfg
 from ...template.setting_shortcuts import SHORTCUTS_PRESET
 from ...userfile.json_setting import create_backup_file, set_backup_timestamp
-from ...userfile.preset_share import summarize_preset
 from ...userfile.preset_trash import count_trash
 from ...validator import is_allowed_filename
 from ..module_view import sort_key
 from ..preset_management import apply_preset_name, check_preset_name
-from .background import BackgroundJobs
 from .models import DictListModel
+from .page_backend import PageBackend
 
 SORT_RECENT = 0
 SORT_NAME = 1
@@ -78,9 +77,7 @@ class PresetHost(Protocol):
     def delete_preset(self, preset_filename: str) -> bool: ...
     def undo_delete(self, entry: Any = None) -> bool: ...
     def export_package(self, preset_filename: str) -> None: ...
-    def copy_share_code(self, preset_filename: str) -> None: ...
     def import_package(self) -> None: ...
-    def import_share_code(self) -> None: ...
     def open_page(self, name: str, preset_filename: str = "") -> None: ...
 
 
@@ -95,6 +92,19 @@ class Summary(NamedTuple):
 Stamp = tuple[int, int]  # file time (ns) & size
 
 
+def summarize_preset(
+    preset: dict, widget_names: Iterable[str], module_names: Iterable[str]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Enabled widgets & modules of preset"""
+    widgets = set(widget_names)
+    modules = set(module_names)
+    enabled = [name for name, options in preset.items() if isinstance(options, dict) and options.get("enable")]
+    return (
+        tuple(sorted(name for name in enabled if name in widgets)),
+        tuple(sorted(name for name in enabled if name in modules)),
+    )
+
+
 def read_summary(path: str, widget_names: Iterable[str], module_names: Iterable[str]) -> tuple[Stamp | None, Summary | None]:
     """Stamp & content of preset file (any thread): content None if unreadable, stamp None if file is gone"""
     try:
@@ -107,10 +117,10 @@ def read_summary(path: str, widget_names: Iterable[str], module_names: Iterable[
             preset = json.load(file)
         if not isinstance(preset, dict):
             raise ValueError("not a preset")
-        content = summarize_preset(preset, widget_names, module_names)
+        widgets, modules = summarize_preset(preset, widget_names, module_names)
         preset_info = preset.get("preset")
         api = str(preset_info.get("api_name", "")) if isinstance(preset_info, dict) else ""
-        summary = Summary(content.widgets, content.modules, api)
+        summary = Summary(widgets, modules, api)
     except (OSError, ValueError, RecursionError, UnicodeDecodeError):
         summary = None
     return (stat.st_mtime_ns, stat.st_size), summary
@@ -223,7 +233,7 @@ def preset_references() -> References:
     return References(classes, tracks, hotkeys)
 
 
-class PresetBackend(QObject):
+class PresetBackend(PageBackend):
     """Presets page state & actions
 
     Args:
@@ -237,11 +247,10 @@ class PresetBackend(QObject):
     stateChanged = Signal()  # auto load, trash, undo
 
     def __init__(self, parent, host: PresetHost):
-        super().__init__(parent)
+        super().__init__(parent, "Presets")
         self._host = host
         self.model = DictListModel(ROLES, self)
         self._cache = SummaryCache()
-        self._jobs = BackgroundJobs(self, "Presets")
         self._summaries: dict[str, Summary | None] = {}  # filename: content of rows read
         self._rows: list[dict] = []  # every preset, file order
         self._times: dict[str, tuple[float, int]] = {}  # filename: (modified time, size)
@@ -298,7 +307,7 @@ class PresetBackend(QObject):
         def work() -> list[tuple[str, Stamp | None, Summary | None]]:
             return [(path, *read_summary(path, widget_names, module_names)) for path in paths]
 
-        self._jobs.run("read presets", work, self._summaries_read, key="summaries")
+        self.jobs.run("read presets", work, self._summaries_read, key="summaries")
 
     def _summaries_read(self, results: list[tuple[str, Stamp | None, Summary | None]]):
         """Preset contents read: pending rows updated (in place), loaded preset & details told"""
@@ -329,7 +338,7 @@ class PresetBackend(QObject):
     @property
     def reading(self) -> bool:
         """Preset contents being read in background"""
-        return self._jobs.is_busy("summaries")
+        return self.jobs.is_busy("summaries")
 
     def make_row(
         self, filename: str, modified: float, summary: Summary | None = None, pending: bool = False,
@@ -600,18 +609,9 @@ class PresetBackend(QObject):
         if self._known(filename):
             self._host.export_package(filename)
 
-    @Slot(str)
-    def copyShareCode(self, filename: str):
-        if self._known(filename):
-            self._host.copy_share_code(filename)
-
     @Slot()
     def importPackage(self):
         self._host.import_package()
-
-    @Slot()
-    def importShareCode(self):
-        self._host.import_share_code()
 
     @Slot(str)
     def compare(self, filename: str):

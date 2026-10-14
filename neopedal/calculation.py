@@ -23,12 +23,11 @@ Calculation function
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from functools import partial
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from functools import lru_cache, partial
 from math import acos, atan, atan2, ceil, cos, degrees, dist, hypot, isfinite, radians, sin, tan
 from statistics import fmean
 from typing import Any
-
-from .const_common import FLOAT_INF
 
 distance = dist  # distance between 2 coordinates
 hypotenuse = hypot  # distance from origin point (0) to a point
@@ -79,12 +78,16 @@ def min_nonzero(data: tuple[float, ...]) -> float:
 
 
 def decimal_strip(raw_range: float, max_decimals: int) -> float:
-    """Strip off unwanted decimal places according to max number of decimals"""
-    value_str = str(raw_range)
-    pos = value_str.find(".") + 1
-    if pos <= 0:
+    """Strip off unwanted decimal places according to max number of decimals
+
+    Cut toward zero from shortest written value (0.29 stays 0.29, -1.29 gives -1.2), exponent too (1.5e-05).
+    """
+    if isinstance(raw_range, int) or not isfinite(raw_range):
         return raw_range
-    return float(value_str[:pos + max_decimals])
+    try:
+        return float(Decimal(repr(raw_range)).quantize(Decimal(1).scaleb(-max(max_decimals, 0)), ROUND_DOWN))
+    except InvalidOperation:  # too many digits (huge value): no decimal to strip
+        return raw_range
 
 
 def dataset_mean(dataset: Sequence[float]) -> float:
@@ -94,26 +97,6 @@ def dataset_mean(dataset: Sequence[float]) -> float:
     if len(dataset) > 1:
         return fmean(dataset)
     return dataset[0]
-
-
-def mean_iter(average: float, value: float, num_samples: int) -> float:
-    """Average value"""
-    return (average * num_samples + value) / (num_samples + 1)
-
-
-def min_vs_avg(data: Sequence) -> float:
-    """Min vs average"""
-    return abs(min(data) - mean(data))
-
-
-def max_vs_avg(data: Sequence) -> float:
-    """Max vs average"""
-    return abs(max(data) - mean(data))
-
-
-def max_vs_min(data: Sequence) -> float:
-    """Max vs min"""
-    return max(data) - min(data)
 
 
 def engine_power(torque: float, rpm: float) -> float:
@@ -235,15 +218,6 @@ def lap_progress_offset(laptime: float, lap_into: float, seconds_delay: float) -
     return 0
 
 
-def lap_progress_difference(ahead_laptime: float, behind_laptime: float) -> float:
-    """Lap progress difference (fraction) between player ahead & behind"""
-    if behind_laptime > ahead_laptime > 0:
-        return (behind_laptime - ahead_laptime) / behind_laptime
-    if ahead_laptime > behind_laptime > 0:
-        return (ahead_laptime - behind_laptime) / ahead_laptime
-    return 0
-
-
 def circular_position_relative(circle_length: float, plr_dist: float, opt_dist: float) -> float:
     """Circular relative position between player and opponent"""
     rel_dist = opt_dist - plr_dist
@@ -268,14 +242,6 @@ def lap_difference(
     if lap_ahead > lap_diff > -lap_behind:
         return 0
     return lap_diff
-
-
-def relative_time_gap(rel_dist: float, plr_speed: float, opt_speed: float) -> float:
-    """Relative time gap between opponent & player"""
-    speed = max(plr_speed, opt_speed)
-    if speed > 1:
-        return abs(rel_dist / speed)
-    return 0
 
 
 def pitlane_length(track_length: float, pit_entry: float, pit_exit: float) -> float:
@@ -309,11 +275,6 @@ def slope_angle(height: float, length: float) -> float:
     if length:
         return degrees(atan(height / length))
     return 0
-
-
-def arc_length(angle: float, radius: float) -> float:
-    """Arc length"""
-    return abs(angle * radius * 3.14159265 / 180)
 
 
 def arc_angle(length: float, radius: float) -> float:
@@ -407,11 +368,6 @@ def clockwise_median_time(start_time: float, end_time: float, max_time: float = 
     return med_time
 
 
-def sec2hourminute(seconds: float) -> str:
-    """Seconds to hour:minute (hour:min)"""
-    return f"{seconds // 3600:02.0f}:{seconds // 60 % 60:02.0f}"
-
-
 def round_seconds(seconds: float) -> int:
     """Seconds rounded to whole seconds, 0 if invalid (inf or nan)"""
     return round(seconds) if isfinite(seconds) else 0
@@ -431,6 +387,7 @@ def sec2countdown(seconds: float) -> str:
     return f"{hours:01d}:{minutes:02d}:{sec:02d}"
 
 
+@lru_cache(maxsize=512)  # same lap times formatted on every update (tables)
 def sec2laptime(seconds: float) -> str:
     """Lap time (min:sec.ms), rounded to ms before split (no 1:60.000)"""
     seconds = round(seconds, 3)
@@ -440,6 +397,7 @@ def sec2laptime(seconds: float) -> str:
     return f"{seconds % 60:.3f}"
 
 
+@lru_cache(maxsize=512)  # same lap times formatted on every update (tables)
 def sec2laptime_full(seconds: float) -> str:
     """Lap time full (min:sec.ms), rounded to ms before split (no 1:60.000)"""
     minutes, sec = divmod(round(seconds, 3) + 0.0, 60)  # + 0.0: no "-0" minutes
@@ -513,25 +471,6 @@ def accumulated_sum(data: list, end_index: int) -> float:
 
 
 # Search
-def search_column_key(key: Sequence, column: int | None = None):
-    """Search column key"""
-    if column is None:
-        return key
-    return key[column]
-
-
-def linear_search_higher(data: Sequence, target: float, column: int | None = None) -> int:
-    """linear search nearest value higher index from unordered list"""
-    #key = lambda x:x[column] if column >= 0 else x
-    end = len(data) - 1
-    nearest = FLOAT_INF
-    for index, data_row in enumerate(data):
-        if target <= search_column_key(data_row, column) < nearest:
-            nearest = search_column_key(data_row, column)
-            end = index
-    return end
-
-
 def binary_search_lower(data: Sequence, target: float, start: int, end: int) -> int:
     """Binary search nearest value lower index from ordered list"""
     while start <= end:
@@ -539,33 +478,6 @@ def binary_search_lower(data: Sequence, target: float, start: int, end: int) -> 
         if target == data[center]:
             return center
         if target > data[center]:
-            start = center + 1
-        else:
-            end = center - 1
-    return end
-
-
-def binary_search_higher(data: Sequence, target: float, start: int, end: int) -> int:
-    """Binary search nearest value higher index from ordered list"""
-    while start < end:
-        center = (start + end) // 2
-        if target == data[center]:
-            return center
-        if target > data[center]:
-            start = center + 1
-        else:
-            end = center
-    return end
-
-
-def binary_search_lower_column(
-    data: Sequence, target: float, start: int, end: int, column: int = 0) -> int:
-    """Binary search nearest value lower index from ordered list with column index"""
-    while start <= end:
-        center = (start + end) // 2
-        if target == data[center][column]:
-            return center
-        if target > data[center][column]:
             start = center + 1
         else:
             end = center - 1
@@ -724,12 +636,6 @@ def end_timer_laps_remain(lap_into: float, laptime_last: float, seconds_remain: 
             return lap_into
         return seconds_remain / laptime_last + lap_into
     return 0
-
-
-def time_type_full_laps_remain(laptime_last: float, seconds_remain: float) -> int:
-    """Estimated full remaining laps count from finish line after race timer ended"""
-    # alternative-lap-into = laptime_current / laptime_last % 1
-    return ceil(end_timer_laps_remain(0, laptime_last, seconds_remain))
 
 
 def time_type_laps_remain(full_laps_remain: int, lap_into: float) -> float:
@@ -915,13 +821,6 @@ def wheel_rotation_bias(rot_axle: float, rot_left: float, rot_right: float) -> f
     if rot_axle:
         return abs((rot_left - rot_right) / rot_axle)
     return 0
-
-
-def wheel_rotation_ratio(rot_axle: float, rot_left: float) -> float:
-    """Calculate wheel rotation ratio between left and right wheel on same axle"""
-    if rot_axle:
-        return rot_left / rot_axle / 2
-    return 0.5
 
 
 def differential_locking_percent(rot_axle: float, rot_left: float) -> float:

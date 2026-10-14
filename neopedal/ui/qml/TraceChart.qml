@@ -40,8 +40,10 @@ FocusScope {
     // Per panel from cursorValues (worked out once per cursor update, not per item & frame):
     // count of values shown, row of each series in bubble, compact text (built when first asked)
     property var cursorPanels: []
-    property var cursorMap: []  // map position of each lap at cursor (TrackMap)
+    property var cursorMap: []  // map position & texts of each lap at cursor (TrackMap)
+    property var cursorMapXY: []  // x, y, angle of each lap on map in one flat list (playback: every frame)
     property var cursorG: []  // G circle position of each lap at cursor (GCircle)
+    property var cursorGXY: []  // x, y of each lap on G circle in one flat list (playback: every frame)
     property var cursorInputs: []  // pedals & steering of each lap at cursor (SimpleView)
     property var cursorDashboard: []  // channel values of each lap at cursor (SimpleView)
     readonly property bool zoomed: targetEnd - targetStart < maxX - 1
@@ -55,12 +57,12 @@ FocusScope {
                                          "available": false, "weight": 1, "note": "" })
     // Lists read once from backend (each read converts a Python list)
     readonly property var sectors: backend.sectorLines
-    readonly property var marks: backend.cornerMarks
+    readonly property var marks: backend.cornerTable.marks
     readonly property real pinX: backend.pinnedX
     readonly property var legendLaps: backend.legend  // shown laps (changed with chart: passage times built again)
-    readonly property var alignInfo: backend.alignment  // corner laps are aligned on, empty if none
+    readonly property var alignInfo: backend.charts.alignment  // corner laps are aligned on, empty if none
     readonly property var overviewInfo: backend.overview  // zoom navigator line of reference lap
-    readonly property bool hasCornerRanges: backend.cornerCount > 0  // no list built
+    readonly property bool hasCornerRanges: backend.cornerTable.count > 0  // no list built
     property int movingFrom: -1
     property int movingTo: -1
     property var lineOffsets: [[0, 0], [0.5, 0.5]]
@@ -145,7 +147,7 @@ FocusScope {
         for (var i = 0; i < panels.length; i++) {
             var column = panels[i].column
             if (panels[i].autoscale) {
-                views[column] = backend.autoscaleAxis(column, targetStart, targetEnd)
+                views[column] = backend.charts.autoscaleAxis(column, targetStart, targetEnd)
                 fitted = true
             }
         }
@@ -157,7 +159,7 @@ FocusScope {
     function setAutoscale(index, enabled) {
         var info = panels[index]
         if (!info) return
-        backend.setPanelAutoscale(info.column, enabled)
+        backend.charts.setPanelAutoscale(info.column, enabled)
         autoscaleTimer.restart()
     }
 
@@ -240,7 +242,7 @@ FocusScope {
     }
     // Previous / next corner (zoomed on), from view center
     function stepCorner(direction) {
-        var ranges = backend.cornerRanges
+        var ranges = backend.cornerTable.ranges
         if (ranges.length === 0) return
         var center = zoomed ? (targetStart + targetEnd) / 2 : (direction > 0 ? -1 : maxX + 1)
         var index = -1
@@ -268,7 +270,9 @@ FocusScope {
             cursorValues = []
             cursorPanels = []
             cursorMap = []
+            cursorMapXY = []
             cursorG = []
+            cursorGXY = []
             cursorInputs = []
             cursorDashboard = []
             return
@@ -293,11 +297,31 @@ FocusScope {
         cursorPanels = state.values.map(cursorPanel)
         cursorValues = state.values
         // Map, G circle & simple view empty while hidden: not set again (their items not updated every move)
-        if (state.map.length > 0 || cursorMap.length > 0) cursorMap = state.map
-        if (state.g.length > 0 || cursorG.length > 0) cursorG = state.g
+        if (state.map.length > 0 || cursorMap.length > 0) { cursorMapXY = flatPositions(state.map, true); cursorMap = state.map }
+        if (state.g.length > 0 || cursorG.length > 0) { cursorGXY = flatPositions(state.g, false); cursorG = state.g }
         if (state.inputs.length > 0 || cursorInputs.length > 0) cursorInputs = state.inputs
         if (state.dashboard.length > 0 || cursorDashboard.length > 0) cursorDashboard = state.dashboard
     }
+    // Positions of cursor points as one flat list (x, y & angle if turned), as playback frames send them
+    function flatPositions(points, turned) {
+        var flat = []
+        for (var i = 0; i < points.length; i++) {
+            flat.push(points[i].x, points[i].y)
+            if (turned) flat.push(points[i].angle)
+        }
+        return flat
+    }
+    // Playback frame: cursor line & map / G circle positions every frame, values & texts with a full state
+    // (playbackStep: one backend call per frame)
+    function applyStep(step) {
+        cursorSource = "play"
+        cursorX = step.x
+        cursorPending = false
+        if (step.state) { applyState(step.state); return }
+        if (step.mapXY.length > 0 || cursorMapXY.length > 0) cursorMapXY = step.mapXY
+        if (step.gXY.length > 0 || cursorGXY.length > 0) cursorGXY = step.gXY
+    }
+    onPlayingChanged: if (!playing && hasCursor) fetchCursor()  // values of last played frame
     function cursorPanel(values) {
         var rows = []
         var count = 0
@@ -305,8 +329,28 @@ FocusScope {
             rows.push(count)
             if (values[i] && values[i].text !== "") count++
         }
-        return { "count": count, "rows": rows, "values": values, "compact": undefined }
+        return { "count": count, "rows": rows, "values": values, "compact": undefined, "width": undefined }
     }
+    // Width of widest value line of panel bubble, measured once per cursor update when first asked (shown bubble)
+    function valueWidth(panelIndex) {
+        var panel = cursorPanels[panelIndex]
+        if (!panel) return 0
+        if (panel.width === undefined) {
+            var widest = 0
+            var values = panel.values
+            for (var i = 0; i < values.length; i++) {
+                var entry = values[i]
+                if (!entry || entry.text === "") continue
+                var width = Math.ceil(valueMetrics.advanceWidth(entry.text))
+                if (entry.diff) width += theme.em * 0.4 + Math.ceil(diffMetrics.advanceWidth(entry.diff))
+                widest = Math.max(widest, width)
+            }
+            panel.width = widest
+        }
+        return panel.width
+    }
+    FontMetrics { id: valueMetrics; font.pointSize: theme.fontSmall; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
+    FontMetrics { id: diffMetrics; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
     // Mouse left charts or map: cursor back to kept position (or none)
     function restoreCursor() {
         var pinned = backend.pinnedX
@@ -314,7 +358,7 @@ FocusScope {
         else setCursor(NaN)
     }
     function zoomCornerAt(x) {
-        var ranges = backend.cornerRanges
+        var ranges = backend.cornerTable.ranges
         for (var i = 0; i < ranges.length; i++)
             if (x >= ranges[i][0] && x <= ranges[i][1]) { zoomRange(ranges[i], 0.15); return }
         var span = maxX * 0.03
@@ -523,12 +567,21 @@ FocusScope {
         }
     }
 
-    // Playback: cursor moves along reference lap at real time (x speed), once per drawn frame (same clock as
-    // other animations: no frame drawn without cursor move, no double step), view slides on when cursor nears its end
-    FrameAnimation {
+    // Playback: cursor moves along reference lap at real time (x speed) about 30 times a second (not every vsync:
+    // whole page drawn again each step), time from wall clock (exact whatever the tick rate), view slides on when
+    // cursor nears its end. Each step: full cursor state (cursor line, cars, values)
+    Timer {
+        property double lastTick: 0  // Date.now() of last step, 0: first step
+        interval: 33
+        repeat: true
+        triggeredOnStart: true
         running: chart.playing
+        onRunningChanged: if (!running) lastTick = 0
         onTriggered: {
-            chart.playTime += Math.min(frameTime, 0.1) * chart.playSpeed
+            var now = Date.now()
+            var elapsed = lastTick > 0 ? (now - lastTick) / 1000 : 0
+            lastTick = now
+            chart.playTime += Math.min(elapsed, 0.1) * chart.playSpeed
             if (chart.playTime >= chart.playTo) {
                 if (chart.hasRange && chart.playLoop) {  // passage A-B again
                     chart.playTime = chart.playFrom
@@ -537,16 +590,18 @@ FocusScope {
                     chart.playing = false
                 }
             }
-            var x = backend.xAtReferenceTime(chart.playTime)
+            var step = backend.playbackStep(chart.playTime, true)
+            var x = step.x
             var span = chart.targetEnd - chart.targetStart
             var margin = chart.hasRange ? 0 : span * 0.1  // passage A-B kept in view as zoomed
             if (chart.zoomed && (x > chart.targetEnd - margin || x < chart.targetStart))
                 chart.setView(x - span * 0.3, x + span * 0.7, true)
-            chart.setCursor(x, "play")
+            chart.applyStep(step)
         }
     }
 
-    readonly property real tickStep: niceStep(viewRange[1] - viewRange[0], plotArea.width / (theme.em * 6))
+    // Ticks: 40 at most (grid & axis label repeaters), wide 4K charts too
+    readonly property real tickStep: niceStep(viewRange[1] - viewRange[0], Math.min(plotArea.width / (theme.em * 6), 38))
     readonly property real firstTick: Math.ceil(viewRange[0] / tickStep) * tickStep
 
     // Digit of key (0-9, else -1), also digit row of layouts typing other characters there without Shift
@@ -601,10 +656,13 @@ FocusScope {
     }
 
     // Legend: lap colors. Hover: highlight lap, click: keep highlighted, double-click: reference, x: hide lap
+    // (texts of chips translated once, not per chip; chip tooltip made while hovered)
+    readonly property string chipHint: i18n.tr("Click: highlight · double-click: set as reference · right-click: menu")
+    readonly property string referenceTag: i18n.tr("REF")
     Flow {
         id: legendRow
         anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: chart.labelWidth }
-        spacing: theme.em * 0.35
+        spacing: theme.em * 0.4
         Repeater {
             model: backend.legendModel  // kept model: chips of laps still shown stay
             Rectangle {
@@ -619,10 +677,10 @@ FocusScope {
                 border.color: model.color
                 opacity: chart.highlightKey === "" || chart.highlightKey === model.key ? 1 : 0.55
                 ToolTip.visible: chipArea.containsMouse
-                ToolTip.text: model.full + (model.tip ? "\n" + model.tip : "")
-                              + (model.excluded ? "\n" + model.excluded : "")
-                              + "\n" + i18n.tr("Click: highlight · double-click: set as reference · right-click: menu")
-                ToolTip.delay: 600
+                ToolTip.text: chipArea.containsMouse ? model.full + (model.tip ? "\n" + model.tip : "")
+                                                       + (model.excluded ? "\n" + model.excluded : "")
+                                                       + "\n" + chart.chipHint : ""
+                ToolTip.delay: theme.tipDelay
                 MouseArea {
                     id: chipArea
                     anchors.fill: parent
@@ -650,15 +708,15 @@ FocusScope {
                     Text {
                         text: model.label
                         color: model.excluded ? theme.dimText : theme.text
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                         font.italic: model.excluded !== ""
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         visible: model.reference
-                        text: i18n.tr("REF")
+                        text: chart.referenceTag
                         color: model.color
-                        font.pointSize: theme.fontPoint * 0.75
+                        font.pointSize: theme.fontCaption
                         font.weight: Font.Bold
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -666,7 +724,7 @@ FocusScope {
                         visible: model.offset !== "" && !backend.timeAxis
                         text: model.offset
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.75
+                        font.pointSize: theme.fontCaption
                         font.features: { "tnum": 1 }
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -701,13 +759,13 @@ FocusScope {
         border.color: theme.purple
         ToolTip.visible: idealArea.containsMouse
         ToolTip.text: i18n.tr("Delta & time gain/loss against ideal lap: fastest clean shown lap in each mini-sector")
-        ToolTip.delay: 500
+        ToolTip.delay: theme.tipDelay
         Text {
             id: idealText
             anchors.centerIn: parent
             text: i18n.tr("Ideal") + " " + backend.idealTime
             color: theme.purple
-            font.pointSize: theme.fontPoint * 0.9
+            font.pointSize: theme.fontLabel
             font.weight: Font.DemiBold
         }
         MouseArea { id: idealArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
@@ -726,13 +784,13 @@ FocusScope {
         ToolTip.text: (backend.timeAxis ? i18n.tr("Laps are aligned on distance axis only") + "\n" : "")
                       + i18n.tr("Laps shifted along distance so their braking starts line up with reference lap") + "\n"
                       + i18n.tr("Click: laps back at their place")
-        ToolTip.delay: 500
+        ToolTip.delay: theme.tipDelay
         Text {
             id: alignText
             anchors.centerIn: parent
             text: "↔ " + i18n.tr("Aligned on braking") + " " + (chart.alignInfo.label || "") + "  ×"
             color: theme.accent
-            font.pointSize: theme.fontPoint * 0.9
+            font.pointSize: theme.fontLabel
             font.weight: Font.DemiBold
         }
         MouseArea {
@@ -740,7 +798,7 @@ FocusScope {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: backend.alignBraking(-1)
+            onClicked: backend.charts.alignBraking(-1)
         }
     }
     TpMenu {
@@ -751,7 +809,7 @@ FocusScope {
         Action {
             text: i18n.tr("Compare Corner by Corner")
             enabled: !chipMenu.reference
-            onTriggered: backend.setCompareKey(chipMenu.lapKey)
+            onTriggered: backend.cornerTable.setCompareKey(chipMenu.lapKey)
         }
         Action {
             text: i18n.tr("Highlight")
@@ -798,7 +856,7 @@ FocusScope {
             spacing: theme.em * 0.4
             opacity: chart.zoomed ? 1 : 0
             visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 200 } }
+            Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "×" + (chart.maxX / Math.max(chart.targetEnd - chart.targetStart, 1e-9)).toFixed(1).replace(".", theme.decimalPoint)
@@ -831,7 +889,7 @@ FocusScope {
         Text {
             text: "A ↔ B"
             color: theme.accent
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.weight: Font.Bold
             height: theme.em * 1.4
             verticalAlignment: Text.AlignVCenter
@@ -839,14 +897,14 @@ FocusScope {
         Repeater {
             model: chart.passage
             Row {
-                spacing: theme.em * 0.25
+                spacing: theme.em * 0.3
                 height: theme.em * 1.4
                 Rectangle { width: theme.em * 0.5; height: width; radius: width / 2; color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: modelData.label + " " + modelData.time + " s"
                     color: modelData.best ? theme.gold : theme.text
-                    font.pointSize: theme.fontPoint * 0.8
+                    font.pointSize: theme.fontCaption
                     font.weight: modelData.best ? Font.Bold : Font.Normal
                     font.features: { "tnum": 1 }
                 }
@@ -855,7 +913,7 @@ FocusScope {
                     visible: modelData.gap !== ""
                     text: modelData.gap
                     color: theme.loss
-                    font.pointSize: theme.fontPoint * 0.8
+                    font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
                 }
             }
@@ -875,7 +933,7 @@ FocusScope {
             anchors.verticalCenter: parent.verticalCenter
             text: "S1"
             color: s1Area.containsMouse ? theme.accent : theme.text
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.weight: Font.Bold
             MouseArea { id: s1Area; anchors.fill: parent; anchors.margins: -3; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: chart.zoomSector(1) }
         }
@@ -888,7 +946,7 @@ FocusScope {
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
                 color: sectorArea.containsMouse ? theme.accent : theme.text
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 font.weight: Font.Bold
                 MouseArea {
                     id: sectorArea
@@ -909,7 +967,7 @@ FocusScope {
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
                 color: cornerArea.containsMouse ? theme.accent : theme.dimText
-                font.pointSize: theme.fontPoint * 0.78
+                font.pointSize: theme.fontCaption
                 MouseArea {
                     id: cornerArea
                     anchors.fill: parent
@@ -928,7 +986,7 @@ FocusScope {
             anchors.bottom: parent.bottom
             text: "\u25BC"
             color: theme.accent
-            font.pointSize: theme.fontPoint * 0.7
+            font.pointSize: theme.fontTiny
         }
     }
 
@@ -969,7 +1027,7 @@ FocusScope {
                         visible: labelItem.roomy
                         text: labelItem.axis.highText
                         color: labelItem.valuesFitted ? theme.accent : theme.dimText
-                        font.pointSize: theme.fontPoint * 0.72
+                        font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
                     }
                     Text {
@@ -977,7 +1035,7 @@ FocusScope {
                         visible: labelItem.roomy
                         text: labelItem.axis.lowText
                         color: labelItem.valuesFitted ? theme.accent : theme.dimText
-                        font.pointSize: theme.fontPoint * 0.72
+                        font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
                     }
                     // Values between range limits, next to their grid line (tall panels only)
@@ -995,7 +1053,7 @@ FocusScope {
                             text: modelData.text
                             color: theme.dimText
                             opacity: 0.8
-                            font.pointSize: theme.fontPoint * 0.68
+                            font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
                         }
                     }
@@ -1018,7 +1076,7 @@ FocusScope {
                             visible: text !== "" && (chart.bubbleFits(index) || !chart.hasCursor)
                             text: labelItem.info.unit
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                         }
                         // Values fitted to visible part
                         Text {
@@ -1026,7 +1084,7 @@ FocusScope {
                             visible: labelItem.valuesFitted && labelItem.height > theme.em * 2.6
                             text: i18n.tr("fitted")
                             color: theme.accent
-                            font.pointSize: theme.fontPoint * 0.7
+                            font.pointSize: theme.fontTiny
                             font.weight: Font.DemiBold
                         }
                         // Sub-channels of combined panel
@@ -1038,7 +1096,7 @@ FocusScope {
                             spacing: theme.em * 0.3
                             Repeater {
                                 model: labelItem.info.parts
-                                Text { text: modelData.label; color: modelData.color; font.pointSize: theme.fontPoint * 0.72; font.weight: Font.DemiBold }
+                                Text { text: modelData.label; color: modelData.color; font.pointSize: theme.fontTiny; font.weight: Font.DemiBold }
                             }
                         }
                         // Cursor values when bubble does not fit in panel
@@ -1051,7 +1109,7 @@ FocusScope {
                             textFormat: Text.StyledText
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
-                            font.pointSize: theme.fontPoint * 0.75
+                            font.pointSize: theme.fontCaption
                             font.weight: Font.DemiBold
                             font.features: { "tnum": 1 }
                         }
@@ -1144,7 +1202,7 @@ FocusScope {
                     y: chart.panelTop(index)
                     width: plotArea.width
                     height: chart.panelHeight(index)
-                    radius: theme.em * 0.35
+                    radius: theme.radiusSm
                     color: theme.dark ? Qt.darker(theme.base, 1.18) : Qt.darker(theme.base, 1.015)
                     border.width: 1
                     border.color: index === chart.movingFrom ? theme.accent : (theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border)
@@ -1200,95 +1258,111 @@ FocusScope {
                 }
             }
 
-            // Channel lines (kept model: showing one more lap only adds its lines)
-            Repeater {
-                model: backend.panelModel
+            // Lines in a multisampled layer while shown (smooth edges, window without MSAA), shown part only
+            // (scrolled charts: no texture for hidden panels). Cursor, markers & bubbles outside: no layer redraw
+            Item {
+                objectName: "traceLines"
+                y: scroller.contentY
+                width: plotArea.width
+                height: scroller.height
+                layer.enabled: pageState.active && scroller.visible && chart.panels.length > 0
+                layer.samples: 4
                 Item {
-                    id: panel
-                    readonly property var info: model
-                    readonly property var axis: chart.axisOf(info)  // fitted values, else whole range
-                    readonly property var range: [axis.low, axis.high]
-                    readonly property real pad: Math.min(theme.em * 0.4, height * 0.1)  // lines at range limits stay visible
-                    readonly property real sy: (height - pad * 2) / Math.max(range[1] - range[0], 1e-9)
-                    readonly property real ty: height - pad + range[0] * sy
-                    // Data to panel pixels, horizontal scale from shown range read once (one update per frame)
-                    function lineMatrix(dx, dy) {
-                        var shown = chart.viewRange
-                        var sx = width / Math.max(shown[1] - shown[0], 1e-9)
-                        return Qt.matrix4x4(sx, 0, 0, -shown[0] * sx + dx, 0, -sy, 0, ty + dy, 0, 0, 1, 0, 0, 0, 0, 1)
-                    }
-                    y: chart.panelTop(index)
+                    y: -scroller.contentY
                     width: plotArea.width
-                    height: chart.panelHeight(index)
-                    clip: true
-
-                    Rectangle {
-                        visible: panel.range[0] < 0 && panel.range[1] > 0
-                        y: Math.round(panel.ty)
-                        width: parent.width
-                        height: 1
-                        color: theme.text
-                        opacity: 0.18
-                    }
-                    // Value grid (same values as labels beside panel)
+                    height: plotArea.height
+                    // Channel lines (kept model: showing one more lap only adds its lines)
                     Repeater {
-                        model: panel.height > theme.em * 6 && panel.info.available ? panel.axis.ticks : []
-                        Rectangle {
-                            y: Math.round(panel.ty - modelData.value * panel.sy)
-                            width: panel.width
-                            height: 1
-                            color: theme.text
-                            opacity: 0.07
-                        }
-                    }
-                    // Lowest & highest value of laps (consistency band)
-                    GpuShape {
-                        visible: panel.info.envelope !== ""
-                        key: panel.info.envelope
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.12 : 0.1)
-                        revision: backend.revision
-                        transform: Matrix4x4 {
-                            matrix: panel.lineMatrix(0, 0)
-                        }
-                    }
-                    // Lines drawn twice, half a pixel apart: about 1.5 px wide (scene graph lines are 1 px).
-                    // One transform per copy for every series of panel (not one per line: zoom frames stay cheap)
-                    Repeater {
-                        model: chart.lineOffsets
+                        model: backend.panelModel
                         Item {
-                            id: lineCopy
-                            readonly property var offset: modelData
-                            transform: Matrix4x4 {
-                                matrix: panel.lineMatrix(lineCopy.offset[0], lineCopy.offset[1])
+                            id: panel
+                            readonly property var info: model
+                            readonly property var axis: chart.axisOf(info)  // fitted values, else whole range
+                            readonly property var range: [axis.low, axis.high]
+                            readonly property real pad: Math.min(theme.em * 0.4, height * 0.1)  // lines at range limits stay visible
+                            readonly property real sy: (height - pad * 2) / Math.max(range[1] - range[0], 1e-9)
+                            readonly property real ty: height - pad + range[0] * sy
+                            // Data to panel pixels, horizontal scale from shown range read once (one update per frame)
+                            function lineMatrix(dx, dy) {
+                                var shown = chart.viewRange
+                                var sx = width / Math.max(shown[1] - shown[0], 1e-9)
+                                return Qt.matrix4x4(sx, 0, 0, -shown[0] * sx + dx, 0, -sy, 0, ty + dy, 0, 0, 1, 0, 0, 0, 0, 1)
                             }
+                            y: chart.panelTop(index)
+                            width: plotArea.width
+                            height: chart.panelHeight(index)
+                            clip: true
+
+                            Rectangle {
+                                visible: panel.range[0] < 0 && panel.range[1] > 0
+                                y: Math.round(panel.ty)
+                                width: parent.width
+                                height: 1
+                                color: theme.text
+                                opacity: 0.18
+                            }
+                            // Value grid (same values as labels beside panel)
                             Repeater {
-                                model: panel.info.seriesModel
-                                GpuShape {
-                                    // Min / max reduced copy when its buckets are at most a pixel wide (same peaks, far fewer vertices)
-                                    key: chart.seriesKey(model)
-                                    color: model.color
-                                    opacity: chart.lapOpacity(model.lap)
-                                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                                model: panel.height > theme.em * 6 && panel.info.available ? panel.axis.ticks : []
+                                Rectangle {
+                                    y: Math.round(panel.ty - modelData.value * panel.sy)
+                                    width: panel.width
+                                    height: 1
+                                    color: theme.text
+                                    opacity: 0.07
                                 }
                             }
+                            // Lowest & highest value of laps (consistency band)
+                            GpuShape {
+                                visible: panel.info.envelope !== ""
+                                key: panel.info.envelope
+                                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.12 : 0.1)
+                                revision: backend.revision
+                                transform: Matrix4x4 {
+                                    matrix: panel.lineMatrix(0, 0)
+                                }
+                            }
+                            // Lines drawn twice, half a pixel apart: about 1.5 px wide (scene graph lines are 1 px).
+                            // One transform per copy for every series of panel (not one per line: zoom frames stay cheap)
+                            Repeater {
+                                model: chart.lineOffsets
+                                Item {
+                                    id: lineCopy
+                                    readonly property var offset: modelData
+                                    transform: Matrix4x4 {
+                                        matrix: panel.lineMatrix(lineCopy.offset[0], lineCopy.offset[1])
+                                    }
+                                    Repeater {
+                                        model: panel.info.seriesModel
+                                        GpuShape {
+                                            // Min / max reduced copy when its buckets are at most a pixel wide (same peaks, far fewer vertices)
+                                            key: chart.seriesKey(model)
+                                            color: model.color
+                                            opacity: chart.lapOpacity(model.lap)
+                                            Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                visible: panel.info.note !== ""
+                                text: panel.info.note
+                                color: theme.dimText
+                                font.pointSize: theme.fontSmall
+                            }
                         }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        visible: panel.info.note !== ""
-                        text: panel.info.note
-                        color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
                     }
                 }
             }
 
             // Markers A & B
             Repeater {
-                model: [["A", chart.markerA], ["B", chart.markerB]]
+                model: ["A", "B"]  // marker positions read by index: items kept when a marker moves
                 Item {
-                    readonly property real px: chart.xOf(modelData[1])
-                    visible: !isNaN(modelData[1]) && px >= 0 && px <= plotArea.width
+                    readonly property real at: index === 0 ? chart.markerA : chart.markerB
+                    readonly property real px: chart.xOf(at)
+                    visible: !isNaN(at) && px >= 0 && px <= plotArea.width
                     x: Math.round(px)
                     height: plotArea.height
                     Rectangle { width: 1.5; height: parent.height; color: theme.accent; opacity: 0.8 }
@@ -1298,7 +1372,7 @@ FocusScope {
                         height: markerText.implicitHeight + 2
                         radius: height / 2
                         color: theme.accent
-                        Text { id: markerText; anchors.centerIn: parent; text: modelData[0]; color: "white"; font.weight: Font.Bold; font.pointSize: theme.fontPoint * 0.75 }
+                        Text { id: markerText; anchors.centerIn: parent; text: modelData; color: "white"; font.weight: Font.Bold; font.pointSize: theme.fontCaption }
                     }
                 }
             }
@@ -1335,7 +1409,7 @@ FocusScope {
                     y: chart.panelTop(index) + 3
                     width: valueColumn.width + theme.em * 0.6
                     height: valueColumn.height + theme.em * 0.25
-                    radius: theme.em * 0.3
+                    radius: theme.radiusSm
                     color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.88)
                     border.width: 1
                     border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.12)
@@ -1345,16 +1419,9 @@ FocusScope {
                         id: valueColumn
                         anchors.centerIn: parent
                         readonly property real rowHeight: valueMetrics.height
-                        width: {
-                            var widest = 0
-                            for (var i = 0; i < valueRows.count; i++) {
-                                var row = valueRows.itemAt(i)
-                                if (row && row.visible) widest = Math.max(widest, row.width)
-                            }
-                            return widest
-                        }
+                        // Widest line measured once per cursor update (not from every row width: rows x rows)
+                        width: bubble.visible ? chart.valueWidth(bubble.panelIndex) : 0
                         height: chart.valueCount(bubble.panelIndex) * rowHeight
-                        FontMetrics { id: valueMetrics; font.pointSize: theme.fontPoint * 0.85; font.weight: Font.DemiBold }
                         // One item per drawn series (kept while cursor moves), empty ones hidden
                         Repeater {
                             id: valueRows
@@ -1370,7 +1437,7 @@ FocusScope {
                                     id: valueText
                                     text: parent.entry ? parent.entry.text : ""
                                     color: bubble.info.series[index] ? bubble.info.series[index].color : theme.text
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                 }
@@ -1380,7 +1447,7 @@ FocusScope {
                                     visible: text !== ""
                                     text: parent.entry ? parent.entry.diff : ""
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.75
+                                    font.pointSize: theme.fontCaption
                                     font.features: { "tnum": 1 }
                                     anchors.baseline: valueText.baseline
                                 }
@@ -1482,9 +1549,9 @@ FocusScope {
         Action {
             text: i18n.tr("Align Laps on Braking Point Here")
             enabled: chart.hasCursor && chart.hasCornerRanges && chart.legendLaps.length > 1 && !backend.timeAxis
-            onTriggered: backend.alignBrakingAt(chart.cursorX)
+            onTriggered: backend.charts.alignBrakingAt(chart.cursorX)
         }
-        Action { text: i18n.tr("Stop Aligning Laps"); enabled: chart.alignInfo.label !== undefined; onTriggered: backend.alignBraking(-1) }
+        Action { text: i18n.tr("Stop Aligning Laps"); enabled: chart.alignInfo.label !== undefined; onTriggered: backend.charts.alignBraking(-1) }
         MenuSeparator {}
         Action { text: i18n.tr("Copy Values"); enabled: chart.hasCursor; onTriggered: backend.copyValues(chart.cursorX) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: chart.pictureRequested(true) }
@@ -1507,7 +1574,7 @@ FocusScope {
                 y: theme.em * 0.2
                 text: visible ? chart.axisText(value) : ""
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 font.features: { "tnum": 1 }
             }
         }
@@ -1522,7 +1589,7 @@ FocusScope {
 
         Rectangle {
             anchors.fill: parent
-            radius: theme.em * 0.35
+            radius: theme.radiusSm
             color: theme.dark ? Qt.darker(theme.base, 1.18) : Qt.darker(theme.base, 1.015)
             border.width: 1
             border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
@@ -1557,11 +1624,11 @@ FocusScope {
             x: chart.viewRange[0] / chart.maxX * overview.width
             width: Math.max((chart.viewRange[1] - chart.viewRange[0]) / chart.maxX * overview.width, 4)
             height: overview.height
-            radius: theme.em * 0.35
+            radius: theme.radiusSm
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, chart.zoomed ? 0.16 : 0.0)
             border.width: chart.zoomed ? 1.5 : 0
             border.color: theme.accent
-            Behavior on color { ColorAnimation { duration: 200 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
         }
         Rectangle {
             visible: chart.hasCursor

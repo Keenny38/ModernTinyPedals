@@ -39,7 +39,7 @@ from collections.abc import Callable, Iterable
 from typing import NamedTuple
 
 from ..const_common import MAX_SECONDS
-from . import atomic_write
+from . import append_line, atomic_write
 from .driver_stats import STATS_LOCK
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def history_path(filepath: str) -> str:
     return os.path.join(filepath, HISTORY_FILE)
 
 
-def parse_record(data) -> SessionRecord | None:
+def parse_record(data: object) -> SessionRecord | None:
     """Record from decoded JSON line, None if invalid"""
     if not isinstance(data, dict):
         return None
@@ -150,7 +150,7 @@ def kept_records(path: str) -> _ParsedFile | None:
         return _parsed.get(path)
 
 
-def keep_records(path: str, parsed: _ParsedFile, generation: int):
+def keep_records(path: str, parsed: _ParsedFile, generation: int) -> None:
     """Records kept unless dropped since generation (page closed meanwhile)"""
     with _cache_lock:
         if generation == _generation:
@@ -313,13 +313,7 @@ def append_record(filepath: str, record: SessionRecord) -> None:
     """Add record at end of history file, on a line of its own (last line cut short by a crash stays apart)"""
     with STATS_LOCK:
         try:
-            with open(history_path(filepath), "ab+") as file:
-                file.seek(0, os.SEEK_END)
-                separator = b""
-                if file.tell() > 0:
-                    file.seek(-1, os.SEEK_END)
-                    separator = b"" if file.read(1) == b"\n" else b"\n"
-                file.write(separator + record_line(record).encode("utf-8"))
+            append_line(history_path(filepath), record_line(record).encode("utf-8"))
         except OSError as error:
             logger.error("USERDATA: unable to save %s: %s", HISTORY_FILE, error)
 
@@ -358,7 +352,7 @@ def as_read_back(record: SessionRecord) -> SessionRecord | None:
     return record
 
 
-def keep_written(path: str, data: bytes, records: list[SessionRecord], generation: int):
+def keep_written(path: str, data: bytes, records: list[SessionRecord], generation: int) -> None:
     """Records just written kept as parsed (next read parses nothing), if file holds data written (text mode
     newlines), every record reads back alike & records not dropped meanwhile"""
     kept = []

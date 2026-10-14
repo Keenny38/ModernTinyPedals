@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable
 
 from . import write_text_file
 
@@ -54,7 +55,7 @@ def profile_filename(settings_path: str, preset_filename: str) -> str:
     return os.path.join(settings_path, f"{os.path.splitext(preset_filename)[0]}{FILE_EXTENSION}")
 
 
-def widget_positions(setting: dict, widget_names) -> dict[str, list[int]]:
+def widget_positions(setting: dict, widget_names: Iterable[str]) -> dict[str, list[int]]:
     """Positions of every widget in preset setting"""
     positions = {}
     for name in widget_names:
@@ -83,7 +84,7 @@ def apply_positions(setting: dict, positions: dict) -> bool:
 def load_profiles(filename: str) -> dict[str, dict]:
     """Load layout profiles, empty if missing or invalid"""
     try:
-        with open(filename, encoding="utf-8") as file:
+        with open(filename, encoding="utf-8-sig") as file:  # BOM if edited by user
             data = json.load(file)
     except FileNotFoundError:
         return {}
@@ -96,13 +97,13 @@ def load_profiles(filename: str) -> dict[str, dict]:
 
 
 def save_profiles(filename: str, profiles: dict[str, dict]) -> bool:
-    """Save layout profiles, keep most recent ones"""
+    """Save layout profiles, keep most recent ones (file order is recency: never sorted)"""
     if len(profiles) > MAX_PROFILES:
         profiles = dict(list(profiles.items())[-MAX_PROFILES:])
-    return write_text_file(filename, json.dumps(profiles, indent=4, sort_keys=True))
+    return write_text_file(filename, json.dumps(profiles, indent=4))
 
 
-def sync_layout(setting: dict, widget_names, filename: str, key: str) -> bool:
+def sync_layout(setting: dict, widget_names: Iterable[str], filename: str, key: str) -> bool:
     """Restore positions of screen setup if known, then store current positions
 
     Returns:
@@ -116,12 +117,14 @@ def sync_layout(setting: dict, widget_names, filename: str, key: str) -> bool:
     return changed
 
 
-def store_layout(setting: dict, widget_names, filename: str, key: str, profiles: dict | None = None):
+def store_layout(
+    setting: dict, widget_names: Iterable[str], filename: str, key: str, profiles: dict | None = None,
+) -> None:
     """Store current widget positions for screen setup"""
     if profiles is None:
         profiles = load_profiles(filename)
     positions = widget_positions(setting, widget_names)
-    if profiles.get(key) == positions:
+    if profiles.get(key) == positions and next(reversed(profiles), None) == key:  # unchanged & most recent
         return
     profiles.pop(key, None)  # most recent last
     profiles[key] = positions

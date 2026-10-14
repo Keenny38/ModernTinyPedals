@@ -19,9 +19,9 @@ Rectangle {
     border.width: 1
     border.color: selected ? theme.accent : area.containsMouse ? Qt.lighter(theme.border, 1.25) : theme.border
     opacity: count > 0 || selected || !showCount ? 1 : 0.5
-    Behavior on color { ColorAnimation { duration: 120 } }
-    Behavior on border.color { ColorAnimation { duration: 120 } }
-    Behavior on opacity { NumberAnimation { duration: 150 } }
+    Behavior on color { ColorAnimation { duration: theme.motionFast } }
+    Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
+    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
 
     Accessible.role: Accessible.RadioButton
     Accessible.name: text
@@ -49,7 +49,7 @@ Rectangle {
             visible: chip.showCount
             text: chip.count
             color: chip.selected ? theme.accent : theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
             anchors.verticalCenter: parent.verticalCenter
         }

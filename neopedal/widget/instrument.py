@@ -20,7 +20,8 @@
 Instrument Widget
 """
 
-from typing import Any
+
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -31,11 +32,14 @@ from ..module_info import minfo
 from ..userfile.custom_image import split_pixmap_image
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import InstrumentConfig
+
 
 class InstrumentMixin:
     """Switch & wheel states, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "InstrumentConfig"
 
     def read_ignition(self) -> int:
         """0 ignition & engine off, 1 ignition on & engine off, 2 ignition & engine on"""
@@ -63,6 +67,8 @@ class InstrumentMixin:
 
 class Realtime(InstrumentMixin, Overlay):
     """Draw widget"""
+
+    wcfg: "InstrumentConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

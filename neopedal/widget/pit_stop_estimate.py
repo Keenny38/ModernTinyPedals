@@ -20,15 +20,23 @@
 Pit stop estimate Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import PitStopEstimateConfig
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "PitStopEstimateConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -314,7 +322,7 @@ class Realtime(Overlay):
         min_pitstop_time = api.read.vehicle.pit_stop_time()
         abs_refill = api.read.vehicle.absolute_refill()
         pass_time = minfo.mapping.pitPassTime
-        pit_timer = minfo.vehicles.dataSet[minfo.vehicles.playerIndex].pitTimer.elapsed
+        pit_timer = player_vehicle().pitTimer.elapsed
         is_lengthy_stop = min_pitstop_time >= self.wcfg["lengthy_stop_duration_threshold"]
         padding = 0.00000001 * is_lengthy_stop
 

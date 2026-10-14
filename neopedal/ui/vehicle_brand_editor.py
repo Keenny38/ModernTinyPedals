@@ -31,11 +31,8 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
-    QHeaderView,
     QMenu,
     QMessageBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
@@ -44,6 +41,7 @@ from ..api_control import api
 from ..async_request import get_response, resolve_hostname, set_header_get
 from ..const_api import API_LMU_ALIAS, API_LMU_CONFIG, API_RF2_ALIAS, API_RF2_CONFIG
 from ..const_file import ConfigType, FileFilter
+from ..game_rest import GameRequest
 from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
 from ..userfile.brands import extract_lmu_brand_name
@@ -57,7 +55,6 @@ from ._common import (
     table_item,
     translate_filter,
 )
-from .game_rest import GameRequest
 from .toast import show_toast
 
 HEADER_BRANDS = "Vehicle name","Brand name"
@@ -78,12 +75,7 @@ class VehicleBrandEditor(BaseEditor):
         self.rest_request = GameRequest(self, (), self.restapi_imported)
 
         # Set table
-        self.table_brands = QTableWidget(self)
-        self.table_brands.setColumnCount(len(HEADER_BRANDS))
-        self.table_brands.setHorizontalHeaderLabels([tr(name) for name in HEADER_BRANDS])
-        self.table_brands.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table_brands.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-
+        self.table_brands = self.editor_table(HEADER_BRANDS)
         self.table_brands.cellChanged.connect(self.set_modified)
         self.refresh_table()
         self.enable_table_undo("brands_temp", self.update_brands_temp, self.refresh_table)
@@ -120,44 +112,10 @@ class VehicleBrandEditor(BaseEditor):
         self.button_import = CompactButton(tr("Import from"), has_menu=True)
         self.button_import.setMenu(import_menu)
 
-        button_add = CompactButton(tr("Add"))
-        button_add.clicked.connect(self.add_brand)
-
-        button_sort = CompactButton(tr("Sort"))
-        button_sort.clicked.connect(self.sort_brand)
-
-        button_delete = CompactButton(tr("Delete"))
-        button_delete.clicked.connect(self.delete_brand)
-
-        button_replace = CompactButton(tr("Replace"))
-        button_replace.clicked.connect(self.open_replace_dialog)
-
-        button_reset = CompactButton(tr("Reset"))
-        button_reset.clicked.connect(self.reset_setting)
-
-        button_apply = CompactButton(tr("Apply"))
-        button_apply.clicked.connect(self.applying)
-
-        button_save = CompactButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(self.close)
-
-        # Set layout
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(self.button_import)
-        layout_button.addWidget(button_add)
-        layout_button.addWidget(button_sort)
-        layout_button.addWidget(button_delete)
-        layout_button.addWidget(button_replace)
-        layout_button.addWidget(button_reset)
-        self.add_undo_buttons(layout_button)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_apply)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_close)
-        return layout_button
+        return self.editor_buttons(
+            (self.button_import, ("Add", self.add_brand), ("Sort", self.sort_brand), ("Delete", self.delete_brand),
+             ("Replace", self.open_replace_dialog)),
+            self.reset_setting, self.applying)
 
     def refresh_table(self):
         """Refresh brands list"""

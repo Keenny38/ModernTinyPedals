@@ -25,18 +25,26 @@ places gained since start. Lap progress in loss color while game invalidated cur
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...api_control import api
 from ...formatter import format_points
 from ...module_info import minfo
+from .._common import player_vehicle
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import LapsAndPositionConfig
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: LapsAndPositionConfig
 
     options = (
         "font_size", "layout", "show_laps", "show_predicted_extra_laps", "show_position_overall",
@@ -88,14 +96,14 @@ class Realtime(StatsMixin, ModernOverlay):
                 position, class_total = self.position_in_class(place, total)
                 values.append(Value(f"{position}/{class_total}"))
             elif key == "track_limits":
-                # Every session (race, qualifying, practice): limit of the session given by game, dash if none
+                # Limit in races only (no penalty in practice & qualifying), dash otherwise or if none
                 points = api.read.session.cut_points()
-                limit = api.read.session.limits_points()
+                limit = api.read.session.limits_points() * api.read.session.in_race()
                 text_limit = format_points(limit) if limit > 0 else DASH
                 color = theme.negative if limit > 0 and points >= limit - 1 else (theme.warning if points > 0 else theme.text_dim)
                 values.append(Value(f"{format_points(points)}/{text_limit}", color))
             elif key == "position_change":
-                veh = minfo.vehicles.dataSet[minfo.vehicles.playerIndex]
+                veh = player_vehicle()
                 if self.wcfg["show_position_change_in_class"]:
                     places = veh.qualifyInClass - veh.positionInClass
                 else:

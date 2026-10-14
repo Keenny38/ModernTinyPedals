@@ -328,7 +328,9 @@ class MapView(QWidget):
             self.map_nodes = len(self.raw_coords)
             self.map_filename = filename
             self.create_map_path(self.raw_coords, sector_index)
-        else:
+        else:  # nothing drawn (paint and highlight check raw_coords only)
+            self.raw_coords = self.raw_dists = None
+            self.map_path = self.sfinish_path = self.sector1_path = self.sector2_path = None
             self.map_length = 0
             self.map_nodes = 0
             self.map_filename = ""

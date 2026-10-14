@@ -28,8 +28,9 @@ from PySide6.QtGui import QColor
 
 from ...api_control import api
 from ...template.setting_heatmap import HEATMAP_DEFAULT_TYRE
-from ...userfile.heatmap import select_compound_color, select_compound_symbol, select_tyre_heatmap_name
+from ...userfile.heatmap import select_tyre_heatmap_name
 from .quad import heatmap, reload_heatmaps
+from .rows import compound_badge
 
 # Heatmap centered on optimal temperature: (offset from optimal in Celsius, color), same colors
 # as tyre_optimal_* heatmap presets (cold blue, ideal green, hot red)
@@ -98,13 +99,8 @@ class TyreCompounds:
         return True
 
 
-def badge(name: str) -> tuple[str, QColor]:
-    """Compound symbol & color"""
-    return select_compound_symbol(name), QColor(select_compound_color(name, text=False))  # badge
-
-
 def axle_badges(left: str, right: str) -> tuple:
     """Compound badge of axle, left & right badges if wheels have different compounds"""
     if left == right:
-        return (badge(left),)
-    return badge(left), badge(right)
+        return (compound_badge(left),)
+    return compound_badge(left), compound_badge(right)

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -42,6 +43,11 @@ from .._style import StyledConfig
 from .base import ModernOverlay
 from .draw import panel
 from .theme import Theme
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DamageConfig
+
+PULSE_STEPS = 40  # visible steps of detached parts pulse (repainted only on step change, none while dim)
 
 # Black box damage panel colors -> theme token (recolored by overlay & widget theme, so
 # Colorblind Safe & custom themes apply), alpha 0 = keep token alpha
@@ -74,6 +80,8 @@ def damage_colors(theme: Theme) -> dict[str, QColor]:
 class Realtime(DamagePainter, ModernOverlay):
     """Draw widget"""
 
+    wcfg: DamageConfig
+
     options = (
         "font_size", "show_background", "show_detached_warning_flash", "warning_flash_highlight_duration",
         "warning_flash_interval", "suspension_damage_light_threshold", "suspension_damage_medium_threshold",
@@ -95,7 +103,7 @@ class Realtime(DamagePainter, ModernOverlay):
             "show_damage_panel_integrity": wcfg["show_integrity_reading"],
             "show_damage_panel_aero_integrity": wcfg["show_aero_integrity_if_available"],
         }
-        self.wcfg = StyledConfig(self.wcfg, panel_options)
+        self.wcfg = StyledConfig(self.wcfg, panel_options)  # type: ignore[assignment]  # + panel options
         unit = self.unit
         self.setFont(self.fonts["strong"])
         self.font_label = self.fonts["label"]
@@ -181,7 +189,7 @@ class Realtime(DamagePainter, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         vehicle = api.read.vehicle
-        if self.wcfg["show_damage_panel_impact_cone"]:
+        if self.wcfg["show_damage_panel_impact_cone"]:  # type: ignore[typeddict-item]  # panel option
             impact_time = vehicle.impact_time()
             if self.last_impact_time != impact_time:
                 self.last_impact_time = impact_time
@@ -202,5 +210,6 @@ class Realtime(DamagePainter, ModernOverlay):
         detached = any(severity >= 3 for severity in self.body_damage) or any(self.damage_detached)
         self.refresh((
             self.body_damage, self.damage_aero, self.damage_detached, self.damage_puncture, self.damage_suspension,
-            self.impact_visible, self.impact_position, monotonic() if detached and self.flash else 0,
+            self.impact_visible, self.impact_position,
+            round(self.pulse() * PULSE_STEPS) if detached and self.flash else 0,  # visible pulse step only
         ))

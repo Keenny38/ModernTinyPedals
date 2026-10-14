@@ -71,8 +71,8 @@ def test_dependent_edits_rebuild_every_row(options, monkeypatch):  # noqa: F811
     options.setAdvanced(True)
     full_rows.clear()
     choices = row(options, "black_box/display_profile")["choices"]
-    options.setChoice("black_box/display_profile", choices.index("Minimal"))  # profile locks options
-    assert full_rows and any(entry["locked"] for entry in options.rows.rows)
+    options.setChoice("black_box/display_profile", choices.index("Minimal"))  # profile sets options
+    assert full_rows and any(entry["note"].startswith("Set by") for entry in options.rows.rows)
     full_rows.clear()
     options.setModifiedOnly(True)
     full_rows.clear()

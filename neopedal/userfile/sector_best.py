@@ -101,7 +101,7 @@ def read_sector_best_file(
     return (list(defaults), list(defaults), list(defaults), list(defaults)), True
 
 
-def merge_sector_best(best_tb: list[float], best_pb: list[float], saved_tb: list[float], saved_pb: list[float]):
+def merge_sector_best(best_tb: list[float], best_pb: list[float], saved_tb: list[float], saved_pb: list[float]) -> None:
     """Merge saved best sectors (file not accessible at load) into best sectors, in place
 
     Theoretical best: best of each sector. Personal best: sectors of faster lap.

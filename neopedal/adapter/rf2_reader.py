@@ -25,6 +25,9 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from pyRfactor2SharedMemory.rF2MMap import MAX_VEHICLES
 
 from ..calculation import (
@@ -37,8 +40,9 @@ from ..calculation import (
 )
 from ..const_common import MAX_SECONDS, WHEELS_NA
 from ..formatter import strip_invalid_char
+from ..penalty_info import NO_PENALTY, Penalty
 from ..process.weather import WeatherNode
-from ..validator import bytes_to_str as tostr
+from ..validator import bytes_to_str
 from ..validator import infnan_to_zero as rmnan
 from . import _reader
 from ._reader import SECTOR_ORDER, signed_char
@@ -52,17 +56,21 @@ class DataAdapter:
     __slots__ = (
         "shmm",
         "rest",
+        "tostr",
     )
 
-    def __init__(self, shmm: RF2Info, rest: RestAPIData) -> None:
+    def __init__(self, shmm: RF2Info, rest: RestAPIData, tostr: Callable[[Any], str] = bytes_to_str) -> None:
         """Initialize API setting
 
         Args:
             shmm: shared memory API connector.
             rest: rest API connector.
+            tostr: text decoder of game bytes (character encoding), replaced (never changed)
+                by connector setup while threads read data.
         """
         self.shmm = shmm
         self.rest = rest
+        self.tostr = tostr
 
     def _is_local_car(self, index: int | None) -> bool:
         """Is vehicle the local player's own car (Rest API garage data belongs to it)
@@ -101,7 +109,7 @@ class State(_reader.State, DataAdapter):
 
     def version(self) -> str:
         """Identify API version"""
-        version = tostr(self.shmm.rf2Ext.mVersion)
+        version = self.tostr(self.shmm.rf2Ext.mVersion)
         return version if version else "unknown"
 
     def session_events(self) -> tuple[bool, bool, bool, bool]:
@@ -425,13 +433,13 @@ class Session(_reader.Session, DataAdapter):
 
     def combo_name(self) -> str:
         """Track & vehicle combo name, strip off invalid char"""
-        track_name = tostr(self.shmm.rf2ScorInfo.mTrackName)
-        class_name = tostr(self.shmm.rf2ScorVeh().mVehicleClass)
+        track_name = self.tostr(self.shmm.rf2ScorInfo.mTrackName)
+        class_name = self.tostr(self.shmm.rf2ScorVeh().mVehicleClass)
         return strip_invalid_char(f"{track_name} - {class_name}")
 
     def track_name(self) -> str:
         """Track name, strip off invalid char"""
-        return strip_invalid_char(tostr(self.shmm.rf2ScorInfo.mTrackName))
+        return strip_invalid_char(self.tostr(self.shmm.rf2ScorInfo.mTrackName))
 
     def identifier(self) -> tuple[int, int, int]:
         """Identify session"""
@@ -702,6 +710,10 @@ class Switch(_reader.Switch, DataAdapter):
         """Rear anti-roll bar level"""
         return -1
 
+    def level_maximum(self, name: str = "", index: int | None = None) -> int:
+        """Highest level of a driver setting, -1 if unknown (not reported by rF2)"""
+        return -1
+
     def wipers(self, index: int | None = None) -> int:
         """Wipers state, 0 = off, 1 = auto, 2 = slow, 3 = fast"""
         return 0
@@ -879,16 +891,16 @@ class Tyre(_reader.Tyre, DataAdapter):
     def compound_name(self, index: int | None = None) -> tuple[str, ...]:
         """Tyre compound name set"""
         tele_veh = self.shmm.rf2TeleVeh(index)
-        front = tostr(tele_veh.mFrontTireCompoundName)
-        rear = tostr(tele_veh.mRearTireCompoundName)
+        front = self.tostr(tele_veh.mFrontTireCompoundName)
+        rear = self.tostr(tele_veh.mRearTireCompoundName)
         return front, front, rear, rear
 
     def compound_class(self, index: int | None = None) -> tuple[str, ...]:
         """Tyre compound name set with class name prefix"""
         tele_veh = self.shmm.rf2TeleVeh(index)
-        class_name = tostr(self.shmm.rf2ScorVeh(index).mVehicleClass)
-        front = f"{class_name} - {tostr(tele_veh.mFrontTireCompoundName)}"
-        rear = f"{class_name} - {tostr(tele_veh.mRearTireCompoundName)}"
+        class_name = self.tostr(self.shmm.rf2ScorVeh(index).mVehicleClass)
+        front = f"{class_name} - {self.tostr(tele_veh.mFrontTireCompoundName)}"
+        rear = f"{class_name} - {self.tostr(tele_veh.mRearTireCompoundName)}"
         return front, front, rear, rear
 
     def surface_temperature_avg(self, index: int | None = None) -> tuple[float, ...]:
@@ -1066,11 +1078,11 @@ class Vehicle(_reader.Vehicle, DataAdapter):
 
     def driver_name(self, index: int | None = None) -> str:
         """Driver name"""
-        return tostr(self.shmm.rf2ScorVeh(index).mDriverName)
+        return self.tostr(self.shmm.rf2ScorVeh(index).mDriverName)
 
     def vehicle_name(self, index: int | None = None) -> str:
         """Vehicle name"""
-        return tostr(self.shmm.rf2ScorVeh(index).mVehicleName)
+        return self.tostr(self.shmm.rf2ScorVeh(index).mVehicleName)
 
     def vehicle_model(self, index: int | None = None) -> str:
         """Vehicle model name (brand name + model ID)"""
@@ -1078,15 +1090,15 @@ class Vehicle(_reader.Vehicle, DataAdapter):
 
     def class_name(self, index: int | None = None) -> str:
         """Vehicle class name"""
-        return tostr(self.shmm.rf2ScorVeh(index).mVehicleClass)
+        return self.tostr(self.shmm.rf2ScorVeh(index).mVehicleClass)
 
     def same_class(self, index: int | None = None) -> bool:
         """Is same vehicle class"""
         return self.shmm.rf2ScorVeh(index).mVehicleClass == self.shmm.rf2ScorVeh().mVehicleClass
 
     def total_vehicles(self) -> int:
-        """Total vehicles"""
-        return self.shmm.rf2ScorInfo.mNumVehicles
+        """Total vehicles, capped to the mapped vehicle rows (count may be garbage)"""
+        return min(max(self.shmm.rf2ScorInfo.mNumVehicles, 0), MAX_VEHICLES)
 
     def place(self, index: int | None = None) -> int:
         """Vehicle overall place"""
@@ -1116,6 +1128,10 @@ class Vehicle(_reader.Vehicle, DataAdapter):
     def number_penalties(self, index: int | None = None) -> int:
         """Number of penalties"""
         return self.shmm.rf2ScorVeh(index).mNumPenalties
+
+    def penalty(self, index: int | None = None) -> Penalty:
+        """Penalties of game results stream: not read for rF2 (count only, see number_penalties)"""
+        return NO_PENALTY
 
     def pit_request(self, index: int | None = None) -> bool:
         """Is requested pit, 0 = none, 1 = request, 2 = entering, 3 = stopped, 4 = exiting"""

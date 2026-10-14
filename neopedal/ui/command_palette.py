@@ -23,6 +23,7 @@ Command palette (Ctrl+K): find & run anything, pages, widgets, modules, tools, p
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable
 from functools import partial
 from typing import NamedTuple
@@ -127,6 +128,22 @@ def build_commands(window) -> list[Command]:
         state = tr("On") if cfg.overlay[option] else tr("Off")
         commands.append(Command(
             f"{tr(label)}  ({state})", tr("Overlay"), search_text(tr(label), label, "overlay toggle"), action))
+    director = director_page()
+    if director is not None:  # Broadcast Director page open: director on or off
+        label = tr("Broadcast Director")
+        state = tr("On") if director.enabled else tr("Off")
+        commands.append(Command(
+            f"{label}  ({state})", tr("Tools"),
+            search_text(label, "Broadcast Director", "broadcast director regie toggle enable disable on off"),
+            toggle_director))
+    race = race_page()
+    if race is not None:  # Race Calculator page open: calculator on or off
+        label = tr("Race Calculator")
+        state = tr("On") if race.game_data else tr("Off")
+        commands.append(Command(
+            f"{label}  ({state})", tr("Tools"),
+            search_text(label, "Race Calculator", "race calculator fuel game data toggle enable disable on off"),
+            toggle_race_game_data))
     commands.append(Command(
         tr("Reload"), tr("Overlay"), search_text(tr("Reload"), "reload preset"), lambda: window.reload_preset(True)))
     commands.append(Command(
@@ -152,6 +169,32 @@ def build_commands(window) -> list[Command]:
     commands += module_commands(wctrl, "Overlays", window)
     commands += module_commands(mctrl, "Module", window)
     return commands
+
+
+def director_page():
+    """Director of the Broadcast Director page if open (its module is imported only by the page)"""
+    module = sys.modules.get("neopedal.ui.quick.director_backend")
+    return module.director_page() if module is not None else None
+
+
+def toggle_director():
+    """Director on or off, page looked for again (closed while the palette was open: nothing)"""
+    director = director_page()
+    if director is not None:
+        director.setEnabled(not director.enabled)
+
+
+def race_page():
+    """Backend of the Race Calculator page if open (its module is imported only by the page)"""
+    module = sys.modules.get("neopedal.ui.quick.race_backend")
+    return module.race_page() if module is not None else None
+
+
+def toggle_race_game_data():
+    """Race Calculator on or off, page looked for again (closed meanwhile: nothing)"""
+    race = race_page()
+    if race is not None:
+        race.setGameData(not race.game_data)
 
 
 _preset_names: tuple[tuple, list[str]] | None = None

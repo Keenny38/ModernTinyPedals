@@ -20,12 +20,6 @@ Item {
         Action { text: i18n.tr("Car Sheet"); onTriggered: backend.selectCar(root.menuSlot) }
     }
 
-    // Tyre colors as on TV: soft red, medium yellow, hard white, wet blue
-    function tyreColor(letter) {
-        return letter === "S" ? "#E5484D" : letter === "M" ? "#F5C518" : letter === "H" ? (theme.dark ? "#EDEDED" : "#777777")
-             : letter === "W" ? "#3E8EF7" : letter === "I" ? "#30A46C" : theme.dimText
-    }
-
     function tone(name) {
         return name === "loss" ? theme.loss : name === "gain" ? theme.gain : name === "warning" ? theme.warning
              : name === "fastest" ? theme.purple : name === "yellow" ? theme.gold : theme.dimText
@@ -34,7 +28,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.em * 0.6
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
 
         RowLayout {
             Layout.fillWidth: true
@@ -45,7 +39,7 @@ Item {
                 text: i18n.tr("Cars") + (backend.carCount > 0 ? "  " + backend.carCount : "")
                 color: theme.text
                 font.weight: Font.DemiBold
-                font.pointSize: theme.fontPoint * 1.05
+                font.pointSize: theme.fontSubtitle
                 elide: Text.ElideRight
             }
             TpButton {  // timing table of every car
@@ -99,17 +93,17 @@ Item {
                         Row {
                             id: chipRow
                             anchors.centerIn: parent
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Rectangle {
                                 width: theme.em * 0.5; height: width; radius: width / 2
                                 color: chip.modelData.color
                                 anchors.verticalCenter: parent.verticalCenter
                             }
-                            Text { text: chip.modelData.name; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                            Text { text: chip.modelData.name; color: theme.text; font.pointSize: theme.fontSmall }
                             Text {
                                 text: chip.modelData.count
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                             }
                         }
@@ -129,9 +123,9 @@ Item {
             reuseItems: true
             spacing: 2
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            move: Transition { NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.OutCubic } }
-            moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 250; easing.type: Easing.OutCubic } }
-            displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
+            move: Transition { NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+            moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+            displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
 
             delegate: Rectangle {
                 id: row
@@ -144,6 +138,7 @@ Item {
                 required property string team
                 required property string carClass
                 required property string classColor
+                required property string classAlias
                 required property string interval
                 required property string best
                 required property bool fastest
@@ -163,16 +158,19 @@ Item {
                 required property string brandLogo
                 required property string tyreFront
                 required property string tyreRear
+                // Reused row: fed other car values at once, no color animation from the old car
+                property bool live: true
+                ListView.onPooled: live = false
+                ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 2.7)
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: onAir ? Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, rowArea.containsMouse ? 0.24 : 0.16)
-                     : selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.15)
-                     : rowArea.containsMouse ? theme.hover : "transparent"
+                     : theme.rowColor(rowArea.containsMouse, selected)
                 border.width: onAir ? 1 : 0
                 border.color: theme.loss
-                Behavior on color { ColorAnimation { duration: 110 } }
+                Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
 
                 MouseArea {
                     id: rowArea
@@ -196,23 +194,14 @@ Item {
                     anchors.leftMargin: 0
                     anchors.rightMargin: theme.em * 0.2
                     spacing: theme.em * 0.4
-                    Rectangle {  // class color
-                        Layout.preferredWidth: Math.round(theme.em * 0.28)
-                        Layout.fillHeight: true
-                        Layout.topMargin: theme.em * 0.35
-                        Layout.bottomMargin: theme.em * 0.35
-                        radius: width / 2
-                        color: row.classColor
-                    }
-                    Column {  // class place, places gained since the start (races)
-                        Layout.preferredWidth: theme.em * 2.0
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            text: row.classPosition > 0 ? row.classPosition : "-"
-                            color: theme.text
-                            font.weight: Font.Bold
-                            font.features: { "tnum": 1 }
+                    Column {  // class badge (as overlays: alias & class place), places gained since the start (races)
+                        Layout.preferredWidth: theme.em * 4.4
+                        TpClassBadge {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            label: row.classAlias
+                            fullName: row.carClass
+                            fill: row.classColor
+                            position: row.classPosition > 0 ? String(row.classPosition) : "-"
                         }
                         Text {
                             width: parent.width
@@ -220,7 +209,7 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                             text: (row.gained > 0 ? "▲" : "▼") + Math.abs(row.gained)
                             color: row.gained > 0 ? theme.gain : theme.loss
-                            font.pointSize: theme.fontPoint * 0.65
+                            font.pointSize: theme.fontMicro
                             font.features: { "tnum": 1 }
                             ToolTip.visible: gainedArea.containsMouse
                             ToolTip.text: i18n.tr("Places gained since the start")
@@ -231,7 +220,7 @@ Item {
                         Layout.preferredWidth: theme.em * 2.4
                         text: row.number !== "" ? "#" + row.number : ""
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                         font.features: { "tnum": 1 }
                         elide: Text.ElideRight
                     }
@@ -254,30 +243,19 @@ Item {
                             Layout.fillWidth: true
                             text: row.status !== "" ? row.status : row.team
                             color: row.status !== "" ? root.tone(row.statusTone) : theme.dimText
-                            font.pointSize: theme.fontPoint * 0.78
+                            font.pointSize: theme.fontCaption
                             elide: Text.ElideRight
                         }
                     }
                     Row {  // tyres front & rear (shared memory of the game on this computer)
                         visible: row.tyreFront !== ""
-                        spacing: 1
+                        spacing: theme.em * 0.2
                         Repeater {
-                            model: row.tyreFront === row.tyreRear ? [row.tyreFront] : [row.tyreFront, row.tyreRear]
-                            delegate: Rectangle {
-                                required property string modelData
-                                width: Math.round(theme.em * 1.05)
-                                height: width
-                                radius: width / 2
-                                color: "transparent"
-                                border.width: Math.max(1.5, theme.em * 0.14)
-                                border.color: root.tyreColor(modelData)
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: parent.modelData
-                                    color: theme.text
-                                    font.pointSize: theme.fontPoint * 0.6
-                                    font.weight: Font.Bold
-                                }
+                            model: 2  // front, rear when another compound (badges kept, letters change)
+                            delegate: TpCompound {
+                                required property int index
+                                name: index === 0 ? row.tyreFront : row.tyreRear
+                                visible: name !== "" && (index === 0 || row.tyreRear !== row.tyreFront)
                             }
                         }
                     }
@@ -304,7 +282,7 @@ Item {
                             horizontalAlignment: Text.AlignRight
                             text: row.interval
                             color: row.intervalTone !== "" ? root.tone(row.intervalTone) : theme.dimText
-                            font.pointSize: theme.fontPoint * 0.88
+                            font.pointSize: theme.fontSmall
                             font.weight: row.intervalTone !== "" ? Font.DemiBold : Font.Normal
                             font.features: { "tnum": 1 }
                             elide: Text.ElideRight
@@ -320,13 +298,14 @@ Item {
                                 id: bars
                                 spacing: 2
                                 Repeater {
-                                    model: [row.s1Tone, row.s2Tone, row.s3Tone]
+                                    model: 3  // bars kept, colors change as sectors complete
                                     delegate: Rectangle {
-                                        required property string modelData
+                                        required property int index
+                                        readonly property string toneName: index === 0 ? row.s1Tone : index === 1 ? row.s2Tone : row.s3Tone
                                         width: Math.round(theme.em * 0.75)
                                         height: Math.max(3, Math.round(theme.em * 0.28))
                                         radius: height / 2
-                                        color: modelData !== "" ? root.tone(modelData) : theme.border
+                                        color: toneName !== "" ? root.tone(toneName) : theme.border
                                     }
                                 }
                             }

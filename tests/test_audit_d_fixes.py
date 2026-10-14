@@ -43,16 +43,13 @@ def test_default_api_always_selectable(monkeypatch):
     assert api_connector.SimLMULegacy in api_control._set_available_api(True)
 
 
-def fake_mctrl(monkeypatch, starts):
-    from neopedal import module_control
-
+def fake_mctrl(app_ctx, starts):
     active = {}
-    fake = SimpleNamespace(active_modules=active, start=lambda name: active.update({name: 1}) if starts else None)
-    monkeypatch.setattr(module_control, "mctrl", fake)
+    app_ctx(mctrl=SimpleNamespace(active_modules=active, start=lambda name: active.update({name: 1}) if starts else None))
 
 
-def test_enable_modules_failed_start_left_off(monkeypatch):
-    fake_mctrl(monkeypatch, starts=False)
+def test_enable_modules_failed_start_left_off(app_ctx):
+    fake_mctrl(app_ctx, starts=False)
     settings = {"module_wheels": {"enable": False}}
     saved = []
     assert bb_modules.enable_modules(["module_wheels"], settings, lambda: saved.append(1)) == []
@@ -60,8 +57,8 @@ def test_enable_modules_failed_start_left_off(monkeypatch):
     assert not saved
 
 
-def test_enable_modules_started(monkeypatch):
-    fake_mctrl(monkeypatch, starts=True)
+def test_enable_modules_started(app_ctx):
+    fake_mctrl(app_ctx, starts=True)
     settings = {"module_wheels": {"enable": False}}
     saved = []
     assert bb_modules.enable_modules(["module_wheels"], settings, lambda: saved.append(1)) == ["module_wheels"]

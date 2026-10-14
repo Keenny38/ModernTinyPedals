@@ -19,6 +19,7 @@
 #include "xr_includes.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -196,6 +197,15 @@ struct SessionData {
     std::vector<uint8_t> upload;
     uint32_t upload_width = 0;
     uint32_t upload_height = 0;
+    // Partial updates (app sends dirty rects): upload holds the whole converted atlas of converted_layout,
+    // reader pixels changed since in pixels_dirty; each swapchain image gets what changed since it was last
+    // uploaded (image_dirty), whole image when image_whole (new swapchain, layout or whole atlas change)
+    bool upload_valid = false;
+    TileLayout converted_layout;
+    Rect pixels_dirty;
+    bool pixels_whole = true;
+    std::array<Rect, 16> image_dirty{};
+    std::array<bool, 16> image_whole{};
     FrameReader reader;
     uint64_t mapping_generation = 0;
     bool version_mismatch = false;  // app writes another protocol version
@@ -260,6 +270,8 @@ void destroy_swapchain(SessionData& session) {
     session.pending = false;
     session.image_valid = false;
     session.shown_layout = TileLayout{};
+    session.upload_valid = false;  // new swapchain images: whole image uploaded to each
+    session.image_whole.fill(true);
 }
 
 void destroy_resources(SessionData& session) {
@@ -394,10 +406,31 @@ void update_image(SessionData& session) {
             compose_layout(layout, pixels, info.width, info.height, session.merged);
             pixels = session.merged.data();
         }
-        session.upload_width = std::min(layout.width + 1u, session.swapchain_width);
-        session.upload_height = std::min(layout.height + 1u, session.swapchain_height);
-        convert_pixels(pixels, layout.width, layout.height, session.upload_width, session.upload_height,
-                       session.format->bgra, !session.format->srgb, session.upload);
+        const uint32_t upload_width = std::min(layout.width + 1u, session.swapchain_width);
+        const uint32_t upload_height = std::min(layout.height + 1u, session.swapchain_height);
+        // Same atlas layout as the converted one, only a rect changed: that rect converted again
+        bool partial = !layout.merged && session.upload_valid && !session.pixels_whole &&
+                       layout == session.converted_layout && upload_width == session.upload_width &&
+                       upload_height == session.upload_height;
+        if (partial && session.pixels_dirty.width != 0 && session.pixels_dirty.height != 0) {
+            partial = convert_rect(pixels, layout.width, layout.height, session.pixels_dirty, upload_width,
+                                   session.format->bgra, !session.format->srgb, session.upload);
+        }
+        if (partial) {
+            for (Rect& rect : session.image_dirty) {
+                rect = union_rect(rect, session.pixels_dirty);
+            }
+        } else {
+            session.upload_width = upload_width;
+            session.upload_height = upload_height;
+            convert_pixels(pixels, layout.width, layout.height, session.upload_width, session.upload_height,
+                           session.format->bgra, !session.format->srgb, session.upload);
+            session.image_whole.fill(true);
+        }
+        session.upload_valid = !layout.merged;
+        session.converted_layout = layout;
+        session.pixels_dirty = Rect{};
+        session.pixels_whole = false;
         session.pending_layout = layout;
         session.pending_format = info.pixel_format;
         XrSwapchainImageAcquireInfo acquire{};
@@ -424,8 +457,21 @@ void update_image(SessionData& session) {
         fail(session, "xrWaitSwapchainImage", result);
         return;
     }
-    const bool uploaded = session.graphics->upload(session.pending_index, session.upload.data(), session.upload_width,
-                                                   session.upload_height);
+    // Swapchain image gets what changed since it was last uploaded (whole image if unknown)
+    const uint32_t index = session.pending_index;
+    const bool whole = index >= session.image_whole.size() || session.image_whole[index];
+    const Rect dirty = whole ? Rect{} : session.image_dirty[index];
+    bool uploaded = true;  // image already up to date: nothing copied
+    if (whole) {
+        uploaded = session.graphics->upload(index, session.upload.data(), session.upload_width, session.upload_height);
+    } else if (dirty.width != 0 && dirty.height != 0) {
+        uploaded = session.graphics->upload_rect(index, session.upload.data(), session.upload_width,
+                                                 session.upload_height, dirty);
+    }
+    if (uploaded && index < session.image_whole.size()) {
+        session.image_whole[index] = false;
+        session.image_dirty[index] = Rect{};
+    }
     XrSwapchainImageReleaseInfo release{};
     release.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
     result = session.instance->ReleaseSwapchainImage(session.swapchain, &release);
@@ -475,6 +521,7 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
     const uint64_t now = now_ms();
     bool drawable = false;
     bool pixels_changed = false;
+    Rect changed_rect;
     shared_mapping().with_view(now, [&](uint8_t* view, size_t size, uint64_t generation) {
         if (generation != session.mapping_generation) {
             session.mapping_generation = generation;  // new mapping: sequence & serial start over
@@ -488,7 +535,7 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
                 session.layout_dirty = true;  // planned on the next frame drawing the overlay
             }
             drawable = session.reader.drawable();
-            pixels_changed = session.reader.take_pixels_changed();
+            pixels_changed = session.reader.take_pixels_changed(changed_rect);
         }
         LayerStatus status;
         status.pid = GetCurrentProcessId();
@@ -503,6 +550,13 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
     });
     if (pixels_changed) {
         session.stale = true;  // before any early return: change consumed from reader, uploaded on a later frame
+        const FrameInfo& changed_info = session.reader.info();
+        if (changed_rect.x == 0 && changed_rect.y == 0 && changed_rect.width == changed_info.width &&
+            changed_rect.height == changed_info.height) {
+            session.pixels_whole = true;
+        } else {
+            session.pixels_dirty = union_rect(session.pixels_dirty, changed_rect);
+        }
     }
     if (!drawable || session.failed) {
         return false;

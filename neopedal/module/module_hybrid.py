@@ -26,7 +26,7 @@ from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import HybridInfo, minfo
 from ..validator import generator_init
-from ._base import DataModule, data_stamp
+from ._base import WAIT_STATE_CHANGE, DataModule, data_stamp
 
 
 class Realtime(DataModule):
@@ -68,9 +68,8 @@ class Realtime(DataModule):
                 gen_motor.send(vehicle_resets)
 
             else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
+                reset = False
+                update_interval = WAIT_STATE_CHANGE  # idle until activity changes
 
 
 @generator_init

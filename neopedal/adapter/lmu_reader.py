@@ -25,6 +25,11 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
+from pyLMUSharedMemory.lmu_mmap import MAX_VEHICLES
+
 from ..calculation import (
     hypotenuse,
     lap_progress_distance,
@@ -35,8 +40,9 @@ from ..calculation import (
 )
 from ..const_common import MAX_SECONDS, WHEELS_NA
 from ..formatter import strip_invalid_char
+from ..penalty_info import Penalty
 from ..process.weather import WeatherNode
-from ..validator import bytes_to_str as tostr
+from ..validator import bytes_to_str
 from ..validator import infnan_to_zero as rmnan
 from . import _reader
 from ._reader import SECTOR_ORDER, signed_char
@@ -57,17 +63,21 @@ class DataAdapter:
     __slots__ = (
         "shmm",
         "rest",
+        "tostr",
     )
 
-    def __init__(self, shmm: LMUInfo, rest: RestAPIData) -> None:
+    def __init__(self, shmm: LMUInfo, rest: RestAPIData, tostr: Callable[[Any], str] = bytes_to_str) -> None:
         """Initialize API setting
 
         Args:
             shmm: shared memory API connector.
             rest: rest API connector.
+            tostr: text decoder of game bytes (character encoding), replaced (never changed)
+                by connector setup while threads read data.
         """
         self.shmm = shmm
         self.rest = rest
+        self.tostr = tostr
 
     def _is_local_car(self, index: int | None) -> bool:
         """Is vehicle the local player's own car (Rest API garage data belongs to it)
@@ -442,13 +452,13 @@ class Session(_reader.Session, DataAdapter):
 
     def combo_name(self) -> str:
         """Track & vehicle combo name, strip off invalid char"""
-        track_name = tostr(self.shmm.lmuScorInfo.mTrackName)
-        class_name = tostr(self.shmm.lmuScorVeh().mVehicleClass)
+        track_name = self.tostr(self.shmm.lmuScorInfo.mTrackName)
+        class_name = self.tostr(self.shmm.lmuScorVeh().mVehicleClass)
         return strip_invalid_char(f"{track_name} - {class_name}")
 
     def track_name(self) -> str:
         """Track name, strip off invalid char"""
-        return strip_invalid_char(tostr(self.shmm.lmuScorInfo.mTrackName))
+        return strip_invalid_char(self.tostr(self.shmm.lmuScorInfo.mTrackName))
 
     def identifier(self) -> tuple[int, int, int]:
         """Identify session"""
@@ -706,6 +716,12 @@ class Session(_reader.Session, DataAdapter):
         return bool(self.shmm.lmuScorInfo.mIsFixedSetup)
 
 
+LEVEL_MAXIMUM_FIELDS = {  # driver setting: telemetry field of its highest level
+    "tc": "mTCMax", "tc_slip": "mTCSlipMax", "tc_cut": "mTCCutMax", "abs": "mABSMax", "motor_map": "mMotorMapMax",
+    "brake_migration": "mMigrationMax", "front_arb": "mFrontAntiSwayMax", "rear_arb": "mRearAntiSwayMax",
+}
+
+
 class Switch(_reader.Switch, DataAdapter):
     """Switch"""
 
@@ -766,6 +782,14 @@ class Switch(_reader.Switch, DataAdapter):
         if tele_veh.mRearAntiSwayMax:
             return tele_veh.mRearAntiSway
         return -1
+
+    def level_maximum(self, name: str = "", index: int | None = None) -> int:
+        """Highest level of a driver setting (tc, tc_slip, tc_cut, abs, motor_map, brake_migration, front_arb,
+        rear_arb), -1 if unknown"""
+        field = LEVEL_MAXIMUM_FIELDS.get(name)
+        if field is None:
+            return -1
+        return getattr(self.shmm.lmuTeleVeh(index), field) or -1
 
     def wipers(self, index: int | None = None) -> int:
         """Wipers state, 0 = off, 1 = auto, 2 = slow, 3 = fast"""
@@ -949,7 +973,7 @@ class Tyre(_reader.Tyre, DataAdapter):
     def compound_class(self, index: int | None = None) -> tuple[str, ...]:
         """Tyre compound name set with class name prefix"""
         wheel_data = self.shmm.lmuTeleVeh(index).mWheels
-        class_name = tostr(self.shmm.lmuScorVeh(index).mVehicleClass)
+        class_name = self.tostr(self.shmm.lmuScorVeh(index).mVehicleClass)
         return (
             f"{class_name} - {LMU_COMPOUND_TYPE(wheel_data[0].mCompoundType)}",
             f"{class_name} - {LMU_COMPOUND_TYPE(wheel_data[1].mCompoundType)}",
@@ -1139,27 +1163,27 @@ class Vehicle(_reader.Vehicle, DataAdapter):
 
     def driver_name(self, index: int | None = None) -> str:
         """Driver name"""
-        return tostr(self.shmm.lmuScorVeh(index).mDriverName)
+        return self.tostr(self.shmm.lmuScorVeh(index).mDriverName)
 
     def vehicle_name(self, index: int | None = None) -> str:
         """Vehicle name"""
-        return tostr(self.shmm.lmuScorVeh(index).mVehicleName)
+        return self.tostr(self.shmm.lmuScorVeh(index).mVehicleName)
 
     def vehicle_model(self, index: int | None = None) -> str:
         """Vehicle model name (brand name + model ID)"""
-        return tostr(self.shmm.lmuTeleVeh(index).mVehicleModel)
+        return self.tostr(self.shmm.lmuTeleVeh(index).mVehicleModel)
 
     def class_name(self, index: int | None = None) -> str:
         """Vehicle class name"""
-        return tostr(self.shmm.lmuScorVeh(index).mVehicleClass)
+        return self.tostr(self.shmm.lmuScorVeh(index).mVehicleClass)
 
     def same_class(self, index: int | None = None) -> bool:
         """Is same vehicle class"""
         return self.shmm.lmuScorVeh(index).mVehicleClass == self.shmm.lmuScorVeh().mVehicleClass
 
     def total_vehicles(self) -> int:
-        """Total vehicles"""
-        return self.shmm.lmuScorInfo.mNumVehicles
+        """Total vehicles, capped to the mapped vehicle rows (count may be garbage)"""
+        return min(max(self.shmm.lmuScorInfo.mNumVehicles, 0), MAX_VEHICLES)
 
     def place(self, index: int | None = None) -> int:
         """Vehicle overall place"""
@@ -1189,6 +1213,10 @@ class Vehicle(_reader.Vehicle, DataAdapter):
     def number_penalties(self, index: int | None = None) -> int:
         """Number of penalties"""
         return self.shmm.lmuScorVeh(index).mNumPenalties
+
+    def penalty(self, index: int | None = None) -> Penalty:
+        """Penalties of game results stream: to serve (first one's kind & time), time added, disqualified"""
+        return self.shmm.lmuPenalty(index)
 
     def pit_request(self, index: int | None = None) -> bool:
         """Is requested pit, 0 = none, 1 = request, 2 = entering, 3 = stopped, 4 = exiting"""

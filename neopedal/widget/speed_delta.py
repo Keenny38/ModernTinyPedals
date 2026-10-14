@@ -26,11 +26,16 @@ from pit lane or garage, in pit lane before start line).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..module_info import minfo
 from ._base import Overlay
 from ._common import delta_shown
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SpeedDeltaConfig
 
 # Reference laps: (option key, delta source of delta module, speed delta attribute, modern label)
 REFERENCES = (
@@ -65,6 +70,8 @@ class SpeedDeltas:
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: SpeedDeltaConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

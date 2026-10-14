@@ -37,6 +37,7 @@ from collections.abc import Collection, Sequence
 from itertools import pairwise
 from typing import NamedTuple
 
+from . import replace_retry
 from .telemetry_lap import LapData, interpolate, lap_time_of, lap_timestamp_of
 
 logger = logging.getLogger(__name__)
@@ -348,7 +349,7 @@ def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
     temporary = f"{target}.tmp"
     try:
         export_lap(load_cached_lap(folder, path), temporary, venue=venue, timestamp=os.path.getmtime(path))
-        os.replace(temporary, target)
+        replace_retry(temporary, target)
     except (OSError, ValueError) as error:
         logger.error("MOTEC: unable to export %s: %s", path, error)
         with suppress(OSError):

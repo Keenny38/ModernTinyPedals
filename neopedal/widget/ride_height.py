@@ -20,13 +20,20 @@
 Ride height Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..api_control import api
 from ._base import Overlay
 from ._painter import WheelGaugeBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RideHeightConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "RideHeightConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

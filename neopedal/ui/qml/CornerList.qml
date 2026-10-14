@@ -11,12 +11,12 @@ Item {
     property var chart
     // Rows: backend model (rows kept while their corner stays: only changed values update their items)
     readonly property bool hasRows: cornerView.count > 0
-    readonly property real maxDelta: backend.cornerMaxDelta
+    readonly property real maxDelta: backend.cornerTable.maxDelta
     readonly property int selected: backend.selectedCorner  // also selected by clicking map corners
     readonly property var comparedLaps: backend.comparedLaps  // read once (list built by backend)
-    readonly property var alignment: backend.alignment
+    readonly property var alignment: backend.charts.alignment
     onSelectedChanged: {  // corner selected on map: row shown
-        var position = backend.cornerPosition(selected)
+        var position = backend.cornerTable.position(selected)
         if (position >= 0) cornerView.positionViewAtIndex(position, ListView.Contain)
     }
     // Details tooltip: built once, shown text only while a row is hovered
@@ -34,7 +34,7 @@ Item {
     function tone(name, fallback) { return name === "loss" ? theme.loss : name === "gain" ? theme.gain : fallback }
     function showCorner(index) {
         backend.setSelectedCorner(index)
-        var range = backend.cornerRange(index)
+        var range = backend.cornerTable.range(index)
         if (range.length === 2 && root.chart) {
             var margin = (range[1] - range[0]) * 0.15
             root.chart.setView(range[0] - margin, range[1] + margin, true)
@@ -54,10 +54,10 @@ Item {
                 Layout.fillWidth: true
                 focusPolicy: Qt.NoFocus  // arrows stay for charts
                 from: 3; to: 40; stepSize: 1
-                value: backend.hysteresis
+                value: backend.cornerTable.hysteresis
                 function apply() {
                     applyTimer.stop()
-                    if (Math.round(value) !== backend.hysteresis) backend.setHysteresis(Math.round(value))
+                    if (Math.round(value) !== backend.cornerTable.hysteresis) backend.cornerTable.setHysteresis(Math.round(value))
                 }
                 // Corners found again once released, or once value stays a moment (dragging stays smooth)
                 onMoved: applyTimer.restart()
@@ -89,16 +89,16 @@ Item {
                         text: modelData.label
                         flat: true
                         implicitHeight: theme.em * 1.8
-                        checked: backend.compareKey === modelData.key
-                        onClicked: backend.setCompareKey(modelData.key)
+                        checked: backend.cornerTable.compareKey === modelData.key
+                        onClicked: backend.cornerTable.setCompareKey(modelData.key)
                     }
                 }
             }
             Item { Layout.fillWidth: true; visible: root.comparedLaps.length <= 1 }
             TpSegmented {
                 options: [i18n.tr("Track order"), i18n.tr("Time lost")]
-                currentIndex: backend.cornerSort === "loss" ? 1 : 0
-                onActivated: function(index) { backend.setCornerSort(index === 1 ? "loss" : "track") }
+                currentIndex: backend.cornerTable.sort === "loss" ? 1 : 0
+                onActivated: function(index) { backend.cornerTable.setSort(index === 1 ? "loss" : "track") }
             }
         }
 
@@ -115,7 +115,7 @@ Item {
                 enabled: root.selected >= 0 && root.comparedLaps.length > 0
                 checked: aligned
                 tip: i18n.tr("Shift laps along distance so their braking starts in selected corner line up with reference lap")
-                onClicked: backend.alignBraking(aligned ? -1 : root.selected)
+                onClicked: backend.charts.alignBraking(aligned ? -1 : root.selected)
             }
             Item { Layout.fillWidth: true }
             TpButton {
@@ -124,16 +124,16 @@ Item {
                 flat: true
                 implicitHeight: theme.em * 1.8
                 tip: i18n.tr("Export corner report: table, deltas, coaching notes & map (HTML or PDF)")
-                onClicked: backend.exportCornerReport()
+                onClicked: backend.exports.exportCornerReport()
             }
         }
 
         // Where compared lap loses most time
         Rectangle {
-            visible: backend.coaching.length > 0
+            visible: backend.cornerTable.coaching.length > 0
             Layout.fillWidth: true
             implicitHeight: coachColumn.implicitHeight + theme.em * 0.8
-            radius: theme.em * 0.5
+            radius: theme.radiusMd
             color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, theme.dark ? 0.1 : 0.07)
             border.width: 1
             border.color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.35)
@@ -141,21 +141,21 @@ Item {
                 id: coachColumn
                 anchors.fill: parent
                 anchors.margins: theme.em * 0.4
-                spacing: theme.em * 0.15
+                spacing: theme.em * 0.2
                 Text {
-                    text: i18n.tr("Where time is lost") + (backend.coachingLap ? " · " + backend.coachingLap : "")
+                    text: i18n.tr("Where time is lost") + (backend.cornerTable.coachingLap ? " · " + backend.cornerTable.coachingLap : "")
                     color: theme.text
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                 }
                 Repeater {
-                    model: backend.coaching
+                    model: backend.cornerTable.coaching
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: tipRow.implicitHeight + theme.em * 0.3
-                        radius: theme.em * 0.35
+                        radius: theme.radiusSm
                         color: tipArea.containsMouse ? theme.hover : "transparent"
                         RowLayout {
                             id: tipRow
@@ -182,7 +182,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: modelData.causes.join(" · ")
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.82
+                                font.pointSize: theme.fontSmall
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -214,12 +214,12 @@ Item {
             Layout.leftMargin: theme.em * 0.5
             Layout.rightMargin: theme.em * 0.5
             spacing: theme.em * 0.5
-            Text { text: i18n.tr("Corner"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; Layout.preferredWidth: theme.em * 6.5 }
-            Text { text: i18n.tr("Time"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85; Layout.fillWidth: true }
+            Text { text: i18n.tr("Corner"); color: theme.dimText; font.pointSize: theme.fontSmall; Layout.preferredWidth: theme.em * 6.5 }
+            Text { text: i18n.tr("Time"); color: theme.dimText; font.pointSize: theme.fontSmall; Layout.fillWidth: true }
             Text {
                 text: i18n.tr("Min Speed")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 Layout.preferredWidth: theme.em * 5.5
                 horizontalAlignment: Text.AlignRight
             }
@@ -230,7 +230,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: backend.cornerModel
+            model: backend.cornerTable.model
             spacing: 2
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
@@ -241,11 +241,11 @@ Item {
                 readonly property bool corner: modelData.kind === "corner"
                 width: ListView.view.width
                 height: corner ? rowContent.implicitHeight + theme.em * 0.6 : theme.em * 2.2
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: root.selected === modelData.index && corner ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16)
                      : area.containsMouse && corner ? theme.hover
                      : corner ? "transparent" : (theme.dark ? Qt.lighter(theme.base, 1.15) : theme.alternate)
-                Behavior on color { ColorAnimation { duration: 120 } }
+                Behavior on color { ColorAnimation { duration: theme.motionFast } }
 
                 // Under details: their tooltips get hover, clicks reach this area
                 MouseArea {
@@ -282,7 +282,7 @@ Item {
                             Text {
                                 text: modelData.apex
                                 color: modelData.kind === "ideal" ? theme.purple : theme.dimText
-                                font.pointSize: theme.fontPoint * 0.8
+                                font.pointSize: theme.fontCaption
                                 anchors.baseline: cornerLabel.baseline
                             }
                         }
@@ -338,7 +338,7 @@ Item {
                         textFormat: Text.StyledText
                         wrapMode: Text.WordWrap
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.78
+                        font.pointSize: theme.fontCaption
                         font.features: { "tnum": 1 }
                         function value(text, color) {
                             return "<font color='" + root.tone(color, theme.text) + "'>" + text.replace(/ /g, "&nbsp;") + "</font>"
@@ -355,7 +355,7 @@ Item {
                             i18n.tr("Brake Pressure") + " " + value(modelData.peakBrake),
                         ].concat(modelData.best ? [i18n.tr("Fastest") + " " + value(modelData.best, "")] : []).join(" &nbsp; ")
                         ToolTip.visible: detailArea.containsMouse
-                        ToolTip.delay: 500
+                        ToolTip.delay: theme.tipDelay
                         ToolTip.text: detailArea.containsMouse ? root.detailsTip : ""
                         MouseArea { id: detailArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                     }

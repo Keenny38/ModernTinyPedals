@@ -54,7 +54,6 @@ from typing import Any, NamedTuple
 
 from PySide6.QtCore import (
     Property,
-    QDate,
     QDateTime,
     QFileSystemWatcher,
     QLocale,
@@ -68,8 +67,8 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPalette
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from ... import app_signal, units
 from ... import calculation as calc
-from ... import units
 from ...api_control import api
 from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...const_file import ConfigType
@@ -79,6 +78,7 @@ from ...process import driver_ranks as dr
 from ...process import results_file as rf
 from ...process import results_index as ri
 from ...process.player_profile import PlayerProfile, player_profile
+from ...process.results_text import gap_seconds_text, laps_behind_text
 from ...rank_info import history_path as ranks_history_path
 from ...rank_info import ranks
 from ...setting import cfg
@@ -117,9 +117,10 @@ from ...userfile.sector_best import load_theoretical_best
 from .. import UIScaler
 from ..lap_viewer import number_text, signed
 from ..track_map_viewer import TrackMapViewer
-from .background import BackgroundJobs
+from .formatting import country_name, date_locale, format_date, format_day, iso_day, localized_number
 from .game_pictures import LogoCache, notifier
 from .models import DictListModel
+from .page_backend import PageBackend
 from .stint_analysis import (
     compare_friend,
     history_document,
@@ -136,10 +137,13 @@ REFERENCE_MAX_AGE = 24 * 3600  # seconds before cached lap time reference is dow
 REFERENCE_KEYS = ("gap", "level")  # table columns from lap time reference, after personal best
 WATCH_DELAY = 800  # milliseconds after stats or history file changed before reloading
 LAPS_DELAY = 150  # milliseconds after selection changed before recorded laps are read (arrow keys: one read)
+SELECTION_BURST = 0.25  # seconds: selection changed again within it (arrow key held): details shown once it settles
+SELECTION_DELAY = 120  # milliseconds after last quick selection change before its details are shown
 SYNC_HISTORY_BYTES = 64 * 1024  # history file read at once up to this size (a few ms), bigger one in background
 SYNC_STATS_BYTES = 128 * 1024  # stats file read at once (saved every lap) up to this size, bigger one in background
 RANKS_CHECK = 5_000  # milliseconds between checks of game ranks file (driver card)
 HIDDEN_RELEASE_DELAY = 60_000  # milliseconds page hidden before session history is released (read again once shown)
+HOME_RESET_DELAY = 120.0  # seconds page hidden before it opens on All Tracks again
 LAP_FOLDERS_KEPT = 4  # recorded laps folders whose lap infos are kept (stints of selected vehicle)
 MAX_UNDO = 50
 ROLLBACK_ATTEMPTS = 3  # history change undone again if stats not saved
@@ -170,8 +174,10 @@ HEADER_KEYS = {
 }
 HEADER_TOOLTIPS = {
     "gap": "Personal best in percent of community reference lap time",
+    "level": ("Level of personal best on the community race pace ladder (in percent of class reference): "
+              "qualifying & race bests are marked on the ladder of the reference card"),
     "theory": "Theoretical best: sum of best sectors of the class (all brands), from Sectors module",
-    "potential": "Personal best minus theoretical best",
+    "potential": "Personal best minus theoretical best of the class (best sectors may be of another brand)",
     "starts": "Race starts (recorded since this version)",
     "dnf": "Races not finished or disqualified (recorded since this version)",
     "avg_finish": "Average finish position (recorded since this version)",
@@ -216,28 +222,6 @@ def format_duration(seconds: float) -> str:
     return f"{hours} h {minutes:02d} min" if hours else f"{minutes} min"
 
 
-def date_locale() -> QLocale:
-    """Date format of system, or of app language if system speaks another one"""
-    system = QLocale.system()
-    code = current_language()
-    if system.name().split("_")[0] == code:
-        return system
-    return QLocale(code)
-
-
-def format_date(timestamp: float) -> str:
-    """Short date in language format (24/10/2025 in French), "-" if none"""
-    if timestamp <= 0:
-        return "-"
-    day = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
-    return date_locale().toString(day, QLocale.FormatType.ShortFormat)
-
-
-def format_day(day: date) -> str:
-    """Short date of a calendar day in language format"""
-    return date_locale().toString(QDate(day.year, day.month, day.day), QLocale.FormatType.ShortFormat)
-
-
 def rank_rows(player: dr.DriverRanks | None, history: list[dr.HistoryEntry]) -> list[dict]:
     """Driver card rank rows: label, value, color, progress (0-1), progress text, change since previous rank
     (percent of a tier, history of rank changes) & its tone (1 better, -1 worse, 0 none)"""
@@ -248,9 +232,7 @@ def rank_rows(player: dr.DriverRanks | None, history: list[dr.HistoryEntry]) -> 
         rank = getattr(player, field)
         if rank is None:
             continue
-        previous = next((getattr(entry, field) for entry in reversed(history)
-                         if getattr(entry, field) not in (None, rank)), None)
-        change = dr.rank_change(previous, rank)
+        change = dr.rank_change_since(history, field, rank)
         progress = max(min(rank.progress, 100), 0)
         rows.append({
             "label": tr(label),
@@ -265,10 +247,72 @@ def rank_rows(player: dr.DriverRanks | None, history: list[dr.HistoryEntry]) -> 
     return rows
 
 
+def badge_card(player: dr.DriverRanks | None) -> dict:
+    """Driver card badge: game name & description (translated), icon file URL ("" until downloaded), colors
+    (dark & light theme); empty if no badge"""
+    from ...userfile.badge_icons import badge_info, icons
+
+    if player is None or not player.badge:
+        return {}
+    info = badge_info(player.badge)
+    if info is None:  # badge unknown to this version: game name as given
+        return {"name": player.badge, "description": "", "icon": "", "color": "", "lightColor": ""}
+    path = icons.file(player.badge)
+    return {
+        "name": tr(info.name),
+        "description": tr(info.description),
+        "icon": QUrl.fromLocalFile(path).toString() if path else "",
+        "color": info.color,
+        "lightColor": info.light_color,
+    }
+
+
+def read_stats_backup(path: str, name: str) -> dict | None:
+    """Stats backup read & checked (background), None if unreadable"""
+    stats_backup = load_stats_backup(path, name)
+    return validate_stats_file(stats_backup) if stats_backup is not None else None
+
+
+def lap_folder_stamp(folder: str) -> int:
+    """Modification time of recorded laps folder (changes when a lap file is added or removed), 0 if none"""
+    try:
+        return os.stat(os.path.join(cfg.path.telemetry, folder)).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def other_account_rows(others: list[dr.OtherAccount]) -> list[dict]:
+    """Driver card rows of other game accounts of this computer: Steam name, picture URL, ranks (short label,
+    value, colors), badge (name, colors), date ranks were seen"""
+    from ...userfile.badge_icons import badge_info
+
+    rows = []
+    for other in others:
+        ranks = []
+        for label, field in (("DR", "driver"), ("SR", "safety")):
+            rank = getattr(other.ranks, field)
+            if rank is not None:
+                ranks.append({"label": label, "value": rank.text,
+                              "color": dr.RANK_COLORS.get(rank.name.casefold(), ""),
+                              "lightColor": dr.RANK_COLORS_LIGHT.get(rank.name.casefold(), "")})
+        info = badge_info(other.ranks.badge) if other.ranks.badge else None
+        rows.append({
+            "name": other.name or tr("Other account"),
+            "avatar": QUrl.fromLocalFile(other.avatar).toString() if other.avatar else "",
+            "ranks": ranks,
+            "badge": {"name": tr(info.name), "color": info.color, "lightColor": info.light_color} if info else (
+                {"name": other.ranks.badge, "color": "", "lightColor": ""} if other.ranks.badge else {}),
+            "when": format_date(other.time),
+        })
+    return rows
+
+
 def rank_info_text(player: dr.DriverRanks | None) -> str:
     """Where ranks come from & when game menu updated them"""
     if player is None or not ranks.updated:
         return ""
+    if ranks.remembered:  # game emptied its menu cache: last ranks seen
+        return trm(f"Last ranks seen in game menu, {format_date(ranks.updated)}")
     return trm(f"Ranks of game menu, updated {format_date(ranks.updated)}")
 
 
@@ -378,22 +422,22 @@ def format_derived(key: str, value: float | None) -> str:
     if value is None:
         return "-"
     if key in ("valid_rate", "win_rate", "podium_rate"):
-        return f"{value:.0f} %"
+        return f"{number_text(value)} %"
     if key == "speed":
         if cfg.units["speed_unit"] == "KPH":
             value = units.mps_to_kph(value)
         elif cfg.units["speed_unit"] == "MPH":
             value = units.mps_to_mph(value)
-        return f"{value:.1f}"
+        return number_text(value, 1)
     if key == "consumption":
         if cfg.units["odometer_unit"] == "Mile":
             value = value / 100000 * (100 / units.meter_to_mile(1.0))
         if cfg.units["fuel_unit"] == "Gallon":
             value = units.liter_to_gallon(value)
-        return f"{value:.1f}"
+        return number_text(value, 1)
     if key == "penalty_rate":
-        return f"{value:.2f}"
-    return f"{value:.1f}"
+        return number_text(value, 2)
+    return number_text(value, 1)
 
 
 def chart_ticks(low: float, high: float, wanted: int = 4) -> list[float]:
@@ -643,17 +687,41 @@ def store_reference(text: str) -> LapReferenceTable:
     return lap_reference.parse_lap_references(text)
 
 
+def download_reference_sheet(url: str) -> tuple[str, str]:
+    """Lap time reference sheet downloaded (worker thread): CSV text (empty if failed), error"""
+    try:
+        return lap_reference.fetch_sheet(url), ""
+    except (OSError, ValueError) as exc:
+        return "", str(exc)
+    except Exception as exc:  # cut off response (IncompleteRead), bad CSV...: never left downloading
+        logger.exception("STATS: lap time reference download failed")
+        return "", str(exc) or type(exc).__name__
+
+
+def read_stints_report(folders: OrderedDict[str, dict], key: str, folder: str, vehicle: str,
+                       generation: int) -> tuple[str, int, dict | None]:
+    """Recorded laps of vehicle read (worker thread, one read at a time): stints report (None if unreadable) with
+    its laps key & read generation. folders: lap infos of last folders read (kept between reads)"""
+    path = os.path.join(cfg.path.telemetry, folder)
+    infos = folders.pop(folder, None) or {}
+    folders[folder] = infos
+    while len(folders) > LAP_FOLDERS_KEPT:
+        folders.popitem(last=False)
+    try:
+        report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), infos, prune=True))
+    except Exception:  # unreadable folder: nothing shown, page goes on
+        logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
+        report = None
+    return key, generation, report
+
+
 def gap_text(summary: ri.ResultSummary) -> str:
     """Gap to class leader of session: "+1.234", "+2 laps", "" for leader or unknown"""
     if summary.gap_laps:
-        return f"+{plural(summary.gap_laps, 'lap', 'laps')}"
+        return laps_behind_text(summary.gap_laps)
     if summary.gap_time > 0:
-        return f"+{localized_number(summary.gap_time, 3)}"
+        return gap_seconds_text(summary.gap_time)
     return ""
-
-
-def localized_number(value: float, decimals: int) -> str:
-    return date_locale().toString(float(value), "f", decimals)
 
 
 def result_details(summary: ri.ResultSummary) -> list[str]:
@@ -683,12 +751,6 @@ def summary_rank(summary: ri.ResultSummary) -> str:
     return f"P{summary.class_position}/{summary.class_cars}"
 
 
-def country_name(code: str) -> str:
-    """Country of ISO code ("FR" -> "France", English name), code if unknown"""
-    territory = QLocale.codeToTerritory(code) if len(code) == 2 else QLocale.Country.AnyCountry
-    return code if territory == QLocale.Country.AnyCountry else QLocale.territoryToString(territory)
-
-
 class StatsEdit(NamedTuple):
     """Change of stats file at path (track, vehicle, stat; empty: whole file), session history change
 
@@ -703,8 +765,10 @@ class StatsEdit(NamedTuple):
     history_only: bool = False  # stats not saved, history change kept (stats not changed by undo & redo)
 
 
-class DriverStatsBackend(QObject):
+class DriverStatsBackend(PageBackend):
     """Driver stats viewer page state & actions"""
+
+    CANCEL_JOBS_ON_RELEASE = False  # running edit saved after close (waiting ones wait for it), see release_resources
 
     tracksChanged = Signal()
     statsChanged = Signal()  # table state: rows or not, track or All Tracks, loading
@@ -718,17 +782,17 @@ class DriverStatsBackend(QObject):
     sortChanged = Signal()  # sort column or order: rows moved, nothing else built again
     columnsChanged = Signal()  # columns shown, their widths
     selectionChanged = Signal()
+    selectedKeyChanged = Signal()  # selected row only (light: told at once, even while arrow key held)
     rowIndexChanged = Signal()  # place of selected row (selection changed or rows sorted)
+    rowsSwitched = Signal()  # other track shown with rows changed in place (page: back to top, short fade)
     referenceChanged = Signal()
     editsChanged = Signal()
     optionsChanged = Signal()
     lapsChanged = Signal()  # stints & consistency of selected vehicle (recorded laps read)
     friendChanged = Signal()  # friend's stats compared (loaded, removed, own stats changed)
-    reference_loaded = Signal(str, str)  # sheet CSV text (empty if failed), error
-    laps_loaded = Signal(str, int, object)  # recorded laps folder & vehicle, read generation, stints report
 
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, "Driver stats")
         self._window = parent
         self.stats_temp: dict = {}
         self.selected_stats_key = ""  # selected track, empty for All Tracks
@@ -748,6 +812,7 @@ class DriverStatsBackend(QObject):
         self._reading = True  # stats files not read yet (read in background): page shows it is loading
         self._visible = True
         self._dirty = False  # files changed while page hidden
+        self._hidden_since = 0.0  # monotonic time page was hidden (0: shown)
         self._theory_cache: dict[str, tuple[float, float]] = {}  # sector best file: modified time, value
         self._edits_undo: list[StatsEdit] = []
         self._edits_redo: list[StatsEdit] = []
@@ -792,7 +857,6 @@ class DriverStatsBackend(QObject):
         self._driver: dict = {"visible": False}
         self._fixes: list[ri.BestLapFix] = []
         self._published: dict[str, Any] = {}  # parts of page as last told (see publish)
-        self.reference_loaded.connect(self.reference_downloaded)
         # Stints & consistency of selected vehicle from recorded laps (read in background), friend's stats
         self._stints: dict = {}
         self._laps_key = ""  # recorded laps folder & vehicle shown in stints
@@ -805,7 +869,12 @@ class DriverStatsBackend(QObject):
         self.laps_timer.setSingleShot(True)
         self.laps_timer.setInterval(LAPS_DELAY)
         self.laps_timer.timeout.connect(self.start_laps_read)
-        self.laps_loaded.connect(self.stints_loaded)
+        # Arrow key held in table: row highlighted at once, its reference, progression & sessions once it settles
+        self.selection_timer = QTimer(self)
+        self.selection_timer.setSingleShot(True)
+        self.selection_timer.setInterval(SELECTION_DELAY)
+        self.selection_timer.timeout.connect(self.publish_selection)
+        self._selection_time = -SELECTION_BURST
         notifier().changed.connect(self.pictures_changed)
         self._friend: dict | None = None
         self._friend_view: dict = {"visible": False}
@@ -825,14 +894,15 @@ class DriverStatsBackend(QObject):
         self.hidden_timer.setInterval(HIDDEN_RELEASE_DELAY)
         self.hidden_timer.timeout.connect(self.release_history)
         # Driver & safety ranks of game menu file: driver card made again when they change
-        self._ranks_serial = ranks.serial
+        self._ranks_serial: tuple[int, int] = (-1, -1)  # ranks & badge icons versions of driver card
         self.ranks_timer = QTimer(self)
         self.ranks_timer.setInterval(RANKS_CHECK)
         self.ranks_timer.timeout.connect(self.check_ranks)
+        self.ranks_timer.timeout.connect(self.check_live_track)
+        self._live_track = ""  # track of game session shown as live (track list marker, Live badge)
         self.ranks_timer.start()
         self._history_released = False
         # Reloads & edits of stats files run in order, one at a time, on a worker thread (see run_locked)
-        self.jobs = BackgroundJobs(self, "Driver stats")
         ri.hold_files()  # results files read once for race results page too
         self._locked_jobs: list[StatsJob] = []  # waiting
         self._running_job: StatsJob | None = None
@@ -845,6 +915,9 @@ class DriverStatsBackend(QObject):
         if isinstance(app, QApplication):
             app.paletteChanged.connect(self.palette_changed)
             self._palette_connected = True
+        # Units & vehicle classification changed in settings: cells, headers & tiles shown again in new ones
+        app_signal.refresh.connect(self.settings_changed)
+        self._settings_connected = True
 
         self.load_reference()
         self.load_friend_file(str(self.viewer_config().get("friend_file", "")))
@@ -856,6 +929,11 @@ class DriverStatsBackend(QObject):
     def palette_changed(self, *_args):
         """Light / dark theme switched: level colors (darker on light theme) computed again"""
         if self._loaded:
+            self.refresh_table()
+
+    def settings_changed(self, _changed: bool = True):
+        """Settings applied (units, vehicle classification): page shown again with them"""
+        if self._loaded and not self._released:
             self.refresh_table()
 
     # Setting
@@ -908,21 +986,15 @@ class DriverStatsBackend(QObject):
         url = config.get("lap_reference_sheet_url") or lap_reference.DEFAULT_SHEET_URL
         self._downloading = True
         self.referenceChanged.emit()
+        self.jobs.run("lap reference download", partial(download_reference_sheet, url), self.reference_fetched,
+                      self.reference_fetch_failed)
 
-        def download():
-            text, error = "", "download failed"
-            try:
-                text, error = lap_reference.fetch_sheet(url), ""
-            except (OSError, ValueError) as exc:
-                text, error = "", str(exc)
-            except Exception as exc:  # cut off response (IncompleteRead), bad CSV...: never left downloading
-                logger.exception("STATS: lap time reference download failed")
-                text, error = "", str(exc) or type(exc).__name__
-            finally:
-                with suppress(RuntimeError):  # page closed meanwhile
-                    self.reference_loaded.emit(text, error)
+    def reference_fetched(self, result: tuple[str, str]):
+        self.reference_downloaded(*result)
 
-        threading.Thread(target=download, daemon=True, name="Lap reference download").start()
+    def reference_fetch_failed(self, error: BaseException):
+        logger.error("STATS: lap time reference download failed", exc_info=(type(error), error, error.__traceback__))
+        self.reference_downloaded("", "download failed")  # never left downloading
 
     def reference_downloaded(self, text: str, error: str):
         """Download over: reference saved & parsed in background (cache read still running dropped)"""
@@ -969,6 +1041,7 @@ class DriverStatsBackend(QObject):
         self.optionsChanged.emit()
         self.referenceChanged.emit()
         self.refresh_table()
+        self.columnsChanged.emit()  # reference columns shown only while compared
         if enabled:
             self.download_reference()
 
@@ -1030,15 +1103,26 @@ class DriverStatsBackend(QObject):
     def page_shown(self):
         self._visible = True
         self.hidden_timer.stop()
+        self.ranks_timer.start()
+        hidden_since, self._hidden_since = self._hidden_since, 0.0
+        home = bool(hidden_since) and time.monotonic() - hidden_since >= HOME_RESET_DELAY and self._loaded
         if self._history_released:
             self._history_released = self._dirty = False
-            self.reload()  # history & its links read again
-        elif self._dirty:
+            # history read again, then its results files & links (see stats_files_read)
+            self.reload_stats(select=ALL_TRACKS if home else None)
+            return
+        if home:  # page left a while: opens on All Tracks again
+            self.selectTrack(ALL_TRACKS)
+        self.check_ranks()  # ranks changed while hidden
+        self.check_live_track()  # game session started or ended while hidden
+        if self._dirty:
             self._dirty = False
             self.reload_if_changed()
 
     def page_hidden(self):
         self._visible = False
+        self._hidden_since = time.monotonic()
+        self.ranks_timer.stop()  # game ranks file checked only while page shown
         if not self._released:
             self.hidden_timer.start()
 
@@ -1060,11 +1144,13 @@ class DriverStatsBackend(QObject):
         self._laps_key = ""
         forget_records(cfg.path.config)
 
-    def release(self):
+    def release_resources(self):
         """Page closed: stop watching files & theme"""
         self.watch_timer.stop()
         self.laps_timer.stop()
+        self.selection_timer.stop()
         self.hidden_timer.stop()
+        self.ranks_timer.stop()
         if not self._released:
             ri.release_files()
         self._released = True
@@ -1081,6 +1167,10 @@ class DriverStatsBackend(QObject):
             self._palette_connected = False
             with suppress(RuntimeError, TypeError):
                 QApplication.instance().paletteChanged.disconnect(self.palette_changed)  # type: ignore[union-attr]
+        if self._settings_connected:
+            self._settings_connected = False
+            with suppress(RuntimeError, TypeError):
+                app_signal.refresh.disconnect(self.settings_changed)
 
     @Slot()
     def reload(self):
@@ -1157,18 +1247,40 @@ class DriverStatsBackend(QObject):
         return ri.best_lap_fixes(self.results, self.stats_temp, linked, self.classification(), brands)
 
     def check_ranks(self):
-        """Game ranks file checked in background, driver card made again once ranks changed"""
+        """Game ranks file checked in background, driver card made again once ranks or badge icon changed"""
+        from ...userfile.badge_icons import icons
+
         ranks.poll()
-        if ranks.serial == self._ranks_serial:
+        serial = (ranks.serial, icons.version)
+        if serial == self._ranks_serial:
             return
-        self._ranks_serial = ranks.serial
+        self._ranks_serial = serial
         if not self.selected_stats_key:
             self._driver = self.driver_card()
             self.publish("driver", self._driver, self.driverChanged)
 
+    @staticmethod
+    def game_track() -> str:
+        """Track of game session, empty if none"""
+        return api.read.session.track_name() if api.read is not None else ""
+
+    def check_live_track(self):
+        """Game session on another track (or ended): track list marker & Live badge shown again at once (else
+        only once stats are saved, after a lap)"""
+        current = self.game_track()
+        if current == self._live_track or not self._loaded or self._released:
+            return
+        self._live_track = current
+        self.track_list()
+        self.tracksChanged.emit()
+        self._track_info = self.track_info()
+        self.publish("trackInfo", self._track_info, self.trackInfoChanged)
+
     def driver_card(self) -> dict:
         """Driver card, made again only when results, fixes or ranks changed"""
-        key = (self._results_serial, len(self._fixes), current_language(), ranks.serial)
+        from ...userfile.badge_icons import icons
+
+        key = (self._results_serial, len(self._fixes), current_language(), ranks.serial, icons.version)
         if key != self._driver_key:
             self._driver_key = key
             self._driver = self.driver_data()
@@ -1179,7 +1291,8 @@ class DriverStatsBackend(QObject):
         profile = self.profile
         races = [summary for summary in self.results if summary.kind == "Race"]
         player = ranks.player
-        if profile is None and not races and player is None:
+        others = ranks.others
+        if profile is None and not races and player is None and not others:
             return {"visible": False}
         if profile is not None:
             name = profile.name
@@ -1190,18 +1303,15 @@ class DriverStatsBackend(QObject):
             details = [country_name(profile.nationality), profile.team, f"#{profile.number}" if profile.number else ""]
         figures = []
         if races:
-            placed = [summary.class_position for summary in races
-                      if summary.status == rf.FINISHED and summary.class_position > 0]
-            clean = sum(summary.contacts == 0 and summary.penalties == 0 for summary in races)
-            contacts = sum(summary.contacts for summary in races)
+            record = ri.race_record(races)
             figures = [
-                {"label": tr("Races"), "value": str(len(races))},
-                {"label": tr("Wins"), "value": str(sum(place == 1 for place in placed))},
-                {"label": tr("Podiums"), "value": str(sum(place <= 3 for place in placed))},
+                {"label": tr("Races"), "value": str(record.races)},
+                {"label": tr("Wins"), "value": str(record.wins)},
+                {"label": tr("Podiums"), "value": str(record.podiums)},
                 {"label": tr("Avg. Finish"),
-                 "value": f"P{localized_number(sum(placed) / len(placed), 1)}" if placed else "-"},
-                {"label": tr("Clean Races"), "value": f"{clean}/{len(races)}"},
-                {"label": tr("Contacts/Race"), "value": localized_number(contacts / len(races), 1)},
+                 "value": f"P{localized_number(record.average_finish, 1)}" if record.average_finish else "-"},
+                {"label": tr("Clean Races"), "value": f"{record.clean}/{record.races}"},
+                {"label": tr("Contacts/Race"), "value": localized_number(record.contacts / record.races, 1)},
             ]
         fixes = len(self._fixes)
         return {
@@ -1211,8 +1321,11 @@ class DriverStatsBackend(QObject):
             "detail": " · ".join(part for part in details if part),
             "avatar": QUrl.fromLocalFile(profile.avatar).toString() if profile is not None and profile.avatar else "",
             "figures": figures,
-            "ranks": rank_rows(player, dr.read_history(ranks_history_path()) if player is not None else []),
+            "ranks": rank_rows(player, dr.account_history(dr.read_history(ranks_history_path()), player.steam_id)
+                               if player is not None else []),
             "ranksInfo": rank_info_text(player),
+            "badge": badge_card(player),
+            "otherAccounts": other_account_rows(others),
             "info": trm(f"From {len(races)} race results of the game, class positions") if races else "",
             "fixes": fixes,
             "fixText": trm(f"{fixes} lap time(s) found in race results") if fixes else "",
@@ -1221,7 +1334,7 @@ class DriverStatsBackend(QObject):
     @Property(dict, notify=driverChanged)
     def driver(self) -> dict:
         """Driver card: name, initials, detail, avatar URL, figures (label, value), ranks (see rank_rows), ranksInfo,
-        info, fixes, fixText"""
+        badge (see badge_card), info, fixes, fixText"""
         return self._driver
 
     @Slot(str)
@@ -1391,7 +1504,6 @@ class DriverStatsBackend(QObject):
             return
         self.stats_temp = stats_user
         self._stats_serial += 1
-        self._laps_key = ""  # stints read again (laps recorded with new stats)
         if select is not None:
             wanted = select
         elif self._loaded:
@@ -1411,7 +1523,7 @@ class DriverStatsBackend(QObject):
     def track_list(self) -> list[str]:
         """Track list of picker made again (All Tracks first), track keys in shown order"""
         keys = self.sorted_tracks()
-        current = api.read.session.track_name() if api.read is not None else ""
+        current = self._live_track = self.game_track()
         self._tracks = [{"key": ALL_TRACKS, "label": tr("All Tracks"), "date": "", "current": False, "logo": ""}] + [
             {"key": key, "label": key, "date": format_date(self.track_last_driven.get(key, 0.0)),
              "current": key == current, "logo": self.logos.track(key)}
@@ -1419,13 +1531,10 @@ class DriverStatsBackend(QObject):
         ]
         return keys
 
-    def initial_track(self) -> str:
-        """Current track if it has stats, else last driven track, else All Tracks"""
-        current = api.read.session.track_name() if api.read is not None else ""
-        if current in self.stats_temp:
-            return current
-        driven = [(when, track) for track, when in self.track_last_driven.items() if track in self.stats_temp]
-        return max(driven)[1] if driven else ALL_TRACKS
+    @staticmethod
+    def initial_track() -> str:
+        """Page opens on All Tracks"""
+        return ALL_TRACKS
 
     def sorted_tracks(self) -> list[str]:
         """Track keys by name, or last driven first (never driven last)"""
@@ -1595,20 +1704,19 @@ class DriverStatsBackend(QObject):
         cells: dict[str, Cell] = {"vehicle": Cell(vehicle, vehicle.lower(), vehicle,
                                                   logo=vehicle_logo(vehicle, self.classes.values(), self.logos))}
         percent = reference.percent(best) if reference else 0.0
-        cells["gap"] = Cell(f"{percent:.2f} %" if percent else "-", percent or None, round(percent, 3) if percent else None)
+        cells["gap"] = Cell(f"{number_text(percent, 2)} %" if percent else "-", percent or None, round(percent, 3) if percent else None)
         level = reference.level(best) if reference else -1
         cells["level"] = Cell(level_text(level), level if level >= 0 else None, level_text(level) if level >= 0 else None,
                               self.level_color(level), level >= 0, pill=level >= 0)
         cells["theory"] = Cell(str(parse_display_value("theory", theory)), theory or None, round(theory, 3) if theory else None)
         potential = best - theory if best and theory and best >= theory - 0.0005 else None
-        cells["potential"] = Cell(f"{max(potential, 0.0):.3f}" if potential is not None else "-",
+        cells["potential"] = Cell(number_text(max(potential, 0.0), 3) if potential is not None else "-",
                                   potential, round(max(potential, 0.0), 3) if potential is not None else None)
         for key in DERIVED_COLUMNS:
             value = derived_value(key, data)
             cells[key] = Cell(format_derived(key, value), value, round(value, 3) if value is not None else None)
         driven = self.vehicle_last_driven.get((track, vehicle), 0.0)
-        cells["last"] = Cell(format_date(driven), driven or None,
-                             time.strftime("%Y-%m-%d", time.localtime(driven)) if driven else None)
+        cells["last"] = Cell(format_date(driven), driven or None, iso_day(driven) if driven else None)
         for key in ("pb", "qb", "rb", "meters", "seconds", "liters", "valid", "invalid", "penalties",
                     "starts", "races", "wins", "podiums", "dnf"):
             value = stat_number(data, key)
@@ -1647,7 +1755,7 @@ class DriverStatsBackend(QObject):
                 level = reference.level(best) if reference else -1
                 if reference is not None and level >= 0:
                     counts[level] += 1
-                    tip = f"{vehicle} · {level_text(level)} · {reference.percent(best):.2f} %"
+                    tip = f"{vehicle} · {level_text(level)} · {number_text(reference.percent(best), 2)} %"
                 else:
                     unrated += 1
                     tip = vehicle
@@ -1657,8 +1765,7 @@ class DriverStatsBackend(QObject):
             for key in TRACK_TOTAL_COLUMNS:
                 if key == "last":
                     driven = self.track_last_driven.get(track, 0.0)
-                    cells[key] = Cell(format_date(driven), driven or None,
-                                      time.strftime("%Y-%m-%d", time.localtime(driven)) if driven else None)
+                    cells[key] = Cell(format_date(driven), driven or None, iso_day(driven) if driven else None)
                 else:
                     value = sum(stat_number(data, key) for data in data_list)
                     cells[key] = Cell(str(parse_display_value(key, value)), value, value)
@@ -1733,7 +1840,10 @@ class DriverStatsBackend(QObject):
         return widths
 
     def visible_keys(self) -> list[str]:
+        """Columns shown: fixed ones, others unless hidden by user (reference ones only while compared)"""
         hidden = self.hidden_columns()
+        if not self.compare:
+            hidden |= set(REFERENCE_KEYS)
         return [key for key in self.table_header_key if key in FIXED_COLUMNS or key not in hidden]
 
     def publish_table(self):
@@ -1767,30 +1877,40 @@ class DriverStatsBackend(QObject):
         for key in keys:
             label = self._labels.get(key, key)
             width = text_width(label, True) * 1.05 + em * 2.0  # margins & sort arrow (StatsTable.qml)
+            extras = False  # logo, pill or letter badge in any cell: decorations made in this column only
             for _, cells in self._table:
                 cell = cells.get(key)
                 if cell is not None:
                     margins = 3.3 if cell.badge else 2.4 if cell.pill else 1.6  # badge, pill & cell margins
                     if cell.logo:
                         margins += LOGO_EM  # logo before text (StatsTable.qml)
+                    extras = extras or bool(cell.badge or cell.pill or cell.logo)
                     width = max(width, text_width(cell.text, cell.bold) * 1.05 + em * margins)
             if key in user_widths:
                 width = max(user_widths[key] * em, em * 2)
             tip = HEADER_TOOLTIPS.get(key, "")
-            columns.append({"key": key, "label": label, "tip": tr(tip) if tip else "",
-                            "width": round(width), "align": "left" if key in FIXED_COLUMNS else "center"})
+            columns.append({"key": key, "label": label, "tip": tr(tip) if tip else "", "width": round(width),
+                            "align": "left" if key in FIXED_COLUMNS else "center", "extras": extras})
         self._columns = columns
 
     def publish_rows(self):
-        """Rows to page: rows of another track rebuilt, else moved & changed in place (scroll & delegates kept)"""
+        """Rows to page: moved & changed in place (scroll & delegates kept); other track with mostly the same
+        vehicles changed in place too (page told: back to top), else rows made again (All Tracks, few shared)"""
         keys = self.visible_keys()
         rows = [{"key": row_key, "cells": [self.cell_data(cells.get(key)) for key in keys]}
                 for row_key, cells in self._table]
-        if self._published_track != self.selected_stats_key:
-            self._published_track = self.selected_stats_key
-            self.row_model.reset(rows)
-        else:
+        if self._published_track == self.selected_stats_key:
             self.row_model.sync(rows)
+            return
+        switched_from = self._published_track
+        self._published_track = self.selected_stats_key
+        old_keys = {row.get("key") for row in self.row_model.rows}
+        shared = sum(row["key"] in old_keys for row in rows)
+        if not switched_from or not self.selected_stats_key or shared * 2 < max(len(rows), len(old_keys)):
+            self.row_model.reset(rows)  # All Tracks, or few vehicles in common: rows fade in
+            return
+        self.row_model.sync(rows)  # a reset if too many rows move (then rows fade in too)
+        self.rowsSwitched.emit()
 
     @staticmethod
     def cell_data(cell: Cell | None) -> dict:
@@ -1813,8 +1933,9 @@ class DriverStatsBackend(QObject):
     def columnMenu(self) -> list[dict]:
         """Columns of vehicle table that can be hidden (shared ones in All Tracks too)"""
         hidden = self.hidden_columns()
+        compare = self.compare
         return [{"key": key, "label": header_label(key), "visible": key not in hidden}
-                for key in VEHICLE_COLUMNS if key not in FIXED_COLUMNS]
+                for key in VEHICLE_COLUMNS if key not in FIXED_COLUMNS and (compare or key not in REFERENCE_KEYS)]
 
     @Slot(str, bool)
     def setColumnVisible(self, key: str, visible: bool):
@@ -1926,7 +2047,7 @@ class DriverStatsBackend(QObject):
         reference = self.reference_of(vehicle)
         level = reference.level(best) if reference else -1
         if reference is not None:
-            detail = f"{reference.percent(best):.2f} %"
+            detail = f"{number_text(reference.percent(best), 2)} %"
         else:
             detail = tr("No reference for this track or class") if self.references.entries else ""
         return [self.tile(tr("Best Lap"), calc.sec2laptime_full(best), vehicle, tip=tip_best, glyph=""),
@@ -1970,8 +2091,7 @@ class DriverStatsBackend(QObject):
                 parts.append(f"{tr('last driven')} {format_date(driven)}")
             else:
                 parts.append(f"{tr('since')} {format_date(first)}")
-        current = api.read.session.track_name() if api.read is not None else ""
-        return {"subtitle": " · ".join(parts), "live": bool(track) and track == current}
+        return {"subtitle": " · ".join(parts), "live": bool(track) and track == self.game_track()}
 
     @Property(dict, notify=trackInfoChanged)
     def trackInfo(self) -> dict:
@@ -2110,7 +2230,7 @@ class DriverStatsBackend(QObject):
         return ""
 
     # Selection: reference, progression & sessions of selected vehicle
-    @Property(str, notify=selectionChanged)
+    @Property(str, notify=selectedKeyChanged)
     def selectedKey(self) -> str:
         return self._selected[self.mode]
 
@@ -2135,7 +2255,10 @@ class DriverStatsBackend(QObject):
         keys = self.row_keys()
         if keys:
             index = self.selected_index()
-            self.selectRow(keys[min(max(index + step, 0), len(keys) - 1) if index >= 0 else 0])
+            key = keys[min(max(index + step, 0), len(keys) - 1) if index >= 0 else 0]
+            if key != self._selected[self.mode]:
+                self._selected[self.mode] = key
+                self.update_selection(keyboard=True)
 
     def selected_row_key(self) -> str:
         return self._selected[self.mode]
@@ -2146,8 +2269,28 @@ class DriverStatsBackend(QObject):
         if not self.selected_stats_key and key in self.stats_temp:
             self.selectTrack(key)
 
-    def update_selection(self):
+    def update_selection(self, keyboard: bool = False):
+        """Selected row told at once; its reference, progression & sessions too, unless moved by keyboard quickly
+        (arrow key held: shown once it settles, page not rebuilt for each row passed)"""
+        burst = False
+        if keyboard:
+            now = time.monotonic()
+            burst = now - self._selection_time < SELECTION_BURST
+            self._selection_time = now
+        if burst:
+            self.publish("selectedKey", self._selected[self.mode], self.selectedKeyChanged)
+            self.publish("rowIndex", self.selected_index(), self.rowIndexChanged)
+            self.selection_timer.start()
+            return
+        self.selection_timer.stop()
+        self.publish_selection()
+
+    @Slot()
+    def publish_selection(self):
         """Reference, progression & sessions of selected row, told only if changed (stats saved every lap)"""
+        if self._released:
+            return
+        self.publish("selectedKey", self._selected[self.mode], self.selectedKeyChanged)
         self._reference = self.reference_data()
         self._progression, self._sessions = self.history_data()
         self._has_laps = bool(self.lap_folder())
@@ -2162,7 +2305,8 @@ class DriverStatsBackend(QObject):
         compound, consistency of each session & of the track"""
         vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
         folder = self.lap_folder(vehicle) if vehicle else ""
-        key = f"{folder}|{vehicle}"
+        laps = f"{folder}|{vehicle}"
+        key = f"{laps}|{lap_folder_stamp(folder)}" if folder else laps
         if not vehicle or not folder:
             self._laps_generation += 1  # running or waiting read ignored
             self._laps_job = None
@@ -2178,9 +2322,13 @@ class DriverStatsBackend(QObject):
             self.lapsChanged.emit()
             return
         if key == self._laps_key and self._stints.get("visible"):
-            return  # same laps shown (reloaded when stats change: see refresh)
+            return  # same laps shown (read again once laps folder changed: lap recorded or removed)
+        same_laps = self._laps_key.rpartition("|")[0] == laps and self._stints.get("visible") and "note" not in self._stints
         self._laps_key = key
-        self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps...")}
+        if same_laps:  # new lap recorded: stints shown kept while read again
+            self._stints = {**self._stints, "busy": True}
+        else:
+            self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps...")}
         self.lapsChanged.emit()
         self._laps_generation += 1
         job = (key, folder, vehicle, self._laps_generation)
@@ -2197,22 +2345,15 @@ class DriverStatsBackend(QObject):
             return  # started when running read is loaded
         job, self._laps_job = self._laps_job, None
         self._laps_running = job[3]
-        threading.Thread(target=self.read_stints, args=job, daemon=True, name="Driver stats laps").start()
+        # Lap infos of last folders read only (one read at a time), result handed over on the UI thread
+        self.jobs.run("laps", partial(read_stints_report, self._lap_infos, *job), self.stints_read)
 
     def read_stints(self, key: str, folder: str, vehicle: str, generation: int):
-        path = os.path.join(cfg.path.telemetry, folder)
-        folders = self._lap_infos  # last folders read only (one read at a time)
-        infos = folders.pop(folder, None) or {}
-        folders[folder] = infos
-        while len(folders) > LAP_FOLDERS_KEPT:
-            folders.popitem(last=False)
-        try:
-            report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), infos, prune=True))
-        except Exception:  # unreadable folder: nothing shown, page goes on
-            logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
-            report = None
-        with suppress(RuntimeError):  # page closed meanwhile
-            self.laps_loaded.emit(key, generation, report)
+        """Recorded laps read now (UI thread)"""
+        self.stints_read(read_stints_report(self._lap_infos, key, folder, vehicle, generation))
+
+    def stints_read(self, result: tuple[str, int, dict | None]):
+        self.stints_loaded(*result)
 
     def stints_loaded(self, key: str, generation: int, report):
         """Recorded laps read: stints & consistency shown if still selected & latest read (an older read of
@@ -2242,7 +2383,9 @@ class DriverStatsBackend(QObject):
         def session(name: str) -> str:
             return tr(name) if name else tr("Session")
 
-        compounds = [{"compound": compound(row["compound"]), "stints": row["stints"], "laps": row["laps"],
+        compounds = [{"compound": compound(row["compound"]),
+                      "names": row["compound"].split("/") if row["compound"] else [],  # badges: front, rear
+                      "stints": row["stints"], "laps": row["laps"],
                       "pace": calc.sec2laptime_full(row["pace"]), "slope": slope_text(row["slope"]),
                       "slopeColor": slope_color(row["slope"])} for row in report["compounds"]]
         stints = [{"date": format_date(row["start"]), "session": session(row["session"]),
@@ -2439,11 +2582,12 @@ class DriverStatsBackend(QObject):
         next_level = {}
         if best > 0:
             gap = best - reference.reference
-            gap_text = trm(f"Personal best {calc.sec2laptime_full(best)}: {gap:+.2f} s ({reference.percent(best):.2f} %) "
+            gap_text = trm(f"Personal best {calc.sec2laptime_full(best)}: {signed(gap, 2)} s "
+                           f"({number_text(reference.percent(best), 2)} %) "
                            f"to reference {calc.sec2laptime_full(reference.reference)}")
             level, to_find = reference.next_level(best)
             if level >= 0:
-                next_text = trm(f"Next level {tr(LEVELS[level])}: {to_find:.2f} s to find")
+                next_text = trm(f"Next level {tr(LEVELS[level])}: {number_text(to_find, 2)} s to find")
                 next_level = {"name": tr(LEVELS[level]), "color": self.level_color(level), "letter": level_letter(level),
                               "toFind": signed(-to_find, 2, " s")}
             else:
@@ -2459,7 +2603,7 @@ class DriverStatsBackend(QObject):
                 "detail": f"{reference.track} · {reference.vehicle_class}{patch}", "ladder": ladder,
                 "gap": gap_text, "next": next_text, "fastest": fastest, "gauge": self.gauge_data(reference, marks),
                 "level": level_text(level) if level >= 0 else "", "levelColor": self.level_color(level),
-                "letter": level_letter(level), "percent": f"{reference.percent(best):.2f} %" if best > 0 else "",
+                "letter": level_letter(level), "percent": f"{number_text(reference.percent(best), 2)} %" if best > 0 else "",
                 "best": calc.sec2laptime_full(best) if best > 0 else "", "nextLevel": next_level,
                 "referenceTime": calc.sec2laptime_full(reference.reference) if reference.reference > 0 else "",
                 "gapTime": signed(best - reference.reference, 2, " s") if best > 0 and reference.reference > 0 else ""}
@@ -2506,7 +2650,7 @@ class DriverStatsBackend(QObject):
             markers.append({
                 "label": name, "short": name[:1].upper(), "main": index == 0, "pos": round(position(laptime), 4),
                 "time": calc.sec2laptime_full(laptime), "color": self.level_color(level),
-                "tip": f"{name} {calc.sec2laptime_full(laptime)} · {level_text(level)} · {reference.percent(laptime):.2f} %",
+                "tip": f"{name} {calc.sec2laptime_full(laptime)} · {level_text(level)} · {number_text(reference.percent(laptime), 2)} %",
             })
         markers.sort(key=lambda marker: bool(marker["main"]))  # personal best drawn last (on top)
         return {"segments": segments, "markers": markers}
@@ -2540,6 +2684,7 @@ class DriverStatsBackend(QObject):
         else:
             lines.append(tr("No session recorded yet: history starts with your next session."))
         chart["info"] = "\n".join(lines)
+        chart["sessions"] = len(records)  # all sessions (list shows the newest MAX_SESSIONS)
         sessions = []
         for record in reversed(records[-MAX_SESSIONS:]):
             laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
@@ -2915,16 +3060,28 @@ class DriverStatsBackend(QObject):
 
     @Slot(str)
     def restoreBackup(self, name: str):
-        """Stats file as saved in backup (undo: stats before restore)"""
+        """Stats file as saved in backup (undo: stats before restore), read in background once confirmed"""
         if self.editing:
             return
-        stats_backup = load_stats_backup(cfg.path.config, name)
+        date = next((entry["date"] for entry in self.cached_backups() if entry["name"] == name), name)
+        if not self.confirm(trm(f"Restore stats saved on <b>{date}</b>?<br><br>Undo with Ctrl+Z while this page is open.")):
+            return
+        self.jobs.run("stats backup", partial(read_stats_backup, cfg.path.config, name), self.backup_read,
+                      self.backup_failed, key="backup")
+
+    def backup_read(self, stats_backup: dict | None):
+        """Backup read (checked): restored as an edit"""
+        if self._released or self.editing:
+            return
         if stats_backup is None:
             self.warning(tr("Unable to read stats file."))
             return
-        date = next((entry["date"] for entry in self.cached_backups() if entry["name"] == name), name)
-        if self.confirm(trm(f"Restore stats saved on <b>{date}</b>?<br><br>Undo with Ctrl+Z while this page is open.")):
-            self.edit_stats((), validate_stats_file(stats_backup))
+        self.edit_stats((), stats_backup)
+
+    def backup_failed(self, error: BaseException):
+        logger.warning("DRIVER STATS: backup not read", exc_info=(type(error), error, error.__traceback__))
+        if not self._released:
+            self.warning(tr("Unable to read stats file."))
 
     # Context menu
     @Slot(str, str, result=list)

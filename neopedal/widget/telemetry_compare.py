@@ -35,7 +35,7 @@ import time
 from array import array
 from collections import OrderedDict, deque
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF
@@ -49,6 +49,9 @@ from ..userfile.reference_trace import CHANNELS, ReferenceLoader, ReferenceTrace
 from ..userfile.telemetry_lap import lap_folder_name
 from ._base import Overlay
 from ._race_aids import LEFT, RIGHT, ClassicCells, finite, option_colors, scale_y
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TelemetryCompareConfig
 
 SAMPLE_SPACING = 2  # chart pixels between samples along distance
 TILE_WIDTH = 256  # chart pixels of a reference lap tile
@@ -67,6 +70,7 @@ PANELS = (  # panel, chart height (share of display height), channels
     ("steering", 0.55, ("steering",)),
     ("gear", 0.45, ("gear",)),
 )
+
 PANEL_LABELS = {"speed": "Speed", "pedals": "Pedals", "steering": "Steering", "gear": "Gear"}
 CHANNEL_OPTIONS = {
     "speed_kph": "show_speed", "throttle": "show_throttle", "brake": "show_brake",
@@ -184,7 +188,7 @@ class TelemetryCompareMixin:
     Design sets pens_reference (channel: pen) & fills (channel: area brush under reference line, optional).
     """
 
-    wcfg: Any
+    wcfg: TelemetryCompareConfig
     cfg: Any
     pens_reference: dict[str, QPen]
     fills: dict[str, QColor | QBrush]
@@ -430,6 +434,8 @@ class TelemetryCompareMixin:
 
 class Realtime(TelemetryCompareMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: TelemetryCompareConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

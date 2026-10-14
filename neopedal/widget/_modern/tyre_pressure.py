@@ -25,6 +25,8 @@ average pressure under it, compound badges between left and right tyres.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,9 +36,14 @@ from .base import ModernOverlay
 from .quad import QuadMixin, Section, Tile
 from .wheels import TyreCompounds
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyrePressureConfig
+
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TyrePressureConfig
 
     options = (
         "font_size", "hot_pressure_temperature_threshold", "average_sampling_duration",

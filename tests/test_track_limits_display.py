@@ -1,4 +1,4 @@
-"""Track limits points shown with the limit of every session (race, qualifying, practice): 1.25/5"""
+"""Track limits points shown with the limit of the session in races (1.25/5), without outside races (no penalty)"""
 
 from importlib import import_module
 
@@ -33,9 +33,12 @@ def laps_widget(ui_env, bundled_fonts, monkeypatch):
 
 
 @pytest.mark.parametrize("modern", [True, False])
-@pytest.mark.parametrize(("limit", "expected"), [(5.0, "1.25/5"), (2.5, "1.25/2.5"), (0.0, "1.25/")])
-def test_limit_shown_outside_race(laps_widget, monkeypatch, modern, limit, expected):
-    monkeypatch.setattr(api.read.session, "in_race", lambda: False)  # qualifying or practice
+@pytest.mark.parametrize(("in_race", "limit", "expected"), [
+    (True, 5.0, "1.25/5"), (True, 2.5, "1.25/2.5"), (True, 0.0, "1.25/"),
+    (False, 5.0, "1.25/"),  # qualifying or practice: no penalty, limit not shown
+])
+def test_limit_shown_in_race_only(laps_widget, monkeypatch, modern, in_race, limit, expected):
+    monkeypatch.setattr(api.read.session, "in_race", lambda: in_race)
     monkeypatch.setattr(api.read.session, "cut_points", lambda *args: 1.25)
     monkeypatch.setattr(api.read.session, "limits_points", lambda: limit)
     widget = laps_widget(modern)
@@ -45,5 +48,7 @@ def test_limit_shown_outside_race(laps_widget, monkeypatch, modern, limit, expec
     else:
         text = widget.bar_cut_points.text.split()[-1]
     assert text.startswith(expected)
-    if limit:
+    if limit and in_race:
         assert text == expected
+    else:
+        assert text != "1.25/5"

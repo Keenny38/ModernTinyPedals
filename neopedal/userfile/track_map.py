@@ -77,7 +77,10 @@ def coords_to_points(coords: tuple | list, decimals: int = -1) -> str:
     return " ".join(list_pair_to_string(xy, decimals) for xy in coords)
 
 
-def load_track_map_file(filepath: str, filename: str, extension: str = FileExt.SVG):
+def load_track_map_file(filepath: str, filename: str, extension: str = FileExt.SVG) -> (
+    tuple[tuple[tuple[float, float], ...], tuple[tuple[float, float], ...], tuple[int, int]]
+    | tuple[None, None, None]
+):
     """Load svg track map file (*.svg)"""
     try:
         dom = xml.dom.minidom.parse(f"{filepath}{filename}{extension}")

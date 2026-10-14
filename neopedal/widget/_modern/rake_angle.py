@@ -24,6 +24,8 @@ Rake angle (negative rake in red) and ride height difference front to rear.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -31,9 +33,14 @@ from ...api_control import api
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RakeAngleConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: RakeAngleConfig
 
     options = (
         "font_size", "show_degree_sign", "show_ride_height_difference", "wheelbase", "rake_angle_smoothing_samples",

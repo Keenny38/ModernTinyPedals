@@ -63,7 +63,7 @@ def test_set_hotkey_from_key_state():
 
 # --- Commands
 @pytest.fixture
-def commands(ui_env, monkeypatch):
+def commands(ui_env, monkeypatch, app_ctx):
     """Commands with signals & controls recorded"""
     from types import SimpleNamespace
 
@@ -77,7 +77,7 @@ def commands(ui_env, monkeypatch):
         locked=SimpleNamespace(emit=lambda value: calls.append(("locked", value))),
         iconify=SimpleNamespace(emit=lambda value: calls.append(("iconify", value)))))
     monkeypatch.setattr(type(command.api), "setup", lambda self: calls.append("setup"))
-    monkeypatch.setattr(command, "wctrl", SimpleNamespace(reload=lambda name=None: calls.append(("reload widget", name))))
+    app_ctx(wctrl=SimpleNamespace(reload=lambda name=None: calls.append(("reload widget", name))))
     return calls
 
 

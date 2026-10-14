@@ -32,34 +32,48 @@ import signal
 import subprocess
 import sys
 from collections.abc import Callable
+from time import monotonic
+from typing import Any
 
 from . import realtime_state, safe_mode
 from .api_control import api
-from .command_server import cmdserver
 from .const_app import EXECUTABLE, RESTART_ENVIRONMENT
 from .const_file import FileExt
 from .hotkey_control import kctrl
+from .lazy_service import LazyService, cmdserver, imported, streamoverlay, update_checker, webdashboard  # noqa: F401
 from .module.module_recorder import wait_lap_saver
-from .module_control import mctrl, wctrl
+from .module_control import event_loop_running, mctrl, wctrl
 from .overlay_control import octrl
 from .replay import replay
 from .setting import cfg
-from .stream_overlay import streamoverlay
-from .update import update_checker
 from .vr_overlay import vroverlay
-from .web_dashboard import webdashboard
 
 logger = logging.getLogger(__name__)
 LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for lap files being written before restart
 # Objects of a started app (window, overlays, settings) moved out of garbage collection: full collections scan
 # only objects made since, shorter pauses while driving. Done once start finished, again after each reload.
 _gc_frozen = False
-_gc_collect_due = False  # full collection of objects parked by reload waiting for idle moment
+_gc_collect_due = False  # full collection of objects parked by reload (or page closed) waiting for idle moment
+_gc_last_collect = 0.0  # monotonic time of last full collection of frozen objects
+IDLE_COLLECT_MS = 10 * 60 * 1000  # full collection asked this often while not driving (garbage of closed pages)
+_idle_collect_timer: Any = None  # QTimer asking periodic full collection, once start finished
 RELOAD_POLL_MS = 10  # reload: interval checking whether modules stopped
+SAVE_TIMEOUT = 10.0  # reload: seconds waiting for settings saving before loading preset (as cfg.flush)
 
 
 def int_signal_handler(sign, frame):
-    """Quit by keyboard interrupt"""
+    """Quit by keyboard interrupt (Ctrl+C in console)
+
+    Main window quits as by its Quit menu (pages closed, QML unloaded before backends, window state
+    saved). Closing here then exiting left QML pages bound to deleted backends ("of null" errors).
+    """
+    from PySide6.QtCore import SIGNAL
+
+    from . import app_signal
+
+    if app_signal.receivers(SIGNAL("quitapp(bool)")) > 0:
+        app_signal.quitapp.emit(True)
+        return
     close()
     sys.exit()
 
@@ -91,11 +105,10 @@ def start():
     # 2 Enable hotkey control
     kctrl.enable()
     # 3 Enable remote control & VR overlay
-    cmdserver.enable()
-    webdashboard.enable()
+    enable_servers()
     if not safe_mode.state.enabled:
         vroverlay().enable()
-        streamoverlay.enable()
+        enable_stream_overlay()
     else:
         vroverlay().disable()  # OpenXR layer left registered (0.22.3) removed in safe mode too
     # 4 Check for updates
@@ -113,14 +126,47 @@ def finish_start():
     safe_mode.clear_marker(cfg.path.config)
     logger.info("STARTED: startup marker removed")
     freeze_collected()
+    start_idle_collect_timer()
 
 
 def freeze_collected():
     """Objects alive now never scanned again by garbage collection (see _gc_frozen)"""
-    global _gc_frozen
+    global _gc_frozen, _gc_last_collect
     _gc_frozen = True
     gc.collect()
     gc.freeze()
+    _gc_last_collect = monotonic()
+
+
+def start_idle_collect_timer():
+    """Full collection asked every IDLE_COLLECT_MS while not driving (see request_idle_collect)"""
+    global _idle_collect_timer
+    if _idle_collect_timer is not None:
+        return
+    from PySide6.QtCore import QTimer
+
+    _idle_collect_timer = QTimer()
+    _idle_collect_timer.timeout.connect(periodic_idle_collect)
+    _idle_collect_timer.start(IDLE_COLLECT_MS)
+
+
+def periodic_idle_collect():
+    """Full collection if none for IDLE_COLLECT_MS & not driving (never waits for driving to end)"""
+    if realtime_state.active or monotonic() - _gc_last_collect < IDLE_COLLECT_MS / 1000 * 0.9:
+        return
+    request_idle_collect()
+
+
+def request_idle_collect():
+    """Frozen objects collected at next idle moment (not driving): garbage of closed page or tool, made of
+    objects frozen with the app (unfreeze, full collection, freeze again). Several requests: one collection."""
+    global _gc_collect_due
+    if not _gc_frozen or _gc_collect_due:
+        return
+    _gc_collect_due = True
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(safe_mode.SETTLE_MS, collect_parked_idle)
 
 
 def park_collected():
@@ -129,18 +175,14 @@ def park_collected():
     Garbage of replaced overlays & modules is parked with them, collected by one full collection at next idle
     moment (not driving), see collect_parked_idle.
     """
-    global _gc_collect_due
     if not _gc_frozen:
         return
     gc.freeze()
-    if not _gc_collect_due:
-        _gc_collect_due = True
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(safe_mode.SETTLE_MS, collect_parked_idle)
+    request_idle_collect()
 
 
 def collect_parked_idle():
-    """Full collection of objects parked by reload, once not driving (pauses GUI & modules)"""
+    """Full collection of objects parked by reload (or of closed pages), once not driving (pauses GUI & modules)"""
     global _gc_collect_due
     if realtime_state.active:
         from PySide6.QtCore import QTimer
@@ -247,7 +289,7 @@ def restart_command() -> list[str]:
 class ReloadState:
     """Reload in progress: modules stopping polled by timer (GUI & overlays kept running)"""
 
-    __slots__ = ("running", "preset", "serial", "queued", "callbacks")
+    __slots__ = ("running", "preset", "serial", "queued", "callbacks", "save_deadline")
 
     def __init__(self):
         self.running = False
@@ -255,6 +297,7 @@ class ReloadState:
         self.serial = 0  # changed once finished or cancelled: poll timer of that reload does nothing
         self.queued: bool | None = None  # reload asked while running (its reload_preset), None if not asked
         self.callbacks: list[Callable[[], object]] = []  # run once no reload left
+        self.save_deadline = 0.0  # monotonic time waiting for saving gives up, 0 until saving seen
 
 
 _reload = ReloadState()
@@ -285,12 +328,6 @@ def cancel_reload():
     state.callbacks.clear()
 
 
-def event_loop_running() -> bool:
-    """Whether GUI event loop runs (app started, not tests or quitting): timers fire"""
-    from PySide6.QtCore import QCoreApplication, QThread
-    return QCoreApplication.instance() is not None and QThread.currentThread().loopLevel() > 0
-
-
 def reload(reload_preset: bool = False, wait: bool | None = None):
     """Reload preset, api, modules, widgets
 
@@ -318,16 +355,18 @@ def reload(reload_preset: bool = False, wait: bool | None = None):
             logger.info("RELOADING: queued after reload in progress")
         return
     logger.info("RELOADING............")
-    # 0 wait unfinished saving
-    cfg.flush()
     # 1 unload modules (servers kept listening: browser sources, dashboard, stream clients stay connected)
     if wait:
+        cfg.flush()  # 0 wait unfinished saving
         unload_modules(keep_servers=True)
         finish_reload(reload_preset)
         return
+    if cfg.is_saving:  # 0 unfinished saving written now, waited by poll_reload (GUI never blocked)
+        cfg.save(next_task=True)
     state.running = True
     state.preset = reload_preset
     state.serial += 1
+    state.save_deadline = 0.0
     try:
         unload_modules(keep_servers=True, wait=False)
     except BaseException:
@@ -337,14 +376,34 @@ def reload(reload_preset: bool = False, wait: bool | None = None):
 
 
 def poll_reload(serial: int):
-    """Continue reload once modules stopped (or gave up after stop timeout, logged), else check again later"""
-    if serial != _reload.serial:
+    """Continue reload once modules stopped (or gave up after stop timeout, logged), else check again later
+
+    Preset reloaded: saving (data saved by stopped modules, track info) then finished first (or gave up
+    after SAVE_TIMEOUT, logged), never lost by loading older file. Polled, GUI never waits for files.
+    """
+    state = _reload
+    if serial != state.serial:
         return  # finished or cancelled
-    if wctrl.stopping() | mctrl.stopping():  # both checked: each logs its own timeouts
+    stopping = wctrl.stopping() | mctrl.stopping()  # both checked: each logs its own timeouts
+    if stopping or (state.preset and saving_pending(state)):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(RELOAD_POLL_MS, lambda: poll_reload(serial))
         return
     complete_reload()
+
+
+def saving_pending(state: ReloadState) -> bool:
+    """Whether settings saving is still running (written at once), False once finished or gave up"""
+    if not cfg.is_saving:
+        return False
+    now = monotonic()
+    if not state.save_deadline:
+        state.save_deadline = now + SAVE_TIMEOUT
+        cfg.save(next_task=True)  # data saved by stopping modules written now
+    elif now >= state.save_deadline:
+        logger.error("USERDATA: saving not finished after %ss, continue anyway", SAVE_TIMEOUT)
+        return False
+    return True
 
 
 def complete_reload(wait: bool = False):
@@ -353,12 +412,18 @@ def complete_reload(wait: bool = False):
     state.serial += 1
     wctrl.wait_stopping()
     mctrl.wait_stopping()
+    failed = False
     try:
-        finish_reload(state.preset)
+        finish_reload(state.preset, flush=wait)
+    except Exception:
+        logger.exception("RELOADING: failed")
+        failed = True
     finally:
         state.running = False
         queued, state.queued = state.queued, None
-    if queued is not None:
+    if failed:
+        state.callbacks.clear()  # never run after a later unrelated reload
+    if queued is not None:  # asked meanwhile: tried again even after failure
         reload(queued, wait)
         if state.running:
             return  # callbacks run once queued reload finished
@@ -371,11 +436,17 @@ def complete_reload(wait: bool = False):
             logger.exception("RELOADING: error after reload")
 
 
-def finish_reload(reload_preset: bool):
-    """Reload steps once modules stopped"""
+def finish_reload(reload_preset: bool, flush: bool = True):
+    """Reload steps once modules stopped
+
+    Args:
+        reload_preset: reload preset file.
+        flush: wait unfinished saving before loading preset, done already (polled) by asynchronous reload.
+    """
     # 2 reload user preset from file
     if reload_preset:
-        cfg.flush()  # data saved by stopped modules (track info) written first, never lost by loading older file
+        if flush:
+            cfg.flush()  # data saved by stopped modules (track info) written first, never lost by loading older file
         cfg.load_user()
         cfg.save(0)  # save new changes in case preset was edited externally
     # 3 widget positions of current screen setup
@@ -407,12 +478,26 @@ def load_modules():
     if not safe_mode.state.enabled:
         wctrl.start()  # 3 widget
     kctrl.enable()  # 4 hotkey
-    cmdserver.enable()  # 5 remote control
-    webdashboard.enable()  # 5 web dashboard
+    enable_servers()  # 5 remote control & web dashboard
     if not safe_mode.state.enabled:
         vroverlay().enable()  # 6 vr overlay
-        streamoverlay.enable()  # 7 stream overlay
-    elif streamoverlay.running:  # 7 started from stream page: capture suspended by unload_modules resumed
+        enable_stream_overlay()  # 7 stream overlay
+    elif imported(streamoverlay) and streamoverlay.running:  # 7 started from stream page: capture resumed
+        streamoverlay.enable()
+
+
+def enable_servers():
+    """Start remote control & web dashboard if on in setting, stop them if off (module imported only if on)"""
+    config = cfg.user.config
+    if config["remote_control"]["enable_remote_control"] or imported(cmdserver):
+        cmdserver.enable()
+    if config["web_dashboard"]["enable_web_dashboard"] or imported(webdashboard):
+        webdashboard.enable()
+
+
+def enable_stream_overlay():
+    """Start stream overlay if on in setting, stop it if off (module imported only if on)"""
+    if cfg.user.config["stream_overlay"]["enable_stream_overlay"] or imported(streamoverlay):
         streamoverlay.enable()
 
 
@@ -428,11 +513,12 @@ def unload_modules(keep_servers: bool = False, wait: bool = True):
     """
     vroverlay().disable()  # 0 vr overlay
     if keep_servers:
-        streamoverlay.suspend()  # 0 stream overlay capture, started again by load_modules
-    else:
-        streamoverlay.disable()  # 0 stream overlay
-        cmdserver.disable()  # 0 remote control
-        webdashboard.disable()  # 0 web dashboard
+        if imported(streamoverlay):
+            streamoverlay.suspend()  # 0 stream overlay capture, started again by load_modules
+    else:  # never started if not imported
+        for server in (streamoverlay, cmdserver, webdashboard):  # 0 stream overlay, remote control, web dashboard
+            if imported(server):
+                server.disable()
     kctrl.disable()  # 1 hotkey
     if wait:
         wctrl.close()  # 2 widget
@@ -440,4 +526,4 @@ def unload_modules(keep_servers: bool = False, wait: bool = True):
     else:
         wctrl.stop_all()  # 2 widget
         mctrl.stop_all()  # 3 module
-    octrl.disable()  # 4 overlay control
+    octrl.disable(wait)  # 4 overlay control

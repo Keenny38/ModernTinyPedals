@@ -26,7 +26,6 @@ from __future__ import annotations
 import html
 import logging
 import os
-import time
 from collections.abc import Callable
 
 import shiboken6
@@ -60,6 +59,7 @@ from ..userfile.motec_ld import import_ld_job
 from ..userfile.telemetry_lap import IMPORT_FOLDER, LapFile
 from ._common import BaseDialog, TextInputDialog, UIScaler
 from .quick.background import BackgroundJobs
+from .quick.formatting import file_stamp, iso_minutes
 from .toast import show_toast
 
 logger = logging.getLogger(__name__)
@@ -97,10 +97,6 @@ def read_library(filepath: str) -> list[tuple[str, list[LibraryLap]]]:
             save_info_index(index_path, index)
         groups.append((name, rows))
     return groups
-
-
-def format_date(timestamp: float) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
 
 
 class LapLibrary(BaseDialog):
@@ -219,7 +215,7 @@ class LapLibrary(BaseDialog):
                 first_info = first_info or info
                 newest = max(newest, imported)
                 item = QTreeWidgetItem(group)
-                item.setText(self.COL_DATE, format_date(imported))
+                item.setText(self.COL_DATE, iso_minutes(imported) if imported > 0 else "")
                 item.setText(self.COL_NAME, lap_label(lap.filename))
                 item.setData(self.COL_NAME, Qt.ItemDataRole.UserRole, lap.path)
                 item.setText(self.COL_TIME, format_laptime(lap.lap_time))
@@ -233,7 +229,7 @@ class LapLibrary(BaseDialog):
                 group.setText(column, str(first_info.get(key, "")))
             if not first_info.get("driver") and is_foreign(laps[0][0].path):  # laps of another driver's folder
                 group.setText(self.COL_DRIVER, tr("foreign laps"))
-            group.setText(self.COL_DATE, format_date(newest))
+            group.setText(self.COL_DATE, iso_minutes(newest) if newest > 0 else "")
             group.setExpanded(name in expanded or len(groups) == 1)
             group.setSelected(name in selected)
         for column in range(self.tree.columnCount()):
@@ -369,7 +365,7 @@ class LapLibrary(BaseDialog):
             return
         if not self.confirm_operation("Delete", f"Move {len(paths)} laps to trash?"):
             return
-        trash = os.path.join(self.filepath, TRASH_FOLDER, time.strftime("%Y-%m-%d %H-%M-%S"))
+        trash = os.path.join(self.filepath, TRASH_FOLDER, file_stamp())
         deletion = delete_laps(self.filepath, paths, trash)
         if deletion.trashed:
             self._undo = deletion.trashed

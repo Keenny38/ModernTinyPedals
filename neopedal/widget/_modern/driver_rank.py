@@ -27,6 +27,8 @@ once any, red one point before penalty). A dash while unknown.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QColor, QPainter
 
 from ...process import driver_ranks as dr
@@ -35,12 +37,18 @@ from ..driver_rank import ITEMS, player_ranks, track_limits, track_limits_text
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DriverRankConfig
+
 LABELS = {"driver_rank": "Driver Rank", "safety_rank": "Safety Rank", "track_limits": "Track limits"}
 RANK_COLORS = {name: QColor(color) for name, color in dr.RANK_COLORS.items()}
+RANK_COLORS_LIGHT = {name: QColor(color) for name, color in dr.RANK_COLORS_LIGHT.items()}  # as app pages
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: DriverRankConfig
 
     options = (
         "font_size", "layout", "show_progress", "show_driver_rank", "show_safety_rank", "show_track_limits",
@@ -86,7 +94,7 @@ class Realtime(StatsMixin, ModernOverlay):
         theme = self.theme
         if rank is None:
             return Value(DASH, theme.text_dim)
-        color = RANK_COLORS.get(rank.name.casefold(), theme.text)
+        color = (RANK_COLORS_LIGHT if theme.light else RANK_COLORS).get(rank.name.casefold(), theme.text)
         if not self.show_progress:
             return Value(rank.text, color)
         progress = max(min(rank.progress, 100), 0)

@@ -24,6 +24,7 @@ Item {
     readonly property string highlightKey: chart ? chart.highlightKey : ""
     // Shown cursor positions: none while hidden (no item updated on every cursor move)
     readonly property var cursorPoints: visible && chart ? chart.cursorG : []
+    readonly property var cursorXY: visible && chart ? chart.cursorGXY : []  // x, y of each lap (every frame)
 
     function lapOpacity(lapKey) { return highlightKey === "" || lapKey === highlightKey ? 1 : 0.15 }
     // Zoom at screen point (G under it stays under it), whole circle again at zoom 1
@@ -103,58 +104,63 @@ Item {
                             y: 1
                             text: (index + 1) + "G"
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.75
+                            font.pointSize: theme.fontCaption
                         }
                     }
                 }
                 readonly property real reach: circle.limit * circle.gScale  // outer ring radius on screen
                 Rectangle { x: circle.originX - parent.reach; y: circle.originY; width: parent.reach * 2; height: 1; color: theme.text; opacity: 0.1 }
                 Rectangle { x: circle.originX; y: circle.originY - parent.reach; width: 1; height: parent.reach * 2; color: theme.text; opacity: 0.1 }
-                Text { text: i18n.tr("Braking"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX - width / 2; y: circle.originY + parent.reach + 2 }
-                Text { text: i18n.tr("Acceleration"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX - width / 2; y: circle.originY - parent.reach - height - 2 }
-                Text { text: i18n.tr("Left"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX - parent.reach + 3; y: circle.originY + 2 }
-                Text { text: i18n.tr("Right"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX + parent.reach - width - 3; y: circle.originY + 2 }
+                Text { text: i18n.tr("Braking"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - width / 2; y: circle.originY + parent.reach + 2 }
+                Text { text: i18n.tr("Acceleration"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - width / 2; y: circle.originY - parent.reach - height - 2 }
+                Text { text: i18n.tr("Left"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - parent.reach + 3; y: circle.originY + 2 }
+                Text { text: i18n.tr("Right"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX + parent.reach - width - 3; y: circle.originY + 2 }
 
-                // G shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
-                Item {
-                    transform: Matrix4x4 { matrix: circle.matrix }
-                    Repeater {
-                        model: circle.info.dots || []
-                        GpuShape {
-                            key: modelData.key
-                            visible: lapFilter.shown(modelData.lap)
-                            color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b,
-                                           circle.chartZoomed || backend.gEnvelope ? 0.12 : 0.4)
-                            opacity: circle.lapOpacity(modelData.lap)
-                            revision: backend.revision
+                Item {  // multisampled layer while shown (smooth edges, window without MSAA), cursor dots outside
+                    anchors.fill: parent
+                    layer.enabled: pageState.active && parent.visible
+                    layer.samples: 4
+                    // G shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+                    Item {
+                        transform: Matrix4x4 { matrix: circle.matrix }
+                        Repeater {
+                            model: circle.info.dots || []
+                            GpuShape {
+                                key: modelData.key
+                                visible: lapFilter.shown(modelData.lap)
+                                color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b,
+                                               circle.chartZoomed || backend.gEnvelope ? 0.12 : 0.4)
+                                opacity: circle.lapOpacity(modelData.lap)
+                                revision: backend.revision
+                            }
                         }
-                    }
-                    Repeater {
-                        model: circle.info.dots || []
-                        GpuShape {
-                            key: modelData.zoom
-                            color: modelData.color
-                            visible: circle.chartZoomed && lapFilter.shown(modelData.lap)
-                            opacity: circle.lapOpacity(modelData.lap)
-                            revision: backend.revision
+                        Repeater {
+                            model: circle.info.dots || []
+                            GpuShape {
+                                key: modelData.zoom
+                                color: modelData.color
+                                visible: circle.chartZoomed && lapFilter.shown(modelData.lap)
+                                opacity: circle.lapOpacity(modelData.lap)
+                                revision: backend.revision
+                            }
                         }
-                    }
-                    // Grip envelope: line drawn twice half a pixel apart (thicker): second copy placed in G units,
-                    // 0.6 pixel right & down on screen (y up in G: minus)
-                    Repeater {
-                        model: backend.gEnvelope ? (circle.info.dots || []) : []
-                        Item {
-                            readonly property var lap: modelData
-                            visible: lapFilter.shown(lap.lap)
-                            opacity: circle.lapOpacity(lap.lap)
-                            Repeater {
-                                model: [0, 0.6]
-                                GpuShape {
-                                    x: modelData / circle.gScale
-                                    y: -modelData / circle.gScale
-                                    key: lap.envelope
-                                    color: lap.color
-                                    revision: backend.revision
+                        // Grip envelope: line drawn twice half a pixel apart (thicker): second copy placed in G units,
+                        // 0.6 pixel right & down on screen (y up in G: minus)
+                        Repeater {
+                            model: backend.gEnvelope ? (circle.info.dots || []) : []
+                            Item {
+                                readonly property var lap: modelData
+                                visible: lapFilter.shown(lap.lap)
+                                opacity: circle.lapOpacity(lap.lap)
+                                Repeater {
+                                    model: [0, 0.6]
+                                    GpuShape {
+                                        x: modelData / circle.gScale
+                                        y: -modelData / circle.gScale
+                                        key: lap.envelope
+                                        color: lap.color
+                                        revision: backend.revision
+                                    }
                                 }
                             }
                         }
@@ -165,10 +171,11 @@ Item {
                     model: circle.info.dots ? circle.info.dots.length : 0
                     Rectangle {
                         readonly property var point: circle.cursorPoints[index] || null
+                        readonly property bool placed: point !== null && circle.cursorXY.length > index * 2 + 1
                         readonly property real size: theme.em * 0.85
-                        visible: point !== null && lapFilter.shown(point.lap)
-                        x: point ? circle.originX + point.x * circle.gScale - size / 2 : 0
-                        y: point ? circle.originY - point.y * circle.gScale - size / 2 : 0
+                        visible: placed && lapFilter.shown(point.lap)
+                        x: placed ? circle.originX + circle.cursorXY[index * 2] * circle.gScale - size / 2 : 0
+                        y: placed ? circle.originY - circle.cursorXY[index * 2 + 1] * circle.gScale - size / 2 : 0
                         width: size
                         height: size
                         radius: size / 2

@@ -270,15 +270,16 @@ def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
     try:
         while backend.reading_infos():  # lap infos of new lap files read in background first
             QApplication.processEvents()
-        assert backend._session_busy and backend.sessionData["busy"]  # read at once, busy indicator shown
-        other = next(item["key"] for item in backend.sessions if item["key"] != backend.sessionKey)
-        backend.setSession(other)  # chosen while first session is read: read once that job is done
+        session = backend.session
+        assert session._busy and session.values["busy"]  # read at once, busy indicator shown
+        other = next(item["key"] for item in session.sessions if item["key"] != session.key)
+        session.choose(other)  # chosen while first session is read: read once that job is done
         backend.wait_jobs()
         wait_loaded(page)
         backend.wait_jobs()
-        assert not backend._session_busy
+        assert not session._busy
         paths = [entry.file.path for entry in backend.entries]
-        assert len(paths) == 4 and all(path in backend._session_extra for path in paths)
+        assert len(paths) == 4 and all(path in session._extra for path in paths)
     finally:
         page.close()
         flush_deleted()
@@ -522,7 +523,7 @@ def test_export_series_csv_resamples(tmp_path):
 
 def test_csv_export_in_background(viewer, tmp_path):  # noqa: F811
     filename = str(tmp_path / "export.csv")
-    viewer.backend.write_csv(filename, ".", background=True)
+    viewer.backend.exports.write_csv(filename, ".", background=True)
     viewer.backend.wait_jobs()
     with open(filename, encoding="utf-8-sig") as file:
         assert len(file.readlines()) > 1000
@@ -664,8 +665,8 @@ def test_session_temperature_in_user_unit(viewer, monkeypatch):  # noqa: F811
     monkeypatch.setitem(cfg.user.setting["units"], "temperature_unit", "Fahrenheit")
     entry = backend.entries[0]
     monkeypatch.setitem(entry.info, "track_temperature", 30.0)
-    row = next(row for row in backend.sessionData["laps"] if row["path"] == entry.file.path)
-    assert row["temp"] == pytest.approx(86.0) and backend.sessionData["temperatureUnit"] == "°F"
+    row = next(row for row in backend.session.values["laps"] if row["path"] == entry.file.path)
+    assert row["temp"] == pytest.approx(86.0) and backend.session.values["temperatureUnit"] == "°F"
 
 
 # --- 11. MoTeC import job

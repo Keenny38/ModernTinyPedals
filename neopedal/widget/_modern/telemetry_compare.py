@@ -26,6 +26,8 @@ difference & time delta to reference at car position.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -33,6 +35,9 @@ from ...i18n import tr_overlay as tr
 from ..telemetry_compare import CENTERED_CHANNELS, PANEL_LABELS, TelemetryCompareMixin, delta_limit, shown_panels
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TelemetryCompareConfig
 
 CHANNEL_COLORS = {  # theme color of each channel
     "speed_kph": "accent", "throttle": "positive", "brake": "negative", "steering": "warning", "gear": "text",
@@ -42,6 +47,8 @@ FILLED_CHANNELS = ("speed_kph", "throttle", "brake")  # reference lap drawn as a
 
 class Realtime(TelemetryCompareMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TelemetryCompareConfig
 
     options = (
         "font_size", "display_width", "display_height", "distance_behind", "distance_ahead", "reference_lap_source",

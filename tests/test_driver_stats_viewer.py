@@ -34,8 +34,21 @@ def dialogs(ui_env, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
     monkeypatch.setattr(sys, "excepthook", lambda *exc_info: slot_errors.append(exc_info[1]))
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
+    opens_on_game_track(monkeypatch)
     yield warnings
     assert not slot_errors
+
+
+REAL_INITIAL_TRACK = {}  # initial_track of backend before tests patched it
+
+
+def opens_on_game_track(monkeypatch):
+    """Page opens on game track (tests written for a track shown), not on All Tracks"""
+    from neopedal.ui.quick import stats_backend
+
+    REAL_INITIAL_TRACK.setdefault("initial_track", vars(stats_backend.DriverStatsBackend)["initial_track"])
+    monkeypatch.setattr(stats_backend.DriverStatsBackend, "initial_track", lambda self: (
+        self.game_track() if self.game_track() in self.stats_temp else stats_backend.ALL_TRACKS))
 
 
 def write_stats(stats: dict):
@@ -285,12 +298,13 @@ def test_next_level_and_qualifying_mark(backend):
     backend.selectRow(OREGA)
     reference = backend.reference
     marks = [row["marks"] for row in reference["ladder"]]
-    assert "PB" in marks[1] and "Qualifying" in marks[2] and "Race" in marks[3]
+    assert "PB" in marks[1] and "Qualifying" in marks[2] and "Race" in marks[2] and not marks[3]
     assert reference["next"] == "Next level Alien: 0.42 s to find"  # 121.50 - 121.08
     backend.selectRow("Hyper - Ferrari")
     assert backend.reference["next"] == "Top level reached"
     spa = lap_reference.parse_lap_references(SHEET).entries[("Spa", "LMP2elms")]
-    assert spa.level_limit(3) == pytest.approx(125.92) and spa.level_limit(5) == 0
+    assert spa.level_limit(2) == pytest.approx(124.71) and spa.level_limit(3) == pytest.approx(127.13)
+    assert spa.level_limit(5) == 0
     assert spa.next_level(140.0) == (4, pytest.approx(140.0 - 128.34))
 
 
@@ -498,6 +512,36 @@ def test_reload_deferred_while_page_hidden(backend, monkeypatch):
     assert not calls
     backend.page_shown()
     assert calls and text_of(backend, "Hyper - Ferrari", "valid") == "12"
+
+
+def test_page_opens_on_all_tracks(window, monkeypatch):
+    from neopedal.ui.quick import stats_backend
+
+    # real initial track: game on Spa (window), still All Tracks
+    monkeypatch.setattr(stats_backend.DriverStatsBackend, "initial_track", REAL_INITIAL_TRACK["initial_track"])
+    page = stats_backend.DriverStatsBackend(window)
+    try:
+        settle(page)
+        assert page.allTracks and page.currentTrack == ""
+    finally:
+        page.release()
+
+
+@pytest.mark.parametrize("released", [False, True])
+def test_back_to_all_tracks_after_page_hidden_a_while(backend, monkeypatch, released):
+    from neopedal.ui.quick import stats_backend
+
+    assert backend.currentTrack == SPA
+    backend.page_hidden()
+    backend.page_shown()  # shown again at once: track kept
+    assert backend.currentTrack == SPA
+    backend.page_hidden()
+    if released:
+        backend.release_history()
+    monkeypatch.setattr(backend, "_hidden_since", time.monotonic() - stats_backend.HOME_RESET_DELAY - 1)
+    backend.page_shown()
+    settle(backend)
+    assert backend.allTracks and backend.currentTrack == ""
 
 
 def test_tracks_list_and_sort_by_last_driven(backend):

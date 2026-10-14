@@ -21,7 +21,7 @@ Card {
     Layout.fillWidth: true
     implicitHeight: titleRow.height + pad * 2 + (collapsed ? 0 : body.implicitHeight + pad * 0.7)
     clip: true
-    Behavior on implicitHeight { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+    Behavior on implicitHeight { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
 
     Item {
         id: titleRow
@@ -37,7 +37,7 @@ Card {
             color: theme.dimText
             rotation: section.collapsed ? 0 : 90
             anchors.verticalCenter: parent.verticalCenter
-            Behavior on rotation { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+            Behavior on rotation { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
         }
         Icon {
             id: sectionIcon
@@ -67,7 +67,7 @@ Card {
             onClicked: backend.setSectionCollapsed(section.name, !section.collapsed)
             ToolTip.visible: section.tip !== "" && containsMouse
             ToolTip.text: section.tip
-            ToolTip.delay: 600
+            ToolTip.delay: theme.tipDelay
         }
         RaceSwitch {
             id: titleSwitch
@@ -95,6 +95,6 @@ Card {
         visible: opacity > 0
         opacity: section.collapsed ? 0 : 1
         enabled: section.switchOn
-        Behavior on opacity { NumberAnimation { duration: 140 } }
+        Behavior on opacity { NumberAnimation { duration: theme.motionFast } }
     }
 }

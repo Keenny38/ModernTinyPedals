@@ -25,13 +25,20 @@ when beyond maximum position range, third spring position mark (front & rear).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...api_control import api
 from ...module_info import minfo
 from .gauge_quad import GaugeQuad
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SuspensionPositionConfig
+
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: SuspensionPositionConfig
 
     options = (
         *GaugeQuad.common_options, "position_maximum_range", "show_maximum_position_range",

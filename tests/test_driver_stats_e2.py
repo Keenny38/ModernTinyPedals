@@ -65,6 +65,9 @@ def test_history_export_and_friend_comparison(tmp_path):
     target.write_text(json.dumps(faster), encoding="utf-8")
     friend = sa.load_friend(str(target))
     assert friend["name"] == "Max V."
+    faster["format"] = "modern-tiny-pedals-driver-history"  # exported by a version until 0.23.0: still read
+    target.write_text(json.dumps(faster), encoding="utf-8")
+    assert sa.load_friend(str(target))["name"] == "Max V."
 
     def mine_class(vehicle: str) -> str:
         return vehicle.split(" - ", 1)[0]
@@ -231,8 +234,11 @@ def test_driver_card_shows_ranks(stats_page, monkeypatch):
 
     monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
     monkeypatch.setattr(rank_info.ranks, "updated", float(START))
+    from neopedal.userfile import badge_icons
+
+    monkeypatch.setattr(badge_icons.icons, "request", lambda key: None)  # never downloaded in tests
     monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
-        "Alice Driver", "1", "", "FR", dr.Rank("Silver", 2, 40), dr.Rank("Platinum", 3, 50)))
+        "Alice Driver", "1", "", "FR", dr.Rank("Silver", 2, 40), dr.Rank("Platinum", 3, 50), "sr-clean"))
     monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
     stats_page.selectTrack("")
     stats_page.check_ranks()
@@ -254,6 +260,7 @@ def test_driver_card_shows_ranks(stats_page, monkeypatch):
                 texts.add(text)
             stack.extend(item.childItems())
         assert {"Driver Rank", "Silver 2", "40%", "Safety Rank", "Platinum 3", "50%"} <= texts
+        assert {"Badge", "Good Driver", "This driver has a low number of incidents per race"} <= texts
         if os.environ.get("NEOPEDAL_SHOT"):
             view.grab().save(os.environ["NEOPEDAL_SHOT"])
     finally:

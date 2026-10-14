@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from neopedal import app_signal
+from neopedal import app_signal, update
 from neopedal.setting import cfg
 from neopedal.ui import home_view
 from neopedal.userfile.driver_history import SessionRecord
@@ -162,7 +162,7 @@ def test_last_session_card(home, monkeypatch):
 
 
 def test_update_button(home, monkeypatch):
-    checker = type(home_view.update_checker)
+    checker = type(update.update_checker)  # home view: proxy, update module imported (checked)
     checks = []
     monkeypatch.setattr(checker, "is_checking", lambda self: False)
     monkeypatch.setattr(checker, "is_updates", lambda self: False)
@@ -194,7 +194,7 @@ def test_quick_access_setting():
         "preset", "race_calculator", "bug_report"]  # unknown & duplicate dropped, merged tool renamed
     assert home_view.default_quick_items() == [
         "lap_viewer", "race_calculator", "driver_stats_viewer", "layout_editor", "perf_view",
-        "game_replays", "widget", "module", "preset", "spectate",
+        "race_results_viewer", "widget", "module", "preset", "spectate",
         "hotkey", "tools", "app_settings", "bug_report", "check_updates",
     ]
 
@@ -236,8 +236,33 @@ def test_quick_entries_run(home, monkeypatch):
     monkeypatch.setattr(home, "_select_page", lambda key: calls.append(("page", key)))
     monkeypatch.setattr(home, "open_tool", lambda path: calls.append(("tool", path)))
     monkeypatch.setattr(home._window, "open_command_palette", lambda: calls.append(("palette",)))
-    monkeypatch.setattr(type(home_view.update_checker), "check", lambda self, manual: calls.append(("check", manual)))
+    monkeypatch.setattr(type(update.update_checker), "check", lambda self, manual: calls.append(("check", manual)))
     entries = home_view.quick_access_entries()
     for key in ("preset", "race_calculator", "command_palette", "check_updates"):
         home.run_quick_entry(entries[key])
     assert calls == [("page", "preset"), ("tool", "race_calculator.RaceCalculator"), ("palette",), ("check", True)]
+
+
+def test_driver_card(home, monkeypatch):
+    """Hidden while nothing is known, shown with ranks once read, opens driver stats"""
+    from neopedal import rank_info
+    from neopedal.process import driver_ranks as dr
+    from neopedal.process import results_index as ri
+    from neopedal.ui.home_driver import DriverData
+
+    monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
+    monkeypatch.setattr(rank_info.ranks, "player", None)
+    home.refresh_driver()
+    assert home.card_driver.isHidden()
+    monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
+        "Keenny Hess", "", "", "", dr.Rank("Gold", 1, 20), None, ""))
+    monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
+    home.refresh_driver()
+    assert not home.card_driver.isHidden() and "DR Gold 1" in home.card_driver.label_value.text()
+    assert home.grid.indexOf(home.card_driver) >= 0
+    home.driver_data_read(DriverData(None, ri.RaceRecord(2, 1, 1, 1.5, 2, 0), "Keenny Hess"))
+    assert "2/2" in home.card_driver.label_detail.text()
+    opened = []
+    monkeypatch.setattr(home, "open_tool", opened.append)
+    home.card_driver.on_click()
+    assert opened == ["driver_stats_viewer.DriverStatsViewer"]

@@ -31,6 +31,7 @@ from typing import Any
 from .. import realtime_state
 from ..adapter.data_notify import notifier
 from ..api_control import api
+from ..context import AppContext, app_context
 from ..setting import Setting
 from ..thread_guard import STOP_TIMEOUT, run_supervised
 
@@ -47,6 +48,57 @@ CHECKPOINT_INTERVAL = 300.0
 # Longest wait for new game data while active (seconds), as state changes made by other threads
 # (realtime state, other modules output) are not notified
 DATA_MAX_WAIT = 0.1
+# Update interval of an idle module (not driving, nothing pending): wait for activity state change
+# (realtime_state.notify_change: active, paused, shown, resets), at most IDLE_WAIT seconds, see wait_update
+WAIT_STATE_CHANGE = -1.0
+IDLE_WAIT = 5.0
+
+
+class DerivedUpdates:
+    """Delta module position updates followed by modules with WAKE_ON_DERIVED (fuel, notes)
+
+    While delta module updates (active), these modules wake once per delta update only (after delta position
+    is set for the new sample), not also on the game data notification just before it (computed twice).
+
+    Attributes:
+        active: delta module updating every new sample (else derived modules follow game data).
+        sequence: number of delta updates, changes only on new delta update.
+    """
+
+    __slots__ = ("active", "sequence", "_lock", "_events")
+
+    def __init__(self) -> None:
+        self.active = False
+        self.sequence = 0
+        self._lock = threading.Lock()
+        self._events: tuple[threading.Event, ...] = ()  # copy on write
+
+    def subscribe(self, event: threading.Event) -> None:
+        """Set event on each delta update"""
+        with self._lock:
+            if event not in self._events:
+                self._events += (event,)
+
+    def unsubscribe(self, event: threading.Event) -> None:
+        """Stop setting event"""
+        with self._lock:
+            self._events = tuple(_event for _event in self._events if _event is not event)
+
+    def publish(self) -> None:
+        """Delta module updated for a new sample"""
+        self.sequence += 1
+        for event in self._events:
+            event.set()
+
+    def set_active(self, active: bool) -> None:
+        """Delta module started or stopped updating every sample, derived modules woken to follow"""
+        if self.active != active:
+            self.active = active
+            for event in self._events:
+                event.set()
+
+
+derived_updates = DerivedUpdates()
 
 
 def data_stamp() -> tuple:
@@ -63,6 +115,17 @@ def data_stamp() -> tuple:
         realtime_state.resets,
     )
 
+
+
+def derived_stamp(delta: Any) -> tuple:
+    """Stamp of modules following delta module position (WAKE_ON_DERIVED), delta: delta module output
+
+    While delta module updates every sample: its update number (it updates once per new data stamp,
+    after setting delta position), else game data stamp & delta position.
+    """
+    if derived_updates.active:
+        return (derived_updates.sequence, realtime_state.resets)
+    return (data_stamp(), delta.lapDistance)
 
 class PendingLap:
     """Lap just completed, waiting for validation by game lap time (scoring updates slower than telemetry)
@@ -128,6 +191,7 @@ class DataModule:
     STOP_TIMEOUT = STOP_TIMEOUT
     __slots__ = (
         "module_name",
+        "ctx",
         "closed",
         "discard",
         "cfg",
@@ -137,11 +201,16 @@ class DataModule:
         "_event",
         "_done",
         "_wake",
+        "_wake_derived",
+        "_wake_state",
         "_max_wait",
+        "_next_update",
     )
 
-    def __init__(self, config: Setting, module_name: str):
+    def __init__(self, config: Setting, module_name: str, ctx: AppContext | None = None):
         self.module_name = module_name
+        # App objects (see neopedal.context): new code reads them here, the update loop keeps its globals
+        self.ctx = ctx if ctx is not None else app_context()
         self.closed = True
         self.discard = False
 
@@ -156,6 +225,9 @@ class DataModule:
         self._done = threading.Event()  # set once update thread finished
         self._done.set()
         self._wake = threading.Event()  # set on new game data (connector notification) or stop
+        self._wake_derived = threading.Event()  # set on delta module update or stop (WAKE_ON_DERIVED)
+        self._wake_state = threading.Event()  # set on activity state change or stop (idle module)
+        self._next_update = 0.0  # monotonic time of earliest next update (update interval kept)
         self.active_interval = max(
             self.mcfg["update_interval"],
             self.cfg.application["minimum_update_interval"]) / 1000
@@ -172,6 +244,9 @@ class DataModule:
             self.discard = False
             self._event.clear()
             self._wake.clear()
+            self._wake_derived.clear()
+            self._wake_state.set()  # idle wait at start returns at once (state read on first update)
+            self._next_update = 0.0
             self._done.clear()
             threading.Thread(target=self.__tasks, daemon=True, name=f"module:{self.module_name}").start()
             logger.info("ENABLED: %s", self.module_name.replace("_", " "))
@@ -185,6 +260,8 @@ class DataModule:
         self.discard = discard
         self._event.set()
         self._wake.set()  # wake thread waiting for game data
+        self._wake_derived.set()  # or for delta module update
+        self._wake_state.set()  # or for activity state change
 
     def wait_closed(self, timeout: float) -> bool:
         """Wait (up to timeout seconds) until update thread finished, True if finished"""
@@ -210,21 +287,42 @@ class DataModule:
     def wait_update(self, interval: float) -> bool:
         """Wait before next update, returns True once module stopping
 
-        Always waits interval first, so module never updates more often than its update interval.
         While active (interval shorter than longest data wait) and a connector notifies new game data,
-        then waits until new data arrived since last update, or longest data wait (DATA_MAX_WAIT) passed,
-        instead of waking every interval to find game data unchanged. Else same as fixed interval polling.
+        waits for new data first (up to longest data wait, DATA_MAX_WAIT), then only for the rest of
+        update interval if data came early: woken once per sample, never more often than update interval.
+        Modules following delta module position (WAKE_ON_DERIVED) wait for delta module update instead,
+        while it updates every sample (see DerivedUpdates). Else same as fixed interval polling.
+        Interval WAIT_STATE_CHANGE (idle module, nothing pending): waits for activity state change instead,
+        at most IDLE_WAIT seconds (state changes made without notification, such as replay state).
         """
-        if self._event.wait(interval):
+        if interval == WAIT_STATE_CHANGE:
+            realtime_state.wait_change(IDLE_WAIT, self._wake_state)
+            return self._event.is_set()
+        if self.WAKE_ON_DERIVED and derived_updates.active and interval < self._max_wait:
+            wake = self._wake_derived
+        elif interval >= self._max_wait or not notifier.available:
+            return self._event.wait(interval)
+        else:
+            wake = self._wake
+        wake.wait(self._max_wait)
+        if self._event.is_set():
             return True
-        data_wait = self._max_wait - interval
-        if data_wait <= 0 or not notifier.available:
-            return False
-        wake = self._wake
-        if not wake.is_set():
-            wake.wait(data_wait)
+        early = self._next_update - monotonic()
+        if early > 0 and self._event.wait(early):
+            return True
         wake.clear()  # before reading data: data notified from now on wakes next wait
-        return self._event.is_set()
+        self._next_update = monotonic() + interval
+        return False
+
+    def wait_fixed(self, interval: float) -> bool:
+        """Wait fixed interval (no wake on new game data), returns True once module stopping
+
+        Interval WAIT_STATE_CHANGE: waits for activity state change instead, see wait_update.
+        """
+        if interval == WAIT_STATE_CHANGE:
+            realtime_state.wait_change(IDLE_WAIT, self._wake_state)
+            return self._event.is_set()
+        return self._event.wait(interval)
 
     def update_data(self):
         """Update module data, rewrite in child class"""
@@ -232,10 +330,15 @@ class DataModule:
     def __tasks(self):
         """Run tasks in separated thread"""
         notifier.subscribe(self._wake, self.WAKE_ON_DERIVED)
+        if self.WAKE_ON_DERIVED:
+            derived_updates.subscribe(self._wake_derived)
+        realtime_state.subscribe(self._wake_state)
         try:
             run_supervised(self.update_data, self.module_name.replace("_", " "), self._event)
         finally:
             notifier.unsubscribe(self._wake)
+            derived_updates.unsubscribe(self._wake_derived)
+            realtime_state.unsubscribe(self._wake_state)
             # Always mark closed, as module control waits for it before reload or quit
             self.closed = True
             self._done.set()

@@ -26,6 +26,8 @@ the other half (never under the bar).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
@@ -34,11 +36,16 @@ from ...api_control import api
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SteeringMeterConfig
+
 FILL_ALPHA = 120  # bar from center to thumb
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: SteeringMeterConfig
 
     options = (
         "font_size", "bar_width", "bar_height", "show_steering_angle", "manual_steering_range", "show_scale_mark",

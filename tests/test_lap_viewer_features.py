@@ -115,7 +115,7 @@ def test_values_in_user_units(viewer, monkeypatch):
     assert data.series(CHANNEL_MAP["tyre_temp_fl"], lap)[1][0] == pytest.approx(80 * 1.8 + 32)
     assert data.series(CHANNEL_MAP["tyre_pres_fl"], lap)[1][0] == pytest.approx(170 * 0.145038, abs=0.01)
     assert next(panel for panel in backend.panels if panel["column"] == "speed_kph")["unit"] == "mph"
-    corner = backend.corners[0]  # corner table in mph too
+    corner = backend.cornerTable.items[0]  # corner table in mph too
     reference, _ = (float(value) for value in corner["speed"].split(" / "))
     assert reference == pytest.approx(120 / 1.609344, abs=1)
 
@@ -157,13 +157,13 @@ def test_axis_steps_and_labels():
 # --- 7 & 13. Corners on charts & map, driving analysis
 def test_corners_marked_and_driving_analysis(viewer):
     backend = viewer.backend
-    marks = backend.cornerMarks
+    marks = backend.cornerTable.marks
     assert len(marks) == 2 and [mark["label"] for mark in backend.trackMap["corners"]] == ["T1", "T2"]
     assert backend.trackMap["corners"][0]["delta"].startswith("+")  # compared lap slower
-    rows = backend.corners
+    rows = backend.cornerTable.items
     assert rows[0]["label"] == "T1" and " / " in rows[0]["coast"] and rows[0]["overlap"].endswith(" s")
     assert [row["kind"] for row in rows[-3:]] == ["sum", "total", "ideal"]
-    start, end = backend.cornerRange(0)
+    start, end = backend.cornerTable.range(0)
     assert start < marks[0]["x"] < end
 
 
@@ -340,13 +340,13 @@ def test_background_loading_and_refresh(viewer, laps):
 def test_csv_export(viewer, tmp_path):
     backend = viewer.backend
     target = tmp_path / "laps.csv"
-    assert backend.write_csv(str(target), decimal_point=",")
+    assert backend.exports.write_csv(str(target), decimal_point=",")
     lines = target.read_text(encoding="utf-8-sig").splitlines()
     header = lines[0].split(";")
     assert header[0] == "Distance (m)" and any("Speed (km/h)" in name for name in header)
     assert len(header) == 1 + len(backend.data.laps) * len(backend.visible)
     assert len(lines) == int(LENGTH) + 2 and "," in lines[100]
-    assert backend.write_csv(str(tmp_path / "dot.csv"), decimal_point=".")
+    assert backend.exports.write_csv(str(tmp_path / "dot.csv"), decimal_point=".")
     assert (tmp_path / "dot.csv").read_text(encoding="utf-8-sig").splitlines()[0].count(",") == len(header) - 1
 
 
@@ -357,13 +357,13 @@ def test_motec_export(viewer, laps, tmp_path, monkeypatch):
     backend = viewer.backend
     target = tmp_path / "reference.ld"
     monkeypatch.setattr(lap_export.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
-    backend.exportMotec("")  # reference lap, written by worker process
+    backend.exports.exportMotec("")  # reference lap, written by worker process
     wait_loaded(viewer)
     assert target.exists() and read_ld(str(target))
     assert "Exported" in backend.status
     monkeypatch.setattr(lap_export.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))
     os.makedirs(tmp_path / "all")
-    backend.exportMotecMany(True)  # every lap of track, in background
+    backend.exports.exportMotecMany(True)  # every lap of track, in background
     wait_loaded(viewer)
     assert len(os.listdir(tmp_path / "all")) == len(laps)
 
@@ -398,12 +398,12 @@ def test_motec_export_many_same_file_name(viewer, laps, tmp_path):
         channels = read_ld(str(filename))[1]
         return max(max(channel.values) for channel in channels if channel.name == "Ground Speed")
 
-    assert backend.export_many([laps[1], other], str(target), background=False) == 2
+    assert backend.exports.export_many([laps[1], other], str(target), background=False) == 2
     stem = os.path.basename(laps[1]).split(".csv")[0]
     first, second = target / f"{stem}.ld", target / f"{stem} (2).ld"
     assert sorted(os.listdir(target)) == sorted([first.name, second.name])
     assert read_ld(str(first))[0].venue == "Atlanta" and read_ld(str(second))[0].venue == "Laguna Seca"
     assert top_speed(first) > top_speed(second)  # lap 2 faster than lap 3 on straights
     before = first.read_bytes()
-    assert backend.export_many([laps[1]], str(target), background=False) == 1  # export again: former files kept
+    assert backend.exports.export_many([laps[1]], str(target), background=False) == 1  # export again: former files kept
     assert first.read_bytes() == before and (target / f"{stem} (3).ld").exists()

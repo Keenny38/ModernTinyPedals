@@ -29,7 +29,7 @@ from ..demo_state import drawing_demo
 from ..regex_pattern import COMMON_TYRE_COMPOUNDS
 from ..setting import cfg
 from ..template.setting_brakes import BRAKEINFO_DEFAULT
-from ..template.setting_compounds import COMPOUNDINFO_DEFAULT
+from ..template.setting_compounds import COMPOUNDINFO_DEFAULT, name_color
 from ..template.setting_heatmap import HEATMAP_DEFAULT_BRAKE, HEATMAP_DEFAULT_TYRE
 from ..validator import invalid_save_name, is_hex_color
 from ..widget._style import overlay_theme, theme_color
@@ -113,6 +113,7 @@ def add_missing_compound(compound_name: str) -> dict:
     """Add missing compound style to compounds preset"""
     new_data = COMPOUNDINFO_DEFAULT.copy()
     new_data["symbol"] = set_predefined_compound_symbol(compound_name.split("-")[-1].strip())
+    new_data["color"] = name_color(compound_name)
     if drawing_demo():  # overlay picture on simulated race: presets left as is
         return new_data
     cfg.user.compounds[compound_name] = new_data

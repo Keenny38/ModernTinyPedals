@@ -60,6 +60,7 @@ from typing import Any, BinaryIO, NamedTuple
 
 from . import app_signal
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
+from .userfile import replace_retry
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ MAX_GAP = 1.0  # seconds, longer gaps between recorded frames (inactive, paused)
 SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
 MAX_FRAME_SIZE = 64 * 1024 * 1024  # bound of header frame size (largest shared memory is a few MB)
 MAX_EXTRA_SIZE = 16 * 1024 * 1024  # bound of Rest API snapshot, marker & summary payload
+MAX_REST_SIZE = 64 * 1024 * 1024  # bound of decompressed Rest API snapshot (a few KB in practice)
 EXPORT_PROGRESS_STEP = 100  # frames between export progress calls
 SCAN_CHECK_STEP = 2000  # frames between cancel checks & progress calls while scanning replay file
 
@@ -165,10 +167,45 @@ def apply_rest_snapshot(dataset: Any, data: dict) -> None:
         setattr(dataset, name, value)
 
 
+XOR_BLOCK = 16384  # bytes compared per slice, only differing slices are XORed
+_ZERO_BLOCK = bytes(XOR_BLOCK)
+
+
+def bounded_decompress(payload: bytes, limit: int) -> bytes:
+    """Decompress zlib payload of at most limit bytes, never more in memory (zip bomb)
+
+    Raises:
+        zlib.error: invalid or incomplete stream, or decompressed data over limit.
+    """
+    decompressor = zlib.decompressobj()
+    data = decompressor.decompress(payload, limit + 1)
+    if len(data) > limit or decompressor.unconsumed_tail or not decompressor.eof:
+        raise zlib.error("decompressed data over limit or incomplete")
+    return data
+
+
 def xor_bytes(data: bytes, base: bytes) -> bytes:
-    """XOR two equal size byte strings"""
+    """XOR two equal size byte strings
+
+    Slices equal in both give zeros, a zero slice in one gives the other's slice, so a mostly
+    unchanged frame (or a mostly zero difference) costs memory compares instead of big int XOR.
+    """
     size = len(data)
-    return (int.from_bytes(data, "little") ^ int.from_bytes(base, "little")).to_bytes(size, "little")
+    output = bytearray(size)
+    for start in range(0, size, XOR_BLOCK):
+        end = start + XOR_BLOCK
+        part, base_part = data[start:end], base[start:end]
+        if part == base_part:
+            continue
+        zero = _ZERO_BLOCK if len(part) == XOR_BLOCK else bytes(len(part))
+        if base_part == zero:
+            output[start:end] = part
+        elif part == zero:
+            output[start:end] = base_part
+        else:
+            output[start:end] = (
+                int.from_bytes(part, "little") ^ int.from_bytes(base_part, "little")).to_bytes(len(part), "little")
+    return bytes(output)
 
 
 class Marker(NamedTuple):
@@ -455,12 +492,11 @@ class ReplayFile:
             raise ValueError("invalid zone layout") from error
         if sum(size for _, size in self.layout) != self.frame_size:
             raise ValueError("invalid zone layout")
-        # Frame index in packed arrays (a long recording has hundreds of thousands of frames)
+        # Frame index in packed arrays (a 24 h recording has millions of frames: 17 bytes each), payload size &
+        # CRC read again from the frame header when the frame is read
         self.times = array("d")
         self.keyframes = bytearray()  # 1 if keyframe
-        self._offsets = array("q")
-        self._sizes = array("q")
-        self._crcs = array("I")  # payload CRC of each frame (format 2)
+        self._heads = array("q")  # file position of each frame header
         # Rest API snapshots are decoded on demand (a long recording has thousands of large snapshots)
         self.rest_times = array("d")
         self._rest_offsets = array("q")
@@ -471,6 +507,7 @@ class ReplayFile:
         self.damaged = False  # file ends with damaged data (power loss, disk error)
         frame_header = frame_header_of(header)
         has_crc = frame_header is FRAME_HEADER
+        self._frame_header = frame_header
         max_frame = self.frame_size + self.frame_size // 100 + 1024  # zlib worst case (incompressible)
         file_size = os.fstat(file.fileno()).st_size
         position = file.tell()
@@ -504,10 +541,7 @@ class ReplayFile:
                 last_time = elapsed
                 self.times.append(elapsed)
                 self.keyframes.append(1 if frame_type else 0)
-                self._offsets.append(position)
-                self._sizes.append(size)
-                if has_crc:
-                    self._crcs.append(fields[3])
+                self._heads.append(position - frame_header.size)
                 file.seek(size, os.SEEK_CUR)
             elif frame_type == REST_FRAME:  # checked & decoded on demand, see rest
                 self.rest_times.append(elapsed)
@@ -523,7 +557,7 @@ class ReplayFile:
                 else:
                     self._read_extra(elapsed, frame_type, payload)
             position += size
-        if not self._offsets or not self.keyframes[0]:
+        if not self._heads or not self.keyframes[0]:
             raise ValueError("replay file contains no frame")
         self.markers.sort(key=lambda marker: marker.time)
 
@@ -556,7 +590,7 @@ class ReplayFile:
             file.close()
 
     def __len__(self) -> int:
-        return len(self._offsets)
+        return len(self._heads)
 
     @property
     def duration(self) -> float:
@@ -588,7 +622,7 @@ class ReplayFile:
         data = None
         if not self._rest_crcs or zlib.crc32(payload) == self._rest_crcs[index]:
             with suppress(zlib.error, ValueError):
-                data = json.loads(zlib.decompress(payload))
+                data = json.loads(bounded_decompress(payload, MAX_REST_SIZE))
         if not isinstance(data, dict):
             if index not in self._rest_corrupt:
                 self._rest_corrupt.add(index)
@@ -649,18 +683,25 @@ class ReplayFile:
         """Markers of kind, in time order"""
         return [marker for marker in self.markers if marker.kind == kind]
 
-    def _payload(self, index: int) -> bytes:
+    def _payload(self, index: int) -> tuple[bytes, int]:
+        """Payload of frame & its CRC (-1: format 1, no CRC), header checked when scanned"""
+        frame_header = self._frame_header
         with self._lock:
-            self._file.seek(self._offsets[index])
-            return self._file.read(self._sizes[index])
+            self._file.seek(self._heads[index])
+            head = self._file.read(frame_header.size)
+            if len(head) < frame_header.size:  # file cut since scanned: frame damaged
+                return b"", -1
+            fields = frame_header.unpack(head)
+            payload = self._file.read(fields[2])
+        return payload, fields[3] if len(fields) > 3 else -1
 
     def _decode(self, index: int, previous: bytes) -> bytes | None:
         """Decoded frame, None if damaged (CRC, decompression or size)"""
-        payload = self._payload(index)
+        payload, crc = self._payload(index)
         raw = b""
-        if not self._crcs or zlib.crc32(payload) == self._crcs[index]:
+        if crc < 0 or zlib.crc32(payload) == crc:
             with suppress(zlib.error):
-                raw = zlib.decompress(payload)
+                raw = bounded_decompress(payload, self.frame_size)
         if len(raw) != self.frame_size:
             if index not in self._corrupt:
                 self._corrupt.add(index)
@@ -759,7 +800,7 @@ class ReplayFile:
                 writer.finish()
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace(temp_name, filename)
+            replace_retry(temp_name, filename)
         except BaseException:
             with suppress(OSError):
                 os.remove(temp_name)
@@ -924,6 +965,7 @@ class ReplayControl:
     def __init__(self):
         self.player: ReplayPlayer | None = None
         self._rec_thread: threading.Thread | None = None
+        self._rec_closing: threading.Thread | None = None  # stopped recorder not finished after join timeout
         self._rec_event = threading.Event()
         self._rec_lock = threading.Lock()  # recording started & stopped from GUI and recorder module
         self._markers: list[tuple[str, str, float]] = []
@@ -998,6 +1040,12 @@ class ReplayControl:
         """Is recording"""
         return self._rec_thread is not None and self._rec_thread.is_alive()
 
+    @property
+    def recording_closing(self) -> bool:
+        """Stopped recording still closing its file (new recording refused until it ends)"""
+        closing = self._rec_closing
+        return closing is not None and closing.is_alive()
+
     def add_marker(self, kind: str, text: str = "", ago: float = 0.0) -> bool:
         """Add marker at current recording time minus ago seconds (any thread), returns True if recording"""
         if not self.recording:
@@ -1014,7 +1062,7 @@ class ReplayControl:
         rest_source: Callable[[], dict | None] | None = None,
         header_extra: dict | None = None,
     ) -> bool:
-        """Record frames from source until stopped, returns False if already recording
+        """Record frames from source until stopped, returns False if already recording (or previous one closing)
 
         Args:
             filename: file to record, "-2", "-3"... added if it exists (never overwritten), see recording_file.
@@ -1025,6 +1073,11 @@ class ReplayControl:
         with self._rec_lock:
             if self.recording:
                 return False
+            if self._rec_closing is not None:
+                if self._rec_closing.is_alive():  # still writing shared counters & its file
+                    logger.warning("replay: previous recording still closing, new recording not started")
+                    return False
+                self._rec_closing = None
             filename = reserve_file(filename)
             sources = source if isinstance(source, RecordingSources) else RecordingSources(source, rest_source)
             # Own stop event for each recording, a previous recorder still closing its file never resumes
@@ -1048,6 +1101,9 @@ class ReplayControl:
             self._rec_event.set()
             if self._rec_thread is not None:
                 self._rec_thread.join(5)
+                if self._rec_thread.is_alive():
+                    logger.warning("replay: recording not closed after 5s, still closing")
+                    self._rec_closing = self._rec_thread
                 self._rec_thread = None
 
     def __recording(

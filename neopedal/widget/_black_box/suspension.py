@@ -33,13 +33,16 @@ while the bump rubber is loaded, or airborne color while the wheel is in the air
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
 from .drawn import motion_length, motion_steps, tint_step
 from .state import WheelState, damper_tint
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 COILS = 6
 MAX_COMPRESSION = 0.8  # shortest spring is 1 - this, relative to longest
@@ -104,7 +107,7 @@ class SuspensionPainter:
     susp_low_speed: Any
     susp_pixels_per_mm: Any
     unit: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     wheel_suspension_motion: Any
     wheel_travel_px: Any
 

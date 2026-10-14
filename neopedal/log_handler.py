@@ -172,6 +172,72 @@ def new_file_handler(
     return _handler
 
 
+class ExceptionRepeats:
+    """Count repeats of same uncaught exception (type, raising file & line): an overlay timer failing
+    20-50 times per second would flood the rotating error log, and stutter overlays while writing it"""
+
+    __slots__ = ("_counts",)
+    MAX_KEYS = 1000
+
+    def __init__(self):
+        self._counts: dict[tuple, int] = {}
+
+    def count(self, exc_type, exc_traceback) -> int:
+        """Return repeat count if exception should be logged (1st, 10th, 100th, then every 1000th), else 0"""
+        tb = exc_traceback
+        while tb is not None and tb.tb_next is not None:
+            tb = tb.tb_next
+        if tb is None:
+            key: tuple = (exc_type, "", 0)
+        else:
+            key = (exc_type, tb.tb_frame.f_code.co_filename, tb.tb_lineno)
+        counts = self._counts
+        if key not in counts and len(counts) >= self.MAX_KEYS:
+            counts.clear()
+        count = counts.get(key, 0) + 1
+        counts[key] = count
+        if count in (1, 10, 100) or count % 1000 == 0:
+            return count
+        return 0
+
+
+def repeat_suffix(count: int) -> str:
+    """Repeat count text of log message, none for first time"""
+    return f" (x{count})" if count > 1 else ""
+
+
+def install_exception_hooks(_logger: logging.Logger) -> None:
+    """Uncaught exceptions logged (error log file): windowed executable has no stderr, the default
+    hooks (Qt slots & timers, threads) would lose them"""
+    default_hook = sys.excepthook
+    repeats = ExceptionRepeats()
+
+    def log_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            default_hook(exc_type, exc_value, exc_traceback)
+            return
+        count = repeats.count(exc_type, exc_traceback)
+        if count:
+            _logger.critical(
+                "Uncaught exception%s", repeat_suffix(count), exc_info=(exc_type, exc_value, exc_traceback)
+            )
+
+    def log_thread_exception(args):
+        if args.exc_type is SystemExit:
+            return
+        count = repeats.count(args.exc_type, args.exc_traceback)
+        if not count:
+            return
+        name = args.thread.name if args.thread is not None else "unknown"
+        _logger.critical(
+            "Uncaught exception in thread %s%s", name, repeat_suffix(count),
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    sys.excepthook = log_exception
+    threading.excepthook = log_thread_exception
+
+
 def set_logging_level(_logger: logging.Logger, filepath: str, filename: str, log_stream=None, log_level=1) -> None:
     """Set logging level
 

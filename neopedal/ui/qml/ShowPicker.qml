@@ -11,45 +11,47 @@ Popup {
 
     signal mathRequested()
 
-    readonly property var catalog: visible ? backend.dashboardCatalog : []
+    // Channels (same list while channels are toggled: chips kept), shown state apart
+    readonly property var catalog: visible ? backend.dashboard.channels : []
+    readonly property var shownKeys: {
+        var keys = {}
+        var shown = visible ? backend.dashboard.shownChannels : []
+        for (var i = 0; i < shown.length; i++) keys[shown[i]] = true
+        return keys
+    }
     readonly property string query: searchField.text.toLowerCase().trim()
+    function isShown(item) { return shownKeys[item.key] === true }
     function matches(item) { return query !== "" && item.search.indexOf(query) >= 0 }
-    function listed(item) { return query === "" ? !item.detail || item.shown : matches(item) }
+    function listed(item) { return query === "" ? !item.detail || isShown(item) : matches(item) }
 
     width: theme.em * 24
     padding: theme.em * 0.6
     onOpened: searchField.forceActiveFocus()
     onClosed: searchField.text = ""
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 }
-        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 150; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase }
+        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: theme.motionBase; easing.type: Easing.OutCubic }
     }
-    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
     background: Rectangle {
-        radius: theme.em * 0.7
+        radius: theme.radiusXl
         color: theme.raised
         border.width: 1
         border.color: theme.border
     }
     contentItem: ColumnLayout {
         spacing: theme.em * 0.4
-        TextField {
+        TpSearchField {
             id: searchField
             Layout.fillWidth: true
+            searchDelay: 0  // query bound to text
             placeholderText: i18n.tr("Search channel")
-            color: theme.text
-            placeholderTextColor: theme.dimText
-            background: Rectangle {
-                radius: theme.em * 0.45
-                color: theme.base
-                border.width: 1
-                border.color: searchField.activeFocus ? theme.accent : theme.border
-            }
+            onExitField: picker.close()  // Esc: clears search, then closes
         }
         // Presets
         Flow {
             Layout.fillWidth: true
-            spacing: theme.em * 0.25
+            spacing: theme.em * 0.3
             visible: picker.query === ""
             Repeater {
                 model: backend.channelPresets
@@ -82,15 +84,14 @@ Popup {
                     Column {
                         id: pickerGroup
                         required property var modelData
-                        readonly property var items: modelData.items.filter(picker.listed)
-                        readonly property bool anyShown: modelData.items.some(function(item) { return item.shown })
+                        readonly property bool anyShown: modelData.items.some(picker.isShown)
                         width: pickerGroups.width
                         spacing: theme.em * 0.3
-                        visible: items.length > 0
+                        visible: modelData.items.some(picker.listed)
                         Rectangle {
                             width: parent.width
                             height: theme.em * 1.8
-                            radius: theme.em * 0.4
+                            radius: theme.radiusMd
                             color: groupArea.containsMouse ? theme.hover : "transparent"
                             Row {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -100,8 +101,8 @@ Popup {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: theme.em * 1.05
                                     height: width
-                                    radius: theme.em * 0.28
-                                    color: pickerGroup.anyShown ? theme.accent : "transparent"
+                                    radius: theme.radiusSm
+                                    color: pickerGroup.anyShown ? theme.accentFill : "transparent"
                                     border.width: pickerGroup.anyShown ? 0 : 1.5
                                     border.color: theme.dimText
                                     Icon { anchors.centerIn: parent; glyph: ""; size: theme.em * 0.7; color: "white"; visible: pickerGroup.anyShown && theme.iconFont !== "" }
@@ -118,45 +119,46 @@ Popup {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: backend.setDashboardGroup(pickerGroup.modelData.key, !pickerGroup.anyShown)
+                                onClicked: backend.dashboard.setGroup(pickerGroup.modelData.key, !pickerGroup.anyShown)
                             }
                         }
                         Flow {
                             width: parent.width
                             leftPadding: theme.em * 0.3
-                            spacing: theme.em * 0.25
+                            spacing: theme.em * 0.3
                             Repeater {
-                                model: pickerGroup.items
+                                model: pickerGroup.modelData.items  // every chip kept, hidden while not listed
                                 Rectangle {
                                     id: chip
                                     required property var modelData
                                     readonly property string channel: modelData.key
-                                    readonly property bool shown: modelData.shown
+                                    readonly property bool shown: picker.isShown(modelData)
                                     readonly property bool detail: modelData.detail
                                     objectName: "showChip"
+                                    visible: picker.listed(modelData)
                                     height: theme.em * 1.6
                                     width: chipText.implicitWidth + theme.em * 0.9
                                     radius: height / 2
-                                    color: modelData.shown ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.22) : "transparent"
+                                    color: shown ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.22) : "transparent"
                                     border.width: 1
-                                    border.color: modelData.shown ? theme.accent : theme.border
-                                    opacity: modelData.available || modelData.shown ? 1 : 0.45
+                                    border.color: shown ? theme.accent : theme.border
+                                    opacity: modelData.available || shown ? 1 : 0.45
                                     ToolTip.visible: chipArea.containsMouse && !modelData.available
                                     ToolTip.text: i18n.tr("Not recorded in shown laps")
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: theme.tipDelay
                                     Text {
                                         id: chipText
                                         anchors.centerIn: parent
                                         text: chip.modelData.title
-                                        color: chip.modelData.shown ? theme.text : theme.dimText
-                                        font.pointSize: theme.fontPoint * 0.85
+                                        color: chip.shown ? theme.text : theme.dimText
+                                        font.pointSize: theme.fontSmall
                                     }
                                     MouseArea {
                                         id: chipArea
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: backend.setChannelVisible(chip.modelData.key, !chip.modelData.shown)
+                                        onClicked: backend.setChannelVisible(chip.modelData.key, !chip.shown)
                                     }
                                 }
                             }

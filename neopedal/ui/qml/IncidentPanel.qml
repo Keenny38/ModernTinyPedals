@@ -10,25 +10,20 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    readonly property var counts: backend.counts
-    readonly property var timelineData: backend.timeline
+    readonly property var counts: replays.counts
+    readonly property var timelineData: replays.timeline
     property var menuEntries: []  // row menu: text, action (jump, filter), driver
     property string menuKey: ""  // incident of row menu
-    readonly property bool canJump: backend.inSession && !backend.lastSession
-    readonly property bool live: backend.inSession && !backend.replayActive  // jump: replay of live session
+    readonly property bool canJump: replays.inSession && !replays.lastSession
+    readonly property bool live: replays.inSession && !replays.replayActive  // jump: replay of live session
     // Replay clock of last game answer, read once per answer (playhead timer ticks between answers)
-    readonly property real replayTime: backend.replayTime
-    readonly property real replayRate: backend.replayRate
-    readonly property real timeReceived: backend.timeReceived
+    readonly property real replayTime: replays.replayTime
+    readonly property real replayRate: replays.replayRate
+    readonly property real timeReceived: replays.timeReceived
 
-    function clock(seconds) {
-        var total = Math.max(Math.floor(seconds), 0)
-        var hours = Math.floor(total / 3600), minutes = Math.floor(total / 60) % 60, rest = total % 60
-        return hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + (rest < 10 ? "0" : "") + rest
-    }
     function escaped(text) { return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
     function showSelected() {
-        var index = backend.incidentIndex(backend.selectedIncident)
+        var index = replays.incidentIndex(replays.selectedIncident)
         if (index >= 0) list.positionViewAtIndex(index, ListView.Contain)
     }
     function openMenu(row, item, x, y) {
@@ -50,8 +45,8 @@ Item {
                 text: modelData.text
                 enabled: modelData.action !== "jump" || root.canJump
                 onTriggered: {
-                    if (modelData.action === "jump") backend.jumpTo(root.menuKey, modelData.driver)
-                    else if (backend.driverFilter !== modelData.driver) backend.setDriverFilter(modelData.driver)  // toggles
+                    if (modelData.action === "jump") replays.jumpTo(root.menuKey, modelData.driver)
+                    else if (replays.driverFilter !== modelData.driver) replays.setDriverFilter(modelData.driver)  // toggles
                 }
             }
             onObjectAdded: function(index, object) { rowMenu.insertAction(index, object) }
@@ -62,8 +57,8 @@ Item {
     TpMenu {
         id: exportMenu
         width: Math.max(implicitWidth, theme.em * 17)
-        Action { text: i18n.tr("Copy to Clipboard"); onTriggered: backend.copyIncidents() }
-        Action { text: i18n.tr("Export CSV..."); onTriggered: backend.exportIncidents() }
+        Action { text: i18n.tr("Copy to Clipboard"); onTriggered: replays.copyIncidents() }
+        Action { text: i18n.tr("Export CSV..."); onTriggered: replays.exportIncidents() }
     }
 
     ColumnLayout {
@@ -80,12 +75,12 @@ Item {
                 visible: root.counts.all > 0
                 options: [i18n.tr("All") + "  " + root.counts.all, i18n.tr("Cars") + "  " + root.counts.cars,
                           i18n.tr("Walls") + "  " + root.counts.walls]
-                currentIndex: backend.incidentFilter
+                currentIndex: replays.incidentFilter
                 maxWidth: root.width * 0.5
-                onActivated: function(index) { backend.setIncidentFilter(index) }
+                onActivated: function(index) { replays.setIncidentFilter(index) }
             }
             Rectangle {  // game in menus: incidents of the session left
-                visible: backend.lastSession && root.counts.all > 0
+                visible: replays.lastSession && root.counts.all > 0
                 implicitHeight: lastText.implicitHeight + theme.em * 0.3
                 implicitWidth: lastText.implicitWidth + theme.em * 1.0
                 radius: height / 2
@@ -95,17 +90,17 @@ Item {
                     anchors.centerIn: parent
                     text: i18n.tr("Last Session")
                     color: theme.warning
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     font.weight: Font.DemiBold
                 }
             }
             Item { Layout.fillWidth: true }
             TpSwitch {
-                visible: backend.playerName !== ""
+                visible: replays.playerName !== ""
                 text: i18n.tr("My car")
-                tip: i18n.tr("Incidents of %1 only").arg(backend.playerName)
-                checked: backend.mineOnly
-                onToggled: backend.setMineOnly(checked)
+                tip: i18n.tr("Incidents of %1 only").arg(replays.playerName)
+                checked: replays.mineOnly
+                onToggled: replays.setMineOnly(checked)
             }
             TpButton {
                 id: exportButton
@@ -122,14 +117,14 @@ Item {
                 flat: true
                 tip: i18n.tr("Previous incident")
                 enabled: root.counts.shown > 0
-                onClicked: { backend.jumpNext(-1); root.showSelected() }
+                onClicked: { replays.jumpNext(-1); root.showSelected() }
             }
             TpButton {
                 glyph: ""  // chevron down
                 flat: true
                 tip: i18n.tr("Next incident")
                 enabled: root.counts.shown > 0
-                onClicked: { backend.jumpNext(1); root.showSelected() }
+                onClicked: { replays.jumpNext(1); root.showSelected() }
             }
         }
 
@@ -139,7 +134,7 @@ Item {
             id: timeline
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(theme.em * 3.2)
-            visible: root.counts.all > 0 || (backend.replayActive && backend.replayTime >= 0)
+            visible: root.counts.all > 0 || (replays.replayActive && replays.replayTime >= 0)
             // Playhead past known end: whole minutes, timeline span not changed on every playhead step
             readonly property real fullEnd: Math.max(root.timelineData.end || 60, Math.ceil(now * 1.02 / 60) * 60, 60)
             property real zoomStart: -1  // shown part of session, -1: whole session
@@ -151,7 +146,7 @@ Item {
             readonly property real pad: theme.em * 0.6
             readonly property real railWidth: Math.max(width - pad * 2, 1)
             readonly property real railY: Math.round(height * 0.36)
-            property real now: backend.replayActive ? backend.replayTime : -1
+            readonly property real now: playhead.now  // replay playhead, -1: no replay
             property string hoverKey: ""
             property real hoverTime: -1
             readonly property real step: {
@@ -192,17 +187,13 @@ Item {
                 zoomStart = start
             }
 
-            Timer {  // playhead moves between game answers at measured rate
-                interval: 100
-                repeat: true
-                running: timeline.visible && backend.replayActive && root.replayRate !== 0 && pageState.active
-                triggeredOnStart: true
-                onTriggered: timeline.now = root.replayTime + root.replayRate
-                             * Math.min(Math.max((Date.now() - root.timeReceived) / 1000, 0), 3)
-            }
-            Connections {
-                target: backend
-                function onReplayTimeChanged() { timeline.now = backend.replayActive ? backend.replayTime : -1 }
+            LiveClock {  // playhead moves between game answers at measured rate
+                id: playhead
+                time: replays.replayActive ? root.replayTime : -1
+                received: root.timeReceived
+                rate: root.replayRate
+                triggeredOnStart: true  // 4 moves a second (LiveClock interval): page drawn again on each
+                active: timeline.visible && replays.replayActive && pageState.active
             }
 
             Rectangle {  // rail
@@ -232,15 +223,15 @@ Item {
                     Text {
                         x: -width / 2
                         y: timeline.railY + theme.em * 0.6
-                        text: tick.visible ? root.clock(tick.value) : ""
+                        text: tick.visible ? playhead.format(tick.value) : ""
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.72
+                        font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
                     }
                 }
             }
             Repeater {  // lap starts of car followed by camera (as game shows on its timeline)
-                model: backend.lapMarks
+                model: replays.lapMarks
                 Item {
                     required property var modelData
                     visible: modelData.time >= timeline.viewStart && modelData.time <= timeline.viewEnd
@@ -251,55 +242,38 @@ Item {
                         y: timeline.railY - theme.em * 0.55 - height
                         text: parent.modelData.lap
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.68
+                        font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
                     }
                 }
             }
-            Canvas {  // incident markers
-                id: markersCanvas
-                anchors.fill: parent
+            Item {  // incident markers: dots placed in a layer moved by drag & scaled by zoom (nothing repainted;
+                    // hover or pick changes two dots), my car & selected or hovered on top, ringed
+                id: markerLayer
+                objectName: "incidentMarkers"
                 property var markerData: root.timelineData  // never "data": shadows Item.data (children)
-                property string selected: backend.selectedIncident
-                property string hover: timeline.hoverKey
-                property real start: timeline.viewStart
-                property real end: timeline.viewEnd
-                property bool dark: theme.dark
-                onMarkerDataChanged: requestPaint()
-                onSelectedChanged: requestPaint()
-                onHoverChanged: requestPaint()
-                onStartChanged: requestPaint()
-                onEndChanged: requestPaint()
-                onDarkChanged: requestPaint()
-                onWidthChanged: requestPaint()
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.reset()
-                    var markers = (markerData && markerData.markers) || []
-                    var order = [[], [], []]  // dim & others, my car, selected or hovered: drawn on top
-                    for (var i = 0; i < markers.length; i++) {
-                        var marker = markers[i]
-                        var px = timeline.xOf(marker.time)
-                        if (px < timeline.pad - 8 || px > width - timeline.pad + 8) continue
-                        var top = marker.key === selected || marker.key === hover
-                        order[top ? 2 : marker.mine ? 1 : 0].push([marker, px])
-                    }
-                    for (var layer = 0; layer < 3; layer++) {
-                        for (var j = 0; j < order[layer].length; j++) {
-                            var entry = order[layer][j], item = entry[0], cx = entry[1]
-                            var isSelected = item.key === selected
-                            var radius = theme.em * (isSelected ? 0.5 : item.key === hover ? 0.43 : item.mine ? 0.37 : 0.28)
-                            ctx.globalAlpha = item.shown ? 1 : 0.18
-                            ctx.beginPath()
-                            ctx.arc(cx, timeline.railY, radius, 0, Math.PI * 2)
-                            ctx.fillStyle = String(item.wall ? theme.warning : theme.loss)
-                            ctx.fill()
-                            if (isSelected || item.mine) {
-                                ctx.lineWidth = 2
-                                ctx.strokeStyle = String(isSelected ? theme.text : theme.accent)
-                                ctx.stroke()
-                            }
-                        }
+                readonly property real scaleX: timeline.railWidth / timeline.viewSpan  // pixels per second
+                x: timeline.pad - timeline.viewStart * scaleX
+                Repeater {
+                    model: (markerLayer.markerData && markerLayer.markerData.markers) || []
+                    Rectangle {
+                        required property var modelData
+                        readonly property real centerX: modelData.time * markerLayer.scaleX
+                        readonly property bool picked: modelData.key === replays.selectedIncident
+                        readonly property bool hovered: modelData.key === timeline.hoverKey
+                        readonly property bool ringed: picked || modelData.mine
+                        readonly property real dot: theme.em * (picked ? 0.5 : hovered ? 0.43 : modelData.mine ? 0.37 : 0.28)
+                        visible: markerLayer.x + centerX >= timeline.pad - 8 && markerLayer.x + centerX <= timeline.width - timeline.pad + 8
+                        z: picked || hovered ? 2 : modelData.mine ? 1 : 0
+                        width: dot * 2 + (ringed ? 2 : 0)  // ring centered on dot edge
+                        height: width
+                        radius: width / 2
+                        x: centerX - width / 2
+                        y: timeline.railY - height / 2
+                        opacity: modelData.shown ? 1 : 0.18
+                        color: modelData.wall ? theme.warning : theme.loss
+                        border.width: ringed ? 2 : 0
+                        border.color: picked ? theme.text : theme.accent
                     }
                 }
             }
@@ -327,7 +301,7 @@ Item {
                 hoverEnabled: true
                 property real pressX: 0
                 property bool moved: false
-                cursorShape: timeline.hoverKey !== "" || backend.replayActive ? Qt.PointingHandCursor
+                cursorShape: timeline.hoverKey !== "" || replays.replayActive ? Qt.PointingHandCursor
                            : timeline.zoomed ? Qt.OpenHandCursor : Qt.ArrowCursor
                 onPressed: function(mouse) { pressX = mouse.x; moved = false }
                 onPositionChanged: function(mouse) {
@@ -345,11 +319,11 @@ Item {
                     if (moved) return
                     var key = timeline.markerAt(mouse.x, mouse.y)
                     if (key !== "") {
-                        backend.selectIncident(key)
-                        if (root.canJump) backend.jumpTo(key, "")
+                        replays.selectIncident(key)
+                        if (root.canJump) replays.jumpTo(key, "")
                         root.showSelected()
-                    } else if (backend.replayActive) {
-                        backend.seek(timeline.timeAt(mouse.x))
+                    } else if (replays.replayActive) {
+                        replays.seek(timeline.timeAt(mouse.x))
                     }
                 }
                 onDoubleClicked: { timeline.zoomStart = -1; timeline.zoomEnd = -1 }
@@ -371,9 +345,9 @@ Item {
                 Text {
                     id: hoverText
                     anchors.centerIn: parent
-                    text: timeline.hoverKey !== "" ? timeline.labelOf(timeline.hoverKey) : root.clock(timeline.hoverTime)
+                    text: timeline.hoverKey !== "" ? timeline.labelOf(timeline.hoverKey) : playhead.format(timeline.hoverTime)
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.75
+                    font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
                 }
             }
@@ -394,30 +368,30 @@ Item {
             id: drivers
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(theme.em * 2.0)
-            visible: count > 1 || backend.driverFilter !== ""
+            visible: count > 1 || replays.driverFilter !== ""
             orientation: ListView.Horizontal
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: backend.drivers
+            model: replays.drivers
             delegate: AbstractButton {
                 id: chip
                 required property var modelData
-                readonly property bool active: backend.driverFilter === modelData.name
+                readonly property bool active: replays.driverFilter === modelData.name
                 height: drivers.height
                 width: chipRow.implicitWidth + theme.em * 1.1
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
-                onClicked: backend.setDriverFilter(modelData.name)
+                onClicked: replays.setDriverFilter(modelData.name)
                 ToolTip.visible: hovered && modelData.car !== ""
                 ToolTip.text: modelData.car
-                ToolTip.delay: 500
+                ToolTip.delay: theme.tipDelay
                 background: Rectangle {
                     radius: height / 2
-                    color: chip.active ? theme.accent : chip.hovered ? theme.hover : theme.raised
+                    color: chip.active ? theme.accentFill : chip.hovered ? theme.hover : theme.raised
                     border.width: chip.active ? 0 : 1
                     border.color: chip.modelData.mine ? theme.accent : theme.border
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { ColorAnimation { duration: theme.motionFast } }
                 }
                 contentItem: Item {
                     Row {
@@ -427,12 +401,12 @@ Item {
                         Text {
                             text: chip.modelData.name
                             color: chip.active ? "white" : theme.text
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                         }
                         Text {
                             text: chip.modelData.count
                             color: chip.active ? "white" : theme.dimText
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                             font.weight: Font.DemiBold
                             font.features: { "tnum": 1 }
                         }
@@ -448,16 +422,16 @@ Item {
             clip: true
             focus: true
             activeFocusOnTab: true
-            model: backend.incidentRows
+            model: replays.incidentRows
             boundsBehavior: Flickable.StopAtBounds
             reuseItems: true  // rows scrolled out fed again with other incidents (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            Keys.onUpPressed: { backend.moveIncidentSelection(-1); root.showSelected() }
-            Keys.onDownPressed: { backend.moveIncidentSelection(1); root.showSelected() }
-            Keys.onReturnPressed: backend.jumpTo(backend.selectedIncident, "")
-            Keys.onEnterPressed: backend.jumpTo(backend.selectedIncident, "")
-            displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
-            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+            Keys.onUpPressed: { replays.moveIncidentSelection(-1); root.showSelected() }
+            Keys.onDownPressed: { replays.moveIncidentSelection(1); root.showSelected() }
+            Keys.onReturnPressed: replays.jumpTo(replays.selectedIncident, "")
+            Keys.onEnterPressed: replays.jumpTo(replays.selectedIncident, "")
+            displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
+            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
 
             delegate: Rectangle {
                 id: row
@@ -472,7 +446,7 @@ Item {
                 required property string driverCar
                 required property string otherCar
                 required property string focused
-                readonly property bool selected: key === backend.selectedIncident
+                readonly property bool selected: key === replays.selectedIncident
                 // Reused row: fed other incident values at once, no color animation from the old incident
                 property bool live: true
                 ListView.onPooled: { live = false; opacity = 1 }  // add transition may have been running
@@ -480,10 +454,9 @@ Item {
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * (driverCar !== "" || otherCar !== "" ? 3.1 : 2.4))
-                radius: theme.em * 0.5
-                color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
-                     : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
+                radius: theme.radiusMd
+                color: theme.rowColor(rowArea.containsMouse, selected)
+                Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
 
                 Rectangle {  // my car involved
                     visible: row.mine
@@ -499,15 +472,15 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onPressed: { list.forceActiveFocus(); backend.selectIncident(row.key) }
+                    onPressed: { list.forceActiveFocus(); replays.selectIncident(row.key) }
                     onClicked: function(mouse) { if (mouse.button === Qt.RightButton) root.openMenu(row, rowArea, mouse.x, mouse.y) }
-                    onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.jumpTo(row.key, "") }
+                    onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) replays.jumpTo(row.key, "") }
                 }
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: theme.em * 0.6
                     anchors.rightMargin: theme.em * 0.4
-                    spacing: theme.em * 0.55
+                    spacing: theme.em * 0.6
                     Text {
                         text: row.timeText
                         color: theme.dimText
@@ -523,7 +496,7 @@ Item {
                         spacing: 1
                         RowLayout {  // drivers, car followed by replay camera in bold with camera mark
                             Layout.fillWidth: true
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Text {
                                 Layout.fillWidth: true
                                 Layout.maximumWidth: implicitWidth
@@ -549,7 +522,7 @@ Item {
                             text: row.driverCar !== "" || row.otherCar !== ""
                                   ? (row.driverCar || "?") + (row.wall ? "" : "  ↔  " + (row.otherCar || "?")) : ""
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.82
+                            font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
                         }
                     }
@@ -562,14 +535,14 @@ Item {
                         ToolTip.visible: mergedArea.containsMouse
                         ToolTip.text: mergedArea.containsMouse
                             ? i18n.tr("Contacts of the same cars a moment apart, shown as one incident") : ""
-                        ToolTip.delay: 400
+                        ToolTip.delay: theme.tipDelay
                         MouseArea { id: mergedArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                         Text {
                             id: mergedText
                             anchors.centerIn: parent
                             text: "×" + row.count
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                             font.features: { "tnum": 1 }
                         }
                     }
@@ -585,7 +558,7 @@ Item {
                             implicitHeight: Math.round(theme.em * 2.0)
                             tip: hovered ? (root.live ? i18n.tr("Replay This Moment") : i18n.tr("Jump to Incident"))
                                            + " (" + i18n.tr("double click") + ")" : ""
-                            onClicked: backend.jumpTo(row.key, "")
+                            onClicked: replays.jumpTo(row.key, "")
                         }
                     }
                 }
@@ -606,7 +579,7 @@ Item {
                 Text {
                     width: parent.width
                     text: root.counts.all > 0 ? i18n.tr("No incident matches the filters.")
-                        : backend.inSession ? i18n.tr("No incident in this session.")
+                        : replays.inSession ? i18n.tr("No incident in this session.")
                         : i18n.tr("Incidents show once a session or a replay is loaded in the game.")
                     color: theme.dimText
                     wrapMode: Text.WordWrap
@@ -626,13 +599,13 @@ Item {
                 from: 0
                 to: 60
                 editable: true
-                value: backend.secondsBefore
+                value: replays.secondsBefore
                 implicitWidth: Math.round(theme.em * 7)
                 implicitHeight: Math.round(theme.em * 2.2)
-                onValueModified: backend.setSecondsBefore(value)
+                onValueModified: replays.setSecondsBefore(value)
                 ToolTip.visible: hovered
                 ToolTip.text: i18n.tr("Replay starts this long before the contact")
-                ToolTip.delay: 600
+                ToolTip.delay: theme.tipDelay
             }
             Item { Layout.fillWidth: true }
             TpButton {
@@ -641,8 +614,8 @@ Item {
                 text: root.live ? i18n.tr("Replay This Moment") : i18n.tr("Jump to Incident")
                 tip: root.live ? i18n.tr("The replay of this session opens at the selected incident (back to live from playback)")
                                : i18n.tr("Replay open in game goes to selected incident, camera on your car if involved")
-                enabled: root.canJump && backend.selectedIncident !== ""
-                onClicked: backend.jumpTo(backend.selectedIncident, "")
+                enabled: root.canJump && replays.selectedIncident !== ""
+                onClicked: replays.jumpTo(replays.selectedIncident, "")
             }
         }
     }

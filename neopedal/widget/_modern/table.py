@@ -45,6 +45,9 @@ PILL = 5  # status pill (pit, garage, flag): text, color, fill
 DELTAS = 6  # lap time deltas to player: extra = (seconds, ...), MAX_SECONDS if unknown
 LOGO = 7  # brand logo image: text = brand name, extra = vehicle name (game car list)
 TREND = 8  # gap trend: extra = (seconds per lap, gap growing or shrinking; good for player), None if steady
+PAIR = 9  # two cells side by side: extra = (left cell, right cell, width of left part)
+LAPTIME = 10  # lap time: text, role, color; extra = LapTimeExtra (sector bars, delta, trend)
+INSIDE_CELL = (TEXT, LOGO, LAPTIME)  # kinds drawn inside their cell (elided text, logo fit, lap time parts): repainted alone
 
 SEPARATOR = "separator"  # row list item: space between class groups
 CLASS_HEADER_SCALE = 0.82  # class header strip height, in row height
@@ -52,6 +55,8 @@ CHANGE_ARROW = 0.42  # position change arrow size, in row height
 COMPOUND_SIZE = 0.62  # tyre compound square, in row height
 COMPOUND_GRID = 0.9  # per wheel compounds 2x2 grid height, in row height
 LOGO_CHECK_MS = 150  # waited logo checked for at this interval (update timer may be stopped)
+# Layered overlay window uploads bounding rect of each repaint: far apart changed parts repainted one by one
+MAX_FLUSHES = 4  # at most, else one repaint of all
 
 
 class Column(NamedTuple):
@@ -72,6 +77,18 @@ class Cell(NamedTuple):
     color: QColor | None = None
     fill: QColor | None = None
     extra: Any = None
+
+
+class LapTimeExtra(NamedTuple):
+    """Lap time cell parts: sector bars under time ((color, filled share) of S1, S2, S3, color None: not driven
+    yet), trend arrow at right end (-1 slower, 1 faster than lap before, 0 none), width of time slot (lap time,
+    delta or running time, one at a time), of space kept for arrow, of sector bars"""
+
+    sectors: tuple = ()
+    trend: int = 0
+    time_width: float = 0.0
+    side_width: float = 0.0
+    bars_width: float = 0.0
 
 
 class Row(NamedTuple):
@@ -252,24 +269,61 @@ class TableMixin:
         above & below (antialiased edges)"""
         return QRectF(0, top, self.width(), self.table.row_height).toAlignedRect().adjusted(0, -1, 0, 1)
 
-    def refresh_rows(self: Any, rows: tuple):
-        """Repaint rows that changed, moved, appeared or left (whole widget before first paint or once
-        resized)"""
+    def cell_update_rect(self: Any, left: float, width: float, top: float) -> QRect:
+        """Part of widget a text cell is drawn in: cell & 3/4 of the gap on each side (glyph overhang, antialiased
+        edges of text ending on a half pixel at screen scale), a pixel around"""
+        gap = self.table.col_gap * 0.75
+        return QRectF(left - gap, top, width + gap * 2, self.table.row_height).toAlignedRect().adjusted(-1, -1, 1, 1)
+
+    def changed_rects(self: Any, top: float, before: tuple | None, after: tuple) -> list[QRect]:
+        """Parts of a row slot to repaint: changed cells drawn inside their cell (text, logo), else whole row"""
+        if before is None or before[1] != after[1]:  # row index: background stripe
+            return [self.row_update_rect(top)]
+        old, new = before[0], after[0]
+        if not (isinstance(old, Row) and isinstance(new, Row)) or old[1:] != new[1:] or len(old.cells) != len(new.cells):
+            return [self.row_update_rect(top)]
+        table = self.table
+        rects = []
+        for column, left, old_cell, cell in zip(table.columns, table.x, old.cells, new.cells):
+            if old_cell == cell:
+                continue
+            if old_cell.kind not in INSIDE_CELL or cell.kind not in INSIDE_CELL:  # may overflow its cell
+                return [self.row_update_rect(top)]
+            rects.append(self.cell_update_rect(left, column.width, top))
+        return rects
+
+    def refresh_rows(self: Any, rows: tuple) -> bool:
+        """Repaint rows that changed, moved, appeared or left, only changed cells of a row otherwise unchanged
+        (whole widget before first paint or once resized)
+
+        Returns:
+            True if anything is repainted (rows changed, or logos arrived).
+        """
         old = self.state
         if self.logos_arrived():  # logo cells of any row
             self.state = rows
             self.update()
-            return
+            return True
         if rows == old:
-            return
+            return False
         self.state = rows
         if old is None or self._static_layer is None:
             self.update()
-            return
+            return True
         before, after = self.row_slots(old), self.row_slots(rows)
-        rects = [self.row_update_rect(top) for top, item in after.items() if before.get(top) != item]
+        rects = []
+        for top, item in after.items():
+            last = before.get(top)
+            if last != item:
+                rects.extend(self.changed_rects(top, last, item))
         rects.extend(self.row_update_rect(top) for top in before.keys() - after.keys())
-        self.dirty_region.update(self, rects)
+        clusters = flush_clusters(rects) if self.dirty_region.pending.isNull() and self.isVisible() else None
+        if clusters is None:
+            self.dirty_region.update(self, rects)
+        else:  # each painted & uploaded now on its own (update requests would merge into one bounding rect)
+            for rect in clusters:
+                self.repaint(rect)
+        return True
 
     def draw_cell(self: Any, painter: QPainter, rect: QRectF, column: Column, cell: Cell, row: Row):
         """Draw one cell"""
@@ -288,11 +342,21 @@ class TableMixin:
         elif kind == CHANGE:
             self.draw_change(painter, rect, cell.extra, column.align)
         elif kind == COMPOUND:
-            self.draw_compounds(painter, rect, cell.extra)
+            self.draw_compounds(painter, rect, cell.extra, column.align)
         elif kind == DELTAS:
             self.draw_deltas(painter, rect, cell.extra)
         elif kind == LOGO:
             self.draw_logo(painter, rect, cell.text, cell.extra or "")
+        elif kind == LAPTIME:
+            self.draw_laptime(painter, rect, cell)
+        elif kind == PAIR:
+            left, right, left_width = cell.extra
+            gap = self.unit * 0.3
+            part = column._replace(align=CENTER)
+            self.draw_cell(painter, QRectF(rect.left(), rect.top(), left_width, rect.height()),
+                           part, left, row)
+            self.draw_cell(painter, QRectF(rect.left() + left_width + gap, rect.top(),
+                                           max(rect.width() - left_width - gap, 0.0), rect.height()), part, right, row)
         elif kind == PILL:
             if not cell.text:
                 return
@@ -350,6 +414,42 @@ class TableMixin:
         text_rect = QRectF(arrow.right() + size * 0.3, rect.top(), rect.width() - size * 1.3, rect.height())
         self.draw_text(painter, text_rect, f"{abs(places)}", "value", color, LEFT, elide=False)
 
+    def draw_laptime(self: Any, painter: QPainter, rect: QRectF, cell: Cell):
+        """Time slot right aligned (lap time, delta or running time), trend arrow in space kept at right end,
+        sector bars under time (fixed width: bars stay still while slot text changes)"""
+        extra: LapTimeExtra = cell.extra
+        theme = self.theme
+        right = rect.right()
+        if extra.side_width:
+            size = rect.height() * CHANGE_ARROW * 0.8
+            if extra.trend:
+                arrow = QRectF(right - size, rect.center().y() - size / 2, size, size)
+                triangle(painter, arrow, extra.trend < 0, theme.negative if extra.trend < 0 else theme.positive)
+            right -= extra.side_width
+        time_width = min(extra.time_width or rect.width(), right - rect.left())
+        if not extra.sectors:
+            self.draw_text(painter, QRectF(right - time_width, rect.top(), time_width, rect.height()), cell.text,
+                           cell.role, cell.color, RIGHT, elide=False)
+            return
+        # Time raised, sector bars under it (as wide as the time)
+        height = max(rect.height() * 0.075, 1.5)
+        margin = rect.height() * 0.1
+        lift = (height + margin) * 0.55
+        self.draw_text(painter, QRectF(right - time_width, rect.top() - lift, time_width, rect.height()), cell.text,
+                       cell.role, cell.color, RIGHT, elide=False)
+        bars_width = min(extra.bars_width or time_width, time_width)
+        gap = self.unit * 0.1
+        width = max((bars_width - gap * 2) / 3, 1.0)
+        top = rect.bottom() - height - margin
+        left = right - bars_width
+        track = theme.tint(theme.text_faint, 60)
+        for number, (color, fill) in enumerate(extra.sectors):
+            bar = QRectF(left + number * (width + gap), top, width, height)
+            if color is None or fill < 1:
+                rounded(painter, bar, height / 2, track)
+            if color is not None and fill > 0:
+                rounded(painter, QRectF(bar.left(), top, max(width * fill, height), height), height / 2, color)
+
     def draw_trend(self: Any, painter: QPainter, rect: QRectF, trend: tuple[float, bool] | None):
         """Gap change per lap: arrow up if gap grows, down if it shrinks, green if good for player, red if not"""
         theme = self.theme
@@ -382,7 +482,7 @@ class TableMixin:
                 text, color = DASH, theme.text_faint
             self.draw_text(painter, box, text, "small", color, RIGHT, elide=False)
 
-    def draw_compounds(self: Any, painter: QPainter, rect: QRectF, compounds: tuple):
+    def draw_compounds(self: Any, painter: QPainter, rect: QRectF, compounds: tuple, align=LEFT):
         """Tyre compound letters on compound colored squares: one per axle side by side, or 4 in
         a 2x2 grid (front left, front right, rear left, rear right) when wheels of an axle differ"""
         if not compounds:
@@ -394,15 +494,16 @@ class TableMixin:
             gap = grid * 0.08
             size = (grid - gap) / 2
             top = rect.center().y() - grid / 2
+            left = aligned_left(rect, grid, align)
             for index, (symbol, color) in enumerate(compounds):
                 row, column = divmod(index, 2)
-                box = QRectF(rect.left() + column * (size + gap), top + row * (size + gap), size, size)
+                box = QRectF(left + column * (size + gap), top + row * (size + gap), size, size)
                 rounded(painter, box, radius * 0.7, color)
                 self.draw_text(painter, box, symbol, role, readable_on(color), CENTER, elide=False)
             return
         size = rect.height() * COMPOUND_SIZE
         gap = size * 0.18
-        left = rect.left()
+        left = aligned_left(rect, size * len(compounds) + gap * (len(compounds) - 1), align)
         top = rect.center().y() - size / 2
         for symbol, color in compounds:
             box = QRectF(left, top, size, size)
@@ -493,6 +594,15 @@ class TableMixin:
             self.watch_logos()
 
 
+def aligned_left(rect: QRectF, width: float, align) -> float:
+    """Left of content of width in rect by column alignment"""
+    if align & Qt.AlignmentFlag.AlignRight:
+        return rect.right() - width
+    if align & Qt.AlignmentFlag.AlignHCenter:
+        return rect.center().x() - width / 2
+    return rect.left()
+
+
 def compounds_width(unit: float, row_scale: float, count: int) -> float:
     """Width of compound cell for count compounds"""
     size = unit * row_scale * COMPOUND_SIZE
@@ -503,3 +613,32 @@ def change_width(unit: float, row_scale: float, digit_width: float, digits: int 
     """Width of position change cell: arrow & gap, then number of places"""
     return unit * row_scale * CHANGE_ARROW * 1.3 + digit_width * digits
 
+
+
+def _area(rect: QRect) -> int:
+    return max(rect.width(), 0) * max(rect.height(), 0)
+
+
+def flush_clusters(rects: list[QRect]) -> list[QRect] | None:
+    """Bounding rects of far apart groups of rects to repaint one by one, None if one repaint of all costs about
+    as much: a layered window uploads the bounding rect of each repaint (2 changed rows far apart: whole table
+    between them), at most MAX_FLUSHES groups (each repaint has its own paint & upload cost)"""
+    if len(rects) < 2:
+        return None
+    clusters: list[QRect] = []
+    for rect in sorted(rects, key=lambda item: (item.top(), item.left())):
+        if clusters:
+            last = clusters[-1]
+            united = last.united(rect)
+            if _area(united) <= 2 * (_area(last) + _area(rect)):  # close: one repaint
+                clusters[-1] = united
+                continue
+        clusters.append(rect)
+    if not 1 < len(clusters) <= MAX_FLUSHES:
+        return None
+    bounding = QRect()
+    for rect in clusters:
+        bounding = bounding.united(rect)
+    if _area(bounding) <= 2 * sum(map(_area, clusters)):
+        return None
+    return clusters

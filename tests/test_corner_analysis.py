@@ -113,17 +113,17 @@ def test_lap_viewer_corner_tab(ui_env, tmp_path):
         slower = make_lap(((0, 250), (400, 250), (500, 90), (700, 220), (800, 220), (900, 150), (1100, 240),
                            (1500, 240)))
         show_laps(backend, [("a", reference), ("b", slower)])
-        rows = backend.corners
+        rows = backend.cornerTable.items
         assert len(rows) == 5  # 2 corners, straights, total, ideal lap
         assert rows[0]["time"].startswith("+")  # time lost
         assert rows[0]["speed"] == "100 / 90"
-        corner = backend._corner_rows[1].corner
-        assert backend.cornerRange(1) == pytest.approx([corner.start, corner.end])  # click: zoom on corner
-        assert [mark["label"] for mark in backend.cornerMarks] == ["T1", "T2"]
+        corner = backend.cornerTable.rows[1].corner
+        assert backend.cornerTable.range(1) == pytest.approx([corner.start, corner.end])  # click: zoom on corner
+        assert [mark["label"] for mark in backend.cornerTable.marks] == ["T1", "T2"]
         show_laps(backend, [("a", reference)])  # reference only: its own values
-        assert backend.corners[0]["speed"] == "100" and backend.corners[0]["timeColor"] == ""
+        assert backend.cornerTable.items[0]["speed"] == "100" and backend.cornerTable.items[0]["timeColor"] == ""
         show_laps(backend, [])
-        assert backend.corners == []
+        assert backend.cornerTable.items == []
     finally:
         parent.deleteLater()
 
@@ -138,18 +138,18 @@ def test_corner_tab_totals_and_sensitivity(ui_env, tmp_path):
         reference = make_lap(PROFILE[:-2] + dip)
         slower = make_lap(((0, 245), (400, 245), (500, 90), (700, 220), (800, 220), (900, 150), *dip))
         show_laps(backend, [("a", reference), ("b", slower)])
-        rows = backend.corners
-        corner_rows = backend._corner_rows
+        rows = backend.cornerTable.items
+        corner_rows = backend.cornerTable.rows
         assert len(rows) == len(corner_rows) + 3  # corners, straights, total, ideal lap
         straights, total = rows[-3], rows[-2]
         corners = sum(row.time_delta for row in corner_rows)
         assert minus(straights["time"]) + corners == pytest.approx(minus(total["time"]), abs=0.011)
         assert minus(straights["time"]) > 0  # slower on first straight
-        assert backend.cornerRange(-1) == []  # not a corner: no zoom, no error
+        assert backend.cornerTable.range(-1) == []  # not a corner: no zoom, no error
         assert len(corner_rows) == 3  # default 10 km/h: small lift is a corner
-        backend.setHysteresis(25)  # less sensitive: small lift left out
-        assert len(backend._corner_rows) == 2 and len(backend.trackMap.get("corners", [])) == 0
+        backend.cornerTable.setHysteresis(25)  # less sensitive: small lift left out
+        assert len(backend.cornerTable.rows) == 2 and len(backend.trackMap.get("corners", [])) == 0
         assert lap_viewer.load_viewer_setting(folder)["corner_hysteresis"] == 25
-        assert corner_backend(folder)[0].hysteresis == 25  # remembered
+        assert corner_backend(folder)[0].cornerTable.hysteresis == 25  # remembered
     finally:
         parent.deleteLater()

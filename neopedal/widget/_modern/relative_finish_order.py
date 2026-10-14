@@ -26,6 +26,7 @@ Grid of predictions, one column per pit stop time: leader & player final lap pro
 from __future__ import annotations
 
 from math import ceil
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -36,14 +37,20 @@ from ...api_control import api
 from ...const_common import ENERGY_TYPE_ID, MAX_SECONDS, RACELENGTH_TYPE_ID
 from ...i18n import tr_overlay
 from ...module_info import minfo
+from .._common import player_vehicle
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RelativeFinishOrderConfig
 
 LABEL_ROWS = (0, 3)  # pit time rows (small labels)
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: RelativeFinishOrderConfig
 
     options = (
         "font_size", "layout", "bar_width", "show_absolute_refilling", "near_start_range", "near_finish_range",
@@ -159,7 +166,7 @@ class Realtime(ModernOverlay):
             laps_diff = 0
 
         self.leader_pit_times[-1] = minfo.vehicles.dataSet[leader_index].pitTimer.elapsed
-        self.player_pit_times[-1] = minfo.vehicles.dataSet[player_index].pitTimer.elapsed
+        self.player_pit_times[-1] = player_vehicle().pitTimer.elapsed
         consumption = minfo.energy if energy_type else minfo.fuel
         fuel_in_tank = 0 if self.wcfg["show_absolute_refilling"] else consumption.amountCurrent
         fuel_consumption = consumption.estimatedValidConsumption

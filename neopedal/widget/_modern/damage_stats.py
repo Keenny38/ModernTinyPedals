@@ -24,6 +24,8 @@ Aero, body, suspension & tyre integrity with gauges, low integrity in red.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
@@ -31,6 +33,9 @@ from ...const_common import TEXT_NA
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DamageStatsConfig
 
 ITEMS = (
     ("aero", "Aero"),
@@ -42,6 +47,8 @@ ITEMS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: DamageStatsConfig
 
     options = (
         "font_size", "layout", "decimal_places",
@@ -90,4 +97,5 @@ class Realtime(StatsMixin, ModernOverlay):
             low = value <= self.wcfg[f"low_{key}_integrity_threshold"]
             color = theme.negative if low else theme.positive
             values.append(Value(f"{value:.{self.decimals}%}", theme.negative if low else None, bar=fraction(value), bar_color=color))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

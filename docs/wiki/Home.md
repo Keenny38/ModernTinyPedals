@@ -10,9 +10,9 @@ The app is built with PySide6 (Qt 6) and runs in English or French.
 
 - **88 configurable overlays** with a modern design (rounded panels, short labels, values colored by meaning), four themes (Modern or Legacy, dark or light, with a colorblind variant), and visibility per session type or pit state. The classic look is still available (Legacy themes).
 - **Race aids**: delta graph, gap trend, pit lane helper, stint timer, spotter, race notifications, tyre temperature trend.
-- **Black box**: an all-in-one view of the four wheels, brakes, suspension, damage, fuel and energy, with an incident log.
+- **Dashboard HUD** (formerly Black box): an all-in-one view of the four wheels, brakes, suspension, damage, fuel and energy, with an incident log.
 - **Telemetry viewer** drawn by the graphics card: every lap is recorded and can be compared, with a racing line map, corner analysis ("where time is lost"), session pace, XY plots, MoTeC import and export.
-- **Race calculator**: fuel, virtual energy and tyre strategy in one page, safety car and rain scenarios, several drivers, live race replanning, a `Live` tab with every value the game gives, share codes.
+- **Race calculator**: fuel, virtual energy and tyre strategy in one page, safety car and rain scenarios, several drivers, live race replanning, a `Live` tab with every value the game gives, race plan files.
 - **Driver stats**: your lap times per track and car, compared with community LMU lap times, with progression, session history linked to the race results (class position, game version), a driver card and lap times completed from the game results files.
 - **Race results**: classification, positions lap by lap, laps and events of every session read from the game results files, with the replay of the session one click away (LMU).
 - **Le Mans Ultimate data**: chat overlay, game replays and contacts, official delta, invalid lap, team stints and more, read from the game REST API with nothing to configure.
@@ -28,12 +28,12 @@ The app is built with PySide6 (Qt 6) and runs in English or French.
 | [Installation](Installation.md) | Windows installer, moving from a portable copy, Linux, running from source, uninstalling |
 | [Game Setup](Game-Setup.md) | Le Mans Ultimate and rFactor 2 setup on Windows and Linux |
 | [Getting Started](Getting-Started.md) | First launch, moving overlays, layout editor, configuring overlays, hotkeys |
-| [Overlays](Overlays.md) | Modern and classic design, themes, visibility, the list of all overlays, Black box |
-| [Presets and Settings](Presets-and-Settings.md) | Presets, share codes, trash, backups, global config, languages |
+| [Overlays](Overlays.md) | Modern and classic design, themes, visibility, the list of all overlays, Dashboard HUD |
+| [Presets and Settings](Presets-and-Settings.md) | Presets, preset packages, trash, backups, global config, languages |
 | [Telemetry Viewer](Telemetry-Viewer.md) | Lap recording and analysis, track map viewer |
 | [Race Calculator](Race-Calculator.md) | Fuel, energy and tyre strategy, live race, Race plan overlay |
 | [Driver Stats](Driver-Stats.md) | Career, levels, progression, sessions |
-| [Race Results](Race-Results.md) | Classification, positions lap by lap, laps and events of every session |
+| [Results & Replays](Race-Results.md) | Classification, positions lap by lap, laps and events of every session, game replays linked to them |
 | [Broadcast Director](Broadcast-Director.md) | Cast a Le Mans Ultimate race: director, cameras, commentator screen, broadcast graphics for your stream |
 | [Connections](Connections.md) | Remote control, WebSocket, web dashboard, stream overlays, VR, session recorder, game replays |
 | [Updates and Security](Updates-and-Security.md) | In-app updates, release files, verifying downloads, reporting a vulnerability |

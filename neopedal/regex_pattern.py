@@ -52,6 +52,7 @@ CFG_BOOL = (
     "^check_for_updates_on_startup$|"
     "^fixed_position$|"
     "^global$|"
+    "^keep_director_and_calculator_running_while_hidden$|"
     "^minimize_to_tray$|"
     "^remember_position$|"
     "^remember_open_pages$|"
@@ -112,6 +113,7 @@ CFG_STRING = (
     "^rail_items$|"
     "^home_quick_access$|"
     "^version$|"
+    "^user_profile_[0-9]$|"  # black box user display profiles (see black_box_ui.USER_PROFILES)
     # Partial match
     "by_class|"
     "by_compound|"
@@ -225,6 +227,7 @@ ABBR_PATTERN = "|".join(
         "api",
         "dpi",
         "drs",
+        "hud",
         "ffb",
         "lmu",
         "rpm",
@@ -279,7 +282,7 @@ CHOICE_COMMON = MappingProxyType({
     CFG_LANGUAGE: LANGUAGE_NAMES,
     "^visibility_context$": ("Always", "Race", "Qualifying & Race", "Practice & Qualifying", "On Track", "In Pits"),
     "^stream_visibility$": ("Screen & Stream", "Stream Only", "Screen Only"),  # stream_overlay.STREAM_VISIBILITY
-    "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
+    "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance", "User 1", "User 2", "User 3"),
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
     "^tyre_load_display$": ("Percent", "Kilogram", "Newton"),
     "^brake_wear_display$": ("Percent", "Laps"),
@@ -288,6 +291,7 @@ CHOICE_COMMON = MappingProxyType({
     "^incident_export_format$": ("JSON", "CSV", "Both"),
     "^status_icons_side$": ("Left", "Right"),
     "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),
+    "^setting_popup_position$": ("Top", "Middle", "Bottom"),  # black box: setting change pop-up in center column
     "^scroll_direction$": ("Upward", "Downward"),  # chat: newest message at bottom (upward) or at top
     "^resize_anchor$": ("Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"),
     # Per widget unit, "Global" = use Units setting

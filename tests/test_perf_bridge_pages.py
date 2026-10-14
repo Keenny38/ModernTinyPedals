@@ -175,14 +175,14 @@ def test_option_index_built_once_per_settings_version(ui_env, monkeypatch):
 def test_replay_clock_timers_read_cached_values():
     """Replay clocks & playhead tick 4-10 times a second: values of last game answer kept in QML, not read from
     Python at each tick"""
-    for name in ("GameReplays.qml", "IncidentPanel.qml"):
+    for name in ("ReplayView.qml", "IncidentPanel.qml"):
         text = qml_text(name)
         for block in text.split("Timer {")[1:]:
             body = block.split("}", 1)[0]
             if "onTriggered" in body:
                 for role in ("replayTime", "replayRate", "timeReceived", "liveTime"):
-                    assert f"backend.{role}" not in body, (name, role)
-        assert "readonly property real timeReceived: backend.timeReceived" in text, name
+                    assert f"replays.{role}" not in body, (name, role)
+        assert "readonly property real timeReceived: replays.timeReceived" in text, name
 
 
 def test_updated_time_message_translated_from_cache(ui_env):

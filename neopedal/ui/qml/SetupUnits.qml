@@ -34,6 +34,6 @@ SetupStep {
         text: i18n.tr("Saved in the preset. Each unit can also be set on its own later.")
         color: theme.dimText
         wrapMode: Text.WordWrap
-        font.pointSize: theme.fontPoint * 0.92
+        font.pointSize: theme.fontLabel
     }
 }

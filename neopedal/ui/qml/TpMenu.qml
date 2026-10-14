@@ -8,14 +8,14 @@ Menu {
     implicitWidth: Math.max(theme.em * 13, contentItem.implicitWidth + 8)
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 120 }
-        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 120; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast }
+        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: theme.motionFast; easing.type: Easing.OutCubic }
     }
-    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 90 } }
+    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
 
     background: Rectangle {
         implicitWidth: theme.em * 13
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: theme.raised
         border.width: 1
         border.color: theme.border
@@ -54,7 +54,7 @@ Menu {
         indicator: Item {}
         arrow: Item {}
         background: Rectangle {
-            radius: theme.em * 0.4
+            radius: theme.radiusMd
             color: item.highlighted ? theme.hover : "transparent"
         }
     }

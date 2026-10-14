@@ -27,7 +27,6 @@ The navigation bar on the left gives access to pages and tools:
 | `Overlays` | Turn overlays on or off and configure them |
 | `Stats` | [Driver Stats](Driver-Stats.md) |
 | `Results` | Results of past sessions: classification, laps, sectors, incidents and penalties |
-| `Replays` | Replays saved by Le Mans Ultimate, see [Connections](Connections.md#game-replays-le-mans-ultimate) |
 | `Broadcast` | [Broadcast Director](Broadcast-Director.md) (Le Mans Ultimate) |
 | `Telemetry` | [Telemetry Viewer](Telemetry-Viewer.md) |
 | `Race` | [Race Calculator](Race-Calculator.md) |
@@ -52,7 +51,7 @@ The `Home` page shows at a glance:
 - the game state with the current session (track, session, position, lap), and a reminder of the game setup while the game is not running;
 - a one-click `Lock Overlay` / `Unlock Overlay` button;
 - the preset, overlays and modules in use, and the last session you drove;
-- **Quick Access** buttons (by default: Lap Telemetry Viewer, Race Calculator, Driver Stats Viewer, Layout Editor, Widget Performance, Game Replays, the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Create Bug Report, Check for Updates). The Module, Hotkey and Tools pages, not in the navigation bar by default, are one click away there. Use `Customize...` next to `Quick Access`, or right-click the buttons, to choose tools, pages and actions.
+- **Quick Access** buttons (by default: Lap Telemetry Viewer, Race Calculator, Driver Stats Viewer, Layout Editor, Widget Performance, Results & Replays, the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Create Bug Report, Check for Updates). The Module, Hotkey and Tools pages, not in the navigation bar by default, are one click away there. Use `Customize...` next to `Quick Access`, or right-click the buttons, to choose tools, pages and actions.
 
 ## When overlays are shown
 
@@ -106,7 +105,7 @@ One page holds the options of every overlay: the overlays on the left (by catego
 - **Search** (`Ctrl+F`): in `This overlay` or in `Every overlay`, for example `opacity` to set it for all overlays in one list. `Changed only` lists the options changed from their default (in one overlay or in all of them); the overlay list shows how many options each overlay has changed.
 - **`...` button of an option**: `Reset to Default`, `Apply to All Overlays` (the value goes to every overlay having this option: font, opacity, update interval, theme...), `Copy Option Name`.
 - **Changes stay pending** until `Apply`, for as many overlays as you like: the overlay list shows how many changes each one has, `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) and `Discard` are in the bar at the bottom. An invalid value is marked at once with the reason and blocks `Apply` (click the message to show it). `Apply` saves the preset once and restarts only the overlays you changed.
-- **Black box**: its own sections, `Advanced Options` (simple mode shows the common options), `Color Theme...` (default or colorblind safe colors) and display profile (options set by the profile are locked and say so).
+- **Dashboard HUD** (formerly Black box): its own sections, `Advanced Options` (simple mode shows the main items), `Color Theme...` (default or colorblind safe colors), display profile (options set by the profile say so; changing one switches to `Custom`) with `Save as Profile...` for your own profiles, and a click on a part of the picture shows its options.
 
 ### Find any option
 
@@ -137,7 +136,7 @@ A preset stores the layout and options of all overlays and modules. You can keep
 
 ## Hotkeys
 
-The `Hotkey` page binds keys to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Black box incident, bring the main window in front of the game and focus it, even from the tray (`show_main_window`), drive the [Broadcast Director](Broadcast-Director.md#hotkeys) (`director_*` commands), turn any overlay or module on or off, load a given preset, restart or quit the app.
+The `Hotkey` page binds keys to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Dashboard HUD incident, bring the main window in front of the game and focus it, even from the tray (`show_main_window`), drive the [Broadcast Director](Broadcast-Director.md#hotkeys) (`director_*` commands), turn any overlay or module on or off, load a given preset, restart or quit the app.
 
 1. Click the `Disabled` button to turn global hotkeys on (it then shows `Enabled`).
 2. Click the key button of a command and press a key or key combination (`Clear` removes it, `Clear All` removes every binding). Preset commands also ask which preset to load.

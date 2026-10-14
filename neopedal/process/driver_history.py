@@ -76,10 +76,11 @@ def same_track(first: str, second: str) -> bool:
 class DriverHistory:
     """Races of every driver (thread safe: scan in a worker thread, read from the page)"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._files: dict[str, tuple[tuple[int, float], dict[str, RaceRecord]]] = {}  # path: stamp, driver key
         self._drivers: dict[str, list[RaceRecord]] = {}
+        self._generation = 0  # cleared while a scan runs: its tables dropped
         self.version = 0
 
     def scan(self, folders: Sequence[str]) -> bool:
@@ -87,6 +88,7 @@ class DriverHistory:
         paths = [path for folder in folders for path in rf.results_files(folder) if race_file(path)][:MAX_FILES]
         with self._lock:
             known = dict(self._files)
+            generation = self._generation
         files: dict[str, tuple[tuple[int, float], dict[str, RaceRecord]]] = {}
         changed = False
         for path in paths:
@@ -111,6 +113,8 @@ class DriverHistory:
             for driver_records in drivers.values():
                 driver_records.sort(key=lambda record: record.time, reverse=True)
             with self._lock:
+                if generation != self._generation:  # cleared meanwhile (page closed): nothing kept
+                    return False
                 self._files = files
                 self._drivers = drivers
                 self.version += 1
@@ -120,7 +124,7 @@ class DriverHistory:
     def read(path: str) -> dict[str, RaceRecord]:
         """Race of every driver of a file, empty if not readable (being written: read again once changed)"""
         try:
-            result = rf.read_results(path)
+            result = rf.read_results(path, keep=False)  # bulk scan: only records kept
         except (OSError, ValueError):
             return {}
         if result.kind != "Race" or result.most_laps <= 0:
@@ -172,8 +176,10 @@ class DriverHistory:
                 behind += 1
         return ahead, behind
 
-    def clear(self):
+    def clear(self) -> None:
+        """Tables released (Broadcast Director page closed), read again on next scan"""
         with self._lock:
+            self._generation += 1
             self._files = {}
             self._drivers = {}
             self.version += 1

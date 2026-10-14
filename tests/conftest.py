@@ -124,6 +124,17 @@ def offline_track_geometry(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def offline_rest_cache(monkeypatch):
+    """Shared game REST cache never asks a running game, no answer carried from one test to the next"""
+    from neopedal.game_rest_cache import rest_cache
+
+    monkeypatch.setattr(rest_cache, "fetch", lambda *args, **kwargs: (0, b""))
+    rest_cache.forget()
+    yield
+    rest_cache.forget()
+
+
+@pytest.fixture(autouse=True)
 def offline_game_images(monkeypatch):
     """Car brand & circuit pictures never asked to a running game in tests, fetch thread ended after each test
 
@@ -228,6 +239,77 @@ class _FakeReader:
         group = _FakeGroup(APIDataReader.__annotations__.get(name))
         setattr(self, name, group)  # cache, so the same object is returned next time
         return group
+
+
+class ContextSwap:
+    """App globals (neopedal.context.GLOBALS) replaced by fakes in every loaded neopedal module & the default
+    context, all put back by restore (modules imported meanwhile too): no fake left behind for the next test"""
+
+    def __init__(self):
+        self.swapped: list[tuple[object, str, object]] = []  # module, name, real value
+        self.fakes: dict[int, tuple[object, object]] = {}  # id of fake: fake (kept alive), real value
+        self.previous = None
+        self.active = False
+
+    def use(self, **fakes):
+        """Fakes given by context field name (api, cfg, minfo, mctrl, wctrl, octrl): context of the test returned"""
+        from neopedal import context
+
+        unknown = set(fakes) - set(context.GLOBALS)
+        if unknown:
+            raise TypeError(f"not app context fields: {sorted(unknown)}")
+        real = context.real_context()
+        for name, fake in fakes.items():
+            value = getattr(real, name)
+            self.fakes[id(fake)] = (fake, value)
+            for module in _app_modules():
+                for attribute, current in list(vars(module).items()):
+                    if current is value:
+                        setattr(module, attribute, fake)
+                        self.swapped.append((module, attribute, value))
+        ctx = real.with_(**fakes)
+        previous = context.set_app_context(ctx)
+        if not self.active:
+            self.previous, self.active = previous, True
+        return ctx
+
+    def restore(self):
+        from neopedal import context
+
+        for module, attribute, value in reversed(self.swapped):
+            setattr(module, attribute, value)
+        for module in _app_modules():  # imported during the test: bound the fake
+            for attribute, current in list(vars(module).items()):
+                pair = self.fakes.get(id(current))
+                if pair is not None and pair[0] is current:
+                    setattr(module, attribute, pair[1])
+        if self.active:
+            context.set_app_context(self.previous)
+        self.swapped.clear()
+        self.fakes.clear()
+        self.active = False
+
+
+def _app_modules():
+    return [module for name, module in list(sys.modules.items())
+            if module is not None and (name == "neopedal" or name.startswith("neopedal."))]
+
+
+@pytest.fixture
+def app_ctx():
+    """Fake app objects for a test: `ctx = app_ctx(mctrl=fake, wctrl=other)` swaps the globals everywhere
+    (module globals of every neopedal module, default app_context()) and puts the real ones back after the test,
+    modules imported meanwhile included. Prefer it to monkeypatching one module's copy of a global: code reading
+    the same object from another module would still reach the real one (real overlays or modules started)."""
+    swap = ContextSwap()
+    yield swap.use
+    swap.restore()
+
+
+@pytest.fixture
+def fake_context(app_ctx):
+    """Same as app_ctx"""
+    return app_ctx
 
 
 @pytest.fixture(scope="session")

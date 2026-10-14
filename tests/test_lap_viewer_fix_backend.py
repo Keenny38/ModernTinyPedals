@@ -235,16 +235,16 @@ def test_track_change_resets_analysis(backend):
     write_other_track(cfg.path.telemetry.rstrip("/"), "Other - GT3", 4, 89.0, START + 400)
     selected = []
     backend.selectionChanged.connect(lambda: selected.append(backend.selectedCorner))
-    backend._align_apex, backend._selected_corner, backend._map_range = 1500.0, 1, (100.0, 200.0)
-    backend._compare_key, backend._session_key = lap_path(backend, 2), "session"
+    backend.charts.align_apex, backend._selected_corner, backend._map_range = 1500.0, 1, (100.0, 200.0)
+    backend.cornerTable.compare_key, backend.session._key = lap_path(backend, 2), "session"
     backend.refresh()  # same track: kept
     wait_loaded(backend)
-    assert backend._align_apex == 1500.0 and backend._selected_corner == 1 and backend._map_range == (100.0, 200.0)
+    assert backend.charts.align_apex == 1500.0 and backend._selected_corner == 1 and backend._map_range == (100.0, 200.0)
     backend.load_track("Other - GT3")
     wait_loaded(backend)
-    assert backend._align_apex == -1.0 and backend._map_range == (-1.0, -1.0) and not backend.data.offsets
-    assert backend._compare_key == "" and backend._session_key == "" and selected == [-1]
-    assert backend.alignment == {}
+    assert backend.charts.align_apex == -1.0 and backend._map_range == (-1.0, -1.0) and not backend.data.offsets
+    assert backend.cornerTable.compare_key == "" and backend.session._key == "" and selected == [-1]
+    assert backend.charts.alignment == {}
 
 
 # --- J22 & J40. Deletion while loading, undo restores whole deletion & reference
@@ -439,16 +439,16 @@ def test_partial_changes_never_redraw_whole_page(backend):
     column = backend.panels[0]["column"]
     assert column in CHANNEL_MAP
     backend.setPanelWeight(column, 2.0)
-    backend.setPanelAutoscale(column, True)
+    backend.charts.setPanelAutoscale(column, True)
     assert sent == ["panelsChanged", "panelsChanged"]
     sent.clear()
-    backend.setCornerSort("loss")
+    backend.cornerTable.setSort("loss")
     assert sent == ["cornersChanged"]
     sent.clear()
     backend.map_rotated()
     assert "chartChanged" not in sent
     sent.clear()
-    backend.alignBraking(-1)  # not aligned: nothing changed
+    backend.charts.alignBraking(-1)  # not aligned: nothing changed
     assert sent == []
     sent.clear()
     backend.chartChanged.emit()  # whole page: every part told too

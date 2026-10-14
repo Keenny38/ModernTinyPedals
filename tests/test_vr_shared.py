@@ -13,13 +13,14 @@ import struct
 import sys
 import time
 import types
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
-from neopedal import app_signal, vr_overlay, vr_shared
+from neopedal import app_signal, realtime_state, vr_overlay, vr_shared
 from neopedal.setting import cfg
 from neopedal.vr_overlay import VROverlay, fit_image
 
@@ -72,7 +73,11 @@ def test_protocol_matches_layer_header():
     assert vr_shared.VERSION == 2
     assert [fields[name] for name in ("canvas_width", "canvas_height", "tile_count")] == [
         vr_shared.OFFSET_CANVAS, vr_shared.OFFSET_CANVAS + 4, vr_shared.OFFSET_CANVAS + 8]
-    assert fields["reserved_app"] == vr_shared.OFFSET_CANVAS + 12 and fields["layer_heartbeat_ms"] == 128
+    # Dirty rect (bytes reserved by earlier builds of version 2): "<6I" from OFFSET_DIRTY
+    dirty = ["dirty_flags", "dirty_base_serial", "dirty_x", "dirty_y", "dirty_width", "dirty_height"]
+    assert [fields[name] for name in dirty] == list(range(vr_shared.OFFSET_DIRTY, vr_shared.OFFSET_DIRTY + 24, 4))
+    assert vr_shared.OFFSET_DIRTY == vr_shared.OFFSET_CANVAS + 12 and defines["TPVR_DIRTY_RECT"] == vr_shared.DIRTY_RECT
+    assert fields["reserved_app"] == vr_shared.OFFSET_DIRTY + 24 and fields["layer_heartbeat_ms"] == 128
     assert list(tile_fields) == ["atlas_x", "atlas_y", "width", "height", "canvas_x", "canvas_y", "reserved"]
     assert list(tile_fields.values()) == [0, 4, 8, 12, 16, 20, 24]
     assert struct.calcsize(vr_shared.TILE_FORMAT) == vr_shared.TILE_SIZE
@@ -472,7 +477,7 @@ def test_loadable_manifest_ascii_path(tmp_path, monkeypatch):
     # No 8.3 names (disabled on the volume): copied to the first writable ASCII folder
     monkeypatch.setattr(vr_shared, "short_path", lambda path: path)
     read_only = str(tmp_path / "read_only")
-    writable = str(tmp_path / "ProgramData" / "ModernTinyPedals")
+    writable = str(tmp_path / "ProgramData" / "NeoPedal")
     real_mkdtemp = vr_shared.tempfile.mkdtemp
 
     def mkdtemp(prefix, dir):
@@ -506,6 +511,26 @@ def test_remove_old_copies_only_in_copy_folders(tmp_path):
     assert vr_shared.remove_old_copies(current, other, roots=[str(root)]) == 1
     assert sorted(entry.name for entry in root.iterdir()) == ["current"]
     assert (tmp_path / "elsewhere" / "sibling").is_dir()  # not a copy folder: untouched
+
+
+def test_remove_legacy_copies_with_emptied_folders(tmp_path, monkeypatch):
+    """Copies of versions until 0.23.0 (ModernTinyPedals folder): all removed once the new copy is registered,
+    folders removed only once empty (another user's copies kept)"""
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "ProgramData"))
+    monkeypatch.setenv("PUBLIC", str(tmp_path / "Public"))
+    monkeypatch.setenv("SYSTEMDRIVE", str(tmp_path / "missing_drive"))
+    roots = vr_shared.ascii_layer_roots(vr_shared.LEGACY_LAYER_COPY_FOLDER)
+    assert all(vr_shared.LEGACY_LAYER_COPY_FOLDER in root for root in roots)
+    assert all(vr_shared.LAYER_COPY_FOLDER in root for root in vr_shared.ascii_layer_roots())
+    make_layer(Path(roots[0], "old_a"))
+    make_layer(Path(roots[0], "old_b"))
+    make_layer(Path(roots[1], "old"))
+    other_user = make_layer(Path(roots[1]).parent / "other_user" / "old")
+    assert vr_shared.remove_legacy_copies() == 3
+    assert not (tmp_path / "ProgramData" / vr_shared.LEGACY_LAYER_COPY_FOLDER).exists()  # every folder emptied
+    assert os.path.isfile(other_user) and not os.path.exists(roots[1])
+    assert (tmp_path / "ProgramData").is_dir()  # base folder never removed
+    assert vr_shared.remove_legacy_copies() == 0  # nothing left: no error
 
 
 def test_register_creates_missing_key(tmp_path):
@@ -639,7 +664,8 @@ def test_installer_never_closes_openxr_games():
     assert re.search(r"^\[UninstallDelete\]$", script, re.MULTILINE)
     assert "RegDeleteValue(HKCU, OpenXRLayersKey" in script
     # ASCII copies (non-ASCII app folder) removed too; entries of deleted files (8.3 paths) once files are gone
-    assert f'Name: "{{commonappdata}}\\ModernTinyPedals\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
+    for copy_folder in (vr_shared.LAYER_COPY_FOLDER, vr_shared.LEGACY_LAYER_COPY_FOLDER):
+        assert f'Name: "{{commonappdata}}\\{copy_folder}\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
     assert "usPostUninstall" in script and "not FileExists(Names[I])" in script
     assert vr_shared.LAYER_INSTALL_FOLDER != "lib"
 
@@ -653,15 +679,19 @@ def test_installer_removes_every_ascii_layer_copy(monkeypatch):
     monkeypatch.setenv("PUBLIC", "C:\\Users\\Public")
     monkeypatch.setenv("SYSTEMDRIVE", "C:")
     monkeypatch.setattr(vr_shared.os.path, "join", ntpath.join)  # Windows paths on any OS
-    roots = vr_shared.ascii_layer_roots()
-    # Each root is <base>\ModernTinyPedals\<install folder>\<user>: base matched by the uninstaller
-    suffix = f"ModernTinyPedals\\{vr_shared.LAYER_INSTALL_FOLDER}\\"
-    assert f"LayerCopyFolder = '{suffix}';" in script
-    assert [root.rsplit("\\", 1)[0] + "\\" for root in roots] == [
-        "C:\\ProgramData\\" + suffix, "C:\\Users\\Public\\" + suffix, "C:\\" + suffix]
     code = script[script.index("procedure CurUninstallStepChanged"):]
-    for base in ("ExpandConstant('{commonappdata}')", "GetEnv('PUBLIC')", "ExpandConstant('{sd}')"):
-        assert f"AddBackslash({base}) + LayerCopyFolder" in code
+    # Each root is <base>\NeoPedal\<install folder>\<user> (ModernTinyPedals until 0.23.0): base matched by
+    # the uninstaller
+    for constant, copy_folder in (("LayerCopyFolder", vr_shared.LAYER_COPY_FOLDER),
+                                  ("LegacyLayerCopyFolder", vr_shared.LEGACY_LAYER_COPY_FOLDER)):
+        roots = vr_shared.ascii_layer_roots(copy_folder)
+        suffix = f"{copy_folder}\\{vr_shared.LAYER_INSTALL_FOLDER}\\"
+        assert f"  {constant} = '{suffix}';" in script
+        assert [root.rsplit("\\", 1)[0] + "\\" for root in roots] == [
+            "C:\\ProgramData\\" + suffix, "C:\\Users\\Public\\" + suffix, "C:\\" + suffix]
+        for base in ("ExpandConstant('{commonappdata}')", "GetEnv('PUBLIC')", "ExpandConstant('{sd}')"):
+            assert f"AddBackslash({base}) + {constant}" in code
+    assert "for J := 1 to 6 do" in code and "for J := 0 to 6 do" in code  # every root of SetArrayLength(Roots, 7)
     assert "DelTree(RemoveBackslash(Roots[J]), True, True, True)" in code
     assert "Pos(Lowercase(Roots[J]), Name) = 1" in code  # entry removed by folder, file deleted or not
     assert code.index("DelTree(") < code.index("RegGetValueNames(")
@@ -742,6 +772,7 @@ class Env:
         monkeypatch.setattr(vr_shared, "tick_ms", lambda: self.now)
         monkeypatch.setattr(vr_overlay, "steamvr_running", lambda: self.steamvr)
         monkeypatch.setattr(vr_overlay, "SteamVRCheck", SyncSteamVRCheck)
+        monkeypatch.setattr(realtime_state, "shown", True)  # driving: overlays updated (not paused)
 
     def frame(self):
         return frame_fields(self.buffer)
@@ -1131,6 +1162,7 @@ def test_steamvr_closed_then_restarted(env, monkeypatch):
 
         control._overlay.setOverlayRaw = closed
         widget.setStyleSheet("background: blue;")
+        env.now += vr_overlay.STEAMVR_MIN_INTERVAL_MS  # image sent again after the rate limit
         control.update_overlay()
         assert control._overlay is None and control.running and control._timer.isActive()  # OpenXR kept
         assert not env.errors  # closing SteamVR is not an error
@@ -1183,6 +1215,7 @@ def test_steamvr_process_checked_in_background(env, monkeypatch):
         # SteamVR closed while the OpenXR layer draws: no process scan until it stops drawing
         control._overlay.setOverlayRaw = None  # raises TypeError: SteamVR overlay stopped
         widget.setStyleSheet("background: blue;")
+        env.now += vr_overlay.STEAMVR_MIN_INTERVAL_MS  # image sent again after the rate limit
         write_layer_status(env.buffer, env.now, frames=9)
         control.update_overlay()
         write_layer_status(env.buffer, env.now, frames=12)
@@ -1305,6 +1338,7 @@ def test_steamvr_running(monkeypatch):
         def __init__(self, name):
             self.info = {"name": name}
 
+    monkeypatch.setattr(vr_overlay, "process_names_windows", lambda: None)  # no snapshot: psutil
     psutil = types.ModuleType("psutil")
     psutil.process_iter = lambda attrs: [Process("explorer.exe"), Process("vrserver.exe")]
     monkeypatch.setitem(sys.modules, "psutil", psutil)

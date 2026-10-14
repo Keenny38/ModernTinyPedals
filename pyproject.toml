@@ -78,6 +78,17 @@ exclude = ["pyLMUSharedMemory/", "pyRfactor2SharedMemory/", "tests/"]
 follow_imports = "silent"
 # Every error code is checked. Black box mixins declare the attributes they read from the widget class.
 
+[[tool.mypy.overrides]]
+# Widget settings are typed per widget (template.widget_config_types): option keys built at runtime
+# (f"show_{key}") can't be checked, read as Any; literal keys are still checked
+module = ["neopedal.widget.*"]
+disable_error_code = ["literal-required"]
+
+[[tool.mypy.overrides]]
+# Game data readers, data processing & user files: every function annotated
+module = ["neopedal.adapter.*", "neopedal.process.*", "neopedal.userfile.*"]
+disallow_untyped_defs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Manual tests need a running sim (pytest -m manual), benchmark runs separately (pytest -m benchmark)

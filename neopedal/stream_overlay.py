@@ -61,22 +61,25 @@ import sys
 import threading
 import time
 import zlib
+from collections.abc import Callable
 from html import escape
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTimer
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_file import ConfigType, FontFile
+from .formatter import driver_display_name
 from .i18n import current_language, tr
 from .log_handler import ErrorThrottle
 from .process import results_file as rf
 from .process import results_text as rt
 from .setting import cfg
 from .stream_director import MAX_LAYOUT_BODY, PlacementStore
+from .template.setting_status_colors import status_css
 from .userfile.custom_image import brand_logo_file
 from .userfile.game_images import images
 
@@ -99,6 +102,7 @@ OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
 TOKEN_BYTES = 18  # access token: 24 url-safe characters
+LIST_SECONDS = 1.0  # overlay windows & screens looked up again at least this often while captured
 
 
 def layout_section(crop: str) -> str:
@@ -150,15 +154,59 @@ def image_checksum(image: QImage) -> int:
     return zlib.crc32(pixels, image.width() << 16 | image.height())
 
 
+def backing_checksum(widget: QWidget) -> int | None:
+    """Checksum of overlay window image as last painted, read in place from window backing store (no copy),
+    same as image_checksum of window_image; None if not available (window_image renders it again)"""
+    store = widget.backingStore()
+    device = store.paintDevice() if store is not None else None
+    if not isinstance(device, QImage) or device.isNull() or device.depth() != 32:
+        return None
+    ratio = device.devicePixelRatio()
+    width, height = round(widget.width() * ratio), round(widget.height() * ratio)
+    if not (0 < width <= device.width() and 0 < height <= device.height()):
+        return None
+    line = width * 4
+    stride = device.bytesPerLine()
+    pixels = memoryview(device.constBits())[:device.sizeInBytes()]  # type: ignore[arg-type]
+    checksum = width << 16 | height
+    if stride == line:
+        return zlib.crc32(pixels[:line * height], checksum)
+    for start in range(0, stride * height, stride):
+        checksum = zlib.crc32(pixels[start:start + line], checksum)
+    return checksum
+
+
+def overlay_windows() -> list[QWidget]:
+    """Overlay windows (shown or not)"""
+    return [widget for widget in QApplication.topLevelWidgets() if isinstance(getattr(widget, "widget_name", None), str)]
+
+
+def shown_overlays(windows: list[QWidget]) -> list[tuple[str, QWidget]]:
+    """Overlay windows of list shown now & shown on stream: (widget name, window)"""
+    overlays = []
+    for widget in windows:
+        try:
+            name = getattr(widget, "widget_name", None)  # closed overlay lost its attributes
+            wcfg = getattr(widget, "wcfg", None)
+            if isinstance(name, str) and wcfg is not None and shown_on_stream(wcfg) and widget.isVisible():
+                overlays.append((name, widget))
+        except RuntimeError:  # window deleted since listed
+            continue
+    return overlays
+
+
 def stream_overlays() -> list[tuple[str, QWidget]]:
     """Overlay windows shown now & shown on stream: (widget name, window)"""
-    overlays = []
-    for widget in QApplication.topLevelWidgets():
-        name = getattr(widget, "widget_name", None)  # closed overlay lost its attributes
-        wcfg = getattr(widget, "wcfg", None)
-        if isinstance(name, str) and wcfg is not None and shown_on_stream(wcfg) and widget.isVisible():
-            overlays.append((name, widget))
-    return overlays
+    return shown_overlays(QApplication.topLevelWidgets())
+
+
+def active_overlays_key() -> tuple | None:
+    """Running overlay instances (started, stopped or reloaded: windows listed again), None if unknown"""
+    control = sys.modules.get(f"{__package__}.module_control")
+    wctrl = getattr(control, "wctrl", None)
+    if wctrl is None:
+        return None
+    return tuple(id(instance) for instance in wctrl.active_modules.values())
 
 
 def stream_opacity(widget: QWidget) -> float:
@@ -196,30 +244,72 @@ def paint_serial(widget: QWidget) -> int | None:
 
 
 class OverlayCapture(QObject):
-    """Overlay images copied while a source is watching (GUI thread), handed to frame store"""
+    """Overlay images copied while a source is watching (GUI thread), handed to frame store
+
+    Timer runs only while watched: started by a frames request (wake, queued from a server thread), stopped once
+    no source asked frames for WATCH_SECONDS.
+    """
+
+    wake = Signal()  # a source asks frames (any thread)
 
     def __init__(self, store: FrameStore):
         super().__init__()
         self.store = store
+        self._enabled = False  # started (capture wanted), timer running only while watched
+        self.wake.connect(self.__wake)
         self._checksums: dict[str, int] = {}
         self._serials: dict[str, tuple[int, int]] = {}  # window id & paint serial of last copy
         self._canvas_key: tuple | None = None
+        self._canvas_serials: tuple | None = None  # window ids & paint serials canvas was last checked with
         self._canvas: tuple[QPoint, float, tuple[int, int]] = (QPoint(0, 0), 1.0, (0, 0))
+        self._windows: list[QWidget] | None = None  # overlay windows, listed again when overlays change
+        self._windows_key: tuple | None = None
+        self._windows_time = 0.0
+        self._screens_key: tuple = ()
+        self._screens_time = -LIST_SECONDS
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.capture)
 
     @property
     def running(self) -> bool:
+        """Capture started (timer itself only active while a source is watching)"""
+        return self._enabled
+
+    @property
+    def capturing(self) -> bool:
         return self._timer.isActive()
 
     def start(self, frame_rate: int):
-        self._timer.start(max(int(1000 / min(max(frame_rate, 1), 60)), 16))
+        self._enabled = True
+        self._timer.setInterval(max(int(1000 / min(max(frame_rate, 1), 60)), 16))
+        if self.store.watched() and not self._timer.isActive():
+            self._timer.start()
+
+    def __wake(self):
+        if self._enabled and not self._timer.isActive():
+            self._timer.start()
+            self.capture()  # first frame at once
 
     def stop(self):
+        self._enabled = False
         self._timer.stop()
         self._checksums.clear()
         self._serials.clear()
         self._canvas_key = None
+        self._canvas_serials = None
+        self._windows = None
+        self._screens_time = -LIST_SECONDS
+
+    def overlays(self) -> list[tuple[str, QWidget]]:
+        """Overlay windows shown on stream now, windows listed again when overlays started or stopped,
+        or every LIST_SECONDS (shown & stream visibility checked each time)"""
+        now = time.monotonic()
+        key = active_overlays_key()
+        if self._windows is None or key != self._windows_key or now - self._windows_time >= LIST_SECONDS:
+            self._windows = overlay_windows()
+            self._windows_key = key
+            self._windows_time = now
+        return shown_overlays(self._windows)
 
     def capture(self):
         watched = self.store.watched()
@@ -228,8 +318,10 @@ class OverlayCapture(QObject):
                 self._checksums.clear()
                 self._serials.clear()
                 self.store.clear()
+            self._windows = None
+            self._timer.stop()  # started again by the next frames request (wake)
             return
-        overlays = stream_overlays()
+        overlays = self.overlays()
         everything = LAYOUT in watched
         origin, ratio, canvas = self.canvas([widget for _, widget in overlays])
         images: dict[str, QImage] = {}
@@ -240,11 +332,19 @@ class OverlayCapture(QObject):
             serial = paint_serial(widget)
             last = self._serials.get(name)
             if serial is None or last != (id(widget), serial) or name not in self._checksums:
-                image = window_image(widget)  # changed since last copy (or not counted)
-                if image is None:
-                    continue
-                checksum = image_checksum(image)
+                # Changed since last copy (or not counted): checksum in place, copied only when it differs
+                checksum = backing_checksum(widget)
+                image = None
+                if checksum is None:
+                    image = window_image(widget)
+                    if image is None:
+                        continue
+                    checksum = image_checksum(image)
                 if self._checksums.get(name) != checksum:
+                    if image is None:
+                        image = window_image(widget)
+                        if image is None:
+                            continue
                     self._checksums[name] = checksum
                     images[name] = image
                 if serial is None:
@@ -261,8 +361,22 @@ class OverlayCapture(QObject):
         self.store.publish(images, shown, canvas)
 
     def canvas(self, widgets: list[QWidget]) -> tuple[QPoint, float, tuple[int, int]]:
-        """Canvas origin, scale & size (screen pixels), found again when an overlay moved or screens changed"""
-        key = (tuple(widget.geometry().getRect() for widget in widgets), screens_key())
+        """Canvas origin, scale & size (screen pixels), found again when an overlay moved or screens changed
+
+        Overlay places looked at only when a window paint serial changed (moves & resizes count),
+        screens every LIST_SECONDS.
+        """
+        now = time.monotonic()
+        screens_changed = now - self._screens_time >= LIST_SECONDS
+        if screens_changed:
+            self._screens_time = now
+            self._screens_key = screens_key()
+        serials = tuple((id(widget), paint_serial(widget)) for widget in widgets)
+        if (not screens_changed and serials == self._canvas_serials and self._canvas_key is not None
+                and all(serial is not None for _, serial in serials)):
+            return self._canvas
+        self._canvas_serials = serials
+        key = (tuple(widget.geometry().getRect() for widget in widgets), self._screens_key)
         if key != self._canvas_key:
             screen = canvas_screen(widgets)
             if screen is not None:
@@ -319,15 +433,20 @@ class FrameStore:
         self._shown: tuple[Placement, ...] = ()
         self._canvas = (0, 0)
         self._requests: dict[str, float] = {}
+        self.on_watch: Callable[[], Any] | None = None  # called when a view not watched asks frames (any thread)
 
     def touch(self, view: str):
         """View asked frames now: overlays captured while watched"""
         now = time.monotonic()
         with self._condition:
-            if view not in self._requests and len(self._requests) >= MAX_VIEWS:
+            last = self._requests.get(view)
+            if last is None and len(self._requests) >= MAX_VIEWS:
                 oldest = min(self._requests, key=lambda name: self._requests[name])
                 del self._requests[oldest]
             self._requests[view] = now
+        on_watch = self.on_watch
+        if on_watch is not None and (last is None or now - last >= WATCH_SECONDS):
+            on_watch()  # capture started if stopped (nobody watched)
 
     def watched(self) -> set[str]:
         now = time.monotonic()
@@ -523,7 +642,7 @@ def results_snapshot(cache: ResultsCache, kind: str) -> dict[str, Any]:
             "cls": entry.car_class,
             "color": rt.class_color(entry.car_class, classes),
             "number": entry.number,
-            "driver": entry.name,
+            "driver": driver_display_name(entry.name),
             "team": entry.team or entry.vehicle,
             "car": entry.car,
             "laps": entry.laps_completed,
@@ -828,6 +947,7 @@ class StreamOverlay:
             logger.info("ENABLED: stream overlay on http://%s:%s", *address)
         if self._capture is None:
             self._capture = OverlayCapture(self.store)
+            self.store.on_watch = self._capture.wake.emit  # queued to GUI thread from server threads
         self._capture.start(int(setting["frame_rate"]))
 
     def suspend(self):
@@ -938,7 +1058,8 @@ def editor_labels(view: str) -> dict[str, Any]:
 def results_html() -> str:
     return (RESULTS_HTML
             .replace("@@lang@@", escape(page_language()))
-            .replace("@@title@@", escape(tr("Race Results"))))
+            .replace("@@title@@", escape(tr("Race Results")))
+            .replace("@@status@@", status_css()))
 
 
 # One overlay or whole layout: images of frames bundle drawn on a canvas (transparent page).
@@ -950,6 +1071,7 @@ canvas{display:block}.fit{width:100vw;height:100vh;object-fit:contain;object-pos
 body.edit{background:#11141a;font:500 13px "Segoe UI",sans-serif;color:#e9ecf1}
 #stage{position:absolute;left:0;top:0;transform-origin:0 0;display:none;background:#1b1f27}
 body.edit #stage{display:block}
+#layers{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden}#layers canvas{position:absolute;display:block}
 #area{position:absolute;outline:3px solid #facc15;box-shadow:0 0 0 100000px rgba(0,0,0,.45);pointer-events:none;z-index:2}
 .item{position:absolute;cursor:move;outline:2px dashed rgba(250,204,21,.6);transform-origin:0 0}
 .item.sel{outline:3px solid #facc15;z-index:3}
@@ -1007,21 +1129,50 @@ function placeOf(entry,box,list){
   if(place)return [place[0]*width,place[1]*height,place[2]];
   return [entry.x-left,entry.y-top,1];
 }
+// Layout: one canvas per overlay placed with CSS (only overlays with a new image drawn again), the whole layer
+// scaled to the page as the single canvas was (fit: contain, left top)
+const layers=new Map();
+let layerStage=null;
+function drawLayout(){
+  const box=area(),width=box[2],height=box[3];
+  if(!layerStage){layerStage=document.createElement("div");layerStage.id="layers";document.body.append(layerStage);canvas.style.display="none"}
+  layerStage.style.width=width+"px";layerStage.style.height=height+"px";
+  const factor=fit&&width>0&&height>0?Math.min(innerWidth/width,innerHeight/height):1;
+  layerStage.style.transform=factor===1?"":"scale("+factor+")";
+  const names=new Set();
+  let order=0;
+  for(const entry of shown){
+    const image=images.get(entry.name);
+    if(!image)continue;
+    names.add(entry.name);
+    let layer=layers.get(entry.name);
+    if(!layer){layer={view:document.createElement("canvas"),image:null,place:""};layers.set(entry.name,layer)}
+    const view=layer.view;
+    if(layer.image!==image||view.width!==entry.w||view.height!==entry.h){
+      if(view.width!==entry.w||view.height!==entry.h){view.width=entry.w;view.height=entry.h}
+      const draw2=view.getContext("2d");draw2.clearRect(0,0,entry.w,entry.h);draw2.drawImage(image,0,0);layer.image=image}
+    const [x,y,size]=placeOf(entry,box),place=[x,y,entry.w*size,entry.h*size,entry.opacity].join(",");
+    if(layer.place!==place){layer.place=place;view.style.left=x+"px";view.style.top=y+"px";
+      view.style.width=entry.w*size+"px";view.style.height=entry.h*size+"px";view.style.opacity=entry.opacity}
+    if(layerStage.children[order]!==view)layerStage.insertBefore(view,layerStage.children[order]||null);
+    order++;
+  }
+  for(const [name,layer] of layers)if(!names.has(name)){layer.view.remove();layers.delete(name)}
+}
 function draw(){
   if(edit){drawEditor();return}
   const layout=VIEW==="layout";
+  if(layout){drawLayout();return}
   const first=shown[0];
-  const box=area();
-  const width=Math.round(layout?box[2]:(first?first.w:0)*scale);
-  const height=Math.round(layout?box[3]:(first?first.h:0)*scale);
+  const width=Math.round((first?first.w:0)*scale);
+  const height=Math.round((first?first.h:0)*scale);
   if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height}
   ctx.clearRect(0,0,canvas.width,canvas.height);
   for(const entry of shown){
     const image=images.get(entry.name);
     if(!image)continue;
     ctx.globalAlpha=entry.opacity;
-    if(layout){const [x,y,size]=placeOf(entry,box);ctx.drawImage(image,x,y,entry.w*size,entry.h*size)}
-    else ctx.drawImage(image,0,0,entry.w*scale,entry.h*scale);
+    ctx.drawImage(image,0,0,entry.w*scale,entry.h*scale);
   }
   ctx.globalAlpha=1;
 }
@@ -1098,7 +1249,7 @@ if(edit){
       hint.textContent=response.ok?LABELS.saved:LABELS.notSaved;if(response.ok)places={...editPlaces}}catch(error){hint.textContent=LABELS.notSaved}};
   addEventListener("resize",()=>drawEditor());
   addEventListener("keydown",event=>{if(event.key==="h"||event.key==="H")document.body.classList.toggle("bare")});
-}
+}else if(VIEW==="layout"&&fit)addEventListener("resize",()=>draw());
 async function run(){
   for(;;){
     try{
@@ -1141,7 +1292,7 @@ RESULTS_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-
 @font-face{font-family:"Barlow Semi Condensed";font-weight:600;src:url(/fonts/BarlowSemiCondensed-SemiBold.ttf)}
 @font-face{font-family:"Barlow Semi Condensed";font-weight:700;src:url(/fonts/BarlowSemiCondensed-Bold.ttf)}
 :root{--panel:rgba(12,14,20,.9);--line:rgba(255,255,255,.07);--text:#f4f6fa;--dim:rgba(232,236,244,.62);
---accent:#e5383b;--purple:#c084fc;--gain:#4ade80;--loss:#f87171;--row:3.9vh}
+--accent:#e5383b;@@status@@--row:3.9vh}
 *{box-sizing:border-box}
 html,body{margin:0;background:transparent;overflow:hidden;height:100%}
 body{font-family:"Barlow Semi Condensed","Segoe UI",sans-serif;color:var(--text);font-weight:500;
@@ -1166,7 +1317,7 @@ border-bottom:1px solid var(--line)}
 .row{height:var(--row);border-bottom:1px solid var(--line);opacity:0;transform:translateX(-1.4vh);
 transition:opacity .35s ease,transform .35s ease}
 .row.on{opacity:1;transform:none}
-.row.me{background:linear-gradient(90deg,rgba(229,56,59,.32),rgba(229,56,59,.08))}
+.row.me{background:linear-gradient(90deg,rgba(56,189,248,.3),rgba(56,189,248,.07))}  /* player: --player */
 .pos{font-weight:700;font-size:calc(var(--row)*.62);text-align:right}
 .bar{height:62%;border-radius:.3vh}
 .num{color:var(--dim)}

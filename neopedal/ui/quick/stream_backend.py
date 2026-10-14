@@ -26,12 +26,10 @@ Sources watched now are shown live (asked again every second while page is shown
 
 from __future__ import annotations
 
-import json
-import os
 from contextlib import suppress
 from typing import Any
 
-from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -50,8 +48,9 @@ from ...stream_overlay import (
     streamoverlay,
 )
 from ...template.setting_widget import WIDGET_FILENAME
-from ...userfile import atomic_write
+from . import page_settings
 from .models import DictListModel
+from .page_backend import PageBackend
 
 SETTINGS_FILE = "stream_overlays.json"  # page settings (race results source options), user config folder
 REFRESH_MS = 1000
@@ -65,22 +64,9 @@ OVERLAY_ROLES = ("key", "label", "visibility", "sizeText", "live", "shown")
 TIMES = chr(0xD7)  # multiplication sign
 
 
-def settings_path() -> str:
-    return os.path.join(cfg.path.config, SETTINGS_FILE)
-
-
 def load_page_settings() -> dict[str, Any]:
-    try:
-        with open(settings_path(), encoding="utf-8") as file:
-            data = json.load(file)
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def save_page_settings(data: dict[str, Any]):
-    with atomic_write(settings_path()) as file:
-        json.dump(data, file, indent=1, ensure_ascii=False)
+    """Page settings (changes of an open page written first)"""
+    return page_settings.load_settings(SETTINGS_FILE)
 
 
 def overlay_windows() -> dict[str, Any]:
@@ -156,7 +142,7 @@ def hidden_reason(rows: list[dict[str, Any]], spectating: bool) -> str:
     return tr("No overlay shown now: hidden by their visibility options or a hotkey.")
 
 
-class StreamOverlaysBackend(QObject):
+class StreamOverlaysBackend(PageBackend):
     """Stream overlays page state & actions"""
 
     serverChanged = Signal()  # switch, settings, addresses, status
@@ -165,8 +151,9 @@ class StreamOverlaysBackend(QObject):
     noticeChanged = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, "Stream overlays")
         settings = load_page_settings()
+        self.page_file = page_settings.PageSettings(SETTINGS_FILE, page_settings.SAVE_DELAY_MS, self)
         self.results_class = choice(settings.get("results_class"), RESULTS_CLASSES, "all")
         self.results_session = choice(settings.get("results_session"), RESULTS_SESSIONS, "race")
         self.results_rows = choice(settings.get("results_rows"), RESULTS_ROWS, 15)
@@ -177,9 +164,7 @@ class StreamOverlaysBackend(QObject):
         self.watched: set[str] = set()
         self._server_state: tuple = ()
         self._model = DictListModel(OVERLAY_ROLES, self)
-        self._timer = QTimer(self)
-        self._timer.setInterval(REFRESH_MS)
-        self._timer.timeout.connect(self.refresh)
+        self._timer = self.page_timer(self.refresh, REFRESH_MS)
         app_signal.refresh.connect(self.refresh_overlays)
 
     # Page
@@ -190,17 +175,22 @@ class StreamOverlaysBackend(QObject):
     def page_hidden(self):
         self._timer.stop()
 
-    def release(self):
+    def release_resources(self):
         self.page_hidden()
+        self.page_file.flush()
         with suppress(RuntimeError, TypeError):  # already disconnected
             app_signal.refresh.disconnect(self.refresh_overlays)
 
     def save_settings(self):
-        save_page_settings({
+        """Settings written once changes pause"""
+        self.page_file.save(self.page_settings())
+
+    def page_settings(self) -> dict[str, Any]:
+        return {
             "results_class": self.results_class, "results_session": self.results_session,
             "results_rows": self.results_rows, "results_cycle": self.results_cycle,
             "layout_format": self.layout_format,
-        })
+        }
 
     @Slot()
     def refresh(self, force: bool = False):

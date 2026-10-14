@@ -22,7 +22,6 @@ Stream overlays: browser sources for OBS Studio, Streamlabs, XSplit, vMix... (se
 Qt Quick page (ui/qml/StreamOverlays.qml), state & actions in quick/stream_backend.py.
 """
 
-from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QVBoxLayout
 
 from ..i18n import tr
@@ -55,6 +54,5 @@ class StreamOverlaysView(BaseDialog):
         super().hideEvent(event)
 
     def closeEvent(self, event):
-        self.backend.release()
-        self.view.setSource(QUrl())  # QML bindings never read a deleted backend
+        self.release_page()
         super().closeEvent(event)

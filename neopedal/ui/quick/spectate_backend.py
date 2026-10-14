@@ -33,17 +33,18 @@ from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ... import app_signal, realtime_state
 from ...api_control import api
-from ...formatter import random_color_class
+from ...formatter import class_alias, class_color
 from ...i18n import tr
 from ...module_control import mctrl
 from ...setting import cfg
 from ..module_view import sort_key as fold_text
 from .game_pictures import LogoCache, car_picture_url, notifier
 from .models import DictListModel
+from .page_backend import PageBackend
 
 logger = logging.getLogger(__name__)
 sort_key = lru_cache(maxsize=1024)(fold_text)  # same names & cars folded at every poll
@@ -53,18 +54,12 @@ NO_DRIVER = -1  # player_index: no driver spectated
 # Data modules recording the spectated driver: started again when another driver is followed
 DATA_MODULES = ("module_delta", "module_fuel", "module_mapping", "module_sectors", "module_stint")
 ROLES = (
-    "key", "slot", "place", "name", "vehicle", "carClass", "classColor",
+    "key", "slot", "place", "name", "vehicle", "carClass", "classColor", "classAlias",
     "bestLap", "lastLap", "status", "player", "spectated", "brandLogo",
 )
 CLASS_ROLES = ("key", "label", "color", "count")
 STATUS_GARAGE = "garage"
 STATUS_PIT = "pit"
-
-
-def class_color(car_class: str) -> str:
-    """Color of vehicle class (vehicle class editor), made from name if not set"""
-    style = cfg.user.classes.get(car_class)
-    return str(style["color"]) if isinstance(style, dict) and "color" in style else random_color_class(car_class)
 
 
 def lap_text(seconds: float) -> str:
@@ -89,7 +84,7 @@ def read_drivers(reader: Any) -> list[dict]:
             "name": vehicle.driver_name(index),
             "vehicle": vehicle.vehicle_name(index),
             "carClass": car_class,
-            "classColor": class_color(car_class),
+            "classColor": class_color(car_class), "classAlias": class_alias(car_class),
             "bestLap": lap_text(timing.best_laptime(index)),
             "lastLap": lap_text(timing.last_laptime(index)),
             "status": status,
@@ -103,7 +98,7 @@ def place_key(row: dict) -> tuple:
     return (row["place"] <= 0, row["place"], sort_key(row["name"]))
 
 
-class SpectateBackend(QObject):
+class SpectateBackend(PageBackend):
     """Spectate page state & actions
 
     Args:
@@ -118,7 +113,7 @@ class SpectateBackend(QObject):
     filterChanged = Signal()
 
     def __init__(self, parent=None, reader: Callable[[], Any] = lambda: api.read):
-        super().__init__(parent)
+        super().__init__(parent, "Spectate")
         self._reader = reader
         self.model = DictListModel(ROLES, self)
         self.class_model = DictListModel(CLASS_ROLES, self)  # chips kept while their values change
@@ -134,9 +129,7 @@ class SpectateBackend(QObject):
         self._active = False
         self._followed = ""  # driver followed by the API, see follow_changed
         self._enabled = bool(cfg.api["enable_player_index_override"])
-        self._timer = QTimer(self)  # deleted with backend: never fires on a deleted model
-        self._timer.setInterval(POLL_MS)
-        self._timer.timeout.connect(self.poll)
+        self._timer = self.page_timer(self.poll, POLL_MS)  # deleted with backend: never fires on a deleted model
         self.logos = LogoCache()
         notifier().changed.connect(self.pictures_changed)
 
@@ -401,5 +394,3 @@ class SpectateBackend(QObject):
         if cfg.api["enable_player_index_override"]:
             self.spectate(NO_DRIVER)
 
-    def release(self):
-        self._timer.stop()

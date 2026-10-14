@@ -38,11 +38,11 @@ Item {
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.em * 0.5
+        radius: theme.radiusMd
         color: area.containsMouse ? theme.hover : theme.base
         border.width: 1
         border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
 
         MouseArea {
             id: area
@@ -65,7 +65,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.round(theme.em * 2)
             height: width
-            radius: theme.em * 0.45
+            radius: theme.radiusMd
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.16 : 0.1)
             Icon {
                 anchors.centerIn: parent
@@ -84,7 +84,7 @@ Item {
 
         Column {
             anchors.left: badge.right
-            anchors.leftMargin: theme.em * 0.65
+            anchors.leftMargin: theme.em * 0.7
             anchors.right: valueBox.left
             anchors.rightMargin: theme.em * 0.6
             anchors.verticalCenter: parent.verticalCenter
@@ -100,7 +100,7 @@ Item {
                 width: parent.width
                 text: row.sectionLabel + "  ·  " + row.groupLabel
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
         }
@@ -110,7 +110,7 @@ Item {
             anchors.right: chevron.left
             anchors.rightMargin: theme.em * 0.4
             anchors.verticalCenter: parent.verticalCenter
-            spacing: theme.em * 0.45
+            spacing: theme.em * 0.5
             Rectangle {
                 visible: row.modified
                 width: Math.round(theme.em * 0.5)
@@ -121,7 +121,7 @@ Item {
                 MouseArea { id: dotArea; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                 ToolTip.visible: dotArea.containsMouse
                 ToolTip.text: i18n.tr("Changed from default")
-                ToolTip.delay: 300
+                ToolTip.delay: theme.tipDelay
             }
             TpSwitch {
                 visible: row.kind === "bool"
@@ -142,7 +142,7 @@ Item {
                 visible: row.kind === "color" && row.color !== ""
                 width: Math.round(theme.em * 1.2)
                 height: width
-                radius: theme.em * 0.3
+                radius: theme.radiusSm
                 color: row.color !== "" ? row.color : "transparent"
                 border.width: 1
                 border.color: theme.border
@@ -171,7 +171,7 @@ Item {
 
         ToolTip.visible: area.containsMouse && row.help !== "" && area.mouseX < valueBox.x
         ToolTip.text: row.help
-        ToolTip.delay: 700
+        ToolTip.delay: theme.tipDelay
     }
 
     Rectangle {

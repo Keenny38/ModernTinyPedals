@@ -3,9 +3,12 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
 // Session events: contacts (reported by both cars, shown once), penalties, track limits (other than no
-// further action) and chat, by session time. Filter by kind, or events of car picked only.
+// further action) and chat, by session time. Filter by kind, or events of car picked only. Session with a
+// replay (LMU): watch an event in the replay (button or double click), camera on the car concerned.
 Item {
     id: events
+
+    readonly property bool replay: (backend.sessionHeader.replay || "") !== ""
 
     function kindColor(kind) {
         return kind === "contact" ? theme.loss : kind === "penalty" ? theme.warning
@@ -54,6 +57,7 @@ Item {
             delegate: Rectangle {
                 id: row
                 required property int index
+                required property string key
                 required property string clock
                 required property string kind
                 required property string glyph
@@ -64,10 +68,15 @@ Item {
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 2.3)
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: rowArea.containsMouse ? theme.hover
                      : index % 2 ? Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.025 : 0.03) : "transparent"
-                MouseArea { id: rowArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+                MouseArea {
+                    id: rowArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onDoubleClicked: if (events.replay) backend.watchEvent(row.key)
+                }
 
                 RowLayout {
                     anchors.fill: parent
@@ -104,6 +113,14 @@ Item {
                         text: row.detail
                         color: theme.dimText
                         elide: Text.ElideRight
+                    }
+                    TpButton {  // replay of session at this event
+                        visible: events.replay
+                        flat: true
+                        glyph: "\uE768"  // play
+                        implicitHeight: Math.round(theme.em * 1.9)
+                        tip: i18n.tr("Watch in replay")
+                        onClicked: backend.watchEvent(row.key)
                     }
                 }
             }

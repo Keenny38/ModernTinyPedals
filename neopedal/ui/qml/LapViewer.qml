@@ -13,8 +13,8 @@ TpPage {
     // Page picture (laps, charts, map) saved to PNG or copied to clipboard
     function grabPicture(copy) {
         bodyArea.grabToImage(function(result) {
-            if (copy) backend.copyImage(result.image)
-            else backend.saveImage(result.image)
+            if (copy) backend.exports.copyImage(result.image)
+            else backend.exports.saveImage(result.image)
         })
     }
     // Charts & map zoomed on passage between markers A & B, picture taken once zoom settled
@@ -49,10 +49,10 @@ TpPage {
         padding: theme.em * 1.2
         modal: true
         dim: true
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 } }
-        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
         background: Rectangle {
-            radius: theme.em * 0.8
+            radius: theme.radiusXl
             color: theme.raised
             border.width: 1
             border.color: theme.border
@@ -98,7 +98,7 @@ TpPage {
                         Layout.alignment: Qt.AlignTop
                         Layout.fillWidth: true
                         spacing: theme.em * 0.3
-                        Text { text: modelData[0]; color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontPoint * 1.1 }
+                        Text { text: modelData[0]; color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontSubtitle }
                         Repeater {
                             model: modelData[1]
                             RowLayout {
@@ -106,13 +106,13 @@ TpPage {
                                 Rectangle {
                                     Layout.preferredWidth: Math.max(keyText.implicitWidth + theme.em * 0.8, theme.em * 2.2)
                                     Layout.preferredHeight: keyText.implicitHeight + theme.em * 0.25
-                                    radius: theme.em * 0.3
+                                    radius: theme.radiusSm
                                     color: theme.hover
                                     border.width: 1
                                     border.color: theme.border
-                                    Text { id: keyText; anchors.centerIn: parent; text: modelData[0] === "Wheel" ? i18n.tr("Wheel") : modelData[0]; color: theme.text; font.pointSize: theme.fontPoint * 0.82 }
+                                    Text { id: keyText; anchors.centerIn: parent; text: modelData[0] === "Wheel" ? i18n.tr("Wheel") : modelData[0]; color: theme.text; font.pointSize: theme.fontSmall }
                                 }
-                                Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontPoint * 0.9; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                             }
                         }
                     }
@@ -141,11 +141,11 @@ TpPage {
                 currentIndex: backend.tracks.indexOf(backend.currentTrack)
                 onActivated: function(index) { backend.currentTrack = backend.tracks[index] }
                 background: Rectangle {
-                    radius: theme.em * 0.55
+                    radius: theme.radiusLg
                     color: trackBox.hovered ? theme.hover : theme.raised
                     border.width: 1
                     border.color: trackBox.popup.visible ? theme.accent : theme.border
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { ColorAnimation { duration: theme.motionFast } }
                 }
                 contentItem: RowLayout {
                     spacing: theme.em * 0.5
@@ -180,8 +180,8 @@ TpPage {
                     padding: 4
                     implicitHeight: Math.min(contentItem.implicitHeight + 8, theme.em * 24)
                     onClosed: chart.forceActiveFocus()  // keys back to charts (popup gives them to window)
-                    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 } }
-                    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+                    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast } }
+                    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
                     contentItem: ListView {
                         clip: true
                         implicitHeight: contentHeight
@@ -189,7 +189,7 @@ TpPage {
                         ScrollBar.vertical: ScrollBar {}
                     }
                     background: Rectangle {
-                        radius: theme.em * 0.6
+                        radius: theme.radiusLg
                         color: theme.raised
                         border.width: 1
                         border.color: theme.border
@@ -224,13 +224,13 @@ TpPage {
                         }
                     }
                     background: Rectangle {
-                        radius: theme.em * 0.4
+                        radius: theme.radiusMd
                         color: trackItem.highlighted ? theme.hover : "transparent"
                     }
                 }
             }
             TpButton { glyph: ""; tip: i18n.tr("Refresh"); onClicked: backend.refresh() }  // refresh
-            TpButton { glyph: ""; text: i18n.tr("Add File..."); tip: i18n.tr("Add laps from another folder or track, or import a MoTeC log (.ld)"); onClicked: backend.addFiles() }
+            TpButton { glyph: ""; text: i18n.tr("Add File..."); tip: i18n.tr("Add laps from another folder or track, or import a MoTeC log (.ld)"); onClicked: backend.exports.addFiles() }
             TpButton {
                 glyph: ""  // folder
                 text: i18n.tr("Imported Laps...")
@@ -240,7 +240,7 @@ TpPage {
             TpButton {
                 text: i18n.tr("Import Folder...")
                 tip: i18n.tr("Import laps of this track & class from another folder (teammate, shared folder): marked as foreign")
-                onClicked: backend.importFolder()
+                onClicked: backend.exports.importFolder()
             }
             TpButton {
                 id: exportButton
@@ -253,18 +253,18 @@ TpPage {
                     id: exportMenu
                     TpMenu {
                         title: "MoTeC i2 (.ld)"
-                        Action { text: i18n.tr("Reference Lap..."); onTriggered: backend.exportMotec("") }
-                        Action { text: i18n.tr("Displayed Laps..."); onTriggered: backend.exportMotecMany(false) }
-                        Action { text: i18n.tr("All Laps of Track..."); onTriggered: backend.exportMotecMany(true) }
+                        Action { text: i18n.tr("Reference Lap..."); onTriggered: backend.exports.exportMotec("") }
+                        Action { text: i18n.tr("Displayed Laps..."); onTriggered: backend.exports.exportMotecMany(false) }
+                        Action { text: i18n.tr("All Laps of Track..."); onTriggered: backend.exports.exportMotecMany(true) }
                     }
-                    Action { text: i18n.tr("Reference Lap as Delta Best..."); onTriggered: backend.exportDeltaBest("") }
+                    Action { text: i18n.tr("Reference Lap as Delta Best..."); onTriggered: backend.exports.exportDeltaBest("") }
                     MenuSeparator {}
-                    Action { text: i18n.tr("CSV, Displayed Laps..."); onTriggered: backend.exportCsv() }
-                    Action { text: i18n.tr("CSV, Displayed Laps on Time Base..."); onTriggered: backend.exportTimeCsv() }
+                    Action { text: i18n.tr("CSV, Displayed Laps..."); onTriggered: backend.exports.exportCsv() }
+                    Action { text: i18n.tr("CSV, Displayed Laps on Time Base..."); onTriggered: backend.exports.exportTimeCsv() }
                     Action {
                         text: i18n.tr("CSV, Passage A ↔ B...")
                         enabled: chart.hasRange
-                        onTriggered: backend.exportPassageCsv(chart.markerA, chart.markerB)
+                        onTriggered: backend.exports.exportPassageCsv(chart.markerA, chart.markerB)
                     }
                     MenuSeparator {}
                     Action { text: i18n.tr("Picture (PNG)..."); onTriggered: page.grabPicture(false) }
@@ -286,10 +286,6 @@ TpPage {
                 options: [i18n.tr("Simple View"), i18n.tr("Advanced View")]
                 currentIndex: backend.simpleView ? 0 : 1
                 onActivated: function(index) { backend.setSimpleView(index === 0) }
-                Connections {  // changed by code: clicking an option replaced the binding
-                    target: backend
-                    function onOptionsChanged() { viewMode.currentIndex = backend.simpleView ? 0 : 1 }
-                }
             }
 
             Item { Layout.fillWidth: true }
@@ -352,7 +348,7 @@ TpPage {
                         height: theme.em * 2.5
                         radius: 1.5
                         color: SplitHandle.pressed ? theme.accent : SplitHandle.hovered ? theme.dimText : theme.border
-                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
                     }
                 }
                 // Saved state (QByteArray) is an ArrayBuffer here: byteLength, not length
@@ -397,7 +393,7 @@ TpPage {
                                 anchors.topMargin: chart.legendBottom + theme.em * 0.5
                                 opacity: backend.simpleView && simpleLoader.status === Loader.Ready ? 1 : 0
                                 visible: opacity > 0
-                                Behavior on opacity { NumberAnimation { duration: 180 } }
+                                Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                                 Loader {
                                     id: simpleLoader
                                     objectName: "simpleView"
@@ -435,21 +431,23 @@ TpPage {
                             options: [i18n.tr("Track Map"), i18n.tr("G Circle"), i18n.tr("Corners"), i18n.tr("Range"), i18n.tr("Session"), i18n.tr("XY")]
                             currentIndex: backend.sideTab
                             onActivated: function(index) { backend.setSideTab(index) }
-                            Connections {  // tab changed by code (markers set): clicking a tab replaced the binding
-                                target: backend
-                                function onOptionsChanged() { sideTabs.currentIndex = backend.sideTab }
-                            }
                         }
                         Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            TrackMap {
+                            // Keys the clicked map leaves (Space plays, A, [ ], arrows when whole map shown) go to
+                            // charts, not page: forwarded by this parent (forwardTo on the map would run before its keys)
+                            Item {
                                 anchors.fill: parent
-                                chart: chart
-                                opacity: sideTabs.currentIndex === 0 && !page.mapFocus ? 1 : 0
-                                visible: opacity > 0
-                                Behavior on opacity { NumberAnimation { duration: 180 } }
-                                onExpandToggled: page.mapFocus = true
+                                Keys.forwardTo: [chart]
+                                TrackMap {
+                                    anchors.fill: parent
+                                    chart: chart
+                                    opacity: sideTabs.currentIndex === 0 && !page.mapFocus ? 1 : 0
+                                    visible: opacity > 0
+                                    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
+                                    onExpandToggled: page.mapFocus = true
+                                }
                             }
                             // Other tabs created on first show, then kept: showing one again costs nothing,
                             // hidden ones refresh only when shown again
@@ -467,7 +465,7 @@ TpPage {
                                     active: opened
                                     asynchronous: true  // tab built over a few frames: tab click never stalls the window
                                     sourceComponent: modelData
-                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                                 }
                             }
                             Component { id: gCircleTab; GCircle { chart: page.traceChart } }
@@ -493,7 +491,7 @@ TpPage {
                     function focusMap() { largeMap.forceActiveFocus() }
                     opacity: 0
                     Component.onCompleted: opacity = 1
-                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                    Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                     TrackMap {
                         id: largeMap
                         anchors.fill: parent
@@ -512,7 +510,7 @@ TpPage {
             visible: backend.status !== "" || backend.warning !== "" || backend.loading || backend.undoText !== ""
             spacing: theme.em * 0.5
             BusyIndicator {
-                running: backend.loading
+                running: backend.loading && pageState.active
                 visible: running
                 implicitWidth: theme.em * 1.4
                 implicitHeight: implicitWidth

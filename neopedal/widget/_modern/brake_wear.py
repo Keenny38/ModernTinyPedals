@@ -25,14 +25,19 @@ live wear, lifespan in laps & minutes. Values past warning thresholds in red.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ...i18n import tr_overlay
 from ...module_info import minfo
+from .._data import brake_wear_data, wear_text
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .quad import QuadMixin, Section, Tile
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BrakeWearConfig
 
 SECTIONS = (
     ("remaining", "Brake", True),
@@ -43,13 +48,10 @@ SECTIONS = (
 )
 
 
-def number(value: float) -> str:
-    """Value cut to 4 characters"""
-    return f"{value:.2f}"[:4].strip(".")
-
-
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: BrakeWearConfig
 
     options = (
         "font_size", "layout", "show_thickness", "warning_threshold_remaining", "warning_threshold_wear",
@@ -80,42 +82,29 @@ class Realtime(QuadMixin, ModernOverlay):
         thickness = wcfg["show_thickness"]
         values: dict[str, list[Tile]] = {key: [] for key in self.keys}
         for index in range(4):
-            current = wheels.currentBrakeThickness[index]
-            failed = current <= 0
-            failure = wheels.failureBrakeThickness[index]
-            max_thickness = wheels.maxBrakeThickness[index] - failure
-            current = max(current - failure, 0.0)  # worn past failure thickness: no lifespan left
-            live = wheels.currentlapBrakeWear[index]
-            wear = wheels.estimatedBrakeWear[index]
-            valid_wear = wheels.estimatedValidBrakeWear[index]
-            if max_thickness <= 0:
-                max_thickness = 99999999
-            live_percent = live * 100 / max_thickness
-            wear_percent = wear * 100 / max_thickness
-            remaining_percent = current * 100 / max_thickness
-            if not thickness:
-                current, live, wear, valid_wear = (value * 100 / max_thickness for value in (current, live, wear, valid_wear))
+            data = brake_wear_data(wheels, index, thickness, minfo.delta.lapTimePace)
             for key in self.keys:
                 if key == "remaining":
-                    warn = remaining_percent <= self.threshold_remaining * 100
+                    failed = data.failed
+                    warn = data.remaining_percent <= self.threshold_remaining * 100
                     color = theme.negative if warn or failed else theme.positive
                     values[key].append(Tile(
-                        (tr_overlay("FAIL") if failed else number(current),),
+                        (tr_overlay("FAIL") if failed else wear_text(data.remaining),),
                         colors=(theme.negative if warn or failed else theme.text,),
-                        level=fraction(remaining_percent / 100), level_color=theme.tint(color, 110)))
+                        level=fraction(data.remaining_percent / 100), level_color=theme.tint(color, 110)))
                 elif key == "wear_difference":
-                    values[key].append(self.plain(wear, wear_percent > wcfg["warning_threshold_wear"]))
+                    values[key].append(self.plain(data.wear, data.wear_percent > wcfg["warning_threshold_wear"]))
                 elif key == "live_wear_difference":
-                    values[key].append(self.plain(live, live_percent > wcfg["warning_threshold_wear"]))
+                    values[key].append(self.plain(data.live, data.live_percent > wcfg["warning_threshold_wear"]))
                 elif key == "lifespan_laps":
-                    laps = calc.wear_lifespan_in_laps(current, valid_wear)
-                    values[key].append(self.plain(laps, laps <= wcfg["warning_threshold_laps"]))
+                    values[key].append(self.plain(data.laps, data.laps <= wcfg["warning_threshold_laps"]))
                 elif key == "lifespan_minutes":
-                    minutes = calc.wear_lifespan_in_mins(current, valid_wear, minfo.delta.lapTimePace)
-                    values[key].append(self.plain(minutes, minutes <= wcfg["warning_threshold_minutes"]))
-        self.refresh(tuple(tuple(values[key]) for key in self.keys))
+                    values[key].append(self.plain(data.minutes, data.minutes <= wcfg["warning_threshold_minutes"]))
+        state = tuple(tuple(values[key]) for key in self.keys)
+        self.refresh_keyed(state, tuple(self.pixel_key(tiles, [rect.width() for rect in slot.tiles], "level", "mark")
+                                        for slot, tiles in zip(self.quad_slots, state)))
 
     def plain(self, value: float, warn: bool) -> Tile:
         """Wheel value, red if past warning threshold"""
         theme = self.theme
-        return Tile((number(value),), colors=(theme.negative if warn else theme.text,))
+        return Tile((wear_text(value),), colors=(theme.negative if warn else theme.text,))

@@ -386,6 +386,31 @@ class TraceData:
         self._ideal = None
         self.update_deltas()
 
+    def release(self):
+        """No lap shown & every series of laps freed (page closed), same as set_laps([]) without reading unit
+        settings (may be unloaded while app quits)"""
+        self.version = next(_versions)
+        self.prepared = None
+        self.laps = []
+        self.reference = None
+        self._aligned = {}
+        self.anchor_key = ""
+        self.auto_offsets = {}
+        self.reference_deltas = {}
+        self.deltas = {}
+        self.scales = {}
+        self.sector_lines = []
+        self._series = {}
+        self._xs = {}
+        self._times = {}
+        self._samples = {}
+        self._ranges = {}
+        self._mini = None
+        self._ideal = None
+        if self.ideal_mode or self._deltas_ideal:  # ideal lap deltas dropped (as update_deltas does)
+            self.delta_version += 1
+        self._deltas_ideal = self.ideal_mode
+
     def units_changed(self) -> bool:
         """Whether unit setting changed since series were computed"""
         units = display_units()

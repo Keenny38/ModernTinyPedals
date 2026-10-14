@@ -25,7 +25,7 @@ from .. import realtime_state
 from ..api_control import api
 from ..module_info import ForceInfo, minfo
 from ..validator import generator_init
-from ._base import DataModule, data_stamp
+from ._base import WAIT_STATE_CHANGE, DataModule, data_stamp
 
 
 class Realtime(DataModule):
@@ -74,7 +74,7 @@ class Realtime(DataModule):
             else:
                 if reset:
                     reset = False
-                    update_interval = self.idle_interval
+                    update_interval = WAIT_STATE_CHANGE  # idle until activity changes
 
 
 @generator_init

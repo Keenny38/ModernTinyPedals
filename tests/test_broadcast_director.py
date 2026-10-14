@@ -1,9 +1,11 @@
 """Broadcast Director: race events & shots (process/director), page backend & QML page (LMU Rest API faked)"""
 
 import json
+import time
+import weakref
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject
 
 from neopedal.process import director as dr
 from neopedal.process.game_info import Contact, Standing
@@ -286,6 +288,22 @@ def director_page(ui_env, monkeypatch):
     from neopedal.ui._common import BaseDialog
 
     game = FakeGame()
+    fake_connection = game.connection
+
+    def connection(*args, **kwargs):
+        """Fake connection with raw requests (answers shared through game_rest_cache)"""
+        made = fake_connection()
+        made.address = kwargs.get("address") or ("localhost", 6397)
+
+        def request(method, resource, body=None):
+            if made.get(resource) is None and not made.answered:
+                return 0, b""
+            return 200, json.dumps(game.answers.get(resource)).encode()
+
+        made.request = request
+        return made
+
+    game.connection = connection
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(game_rest, "GameConnection", game.connection)
     page = broadcast_director.BroadcastDirector(None)
@@ -298,12 +316,15 @@ def director_page(ui_env, monkeypatch):
 
 
 def poll(page, answers):
+    from neopedal.game_rest_cache import rest_cache
+
+    rest_cache.forget()  # answers of previous poll not reused
     page.game.answers = answers
     backend = page.backend
-    backend._timer.stop()
-    backend.refresh_state()
-    wait_requests(backend.request_state)
-    backend._timer.stop()
+    backend.game._timer.stop()
+    backend.game.refresh_state()
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
 
 
 def test_page_loads_and_follows_session(director_page):
@@ -325,15 +346,15 @@ def test_operator_cut_and_camera_commands(director_page):
     page, backend = director_page, director_page.backend
     poll(page, race_answers(100.0, car(1, 1, distance=1040.0), car(2, 2, distance=1000.0)))
     backend.cutToCar(2)
-    backend.selectCamera("TVCOCKPIT")
-    wait_commands(backend)
+    backend.camera.selectCamera("TVCOCKPIT")
+    wait_commands(backend.camera)
     assert page.game.sent == [
         ("PUT", "/rest/watch/focus/2"), ("PUT", "/rest/watch/focus/1/0/false"),
         ("POST", "/rest/replay/CameraController/setCamera", json.dumps({"cameraGroup": "Driving", "direction": 1})),
     ]
     assert backend.onAir["slot"] == 2 and backend.on_air_kind == dr.MANUAL
     backend.stepCar(1)  # next by place, wraps around
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert page.game.sent[-1] == ("PUT", "/rest/watch/focus/1")
     # Car chosen in game later (after the grace time): followed as an operator cut
     backend.last_cut = 0.0
@@ -347,12 +368,12 @@ def test_automatic_mode_cuts_to_events(director_page):
     poll(page, race_answers(100.0, *cars))
     assert backend.mode == "assist"
     backend.setMode(2)
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert backend.mode == "auto"
     backend.director.hold_until = 0.0
     backend.director.shot = backend.director.shot._replace(start=-100.0) if backend.director.shot else None
     poll(page, race_answers(101.0, *cars, contacts=((100.5, "Driver 3", "Driver 2"),)))
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert backend.on_air_slot == 3 and backend.on_air_kind == dr.CONTACT
     assert ("PUT", "/rest/watch/focus/3") in page.game.sent
     assert ("PUT", "/rest/watch/focus/4/0/false") in page.game.sent  # trackside cycle on contacts
@@ -385,6 +406,56 @@ def test_settings_saved_automatic_mode_not_restored(director_page, ui_env):
         other.release()
 
 
+def test_game_hud_menu(director_page, monkeypatch):
+    """HUD of the game as on the Game Replays page: parts asked when the menu opens, all or each part, game UI"""
+    import time
+
+    from PySide6.QtCore import QMetaObject, QObject
+
+    from neopedal.ui.quick import game_window
+
+    page, backend = director_page, director_page.backend
+    answers = race_answers(100.0, car(1, 1), car(2, 2, distance=200.0))
+    poll(page, answers)
+    assert backend.camera.hudState == {} and "/rest/hud" not in page.game.asked  # not asked at each answer
+    poll(page, dict(answers, **{"/rest/hud": {"chat": True, "mfd": True, "speedo": False}}))
+    assert backend.camera.hudState == {}
+    backend.camera.refreshHud()  # menu opened
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    assert backend.camera.hudState == {"chat": True, "mfd": True, "speedo": False} and not backend.game.need_hud
+    root = page.view.rootObject()
+    chat, speedo, timing = (root.findChild(QObject, f"hud_{key}") for key in ("chat", "speedo", "timing"))
+    assert chat.property("checked") and not speedo.property("checked") and not timing.property("enabled")
+    QMetaObject.invokeMethod(chat, "trigger")
+    QCoreApplication.processEvents()
+    assert not chat.property("checked") and backend.camera.hudState["chat"] is False
+    backend.camera.setHudShown(True)
+    wait_commands(backend.camera)
+    assert page.game.sent == [("POST", "/rest/hud/toggle/chat"), ("POST", "/rest/hud/toggleAllComponents/true"),
+                              ("POST", "/rest/sessions/setHudOnWatchScreen", "true"),
+                              ("POST", "/rest/watch/replay/setReplayUIVisible", "true")]
+    assert all(backend.camera.hudState.values()) and chat.property("checked")
+    # Whole game UI: middle click to the game window of this computer, never to a game on another one
+    clicks: list = []
+    monkeypatch.setattr(game_window, "find_game_window", lambda: (42, 1920, 1080))
+    monkeypatch.setattr(game_window, "middle_click", lambda found: clicks.append(found) or True)
+    backend.camera.toggleGameUi()
+    end = time.monotonic() + 2
+    while not clicks and time.monotonic() < end:
+        time.sleep(0.01)
+    assert clicks == [(42, 1920, 1080)] and not backend.noticeError
+    backend.game.game_host = "192.168.1.20"
+    backend.camera.toggleGameUi()
+    assert len(clicks) == 1 and backend.noticeError
+    backend.game.game_host = ""
+    poll(page, {})  # game closed: nothing sent
+    sent = len(page.game.sent)
+    backend.camera.setHudShown(False)
+    backend.camera.toggleHudComponent("chat")
+    assert len(page.game.sent) == sent and not backend.camera.request_command.busy
+
+
 def test_event_in_replay_seeks_before_it(director_page):
     page, backend = director_page, director_page.backend
     cars = (car(1, 1, distance=2000.0), car(2, 2, distance=1000.0))
@@ -392,7 +463,7 @@ def test_event_in_replay_seeks_before_it(director_page):
     assert backend.replayActive
     key = backend.feedRows.rows[0]["key"]
     backend.showEvent(key)
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert ("PUT", "/rest/watch/focus/2") in page.game.sent
     assert page.game.sent[-1] == ("PUT", "/rest/watch/replaytime/245")
 
@@ -407,7 +478,7 @@ def test_hotkeys_reach_open_page(director_page, monkeypatch):
     command.hotkey_director_auto()
     assert backend.mode == "assist"
     command.hotkey_director_next_car()
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert page.game.sent[-1] == ("PUT", "/rest/watch/focus/2")
     page.close()
     assert command.open_director() is None
@@ -428,6 +499,7 @@ def test_page_qml_bundled_modules_and_translated():
     from neopedal.i18n.fr import TRANSLATION
     from neopedal.ui.quick import QML_FOLDER
     from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
     from neopedal.ui.quick.qml_modules import QML_MODULES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
@@ -442,7 +514,7 @@ def test_page_qml_bundled_modules_and_translated():
     for table in (db.STATE_TEXTS, db.KIND_TEXTS, db.SESSION_TEXTS):
         missing += [text for text in table.values() if text not in TRANSLATION]
     missing += [text for text in db.CAMERA_STYLE_TEXTS if text not in TRANSLATION]
-    missing += [title for title, _, _ in db.TIMING_COLUMNS.values() if title not in TRANSLATION and title not in
+    missing += [title for title, _, _ in ds.TIMING_COLUMNS.values() if title not in TRANSLATION and title not in
                 ("#", "+/-", "S1", "S2", "S3")]
     assert not missing
 
@@ -595,7 +667,7 @@ def test_lock_unseen_export_laps_and_weather(director_page, monkeypatch, tmp_pat
     # Export
     path = tmp_path / "events.csv"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(path), ""))
-    backend.exportEvents()
+    backend.log.exportEvents()
     lines = path.read_text(encoding="utf-8-sig").splitlines()
     assert lines[0].startswith("Session time,Kind") and "Contact: #3 Driver 3 and #2 Driver 2" in lines[1]
     # Lap history of a car
@@ -630,7 +702,7 @@ def test_instant_replay_of_live_session(director_page, monkeypatch):
     game.answers = Answers(game.answers)
     backend.replayEvent(key)
     assert backend.instantReplay
-    wait_commands(backend)
+    wait_commands(backend.camera)
     sent = page.game.sent
     assert ("POST", "/rest/replay/toggleactive") in sent and ("PUT", "/rest/watch/focus/1") in sent
     assert ("PUT", "/rest/watch/replaytime/95") in sent
@@ -642,7 +714,7 @@ def test_instant_replay_of_live_session(director_page, monkeypatch):
     poll(page, race_answers(95.0, *cars, replay=True))
     assert len(backend.events) == events and backend.instantReplay
     backend.backToLive()
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert not backend.instantReplay and sent[-1] == ("POST", "/rest/replay/toggleactive")
 
 
@@ -687,16 +759,16 @@ def test_instant_replay_kept_while_standings_tell_live(director_page, monkeypatc
 
     game.answers = Answers(game.answers)
     backend.replayEvent(backend.feedRows.rows[0]["key"])
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert backend.instantReplay and backend._instant_timer.isActive()
     assert game.sent.count(("POST", "/rest/replay/toggleactive")) == 1  # not back to live yet
     # Game refuses the replay time: back to live at once
     backend.backToLive()
-    wait_commands(backend)
+    wait_commands(backend.camera)
     game.sent.clear()
     game.refused.add("/rest/watch/replaytime/245")
     backend.replayEvent(backend.feedRows.rows[0]["key"])
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert not backend.instantReplay
 
 
@@ -729,8 +801,8 @@ def test_hidden_page_lists_made_once_shown(director_page):
     assert backend.watcher.now == 100.0  # watcher & director go on
     backend.page_shown()
     assert backend.carRows.rowCount() == 2 and not backend._stale
-    wait_requests(backend.request_state)
-    backend._timer.stop()
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
 
 
 def test_state_requests_keep_one_connection(director_page):
@@ -759,7 +831,7 @@ def test_search_cut_and_suggestion_by_number(director_page):
     backend.setSearch("zoe")  # accents & case ignored
     assert [row["slot"] for row in backend.carRows.rows] == [77]
     backend.cutToFirstMatch()
-    wait_commands(backend)
+    wait_commands(backend.camera)
     assert page.game.sent[-1] == ("PUT", "/rest/watch/focus/77")
     backend.setSearch("")
     assert backend.carRows.rowCount() == 3
@@ -767,6 +839,108 @@ def test_search_cut_and_suggestion_by_number(director_page):
     backend.takeSuggestionAt(0)
     assert backend.director.shot.key == key
     backend.takeSuggestionAt(9)  # no such suggestion: nothing
+
+
+def test_director_switched_off_and_on(director_page, monkeypatch):
+    from neopedal.setting import cfg
+    from neopedal.stream_director import director_feed
+    from neopedal.ui.quick import director_backend as db
+
+    page, backend = director_page, director_page.backend
+    from neopedal.api_control import api
+
+    monkeypatch.setattr(type(api), "setup", lambda self: None)
+    monkeypatch.setitem(cfg.api, "enable_player_index_override", False)
+    cars = (car(1, 1, distance=2000.0), car(2, 2, distance=1000.0))
+    poll(page, race_answers(100.0, *cars, focus=1))
+    assert backend.enabled and backend.inSession and db.active_director() is backend
+    backend.setMode(2)
+    monkeypatch.setitem(cfg.api, "enable_player_index_override", True)  # spectate page, follow option off
+    assert not backend.followOverlays
+    director_feed.publish({"tower": [1], "live": True})
+    switch = page.view.rootObject().findChild(QObject, "enabledSwitch")
+    QMetaObject.invokeMethod(switch, "click")  # off
+    assert not backend.enabled and not backend.inSession and backend.modeName == "assist"
+    assert not cfg.api["enable_player_index_override"]  # spectate mode off: overlays on the player car
+    assert not any(director_feed.state.values())  # graphics emptied
+    assert db.active_director() is None  # hotkeys as with the page closed
+    assert db.load_page_settings()["enabled"] is False
+    backend.game.refresh_state()
+    assert not backend.game.request_state.busy and not backend.game._timer.isActive()  # game never asked
+    backend.graphics.publish_graphics(force=True)
+    assert not any(director_feed.state.values())
+    # Opened again: still off
+    other = db.DirectorBackend(None)
+    assert not other.enabled and not other._history_asked  # race results files read once turned on
+    other.release()
+    monkeypatch.setattr(db, "_active", weakref.ref(backend))
+    # On again: game asked at once, events of the session kept
+    events = len(backend.events)
+    QMetaObject.invokeMethod(switch, "click")
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    assert backend.enabled and backend.inSession and len(backend.events) >= events
+    assert db.load_page_settings()["enabled"] is True and db.active_director() is backend
+    assert not page.view.errors()
+    director_feed.clear()
+
+
+def test_director_turned_on_from_empty_page_hotkey_and_palette(director_page):
+    from neopedal.hotkey import command
+    from neopedal.ui import command_palette
+    from neopedal.ui.quick import director_backend as db
+
+    page, backend = director_page, director_page.backend
+    assert db.director_status() == "on"
+    command.hotkey_director_toggle()
+    assert not backend.enabled and db.director_status() == "off" and db.director_page() is backend
+    assert "director_toggle" in dict(command.COMMANDS_GENERAL)
+    command_palette.toggle_director()
+    assert backend.enabled
+    command_palette.toggle_director()
+    root = page.view.rootObject()
+    button = root.findChild(QObject, "emptyStateAction")
+    assert button.property("visible") and button.property("text") == "Turn On Broadcast Director"
+    QMetaObject.invokeMethod(button, "click")
+    assert backend.enabled
+    assert not page.view.errors()
+
+
+def test_game_asked_less_often_while_hidden_and_unused(director_page, monkeypatch):
+    from neopedal.stream_director import director_feed, live_feed
+
+    page, backend = director_page, director_page.backend
+    poll(page, race_answers(100.0, car(1, 1), car(2, 2, distance=600.0)))
+    watched = {"director": False}
+    monkeypatch.setattr(director_feed, "watched", lambda: watched["director"])
+    monkeypatch.setattr(live_feed, "watched", lambda: False)
+    backend._shown = False
+    backend.game._asked = time.monotonic()
+    backend.game.poll_tick()  # hidden, assisted, no source: not asked yet
+    assert not backend.game.request_state.busy and backend.game._timer.isActive()
+    watched["director"] = True  # graphics source showing: asked at once
+    backend.game.poll_tick()
+    assert backend.game.request_state.busy
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    watched["director"] = False
+    backend.game._asked = time.monotonic() - db_hidden_seconds()  # long enough: asked
+    backend.game.poll_tick()
+    assert backend.game.request_state.busy
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    for wanted in (lambda: setattr(backend, "_shown", True), lambda: backend.setMode(2)):
+        backend._shown = False
+        backend.game._asked = time.monotonic()
+        wanted()
+        assert backend.game.needs_fresh()
+    backend.game._timer.stop()
+
+
+def db_hidden_seconds() -> float:
+    from neopedal.ui.quick import director_shared as ds
+
+    return ds.HIDDEN_POLL_MS / 1000
 
 
 def test_game_camera_changes_followed_without_holding_director(director_page):
@@ -870,20 +1044,20 @@ def test_tyres_logos_game_computer_and_log(director_page, monkeypatch):
 
     connection = page.game.connection
     monkeypatch.setattr(game_rest, "GameConnection", lambda *args, **kwargs: made.append(kwargs) or connection())
-    backend.setGameHost("192.168.1.20")
-    wait_requests(backend.request_state)
-    backend._timer.stop()
-    assert backend.game_address()[0] == "192.168.1.20" and made[-1]["address"][0] == "192.168.1.20"
+    backend.game.setGameHost("192.168.1.20")
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    assert backend.game.game_address()[0] == "192.168.1.20" and made[-1]["address"][0] == "192.168.1.20"
     poll(page, race_answers(101.0, car(1, 1), car(2, 2, distance=600.0)))
     assert backend.tyres == {}
-    backend.setGameHost("localhost")
-    wait_requests(backend.request_state)
-    backend._timer.stop()
-    assert backend.game_address() is None and backend.local_game()
+    backend.game.setGameHost("localhost")
+    wait_requests(backend.game.request_state)
+    backend.game._timer.stop()
+    assert backend.game.game_address() is None and backend.game.local_game()
     # Events log: one line per live event as it comes
-    backend.setLogEvents(True)
+    backend.log.setLogEvents(True)
     poll(page, race_answers(102.0, car(1, 1), car(2, 2, distance=600.0), contacts=((101.8, "Driver 1", "Immovable"),)))
-    with open(backend.log_path(), encoding="utf-8-sig") as file:
+    with open(backend.log.log_path(), encoding="utf-8-sig") as file:
         lines = file.read().splitlines()
     assert lines[0].startswith("Time,Session time") and "#1 Driver 1 hits the wall" in lines[1]
 
@@ -951,6 +1125,7 @@ def test_graphics_source_routes(ui_env, monkeypatch):
 def test_graphics_state_and_settings(director_page, monkeypatch):
     from neopedal.stream_director import director_feed
     from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_shared as ds
 
     page, backend = director_page, director_page.backend
     published = []
@@ -973,28 +1148,31 @@ def test_graphics_state_and_settings(director_page, monkeypatch):
     # Banners: live events of banner kinds, with the event that just happened marked fresh
     poll(page, race_answers(101.0, *cars, contacts=((100.6, "Driver 3", "Driver 1"),)))
     backend.add_events([dr.Event("fastest|x", dr.FASTEST, 100.5, (1,), ("Lena Hartmann",), "GT3", 1, 88.0)])
-    backend.publish_graphics(force=True)
+    backend.graphics.publish_graphics(force=True)
     events = published[-1]["events"]
     assert [event["id"] for event in events] == ["fastest|x"] and events[0]["fresh"]
     # Settings: kept, checked
-    backend.setGraphic("towerMode", "air")
-    backend.setGraphic("towerMode", "nope")
-    backend.setGraphic("towerRows", 1)
-    backend.setGraphic("hidden", True)
-    backend.setGraphic("unknown", 3)
-    assert backend.graphics["towerMode"] == "air" and backend.graphics["towerRows"] == 3 and backend.graphics["hidden"]
+    backend.graphics.setGraphic("towerMode", "air")
+    backend.graphics.setGraphic("towerMode", "nope")
+    backend.graphics.setGraphic("towerRows", 1)
+    backend.graphics.setGraphic("hidden", True)
+    backend.graphics.setGraphic("unknown", 3)
+    assert backend.graphics.settings["towerMode"] == "air" and backend.graphics.settings["towerRows"] == 3 and backend.graphics.settings["hidden"]
     assert published[-1]["graphics"]["hidden"]
     assert db.load_page_settings()["graphics"]["towerMode"] == "air"
-    assert db.graphics_setting({"towerMode": "x", "towerRows": "9", "card": False})["towerMode"] == "class"
-    assert db.graphics_setting({"towerRows": "9", "card": False})["towerRows"] == 12
-    assert db.short_name("Tobias Mueller#7949") == "T. Mueller" and db.short_name("Senna") == "Senna"
+    assert ds.graphics_setting({"towerMode": "x", "towerRows": "9", "card": False})["towerMode"] == "class"
+    assert ds.graphics_setting({"towerRows": "9", "card": False})["towerRows"] == 12
+    # Tower up to 70 cars (carousel beyond the height set)
+    assert ds.graphics_setting({"towerRows": 70})["towerRows"] == 70
+    assert ds.graphics_setting({"towerRows": 90})["towerRows"] == 70
+    assert ds.short_name("Tobias Mueller#7949") == "T. Mueller" and ds.short_name("Senna") == "Senna"
     # Source address only while stream overlays run
     from neopedal.stream_overlay import streamoverlay
 
     monkeypatch.setattr(type(streamoverlay), "running", property(lambda self: False))
-    assert backend.graphicsUrl == ""
+    assert backend.graphics.graphicsUrl == ""
     monkeypatch.setattr(type(streamoverlay), "running", property(lambda self: True))
-    assert "/director?token=" in backend.graphicsUrl
+    assert "/director?token=" in backend.graphics.graphicsUrl
 
 
 def test_pit_radar_of_car_on_air(director_page, monkeypatch):
@@ -1019,10 +1197,10 @@ def test_pit_radar_of_car_on_air(director_page, monkeypatch):
     assert radar["rows"][1]["distance"] == "40 m" and not radar["rows"][1]["ahead"]
     assert radar["count"] == "1 cars approaching"
     assert [row["number"] for row in backend.onAir["pitRadar"]] == ["2", "3"]
-    backend.setGraphic("pitRadar", False)
+    backend.graphics.setGraphic("pitRadar", False)
     assert published[-1]["pitRadar"] is None
-    backend.setGraphic("pitRadarRange", 5000)
-    assert backend.graphics["pitRadarRange"] == 400
+    backend.graphics.setGraphic("pitRadarRange", 5000)
+    assert backend.graphics.settings["pitRadarRange"] == 400
 
 
 def test_overlays_follow_car_on_air_and_stop(director_page, monkeypatch):

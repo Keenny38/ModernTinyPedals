@@ -19,9 +19,10 @@
 """
 Layout guide: visual grid, alignment lines & position while dragging overlay widget
 
-Full screen transparent window: only the parts that change (dragged outline, lines, position label)
-are drawn again on each mouse move, and the window is released once the drag ends (its screen size
-image is not kept in memory).
+Full screen transparent window: only the parts that change (dragged outline edges, lines appearing or
+leaving, position label) are drawn again on each mouse move, each on its own (a layered window uploads
+the bounding rect of each repaint: one repaint of all would upload the whole screen), and the window is
+released once the drag ends (its screen size image is not kept in memory).
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ COLOR_LABEL = QColor(20, 24, 30, 225)
 COLOR_LABEL_TEXT = QColor(240, 244, 248)
 ALIGN_TOLERANCE = 1  # pixel
 LABEL_GAP = 6  # pixels between dragged widget & position label
+MAX_REPAINTS = 12  # changed parts repainted one by one per move, at most (else one repaint of all)
 
 
 def alignment_lines(target: QRect, others: list[QRect], screen: QRect) -> tuple[set[int], set[int]]:
@@ -103,13 +105,40 @@ class LayoutGuide(QWidget):
 
     def track(self, widget: QWidget):
         """Update dragged widget position, only changed parts drawn again"""
-        old_parts = self.changing_parts()
+        old_parts = self.drawn_parts()
         self._target = widget.geometry()
         self._lines = alignment_lines(self._target, self._others, self.geometry())
         self._label = f"X {self._target.x()}   Y {self._target.y()}"
         self._label_rect = self.label_geometry()
         if self.isVisible():
-            self.update(old_parts.united(self.changing_parts()))
+            rects = changed_rects(old_parts, self.drawn_parts())
+            if len(rects) <= MAX_REPAINTS:
+                for rect in rects:  # each painted & uploaded now on its own (update requests would merge)
+                    self.repaint(rect)
+            else:
+                region = QRegion()
+                for rect in rects:
+                    region += rect
+                self.update(region)
+
+    def drawn_parts(self) -> tuple[list[QRect], frozenset[tuple[int, int, int, int]]]:
+        """Rects drawn for current position (local coordinates): outline edges & label, alignment lines (as tuples:
+        unchanged lines are not drawn again)"""
+        if self._target.isNull():
+            return [], frozenset()
+        origin = self.geometry().topLeft()
+        box = self._target.translated(-origin)  # outline drawn a pixel around
+        left, top, right, bottom = box.left(), box.top(), box.right(), box.bottom()
+        edges = [
+            QRect(left - 2, top - 2, box.width() + 4, 4), QRect(left - 2, bottom - 1, box.width() + 4, 4),
+            QRect(left - 2, top - 2, 4, box.height() + 4), QRect(right - 1, top - 2, 4, box.height() + 4),
+            self._label_rect.adjusted(-1, -1, 1, 1),
+        ]
+        lines_x, lines_y = self._lines
+        lines = frozenset(
+            [(x - origin.x() - 1, 0, 3, self.height()) for x in lines_x]
+            + [(0, y - origin.y() - 1, self.width(), 3) for y in lines_y])
+        return edges, lines
 
     def changing_parts(self) -> QRegion:
         """Area drawn for current position: dragged outline, alignment lines, label (local coordinates)"""
@@ -174,6 +203,30 @@ class LayoutGuide(QWidget):
         painter.setFont(self._label_font)
         painter.setPen(COLOR_LABEL_TEXT)
         painter.drawText(self._label_rect, Qt.AlignmentFlag.AlignCenter, self._label)
+
+
+def changed_rects(old: tuple[list[QRect], frozenset], new: tuple[list[QRect], frozenset]) -> list[QRect]:
+    """Rects to repaint from old to new drawn parts: each outline edge & label with its old place (one rect if
+    close), lines appearing or leaving"""
+    old_edges, old_lines = old
+    new_edges, new_lines = new
+    rects: list[QRect] = []
+    if old_edges and new_edges:
+        for before, after in zip(old_edges, new_edges):
+            united = before.united(after)
+            if area(united) <= 2 * (area(before) + area(after)):
+                rects.append(united)
+            else:  # far: each on its own
+                rects.extend((before, after))
+    else:
+        rects.extend(old_edges or new_edges)
+    rects.extend(QRect(*line) for line in old_lines ^ new_lines)
+    return rects
+
+
+def area(rect: QRect) -> int:
+    """Pixels of rect"""
+    return max(rect.width(), 0) * max(rect.height(), 0)
 
 
 def grid_brush(size: int) -> QBrush:

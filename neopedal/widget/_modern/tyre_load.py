@@ -24,13 +24,20 @@ Load per tyre (or share of total load), gauge of load share, warning when load i
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ... import calculation as calc
 from ...api_control import api
 from .gauge_quad import GaugeQuad
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreLoadConfig
+
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: TyreLoadConfig
 
     options = (*GaugeQuad.common_options, "low_load_threshold", "show_tyre_load_ratio")
     label = "Tyre load"

@@ -26,8 +26,8 @@ Shared by race results page (ui/quick/results_backend.py) and race results strea
 from __future__ import annotations
 
 from .. import calculation as calc
-from ..formatter import random_color_class
-from ..i18n import tr
+from ..formatter import class_alias, class_color, class_style  # noqa: F401  # shared by results pages & stream graphics
+from ..i18n import localized, tr
 from .results_file import Entry, SessionResult, best_lap_gap, race_gap
 
 MINUS = chr(0x2212)  # typeset minus sign
@@ -78,11 +78,17 @@ def race_time_text(seconds: float) -> str:
     return f"{minutes}:{rest:06.3f}"
 
 
-def gap_seconds_text(seconds: float) -> str:
-    """Gap "+2.345", "+1:02.345" over a minute"""
+def gap_seconds_text(seconds: float, decimals: int = 3) -> str:
+    """Gap "+2.345" (decimal separator of app language), "+1:02.345" over a minute: gaps of every page &
+    stream graphic"""
     if seconds >= 60:
         return f"+{calc.sec2laptime_full(seconds)}"
-    return f"+{seconds:.3f}"
+    return f"+{localized(f'{seconds:.{decimals}f}')}"
+
+
+def laps_behind_text(laps: int) -> str:
+    """Gap in whole laps: "+1 lap", "+2 laps" (in app language), for every page & stream graphic"""
+    return f"+{laps_text(laps)}"
 
 
 def count_text(count: int, one: str, many: str) -> str:
@@ -114,7 +120,7 @@ def entry_gap(result: SessionResult, entry: Entry, leader: Entry, first: bool) -
             return (race_time_text(entry.finish_time) or laps_text(entry.laps_completed)), ""
         gap = race_gap(entry, leader)
         if gap.laps:
-            return f"+{laps_text(gap.laps)}", "dim"
+            return laps_behind_text(gap.laps), "dim"
         return (gap_seconds_text(gap.time) if gap.time > 0 else ""), ""
     if first:
         return "", ""
@@ -133,13 +139,3 @@ def driver_names(entry: Entry) -> list[str]:
     return names
 
 
-def class_color(car_class: str, classes: dict | None = None) -> str:
-    """Color of vehicle class (vehicle class editor), made from name if not set"""
-    if classes is None:
-        from ..setting import cfg
-
-        classes = cfg.user.classes
-    style = classes.get(car_class) if isinstance(classes, dict) else None
-    if isinstance(style, dict) and style.get("color"):
-        return str(style["color"])
-    return random_color_class(car_class)

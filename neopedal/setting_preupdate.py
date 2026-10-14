@@ -28,12 +28,16 @@ from .const_app import LEGACY_PACKAGE
 
 logger = logging.getLogger(__name__)
 
+# Style files (compounds...) have no version: updates found by the global setting update, done once loaded
+PENDING_STYLE_UPDATES: set[str] = set()
+
 
 def preupdate_global_setting(preset_version: tuple[int, int, int], dict_user: dict):
     """Pre update global setting from specific version"""
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 0), _global_prior_2_51_0),  # 2026-10-12
         ((2, 50, 8), _global_prior_2_50_8),  # 2026-10-11
         ((2, 50, 4), _global_prior_2_50_4),  # 2026-10-06
         ((2, 50, 3), _global_prior_2_50_3),  # 2026-10-06
@@ -76,6 +80,12 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
 
 
 # Global setting update function
+def _global_prior_2_51_0(dict_user: dict):
+    # Tyre compound colors (soft white, medium yellow, hard red, wet blue), same as app pages:
+    # compounds still at former default color updated once (see StyleValidator.compounds)
+    PENDING_STYLE_UPDATES.add("compound_colors")
+
+
 def _global_prior_2_50_8(dict_user: dict):
     # Navigation bar: Broadcast Director in place of Spectate, Config left out (Ctrl+, & menu), same bar for
     # everyone (once): back to default

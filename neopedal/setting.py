@@ -42,6 +42,7 @@ from .userfile import set_global_config_path, set_user_data_path
 from .userfile.json_setting import (
     copy_setting,
     create_versioned_backup,
+    is_saving_backup,
     load_setting_json_file,
     load_style_json_file,
     save_and_verify_json_file,
@@ -49,6 +50,14 @@ from .userfile.json_setting import (
 from .validator import is_allowed_filename
 
 logger = logging.getLogger(__name__)
+
+
+def file_mtime(filename: str) -> float | None:
+    """Modified time of file, None if removed meanwhile (temporary file of a save) or not accessible"""
+    try:
+        return os.path.getmtime(filename)
+    except OSError:
+        return None
 
 STYLE_TYPES = (
     ConfigType.BRAKES,
@@ -130,14 +139,19 @@ class FilePath:
         self.game_image = ""
 
     def update(self, user_path: dict, default_path: dict):
-        """Update path variables from global user path dictionary"""
+        """Update path variables from global user path dictionary
+
+        Invalid or unavailable path (USB drive, NAS or cloud folder not mounted): default path
+        used for this session only, user path kept (used again once available).
+        """
         for key in user_path:
-            # Reset path if invalid
-            if not set_user_data_path(user_path[key]):
-                user_path[key] = default_path[key]
-                set_user_data_path(user_path[key])
+            path = user_path[key]
+            if not set_user_data_path(path):
+                path = default_path[key]
+                logger.warning("SETTING: %s %s unavailable, %s used for this session", key, user_path[key], path)
+                set_user_data_path(path)
             # Assign path
-            setattr(self, key.replace("_path", ""), user_path[key])
+            setattr(self, key.replace("_path", ""), path)
 
 
 class Preset:
@@ -378,6 +392,7 @@ class Setting:
             filename=self.filename.brands,
             filepath=self.path.settings,
             dict_def=self.default.brands,
+            validator=StyleValidator.brands,
             max_attempts=loading_attempts,
         )
         self.user.classes = load_style_json_file(
@@ -441,13 +456,14 @@ class Setting:
         """
         if by_date:
             date_file_list = (
-                (os.path.getmtime(f"{self.path.settings}{_filename}"), _filename[:-5])
+                (file_mtime(f"{self.path.settings}{_filename}"), _filename[:-5])
                 for _filename in os.listdir(self.path.settings)
                 if _filename.lower().endswith(FileExt.JSON)
             )
             valid_file_list = [
                 _filename[1]
-                for _filename in sorted(date_file_list, reverse=reverse)
+                for _filename in sorted(
+                    ((mtime, name) for mtime, name in date_file_list if mtime is not None), reverse=reverse)
                 if is_allowed_filename(_filename[1])
             ]
         else:
@@ -476,13 +492,14 @@ class Setting:
             Backup filename list.
         """
         date_file_list = (
-            (os.path.getmtime(f"{filepath}{_filename}"), _filename)
+            (file_mtime(f"{filepath}{_filename}"), _filename)
             for _filename in os.listdir(filepath)
-            if extension in _filename.lower()
+            if extension in _filename.lower() and not is_saving_backup(f"{filepath}{_filename}")
         )
         valid_file_list = [
             _filename[1]
-            for _filename in sorted(date_file_list, reverse=True)
+            for _filename in sorted(
+                ((mtime, name) for mtime, name in date_file_list if mtime is not None), reverse=True)
         ]
         if valid_file_list:
             return valid_file_list
@@ -614,7 +631,7 @@ class Setting:
                                 filename, filepath, max_count=self.application["number_of_automatic_backups"]
                             )
                         save_and_verify_json_file(
-                            dict_user=snapshot_dict(dict_user),
+                            dict_user=dict_user,  # serialized once (snapshot), no deep copy
                             filename=filename,
                             filepath=filepath,
                             max_attempts=saving_attempts,

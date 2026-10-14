@@ -488,6 +488,81 @@ void test_convert_pixels() {
     CHECK(reused.size() == 3u * 2u * 4u && reused[0] == 0 && reused[23] == 0);
 }
 
+// Dirty rect frame: atlas of base serial except rect, pixels of the whole atlas set to value in memory
+void write_dirty(Memory& memory, uint32_t serial, uint32_t base, tpvr::Rect rect, uint8_t value) {
+    TpvrHeader& header = memory.header();
+    header.sequence += 1;
+    header.image_serial = serial;
+    header.dirty_flags = TPVR_DIRTY_RECT;
+    header.dirty_base_serial = base;
+    header.dirty_x = rect.x;
+    header.dirty_y = rect.y;
+    header.dirty_width = rect.width;
+    header.dirty_height = rect.height;
+    std::memset(memory.data() + TPVR_DATA_OFFSET, value, static_cast<size_t>(header.stride) * header.height);
+    header.sequence += 1;
+}
+
+void test_dirty_rect() {
+    Memory memory;
+    init_header(memory);
+    write_frame(memory, 4, 3, 7, 1, TPVR_FLAG_VISIBLE, 1000);
+    tpvr::FrameReader reader;
+    tpvr::Rect changed;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{0, 0, 4, 3}));
+    const std::vector<uint8_t>& pixels = reader.pixels();
+    // Only the dirty rect read (rest of the memory changed too: never copied)
+    write_dirty(memory, 2, 1, tpvr::Rect{1, 1, 2, 1}, 9);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{1, 1, 2, 1}));
+    CHECK(pixels[(4 + 1) * 4] == 9 && pixels[(4 + 2) * 4 + 3] == 9);
+    CHECK(pixels[0] == 7 && pixels[(4 + 3) * 4] == 7 && pixels[(8 + 1) * 4] == 7 && pixels[4] == 7);
+    // Two dirty frames before the consumer takes them: union
+    write_dirty(memory, 3, 2, tpvr::Rect{0, 0, 1, 1}, 5);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    write_dirty(memory, 4, 3, tpvr::Rect{3, 2, 1, 1}, 6);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{0, 0, 4, 3}));
+    CHECK(pixels[0] == 5 && pixels[(8 + 3) * 4] == 6 && pixels[(4 + 1) * 4] == 9 && pixels[4] == 7);
+    // Empty rect (tiles moved only): frame updated, no pixel change
+    write_dirty(memory, 5, 4, tpvr::Rect{0, 0, 0, 0}, 1);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(!reader.take_pixels_changed() && reader.info().image_serial == 5 && reader.pixels()[0] == 5);
+    // Base serial not held (frame missed), rect outside atlas, no flag: whole atlas copied
+    write_dirty(memory, 7, 6, tpvr::Rect{0, 0, 1, 1}, 2);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{0, 0, 4, 3}) && reader.pixels()[44] == 2);
+    write_dirty(memory, 8, 7, tpvr::Rect{3, 2, 2, 1}, 3);
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{0, 0, 4, 3}) && reader.pixels()[0] == 3);
+    write_dirty(memory, 9, 8, tpvr::Rect{0, 0, 1, 1}, 4);
+    memory.header().dirty_flags = 0;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.take_pixels_changed(changed) && changed == (tpvr::Rect{0, 0, 4, 3}) && reader.pixels()[44] == 4);
+    // Writer busy during a dirty copy: pixels kept as they were
+    write_dirty(memory, 10, 9, tpvr::Rect{0, 0, 1, 1}, 8);
+    memory.header().sequence += 1;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Busy);
+    CHECK(!reader.take_pixels_changed() && reader.pixels()[0] == 4);
+}
+
+void test_convert_rect_and_union() {
+    std::vector<uint8_t> out;
+    const uint8_t before[16] = {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16};  // 2 x 2
+    tpvr::convert_pixels(before, 2, 2, 3, 3, true, false, out);
+    const uint8_t after[16] = {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 255, 128, 0, 200};
+    CHECK(tpvr::convert_rect(after, 2, 2, tpvr::Rect{1, 1, 1, 1}, 3, true, false, out));
+    CHECK(out[(3 + 1) * 4] == 0 && out[(3 + 1) * 4 + 1] == 128 && out[(3 + 1) * 4 + 2] == 255 &&
+          out[(3 + 1) * 4 + 3] == 200);  // BGRA at (1, 1) of 3 columns
+    CHECK(out[0] == 16 && out[(3 + 2) * 4] == 0 && out[8 * 4] == 0);  // rest & border untouched
+    CHECK(!tpvr::convert_rect(after, 2, 2, tpvr::Rect{1, 1, 2, 1}, 3, true, false, out));  // outside image
+    CHECK(!tpvr::convert_rect(after, 2, 2, tpvr::Rect{0, 0, 1, 1}, 3, true, false, out = std::vector<uint8_t>(4)));
+    CHECK(tpvr::union_rect(tpvr::Rect{1, 1, 2, 2}, tpvr::Rect{4, 0, 1, 1}) == (tpvr::Rect{1, 0, 4, 3}));
+    CHECK(tpvr::union_rect(tpvr::Rect{}, tpvr::Rect{4, 0, 1, 1}) == (tpvr::Rect{4, 0, 1, 1}));
+    CHECK(tpvr::union_rect(tpvr::Rect{2, 2, 1, 1}, tpvr::Rect{0, 0, 0, 5}) == (tpvr::Rect{2, 2, 1, 1}));
+}
+
 }  // namespace
 
 int main() {
@@ -507,6 +582,8 @@ int main() {
     test_layer_status();
     test_formats_and_extent();
     test_convert_pixels();
+    test_dirty_rect();
+    test_convert_rect_and_union();
     if (failures != 0) {
         std::printf("%d check(s) failed\n", failures);
         return 1;

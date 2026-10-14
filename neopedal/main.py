@@ -34,7 +34,7 @@ from . import realtime_state, safe_mode, version_check
 from .const_app import APP_NAME, CONFIG_ID, DESKTOP_FILE_NAME, PLATFORM, RESTART_ENVIRONMENT, VERSION
 from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
-from .log_handler import BoundedLogStream, set_logging_level
+from .log_handler import BoundedLogStream, install_exception_hooks, set_logging_level
 from .setting import cfg
 from .userfile.settings_import import log_import_report
 
@@ -243,6 +243,7 @@ def start_app(cli_args):
     single_instance_check(bool(cli_args.single_instance))
     unset_environment()
     set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
+    install_exception_hooks(logger)
     get_version()
     log_import_report()  # settings import, done before logging was set
     # load global config (language packs first, else a pack language is reset to English)

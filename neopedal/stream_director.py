@@ -19,7 +19,7 @@
 """
 Broadcast graphics of the Broadcast Director page, as a browser source of the stream overlay server
 
-The page (ui/quick/director_backend) publishes what is on air (car, story, battle, race events, standings,
+The page (ui/quick/director_graphics) publishes what is on air (car, story, battle, race events, standings,
 clock, weather, instant replay...) to DirectorFeed; the source (/director, transparent 1920x1080 page) asks
 /api/director again and again, each answer as soon as something changed (long poll), and draws TV graphics:
 standings tower, driver card on each cut, battle card & battle train, banners (fastest lap, penalty, flags,
@@ -44,6 +44,9 @@ import time
 from collections.abc import Iterable
 from html import escape
 from typing import Any
+
+from .template.setting_compounds import COMPOUND_SYMBOLS, letter_color
+from .template.setting_status_colors import ENERGY_LOW, ENERGY_MEDIUM, status_css
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +289,7 @@ class PlacementStore:
             data[self.ACTIVE] = self._active
         try:
             with atomic_write(os.path.join(self._folder, self.filename)) as file:
-                json.dump(data, file, indent=1)
+                file.write(json.dumps(data, indent=1))
         except OSError as error:
             logger.warning("STREAM OVERLAY: layout not saved: %s", error)
 
@@ -515,8 +518,11 @@ def demo_labels() -> dict[str, Any]:
 
 def labels(tr) -> dict[str, Any]:
     """Texts of the graphics page in app language"""
+    from .i18n import tr_overlay
+
     return {
         "overall": tr("Overall"), "pit": tr("Pit").upper(), "replay": tr("Replay").upper(),
+        "garage": tr_overlay("GAR"), "dnf": tr_overlay("DNF"), "dq": tr_overlay("DQ"),  # tower status, as overlays
         "alongside": tr("Alongside").upper(), "pen": tr("PEN"), "laps": tr("Laps"), "gap": tr("Gap"),
         "best": tr("Best"), "pits": tr("Pit Stops"), "points": tr("Points"), "lap": tr("Lap"), "gear": tr("Gear"),
         "throttle": tr("Throttle"), "brake": tr("Brake"), "energy": tr("Energy"), "fastestTag": tr("FL"),
@@ -537,8 +543,21 @@ def labels(tr) -> dict[str, Any]:
     }
 
 
+def tyre_badges() -> dict[str, tuple[str, str]]:
+    """Compound badge of each letter, as in overlays: (fill, readable letter color)"""
+    badges = {}
+    for letter in COMPOUND_SYMBOLS:
+        fill = letter_color(letter)
+        red, green, blue = (int(fill[index:index + 2], 16) / 255 for index in (1, 3, 5))
+        light = 0.2126 * red + 0.7152 * green + 0.0722 * blue > 0.55
+        badges[letter.upper()] = (fill, "#0E1116" if light else "#F4F6F9")
+    return badges
+
+
 def director_html(language: str, title: str) -> str:
-    return DIRECTOR_HTML.replace("@@lang@@", escape(language)).replace("@@title@@", escape(title))
+    return (DIRECTOR_HTML.replace("@@lang@@", escape(language)).replace("@@title@@", escape(title))
+            .replace("@@tyres@@", json.dumps(tyre_badges())).replace("@@status@@", status_css())
+            .replace("@@energyLow@@", str(ENERGY_LOW)).replace("@@energyMedium@@", str(ENERGY_MEDIUM)))
 
 
 # Transparent 16:9 page, sized from the page height (vh): 1920x1080 browser source in OBS, Streamlabs, vMix...
@@ -552,8 +571,8 @@ DIRECTOR_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf
 @font-face{font-family:"Barlow Semi Condensed";font-weight:600;src:url(/fonts/BarlowSemiCondensed-SemiBold.ttf)}
 @font-face{font-family:"Barlow Semi Condensed";font-weight:700;src:url(/fonts/BarlowSemiCondensed-Bold.ttf)}
 :root{--u:1vh;--op:.92;--panel:rgba(11,13,19,var(--op));--panel2:rgba(22,25,34,var(--op));--line:rgba(255,255,255,.08);
---text:#f5f7fb;--dim:rgba(230,235,244,.64);--accent:#e5383b;--purple:#c084fc;--gain:#4ade80;--loss:#f87171;--warn:#fb923c;
---gold:#facc15;--blue:#60a5fa;--ar:229,56,59;--ease:cubic-bezier(.2,.8,.2,1)}
+--text:#f5f7fb;--dim:rgba(230,235,244,.64);--accent:#e5383b;@@status@@
+--blue:#60a5fa;--ar:229,56,59;--ease:cubic-bezier(.2,.8,.2,1)}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:transparent}
 body{font-family:"Barlow Semi Condensed","Segoe UI",sans-serif;color:var(--text);font-weight:500;
@@ -571,7 +590,9 @@ transform:translateX(calc(var(--u)*-3));transition:opacity .5s,transform .5s var
 #tower header{display:flex;align-items:center;gap:calc(var(--u)*1);padding:calc(var(--u)*1) calc(var(--u)*1.4);font-weight:700}
 #towerTitle{font-size:calc(var(--u)*2.1);letter-spacing:.06em;text-transform:uppercase;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #towerSub{font-size:calc(var(--u)*1.6);color:rgba(255,255,255,.85)}
-#towerRows{position:relative;transition:height .4s var(--ease)}
+#towerRows{position:relative;overflow:hidden;transition:height .4s var(--ease)}
+#towerThumb{position:absolute;right:calc(var(--u)*.15);top:0;width:calc(var(--u)*.4);z-index:1;display:none;background:rgba(255,255,255,.5);
+border-radius:calc(var(--u)*.2);transition:top .6s var(--ease),height .4s var(--ease)}
 .trow{position:absolute;left:0;right:0;top:0;display:grid;grid-template-columns:calc(var(--u)*3.4) calc(var(--u)*.45) calc(var(--u)*4.6) minmax(0,1fr) auto calc(var(--u)*7.6);
 align-items:center;column-gap:calc(var(--u)*.9);height:calc(var(--u)*3.3);padding:0 calc(var(--u)*1.2);
 border-bottom:1px solid var(--line);transition:transform .6s var(--ease),background .3s,opacity .4s}
@@ -589,10 +610,11 @@ background:rgba(255,255,255,.04);transition:transform .6s var(--ease)}
 .tgap.close{color:var(--loss);font-weight:700}
 .tgap.lap{color:var(--gold);font-weight:700}.tgap.lap.fastest{color:var(--purple)}
 .tgap .tpit{display:inline-block;padding:0 calc(var(--u)*.6);border-radius:calc(var(--u)*.4);background:rgba(251,146,60,.22);color:var(--warn);font-weight:700;font-size:calc(var(--u)*1.5)}
+.tgap .tpit.garage{background:rgba(255,255,255,.1);color:var(--dim)}.tgap .tpit.dnf,.tgap .tpit.dq{background:rgba(248,113,113,.22);color:var(--loss)}
 .tchange{font-size:calc(var(--u)*1.2);margin-left:calc(var(--u)*.4)}
 .tchange.up{color:var(--gain)}.tchange.down{color:var(--loss)}
 .tmarks{display:flex;align-items:center;gap:calc(var(--u)*.3)}
-.tyre{width:calc(var(--u)*1.7);height:calc(var(--u)*1.7);border-radius:50%;border:calc(var(--u)*.25) solid #888;display:flex;
+.tyre{width:calc(var(--u)*1.7);height:calc(var(--u)*1.7);border-radius:calc(var(--u)*.34);display:flex;
 align-items:center;justify-content:center;font-size:calc(var(--u)*1);font-weight:700}
 .tpen{padding:0 calc(var(--u)*.45);border-radius:calc(var(--u)*.3);background:var(--loss);color:#fff;font-weight:700;font-size:calc(var(--u)*1.25)}
 .tfl{padding:0 calc(var(--u)*.45);border-radius:calc(var(--u)*.3);background:var(--purple);color:#111;font-weight:700;font-size:calc(var(--u)*1.25)}
@@ -654,7 +676,8 @@ font-size:calc(var(--u)*1.7);display:flex;align-items:center;color:#111}
 #replay{right:calc(var(--u)*3);top:calc(var(--u)*3);padding:calc(var(--u)*.9) calc(var(--u)*1.8);
 background:var(--accent);font-weight:700;letter-spacing:.24em;font-size:calc(var(--u)*2.4);border-radius:calc(var(--u)*.6);
 opacity:0;transition:opacity .35s;display:flex;align-items:center;gap:calc(var(--u)*1)}
-#replay i{width:calc(var(--u)*1.4);height:calc(var(--u)*1.4);border-radius:50%;background:#fff;animation:blink 1.2s infinite}
+#replay i{width:calc(var(--u)*1.4);height:calc(var(--u)*1.4);border-radius:50%;background:#fff}
+#replay.show i{animation:blink 1.2s infinite}
 @keyframes blink{50%{opacity:.25}}
 #clock{right:calc(var(--u)*3);bottom:calc(var(--u)*3);display:flex;align-items:center;
 gap:calc(var(--u)*1.4);padding:calc(var(--u)*.9) calc(var(--u)*1.6);opacity:0;transition:opacity .5s}
@@ -704,7 +727,7 @@ color:var(--dim);font-size:calc(var(--u)*1.4);text-transform:uppercase;letter-sp
 .ob-energy:last-child{padding-bottom:calc(var(--u)*1)}
 .ob-energy span{min-width:calc(var(--u)*8)}
 .ob-energy div{flex:1;height:calc(var(--u)*.7);border-radius:calc(var(--u)*.35);background:rgba(255,255,255,.08);overflow:hidden}
-.ob-energy i{display:block;height:100%;background:var(--blue);transition:width .2s linear}
+.ob-energy i{display:block;height:100%;background:var(--gain);transition:width .2s linear,background-color .3s}
 #onboard.cockpit .ob-main{flex-direction:column;align-items:center}
 #onboard.cockpit .ob-gear{min-width:calc(var(--u)*14);min-height:calc(var(--u)*11);border-radius:50%;font-size:calc(var(--u)*7)}
 #onboard.cockpit .ob-speed{align-items:center}
@@ -728,10 +751,13 @@ font-size:calc(var(--u)*1.5);letter-spacing:.1em;text-transform:uppercase}
 font-size:calc(var(--u)*1.9);font-weight:700;border-bottom:calc(var(--u)*.4) solid rgba(255,255,255,.12)}
 .q-target{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;font-size:calc(var(--u)*1.5);color:var(--dim)}
 .q-target b{font-size:calc(var(--u)*2.4)}
-/* Track map: no panel, shadow keeps it readable on any picture */
-#map{right:calc(var(--u)*3);top:calc(var(--u)*11);width:calc(var(--u)*40);padding:calc(var(--u)*1.2);opacity:0;transition:opacity .5s;
-filter:drop-shadow(0 0 calc(var(--u)*.35) rgba(0,0,0,.85)) drop-shadow(0 0 calc(var(--u)*.9) rgba(0,0,0,.5))}
-#map svg{display:block;width:100%;height:auto;overflow:visible}
+/* Track map: no panel, shadow keeps it readable on any picture. Shadow of the track lines drawn once in its own
+svg layer behind (blurred copy: two shadows of 0.35 & 0.9 u as before), never blurred again while cars move */
+#map{right:calc(var(--u)*3);top:calc(var(--u)*11);width:calc(var(--u)*40);padding:calc(var(--u)*1.2);opacity:0;transition:opacity .5s}
+#map svg{display:block;width:100%;height:auto;overflow:visible;position:relative}
+#map svg#mapShade{position:absolute;left:calc(var(--u)*1.2);top:calc(var(--u)*1.2);width:calc(100% - var(--u)*2.4);
+will-change:transform;pointer-events:none}
+#mapSvg{will-change:transform}
 .msector{fill:none;stroke:rgba(255,255,255,.92);stroke-linejoin:round;stroke-linecap:round;transition:stroke .4s}
 .msector.yellow{stroke:var(--gold)}
 #mapPit{fill:none;stroke:rgba(255,255,255,.45);stroke-dasharray:6 6}
@@ -815,7 +841,7 @@ body.edit.bare #chips,body.edit.bare #toolbar{display:none}
 #chips button{font:600 12px "Segoe UI",sans-serif;padding:3px 10px;border-radius:12px;border:1px solid #facc15;background:#facc15;color:#111;cursor:pointer}
 #chips button.off{background:transparent;color:#aab2c0;border-color:#3a4150}
 </style></head><body>
-<div id="tower" class="g panel"><header class="accentbg"><div id="towerTitle"></div><div id="towerSub"></div></header><div id="towerRows"></div></div>
+<div id="tower" class="g panel"><header class="accentbg"><div id="towerTitle"></div><div id="towerSub"></div></header><div id="towerRows"><div id="towerThumb"></div></div></div>
 <div id="card" class="g panel"><div id="cardPlace"><b id="cardPos"></b><span id="cardClass"></span></div>
 <div id="cardBody"><div id="cardTop"><span id="cardNum"></span><span id="cardName"></span><img id="cardLogo" alt=""></div>
 <div id="cardTeam"></div><div id="cardStats"></div><div id="cardStory"></div></div><img id="cardPicture" alt=""></div>
@@ -839,7 +865,14 @@ body.edit.bare #chips,body.edit.bare #toolbar{display:none}
 <span class="q-status" id="qStatus"></span><span class="q-time" id="qTime"></span></div>
 <div class="q-bottom"><div class="q-sector" id="qS1"></div><div class="q-sector" id="qS2"></div><div class="q-sector" id="qS3"></div>
 <div class="q-target"><span id="qTargetLabel"></span><b id="qDelta"></b></div></div></div>
-<div id="map" class="g"><svg id="mapSvg" viewBox="0 0 1000 1000"><path id="mapPit"></path><path id="mapS1" class="msector"></path>
+<div id="map" class="g"><svg id="mapShade" viewBox="0 0 1000 1000" aria-hidden="true"><defs>
+<filter id="mapGlow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur in="SourceAlpha" stdDeviation="4.65" result="near"/>
+<feComponentTransfer in="near" result="near"><feFuncA type="linear" slope=".85"/></feComponentTransfer>
+<feGaussianBlur in="SourceAlpha" stdDeviation="12" result="far"/>
+<feComponentTransfer in="far" result="far"><feFuncA type="linear" slope=".5"/></feComponentTransfer>
+<feMerge><feMergeNode in="far"/><feMergeNode in="near"/></feMerge></filter></defs>
+<g filter="url(#mapGlow)"><use href="#mapPit"></use><use href="#mapS1"></use><use href="#mapS2"></use><use href="#mapS3"></use></g></svg>
+<svg id="mapSvg" viewBox="0 0 1000 1000"><path id="mapPit"></path><path id="mapS1" class="msector"></path>
 <path id="mapS2" class="msector"></path><path id="mapS3" class="msector"></path><g id="mapCars"></g></svg></div>
 <div id="grid" class="g panel board"><header class="accentbg"><b id="gridTitle"></b><em id="gridPage"></em></header><div id="gridCars"></div><div class="pagebar" id="gridBar"></div></div>
 <div id="event" class="g panel board"><header class="accentbg"><b id="eventTrack"></b><span id="eventSession"></span></header>
@@ -873,10 +906,10 @@ document.documentElement.style.setProperty("--u",scale+"vh");
 const $=id=>document.getElementById(id);
 const TONES={fastest:"var(--purple)",loss:"var(--loss)",warning:"var(--warn)",gain:"var(--gain)",accent:"var(--accent)",
 yellow:"var(--gold)",dim:"#9aa3b2"};
-const TYRES={S:"#E5484D",M:"#F5C518",H:"#EDEDED",W:"#3E8EF7",I:"#30A46C"};
+const TYRES=@@tyres@@;  // letter: [fill, letter color], as compound badges of overlays
 const ROW=3.3,HEAD=2.4;  // tower row & class title heights (u)
 const picture=link=>link?link+(link.includes("?")?"&":"?")+"token="+encodeURIComponent(token):"";
-let state={},layout={},preset="",version=0,lastCut=-1,cardTimer=0,towerPage=0,towerTimer=0,shownBanners=new Set(),bannerQueue=[],bannerBusy=false;
+let state={},layout={},preset="",version=0,lastCut=-1,cardTimer=0,towerPage=0,towerScroll=0,towerScrolls=1,towerTimer=0,shownBanners=new Set(),bannerQueue=[],bannerBusy=false;
 let wasReplay=false,received=Date.now(),replayEnded=0,lastTrain=null,trainUntil=0,laps=new Map(),live={},liveVersion=0,trackKey=null,track=null;
 const pages={grid:0,results:0,champ:0},pageTimers={},towerLines=new Map(),recentBanners=new Map();
 let sponsorIndex=0,sponsorTimer=0,sponsorKey="";
@@ -894,7 +927,8 @@ function applyLayout(){
     else{for(const name of ["left","top","right","bottom","transform","--u"])el.style.removeProperty(name)}
   }
 }
-function tyreMark(letter){const mark=cell("tyre",letter);mark.style.borderColor=TYRES[letter]||"#888";return mark}
+function tyreMark(letter){const mark=cell("tyre",letter),badge=TYRES[letter]||["#AAAAAA","#0E1116"];
+  mark.style.background=badge[0];mark.style.color=badge[1];return mark}
 // Tower: one element per car, kept from answer to answer (texts changed only when they change, moves animated)
 function towerLine(key,header){
   let line=towerLines.get(key);
@@ -911,14 +945,29 @@ function placeLine(line,y){
   if(line.dataset.fresh){delete line.dataset.fresh;void line.offsetWidth;
     requestAnimationFrame(()=>{line.style.removeProperty("transition");line.classList.remove("new")})}
 }
-function towerEntries(g,group){
-  const max=g.towerRows||12;let shown=group.rows.slice(0,max);
-  if(!shown.some(row=>row.air)){const index=group.rows.findIndex(row=>row.air);if(index>=max)shown=[...group.rows.slice(0,max-3),...group.rows.slice(index-1,index+2)]}
-  if(!group.grouped)return shown.map(row=>({row}));
+function towerEntries(group){
+  if(!group.grouped)return group.rows.map(row=>({row}));
   // Overall by class: class title then its cars (best placed class first)
-  const classes=[...new Set(shown.map(row=>row.cls))],entries=[];
-  for(const cls of classes){const rows=shown.filter(row=>row.cls===cls);entries.push({header:cls,color:rows[0].color});for(const row of rows)entries.push({row})}
+  const classes=[...new Set(group.rows.map(row=>row.cls))],entries=[];
+  for(const cls of classes){const rows=group.rows.filter(row=>row.cls===cls);entries.push({header:cls,color:rows[0].color});for(const row of rows)entries.push({row})}
   return entries;
+}
+// Carousel: more cars than the tower height (cars shown): pages of whole rows in turn, sliding up, the last one
+// ending on the last car; a page never ends on a class title
+function towerPages(entries,height){
+  const tops=[];let total=0;
+  for(const entry of entries){tops.push(total);total+=entry.header?HEAD:ROW}
+  tops.push(total);
+  if(total<=height+.01)return {pages:[{offset:0,height:total}],total};
+  let last=entries.length;while(last>0&&total-tops[last-1]<=height+.01)last--;
+  const pages=[];
+  for(let start=0;start<last;){
+    let end=start;while(end<entries.length&&tops[end+1]-tops[start]<=height+.01)end++;
+    if(end<entries.length&&end-1>start&&entries[end-1].header)end--;
+    end=Math.max(end,start+1);pages.push({offset:tops[start],height:tops[end]-tops[start]});start=end;
+  }
+  pages.push({offset:tops[last],height:total-tops[last]});
+  return {pages,total};
 }
 function tower(){
   const g=state.graphics||{},rows=state.tower||[];
@@ -932,8 +981,10 @@ function tower(){
   }
   const group=groups[towerPage%groups.length];
   set("towerTitle",group.title);set("towerSub",state.clock?state.clock.text:"");
-  const now=Date.now(),used=new Set(),leader=g.towerGap==="leader";let y=0;
-  for(const entry of towerEntries(g,group)){
+  const entries=towerEntries(group),height=(g.towerRows||12)*ROW+(group.grouped?HEAD:0);
+  const {pages,total}=towerPages(entries,height),page=pages[towerScroll%pages.length],offset=page.offset;towerScrolls=pages.length;
+  const now=Date.now(),used=new Set(),leader=g.towerGap==="leader";let y=-offset;
+  for(const entry of entries){
     if(entry.header){
       const key="h|"+entry.header,line=towerLine(key,true);used.add(key);
       line.firstChild.style.background=entry.color;set(line.lastChild,entry.header);
@@ -958,17 +1009,22 @@ function tower(){
       const until=state.demo?Infinity:seen||state.version?now+5000:0;laps.set(lapKey,{id:row.lapId,until});
       if(until>now&&until<Infinity)setTimeout(tower,5100)}
     const flash=g.towerLaps&&row.lap&&laps.get(lapKey)&&laps.get(lapKey).until>now;
-    if(row.pit){if(gapBox.dataset.mode!=="pit"){gapBox.dataset.mode="pit";gapBox.className="tgap";gapBox.innerHTML="";
-      const tag=document.createElement("span");tag.className="tpit";tag.textContent=labels().pit;gapBox.append(tag)}}
+    const status=row.state||(row.pit?"pit":"");  // pit lane, garage, retired, disqualified: colored as in the app
+    if(status){if(gapBox.dataset.mode!==status){gapBox.dataset.mode=status;gapBox.className="tgap";gapBox.innerHTML="";
+      const tag=document.createElement("span");tag.className="tpit "+status;tag.textContent=labels()[status]||status;gapBox.append(tag)}}
     else{gapBox.dataset.mode="";gapBox.className="tgap"+(flash?" lap"+(row.lapTone==="fastest"?" fastest":""):row.close&&!leader?" close":"");
       set(gapBox,flash?row.lap:group.byClass?(leader?row.gapClassLeader:row.gapClass):(leader?row.gapLeader:row.gap))}
     placeLine(line,y);y+=ROW;
   }
   for(const [key,line] of towerLines)if(!used.has(key)){line.remove();towerLines.delete(key)}
-  $("towerRows").style.height="calc(var(--u)*"+y+")";
+  $("towerRows").style.height="calc(var(--u)*"+page.height+")";
+  // Scroll mark: part of the cars shown (carousel only)
+  const thumb=$("towerThumb");thumb.style.display=pages.length>1?"block":"none";
+  if(pages.length>1){thumb.style.top="calc(var(--u)*"+(offset/total*page.height)+")";thumb.style.height="calc(var(--u)*"+(page.height/total*page.height)+")"}
   toggle("tower",true);
 }
-function cycleTower(){clearTimeout(towerTimer);towerTimer=setTimeout(()=>{towerPage++;tower();cycleTower()},(state.graphics&&state.graphics.towerCycle||10)*1000)}
+// Every few seconds: next page of the carousel, then next class (each class in turn)
+function cycleTower(){clearTimeout(towerTimer);towerTimer=setTimeout(()=>{if(++towerScroll>=towerScrolls){towerScroll=0;towerPage++}tower();cycleTower()},(state.graphics&&state.graphics.towerCycle||10)*1000)}
 function fillCard(car,story,storyTone){
   const g=state.graphics||{};
   set("cardPos","P"+car.classPos);set("cardClass",car.cls);$("cardPlace").style.background=car.color||"var(--accent)";
@@ -1109,6 +1165,7 @@ function drawOnboard(data){
   [...leds.children].forEach((led,i)=>led.classList.toggle("on",i<lit));leds.classList.toggle("flash",data.gear!=null&&ratio>=.97);
   $("obThrottle").style.height=(ease.throttle*100).toFixed(1)+"%";$("obBrake").style.height=(ease.brake*100).toFixed(1)+"%";
   $("obEnergyRow").style.display=data.energy>=0?"flex":"none";$("obEnergy").style.width=Math.max(data.energy,0)*100+"%";
+  $("obEnergy").style.background=data.energy<=@@energyLow@@?"var(--loss)":data.energy<=@@energyMedium@@?"var(--warn)":"var(--gain)";  // as overlays
 }
 function lapClock(seconds){if(seconds<0)return "";const minutes=Math.floor(seconds/60),rest=seconds-minutes*60;
   return minutes+":"+(rest<10?"0":"")+rest.toFixed(1)}
@@ -1139,7 +1196,8 @@ function toMap(x,y){const [tx,ty]=turn(x,y);return [(tx-track.minX)*track.f+trac
 function polyline(points){return points.map((p,i)=>{const [x,y]=toMap(p[0],p[1]);return (i?"L":"M")+x.toFixed(1)+" "+y.toFixed(1)}).join(" ")}
 function setupTrack(data){
   track={...data,rotation:(state.graphics||{}).mapRotation||0,...fit([...data.points,...data.pit])};
-  $("mapSvg").setAttribute("viewBox","0 "+Math.round(track.oy-20)+" 1000 "+Math.round(track.height*track.f+40));
+  const viewBox="0 "+Math.round(track.oy-20)+" 1000 "+Math.round(track.height*track.f+40);
+  $("mapSvg").setAttribute("viewBox",viewBox);$("mapShade").setAttribute("viewBox",viewBox);
   // Length along the racing line of each point (sectors cut by fraction of the lap)
   const cum=[0];for(let i=1;i<data.points.length;i++){const a=data.points[i-1],b=data.points[i];cum.push(cum[i-1]+Math.hypot(b[0]-a[0],b[1]-a[1]))}
   track.cum=cum;track.total=cum[cum.length-1]||1;track.sectorKey="";

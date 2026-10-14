@@ -74,6 +74,7 @@ def rounded(painter: QPainter, rect: QRectF, radius: float, color: QColor | QBru
 
 _PLAIN_TRANSFORMS = (QTransform.TransformationType.TxNone, QTransform.TransformationType.TxTranslate)
 _SHAPE_CACHE_SIZE = 1024
+_SHAPE_CACHE_BYTES = 8 * 1024 * 1024  # ARGB32 pixmaps memory budget (screen scale included)
 _SHAPE_SEEN_SIZE = 4096
 _SHAPE_MAX_PIXELS = 256 * 256
 _shape_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
@@ -105,9 +106,16 @@ def _cached_shape(width: float, height: float, radius: float, color: QColor, rat
     shape.fillPath(path, color)
     shape.end()
     _shape_cache[key] = pixmap
-    if len(_shape_cache) > _SHAPE_CACHE_SIZE:
-        _shape_cache.popitem(last=False)
+    _trim_shape_cache()
     return pixmap
+
+
+def _trim_shape_cache() -> None:
+    """Evict least recently used pixmaps over count or memory budget (keep newest); keys hold device pixel size"""
+    cache_bytes = sum(max(key[0], 1) * max(key[1], 1) * 4 for key in _shape_cache)
+    while len(_shape_cache) > 1 and (len(_shape_cache) > _SHAPE_CACHE_SIZE or cache_bytes > _SHAPE_CACHE_BYTES):
+        key, _ = _shape_cache.popitem(last=False)
+        cache_bytes -= max(key[0], 1) * max(key[1], 1) * 4
 
 
 def drawable(rect: QRectF) -> bool:
@@ -229,25 +237,6 @@ def bar(painter: QPainter, rect: QRectF, fraction: float, color: QColor, track: 
         fill = QRectF(rect.left(), rect.bottom() - fill_h, rect.width(), fill_h)
     else:
         fill = QRectF(rect.left(), rect.top(), rect.width() * fraction, rect.height())
-    rounded(painter, fill, radius, color)
-
-
-def center_bar(painter: QPainter, rect: QRectF, value: float, max_range: float,
-               positive: QColor, negative: QColor, track: QColor | None, radius: float) -> None:
-    """Bar growing from center: right for positive value, left for negative"""
-    if track is not None:
-        rounded(painter, rect, radius, track)
-    if not (max_range > 0 and isfinite(value)) or not value:
-        return
-    fraction = min(abs(value) / max_range, 1.0)
-    half = rect.width() / 2
-    width = half * fraction
-    if value > 0:
-        fill = QRectF(rect.center().x(), rect.top(), width, rect.height())
-        color = positive
-    else:
-        fill = QRectF(rect.center().x() - width, rect.top(), width, rect.height())
-        color = negative
     rounded(painter, fill, radius, color)
 
 

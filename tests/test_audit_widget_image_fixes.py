@@ -351,3 +351,11 @@ def test_empty_game_lists_read_again_later(game):
     fake.answers[gi.CARS_ROUTE] = (200, json.dumps([{"desc": "BMW Team WRT #46", "manufacturer": "BMW"}]).encode())
     assert cache.read_game_lists()
     assert cache._catalog_read and cache.brand("BMW Team WRT #46") == "BMW"
+
+
+# --- Damage: modern design shares black box panel drawing, integrity text in widget font (no kept font)
+def test_modern_damage_draws_integrity_reading(widgets):
+    widget = widgets("damage", show_integrity_reading=True)
+    widget.timerEvent(None)
+    widget.grab()  # paint raised AttributeError (widget_font of black box only), aborting the page
+    assert widget.panel_font().family() == widget.font().family()

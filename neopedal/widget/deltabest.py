@@ -22,6 +22,8 @@ Deltabest Widget
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -31,11 +33,16 @@ from ._base import Overlay
 from ._common import delta_shown, game_deltabest, lap_delta_shown
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import DeltabestConfig
+
 NO_DELTA_COLOR = "#888888"  # dash while no delta (no reference lap, or out lap)
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: DeltabestConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

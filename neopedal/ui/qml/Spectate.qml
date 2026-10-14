@@ -9,7 +9,7 @@ TpPage {
     id: page
 
     readonly property var spectated: backend.spectated
-    readonly property bool compact: width < theme.em * 40
+    readonly property bool compact: width < theme.bpCompact
 
     function focusSearch() {
         search.forceActiveFocus()
@@ -30,25 +30,9 @@ TpPage {
         spacing: theme.em * 0.6
 
         // Title & spectate mode
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.em * 0.6
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 0
-                Text {
-                    text: i18n.tr("Spectate")
-                    color: theme.text
-                    font.pointSize: theme.fontPoint * 1.5
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: i18n.tr("Show the data of another driver in your overlays")
-                    color: theme.dimText
-                    elide: Text.ElideRight
-                }
-            }
+        TpPageHeader {
+            title: i18n.tr("Spectate")
+            subtitle: i18n.tr("Show the data of another driver in your overlays")
             TpSwitch {
                 checkable: false  // follows backend
                 checked: backend.enabled
@@ -68,7 +52,7 @@ TpPage {
             implicitHeight: heroRow.implicitHeight + theme.em * 1.4
             color: backend.enabled && page.spectated.found
                    ? Qt.tint(theme.base, Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.08)) : theme.base
-            Behavior on color { ColorAnimation { duration: 200 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
 
             RowLayout {
                 id: heroRow
@@ -105,7 +89,7 @@ TpPage {
                             : page.spectated.slot >= 0 ? i18n.tr("Spectated driver is not in this session")
                             : i18n.tr("No driver spectated")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         elide: Text.ElideRight
                     }
                     Text {
@@ -114,23 +98,23 @@ TpPage {
                             : backend.enabled ? i18n.tr("Pick a driver in the list")
                             : i18n.tr("Your overlays show your own car")
                         color: theme.text
-                        font.pointSize: theme.fontPoint * (page.spectated.found ? 1.35 : 1.1)
+                        font.pointSize: (page.spectated.found ? theme.fontLarge : theme.fontSubtitle)
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
                     Flow {
                         Layout.fillWidth: true
                         visible: page.spectated.found === true
-                        spacing: theme.em * 0.35
+                        spacing: theme.em * 0.4
                         Pill {
                             visible: (page.spectated.place || 0) > 0
                             text: "P" + page.spectated.place
                             solid: true
                         }
-                        Pill {
-                            visible: (page.spectated.carClass || "") !== ""
-                            text: page.spectated.carClass || ""
-                            tint: page.spectated.classColor || theme.accent
+                        TpClassBadge {  // as overlays
+                            label: page.spectated.classAlias || page.spectated.carClass || ""
+                            fullName: page.spectated.carClass || ""
+                            fill: page.spectated.classColor || theme.accent
                         }
                         Pill {
                             visible: (page.spectated.status || "") !== ""
@@ -229,7 +213,7 @@ TpPage {
         Flow {
             Layout.fillWidth: true
             visible: classChips.count > 0
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             OverlayChip {
                 text: i18n.tr("All")
                 showDot: false
@@ -273,17 +257,17 @@ TpPage {
                 }
 
                 add: Transition {
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase }
                 }
                 remove: Transition {
-                    NumberAnimation { property: "opacity"; to: 0; duration: 120 }
+                    NumberAnimation { property: "opacity"; to: 0; duration: theme.motionFast }
                 }
                 displaced: Transition {
-                    NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; to: 1; duration: 220 }
+                    NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; to: 1; duration: theme.motionSlow }
                 }
                 move: Transition {
-                    NumberAnimation { properties: "y"; duration: 260; easing.type: Easing.OutCubic }
+                    NumberAnimation { properties: "y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
                 }
 
                 Keys.onReturnPressed: if (currentItem) backend.spectate(currentItem.slot)
@@ -335,7 +319,7 @@ TpPage {
                 horizontalAlignment: Text.AlignRight
                 text: i18n.tr("Hotkeys can switch spectate mode & drivers (Hotkey page)")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
         }

@@ -249,16 +249,29 @@ def test_driver_list_per_wheel_compounds_drawn(widgets, field):
     update(widget)
 
 
+def cell_texts(widget) -> set:
+    """Texts of every cell, parts of pit status & stops cells too"""
+    from neopedal.widget._modern.table import PAIR
+
+    texts = set()
+    for row in widget.state:
+        for cell in getattr(row, "cells", ()):
+            texts.add(cell.text)
+            if cell.kind == PAIR:
+                texts.update(part.text for part in cell.extra[:2])
+    return texts
+
+
 def test_driver_list_custom_pit_and_leader_texts(widgets, field, monkeypatch):
     field[1].inPit = 1
     reader(monkeypatch, "session", "in_race", True)
     widget = widgets("standings", column_pit_status=True, column_time_gap=True, column_time_interval=True)
     update(widget)
-    texts = {cell.text for row in widget.state if hasattr(row, "cells") for cell in row.cells}
+    texts = cell_texts(widget)
     assert "PIT" in texts and "Leader" in texts  # design labels at default option values
     widget = widgets("standings", pit_status_text="BOX", time_gap_leader_text="P1", time_interval_leader_text="---")
     update(widget)
-    texts = {cell.text for row in widget.state if hasattr(row, "cells") for cell in row.cells}
+    texts = cell_texts(widget)
     assert {"BOX", "P1", "---"} <= texts
 
 

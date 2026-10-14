@@ -86,70 +86,24 @@ def test_invalid_package(tmp_path):
         import_preset_package(str(package), f"{tmp_path}/")
 
 
-def test_preset_share_code():
-    import pytest
-
-    from neopedal.userfile.preset_share import decode_preset, encode_preset, summarize_preset
+def test_summarize_preset():
+    from neopedal.ui.quick.preset_backend import summarize_preset
 
     preset = {"speedometer": {"enable": True, "font_size": 15}, "gear": {"enable": False}, "module_delta": {"enable": True}}
-    code = encode_preset(preset)
-    assert code.startswith("MTP1:") and "\n" not in code
-    # Line breaks added by chat apps are ignored
-    assert decode_preset(code[:20] + "\n" + code[20:]) == preset
-    summary = summarize_preset(preset, ("speedometer", "gear"), ("module_delta",))
-    assert summary.widgets == ("speedometer",) and summary.modules == ("module_delta",)
-    for bad in ("hello", "MTP1:!!!", encode_preset({"a": 1})[:-4], "MTP1:" + code[5:15]):
-        with pytest.raises(ValueError):
-            decode_preset(bad)
+    assert summarize_preset(preset, ("speedometer", "gear"), ("module_delta",)) == (("speedometer",), ("module_delta",))
 
 
-def test_share_code_and_package_refuse_nan():
-    import base64
-    import zlib
-
-    import pytest
-
+def test_package_refuses_nan():
     from neopedal.userfile.preset_package import is_json_dict
-    from neopedal.userfile.preset_share import decode_preset
 
     raw = b'{"speedometer": {"opacity": NaN, "font_size": 1e999}}'
-    for data in (raw, b"[" * 100_000):  # non-finite numbers, too deeply nested
-        with pytest.raises(ValueError, match="damaged"):
-            decode_preset("MTP1:" + base64.urlsafe_b64encode(zlib.compress(data)).decode("ascii"))
-    assert not is_json_dict(raw) and is_json_dict(b'{"speedometer": {"opacity": 0.5}}')
-
-
-def test_import_share_code_dialog(ui_env, monkeypatch):
-    import os
-
-    from PySide6.QtWidgets import QApplication
-
-    from neopedal.setting import cfg
-    from neopedal.ui._common import TextInputDialog
-    from neopedal.ui.preset_view import PresetList
-    from neopedal.userfile.preset_share import SHARE_PREFIX, encode_preset
-
-    QApplication.clipboard().setText(encode_preset({"speedometer": {"enable": True}}))
-    shown = []
-
-    def answer(dialog):  # code input keeps pasted clipboard code, name input gets a name
-        shown.append(dialog.text())
-        if len(shown) == 2:
-            dialog.edit.setText("My: shared")
-        dialog.accepting()
-
-    monkeypatch.setattr(TextInputDialog, "open", answer)
-    view = PresetList(None)
-    view.import_share_code()
-    assert os.path.exists(os.path.join(cfg.path.settings, "My shared.json"))
-    assert shown[0].startswith(SHARE_PREFIX)  # clipboard code proposed
-    assert shown[1] == "Shared preset"
-    view.deleteLater()
+    assert not is_json_dict(raw) and not is_json_dict(b"[" * 100_000)  # non-finite numbers, too deeply nested
+    assert is_json_dict(b'{"speedometer": {"opacity": 0.5}}')
 
 
 def test_style_write_error_keeps_existing_file(tmp_path, source, monkeypatch):
     """Write error (full disk) while importing styles: existing style file kept whole (was: truncated)"""
-    from neopedal.userfile import preset_package
+    from neopedal import userfile
 
     settings, _ = source
     package = tmp_path / "race.zip"
@@ -163,7 +117,7 @@ def test_style_write_error_keeps_existing_file(tmp_path, source, monkeypatch):
             file.write(b"{")  # partly written
             raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(preset_package, "flush_to_disk", full_disk, raising=False)
+    monkeypatch.setattr(userfile, "flush_to_disk", full_disk)  # atomic_replace of package files
     with pytest.raises(OSError):
         import_preset_package(str(package), f"{target}/", overwrite_styles=True)
     assert json.loads((target / "classes.json").read_text(encoding="utf-8")) == {"Mine": {}}

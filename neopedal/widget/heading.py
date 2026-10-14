@@ -20,6 +20,8 @@
 Heading Widget
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QPainter, QPen, QPixmap
 
@@ -29,6 +31,9 @@ from ..const_file import ImageFile
 from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import HeadingConfig
 
 
 class HeadingMixin:
@@ -83,6 +88,8 @@ class HeadingMixin:
 class Realtime(HeadingMixin, Overlay):
     """Draw widget"""
 
+    wcfg: "HeadingConfig"
+
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
@@ -131,7 +138,8 @@ class Realtime(HeadingMixin, Overlay):
         # Config canvas
         self.resize(self.area_size, self.area_size)
         self.pixmap_background = QPixmap(self.area_size, self.area_size)
-        self.pixmap_dot = QPixmap(self.dot_size * 2, self.dot_size * 2)
+        dot_pixels = round(self.dot_size * 2)  # pixmap size: whole pixels
+        self.pixmap_dot = QPixmap(dot_pixels, dot_pixels)
         self.pixmap_icon = QPixmap(ImageFile.COMPASS).scaledToWidth(
             int(self.area_size * 1.5),
             mode=Qt.TransformationMode.SmoothTransformation
@@ -139,15 +147,15 @@ class Realtime(HeadingMixin, Overlay):
 
         self.pen_yaw = QPen()
         self.pen_yaw.setCapStyle(Qt.PenCapStyle.RoundCap)
-        self.pen_yaw.setWidth(self.wcfg["yaw_line_width"])
+        self.pen_yaw.setWidthF(self.wcfg["yaw_line_width"])
         self.pen_yaw.setColor(self.wcfg["yaw_line_color"])
         self.pen_slip = QPen()
         self.pen_slip.setCapStyle(Qt.PenCapStyle.RoundCap)
-        self.pen_slip.setWidth(self.wcfg["slip_angle_line_width"])
+        self.pen_slip.setWidthF(self.wcfg["slip_angle_line_width"])
         self.pen_slip.setColor(self.wcfg["slip_angle_line_color"])
         self.pen_direction = QPen()
         self.pen_direction.setCapStyle(Qt.PenCapStyle.RoundCap)
-        self.pen_direction.setWidth(self.wcfg["direction_line_width"])
+        self.pen_direction.setWidthF(self.wcfg["direction_line_width"])
         self.pen_direction.setColor(self.wcfg["direction_line_color"])
         self.pen_text_yaw = QPen()
         self.pen_text_yaw.setColor(self.wcfg["font_color_yaw_angle"])
@@ -164,7 +172,15 @@ class Realtime(HeadingMixin, Overlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         temp_veh_ori_yaw = self.read_heading()
-        if self.veh_ori_yaw != temp_veh_ori_yaw:
+        # Repaint only on visible change: angles to 0.1 degree (as modern), reading texts
+        visible = (
+            round(temp_veh_ori_yaw, 1),
+            round(self.yaw_angle, 1),
+            round(self.slip_angle, 1),
+            self.format_angle(self.display_yaw_angle(self.yaw_angle)) if self.wcfg["show_yaw_angle_reading"] else "",
+            self.format_angle(self.slip_angle) if self.wcfg["show_slip_angle_reading"] else "",
+        )
+        if self.changed("heading", visible):
             self.veh_ori_yaw = temp_veh_ori_yaw
             self.update()
 
@@ -206,7 +222,8 @@ class Realtime(HeadingMixin, Overlay):
             painter.resetTransform()
         # Draw dot
         if self.wcfg["show_dot"]:
-            painter.drawPixmap(self.area_center - self.dot_size, self.area_center - self.dot_size, self.pixmap_dot)
+            dot_pos = int(self.area_center - self.dot_size)  # whole pixel position (truncated)
+            painter.drawPixmap(dot_pos, dot_pos, self.pixmap_dot)
         # Draw text
         if self.wcfg["show_yaw_angle_reading"]:
             painter.setPen(self.pen_text_yaw)
@@ -248,7 +265,7 @@ class Realtime(HeadingMixin, Overlay):
             else:
                 pen.setStyle(Qt.PenStyle.DashLine)
             mark_scale = self.area_center * min(self.wcfg["center_mark_length_scale"], 1)
-            pen.setWidth(self.wcfg["center_mark_width"])
+            pen.setWidthF(self.wcfg["center_mark_width"])
             pen.setColor(self.wcfg["center_mark_color"])
             painter.setPen(pen)
             painter.drawLine(center, center, center - mark_scale, center)
@@ -263,7 +280,7 @@ class Realtime(HeadingMixin, Overlay):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if self.wcfg["dot_outline_width"] > 0:
             pen = QPen()
-            pen.setWidth(self.wcfg["dot_outline_width"])
+            pen.setWidthF(self.wcfg["dot_outline_width"])
             pen.setColor(self.wcfg["dot_outline_color"])
             painter.setPen(pen)
         else:
@@ -271,7 +288,7 @@ class Realtime(HeadingMixin, Overlay):
         brush = QBrush(Qt.BrushStyle.SolidPattern)
         brush.setColor(self.wcfg["dot_color"])
         painter.setBrush(brush)
-        painter.drawEllipse(self.dot_size * 0.5, self.dot_size * 0.5, self.dot_size, self.dot_size)
+        painter.drawEllipse(QRectF(self.dot_size * 0.5, self.dot_size * 0.5, self.dot_size, self.dot_size))
 
     # Additional methods
     def format_angle(self, angle):

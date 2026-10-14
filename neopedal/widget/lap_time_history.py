@@ -20,81 +20,34 @@
 Lap time history Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
-from .. import units
 from ..api_control import api
 from ..const_common import TEXT_NOLAPTIME
 from ..module_info import ConsumptionDataSet, minfo
-from ._base import Overlay
 from ._common import delta_shown
+from ._data import cut_number, lap_delta, used_amount
+from ._history import HistoryTable
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import LapTimeHistoryConfig
 
 
-class Realtime(Overlay):
+class Realtime(HistoryTable):
     """Draw widget"""
+
+    wcfg: "LapTimeHistoryConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
-        layout = self.set_grid_layout(gap_vert=self.wcfg["bar_gap"])
-        self.set_primary_layout(layout=layout)
-
-        # Config font
-        font = self.config_font(
-            self.wcfg["font_name"],
-            self.wcfg["font_size"],
-            self.wcfg["font_weight"],
-        )
-        self.setFont(font)
-        font_m = self.get_font_metrics(font)
-
-        if self.wcfg["show_caption"]:
-            font_cap = self.config_font(
-                self.wcfg["font_name"],
-                self.wcfg["font_size"] * self.wcfg["font_scale_caption"],
-                self.wcfg["font_weight"],
-            )
-            font_cap_m = self.get_font_metrics(font_cap)
-
-        # Config variable
-        layout_reversed = self.wcfg["layout"] != 0
-        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.history_slot = min(max(self.wcfg["lap_time_history_count"], 1), 100)
-        row_caption = (self.history_slot + 2) * self.wcfg["swap_upper_caption"]
-
-        # Config units
-        self.unit_fuel = units.set_unit_fuel(self.cfg.units["fuel_unit"])
+        self.set_history_layout(self.history_slot)
 
         # Laps
         if self.wcfg["show_laps"]:
-            self.bars_laps = self.set_rawtext(
-                text="---",
-                width=font_m.width * 3 + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.wcfg["font_color_last_laps"],
-                bg_color=self.wcfg["background_color_last_laps"],
-                count=self.history_slot + 1,
-            )
-            self.bars_laps[0].fg = self.wcfg["font_color_laps"]
-            self.bars_laps[0].bg = self.wcfg["background_color_laps"]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_laps,
-                row_start=1,
-                column=self.wcfg["display_order_laps"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                cap_temp = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_laps"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(cap_temp, row_caption, self.wcfg["display_order_laps"])
+            self.bars_laps = self.set_history_column("laps", "last_laps", "---", 3)
 
         # Time
         if self.wcfg["show_time"]:
@@ -112,190 +65,23 @@ class Realtime(Overlay):
                     self.wcfg["background_color_last_time"],
                 ),
             )
-            self.bars_time = self.set_rawtext(
-                text=TEXT_NOLAPTIME,
-                width=font_m.width * 8 + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.bar_style_time[1][0],
-                bg_color=self.bar_style_time[1][1],
-                count=self.history_slot + 1,
-            )
-            self.bars_time[0].fg = self.bar_style_time[0][0]
-            self.bars_time[0].bg = self.bar_style_time[0][1]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_time,
-                row_start=1,
-                column=self.wcfg["display_order_time"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                cap_temp = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_time"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(cap_temp, row_caption, self.wcfg["display_order_time"])
+            self.bars_time = self.set_history_column("time", "last_time", TEXT_NOLAPTIME, 8)
 
         # Lap time delta
-        if self.wcfg["show_delta"]:
-            self.bar_style_delta = (
-                (
-                    self.wcfg["font_color_delta"],
-                    self.wcfg["background_color_delta"],
-                ),
-                (
-                    self.wcfg["font_color_last_delta"],
-                    self.wcfg["background_color_last_delta"],
-                ),
-            )
-            decimals_delta = max(self.wcfg["decimal_places_delta"], 1)
-            self.width_delta = 3 + decimals_delta
-            self.bars_delta = self.set_rawtext(
-                text=f"--.{'-' * decimals_delta}",
-                width=font_m.width * self.width_delta + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.bar_style_delta[1][0],
-                bg_color=self.bar_style_delta[1][1],
-                count=self.history_slot + 1,
-            )
-            self.bars_delta[0].fg = self.bar_style_delta[0][0]
-            self.bars_delta[0].bg = self.bar_style_delta[0][1]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_delta,
-                row_start=1,
-                column=self.wcfg["display_order_delta"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                cap_temp = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_delta"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(cap_temp, row_caption, self.wcfg["display_order_delta"])
+        self.set_delta_column("last_delta")
 
         # Fuel
-        if self.wcfg["show_fuel"]:
-            if self.wcfg["show_fuel_sign"]:
-                self.sign_fuel = units.set_symbol_fuel(self.cfg.units["fuel_unit"])[0].upper()
-            else:
-                self.sign_fuel = ""
-            self.sign_energy = "E" if self.sign_fuel else ""
-            decimals_fuel = max(self.wcfg["decimal_places_fuel"], 1)
-            self.width_fuel = 2 + decimals_fuel
-            self.bars_fuel = self.set_rawtext(
-                text=f"-.{'-' * decimals_fuel}{self.sign_fuel}",
-                width=font_m.width * (self.width_fuel + len(self.sign_fuel)) + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.wcfg["font_color_last_fuel"],
-                bg_color=self.wcfg["background_color_last_fuel"],
-                count=self.history_slot + 1,
-            )
-            self.bars_fuel[0].fg = self.wcfg["font_color_fuel"]
-            self.bars_fuel[0].bg = self.wcfg["background_color_fuel"]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_fuel,
-                row_start=1,
-                column=self.wcfg["display_order_fuel"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                self.cap_fuel = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_fuel"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(self.cap_fuel, row_caption, self.wcfg["display_order_fuel"])
+        self.set_fuel_column("last_fuel")
 
         # Fuel ratio
         if self.wcfg["show_fuel_ratio"]:
             decimals_ratio = max(self.wcfg["decimal_places_fuel_ratio"], 1)
             self.width_ratio = 2 + decimals_ratio
-            self.bars_ratio = self.set_rawtext(
-                text=f"-.{'-' * decimals_ratio}",
-                width=font_m.width * self.width_ratio + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.wcfg["font_color_last_fuel_ratio"],
-                bg_color=self.wcfg["background_color_last_fuel_ratio"],
-                count=self.history_slot + 1,
-            )
-            self.bars_ratio[0].fg = self.wcfg["font_color_fuel_ratio"]
-            self.bars_ratio[0].bg = self.wcfg["background_color_fuel_ratio"]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_ratio,
-                row_start=1,
-                column=self.wcfg["display_order_fuel_ratio"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                cap_temp = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_fuel_ratio"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(cap_temp, row_caption, self.wcfg["display_order_fuel_ratio"])
+            self.bars_ratio = self.set_history_column(
+                "fuel_ratio", "last_fuel_ratio", f"-.{'-' * decimals_ratio}", self.width_ratio)
 
         # Tyre wear
-        if self.wcfg["show_wear"]:
-            if self.wcfg["show_wear_sign"]:
-                self.sign_wear = "%"
-            else:
-                self.sign_wear = ""
-            decimals_wear = max(self.wcfg["decimal_places_wear"], 1)
-            self.width_wear = 2 + decimals_wear
-            self.bars_wear = self.set_rawtext(
-                text=f"-.{'-' * decimals_wear}{self.sign_wear}",
-                width=font_m.width * (self.width_wear + len(self.sign_wear)) + bar_padx,
-                fixed_height=font_m.height,
-                offset_y=font_m.voffset,
-                fg_color=self.wcfg["font_color_last_wear"],
-                bg_color=self.wcfg["background_color_last_wear"],
-                count=self.history_slot + 1,
-            )
-            self.bars_wear[0].fg = self.wcfg["font_color_wear"]
-            self.bars_wear[0].bg = self.wcfg["background_color_wear"]
-            self.set_grid_layout_table_column(
-                layout=layout,
-                targets=self.bars_wear,
-                row_start=1,
-                column=self.wcfg["display_order_wear"],
-                bottom_to_top=layout_reversed,
-            )
-
-            if self.wcfg["show_caption"]:
-                cap_temp = self.set_rawtext(
-                    font=font_cap,
-                    text=self.wcfg["caption_text_wear"],
-                    fixed_height=font_cap_m.height,
-                    offset_y=font_cap_m.voffset,
-                    fg_color=self.wcfg["font_color_caption"],
-                    bg_color=self.wcfg["background_color_caption"],
-                )
-                layout.addWidget(cap_temp, row_caption, self.wcfg["display_order_wear"])
+        self.set_wear_column("last_wear")
 
         # Last data
         self.empty_data = ConsumptionDataSet()
@@ -315,12 +101,9 @@ class Realtime(Overlay):
         if self.wcfg["show_delta"]:
             self.update_delta(self.bars_delta[0], minfo.delta.deltaLast if delta_shown("Last") else None)
         if self.wcfg["show_fuel"]:
-            if energy_type:
-                fuel = minfo.energy.estimatedConsumption
-                sign_fuel = self.sign_energy
-            else:
-                fuel = self.unit_fuel(minfo.fuel.estimatedConsumption)
-                sign_fuel = self.sign_fuel
+            fuel, sign_fuel = used_amount(
+                energy_type, minfo.energy.estimatedConsumption, minfo.fuel.estimatedConsumption,
+                self.unit_fuel, self.sign_fuel)
             if self.wcfg["show_caption"]:
                 self.update_fuel_caption(self.cap_fuel, energy_type)
             self.update_fuel(self.bars_fuel[0], fuel, sign_fuel)
@@ -360,41 +143,14 @@ class Realtime(Overlay):
             if data is None:
                 target.text = "-"
             else:
-                target.text = f"{calc.sym_max(data, 99.9):+.{self.width_delta}f}"[:self.width_delta].strip(".")
-            target.update()
-
-    def update_fuel(self, target, data, sign):
-        """Fuel data"""
-        if target.last != data:
-            target.last = data
-            text_fuel = f"{data:.{self.width_fuel}f}"[:self.width_fuel].strip(".")
-            target.text = f"{text_fuel}{sign}"
-            target.update()
-
-    def update_fuel_caption(self, target, data):
-        """Fuel caption"""
-        if target.last != data:
-            target.last = data
-            if data:
-                text_caption = self.wcfg["caption_text_virtual_energy"]
-            else:
-                text_caption = self.wcfg["caption_text_fuel"]
-            target.text = text_caption
+                target.text = cut_number(calc.sym_max(data, 99.9), self.width_delta, "+")
             target.update()
 
     def update_ratio(self, target, data):
         """Fuel ratio data"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:.{self.width_ratio}f}"[:self.width_ratio].strip(".")
-            target.update()
-
-    def update_wear(self, target, data):
-        """Wear data"""
-        if target.last != data:
-            target.last = data
-            text_wear = f"{data:.{self.width_wear}f}"[:self.width_wear].strip(".")
-            target.text = f"{text_wear}{self.sign_wear}"
+            target.text = cut_number(data, self.width_ratio)
             target.update()
 
     def update_laps_history(self, dataset):
@@ -423,20 +179,13 @@ class Realtime(Overlay):
             if self.wcfg["show_delta"]:
                 last_data = dataset[index] if index < len(dataset) else self.empty_data
                 # No lap to compare (oldest lap, or no time set): dash, not the whole lap time
-                if data.lapTimeLast > 0 and last_data.lapTimeLast > 0:
-                    delta = data.lapTimeLast - last_data.lapTimeLast
-                else:
-                    delta = None
-                self.update_delta(self.bars_delta[index], delta)
+                self.update_delta(self.bars_delta[index], lap_delta(data.lapTimeLast, last_data.lapTimeLast))
                 self.bars_delta[index].setHidden(hidden)
 
             if self.wcfg["show_fuel"]:
-                if show_energy and data.lastLapUsedEnergy:
-                    fuel = data.lastLapUsedEnergy
-                    sign_fuel = "E" if self.sign_fuel else ""
-                else:
-                    fuel = self.unit_fuel(data.lastLapUsedFuel)
-                    sign_fuel = self.sign_fuel
+                fuel, sign_fuel = used_amount(
+                    show_energy and bool(data.lastLapUsedEnergy), data.lastLapUsedEnergy, data.lastLapUsedFuel,
+                    self.unit_fuel, self.sign_fuel)
                 self.update_fuel(self.bars_fuel[index], fuel, sign_fuel)
                 self.bars_fuel[index].setHidden(hidden)
 

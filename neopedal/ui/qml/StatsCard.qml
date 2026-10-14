@@ -23,7 +23,7 @@ Card {
         y: card.pad * 0.8
         width: card.width - card.pad * 2
         height: Math.round(theme.em * 2)
-        spacing: theme.em * 0.45
+        spacing: theme.em * 0.5
         Icon { glyph: card.glyph; color: theme.accent; size: theme.em * 0.95 }
         Text {
             text: card.title
@@ -34,7 +34,7 @@ Card {
             HoverHandler { id: titleHover; enabled: card.tip !== "" }
             ToolTip.visible: titleHover.hovered
             ToolTip.text: card.tip
-            ToolTip.delay: 500
+            ToolTip.delay: theme.tipDelay
         }
         Rectangle {
             visible: card.count !== ""
@@ -47,7 +47,7 @@ Card {
                 anchors.centerIn: parent
                 text: card.count
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 font.weight: Font.DemiBold
                 font.features: { "tnum": 1 }
             }
@@ -55,7 +55,7 @@ Card {
         Item { visible: card.count !== ""; Layout.fillWidth: true }
         Row {
             id: actionRow
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             Layout.alignment: Qt.AlignVCenter
         }
     }

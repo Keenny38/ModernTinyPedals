@@ -35,11 +35,12 @@ from PySide6.QtWidgets import (
 
 from ..i18n import tr, trm
 from ..i18n.options import module_label
-from ..perf_monitor import PerfMonitor, ProcessMonitor, connection_health, endpoint_rows
+from ..perf_monitor import PerfMonitor, ProcessMonitor, connection_health, endpoint_rows, gc_stats
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 
 HEADER = ("Widget", "Event", "Calls/s", "Avg (ms)", "Max (ms)", "Total (ms)")
 THREAD_HEADER = ("Thread", "CPU %", "CPU time (s)")
+REFRESH_MS = 2000  # tables refreshed this often while shown (thread CPU times of whole process read)
 REST_HEADER = ("Rest API resource", "Status", "Last answer (s ago)", "Last error")
 # Rest API resource state & error (see adapter.restapi_connector.EndpointStatus): display text
 REST_STATES = {
@@ -101,15 +102,17 @@ class PerformanceView(BaseDialog):
         # App & modules (threads)
         self.process_monitor = ProcessMonitor()
         self.label_process = QLabel(self)
+        self.label_gc = QLabel(self)
         self.table_threads = QTableWidget(0, len(THREAD_HEADER), self)
         self.table_threads.setHorizontalHeaderLabels([tr(text) for text in THREAD_HEADER])
         self.table_threads.verticalHeader().setVisible(False)
         self.table_threads.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table_threads.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        tab_threads = QWidget(self)
+        tab_threads = self.tab_threads = QWidget(self)
         layout_threads = QVBoxLayout(tab_threads)
         layout_threads.setContentsMargins(0, 0, 0, 0)
         layout_threads.addWidget(self.label_process)
+        layout_threads.addWidget(self.label_gc)
         layout_threads.addWidget(self.table_threads)
 
         tab_widgets = QWidget(self)
@@ -136,6 +139,7 @@ class PerformanceView(BaseDialog):
         self.tabs.addTab(tab_widgets, tr("Widgets"))
         self.tabs.addTab(tab_threads, tr("App & modules"))
         self.tabs.addTab(tab_connection, tr("Game data"))
+        self.tabs.currentChanged.connect(self.tab_changed)
 
         checkbox_enable = QCheckBox(tr("Enable Monitoring"))
         checkbox_enable.setChecked(PerfMonitor.enabled)
@@ -160,7 +164,9 @@ class PerformanceView(BaseDialog):
         self.setLayout(layout_main)
 
         self.refresh()
-        self._update_timer.start(1000, self)
+        if self.tabs.currentWidget() is not self.tab_threads:
+            self.refresh_threads()  # filled once, then while its tab is shown
+        self._update_timer.start(REFRESH_MS, self)
 
     def toggle_monitor(self, checked: bool):
         """Enable or disable monitoring"""
@@ -174,14 +180,21 @@ class PerformanceView(BaseDialog):
 
     def timerEvent(self, event):
         """Auto refresh"""
-        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+        # Hidden page (other page shown), window hidden (tray) or minimized: nothing to refresh
+        if not self.isVisible() or self.window().isMinimized():
             return
         self.refresh()
 
+    def tab_changed(self, _index: int):
+        """Tab shown: refreshed at once"""
+        if self.tabs.currentWidget() is self.tab_threads:
+            self.refresh_threads()
+
     def refresh(self):
-        """Refresh tables"""
+        """Refresh tables (threads of whole process read only while their tab is shown)"""
         self.refresh_widgets()
-        self.refresh_threads()
+        if self.tabs.currentWidget() is self.tab_threads:
+            self.refresh_threads()
         self.refresh_connection()
 
     def refresh_connection(self):
@@ -211,6 +224,8 @@ class PerformanceView(BaseDialog):
         self.label_process.setText(trm(
             f"App: CPU {process.cpu_percent:.1f}%   Memory {process.memory_mb:.0f} MB   Threads {process.threads}"
         ))
+        frozen, tracked = gc_stats()
+        self.label_gc.setText(trm(f"Python objects: {frozen} frozen, {tracked} tracked"))
         self.table_threads.setRowCount(len(threads))
         for row, item in enumerate(threads):
             for column, value in enumerate((item.name, round(item.cpu_percent, 1), round(item.cpu_seconds, 1))):

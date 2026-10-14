@@ -288,7 +288,7 @@ def test_show_menu_keeps_scroll_and_tells_no_match(opener, warnings):
         return [item for item in items(channels) if item.objectName() == "showChip" and item.isVisible()]
 
     listed = len(chips())
-    catalog = [item for group in backend.dashboardCatalog for item in group["items"]]
+    catalog = [item for group in backend.dashboard.catalog for item in group["items"]]
     assert 0 < listed < len(catalog)  # one wheel channels listed only while shown or searched
     channels.setProperty("contentY", 200.0)
     wait(0.2)
@@ -318,12 +318,12 @@ def test_hysteresis_applied_while_slider_moves(opener):
     backend.setSideTab(2)
     wait(0.4)
     slider = find(view, lambda item: "Slider" in class_name(item) and item.property("from") == 3.0)[0]
-    value = 10 if backend.hysteresis != 10 else 12
+    value = 10 if backend.cornerTable.hysteresis != 10 else 12
     slider.setProperty("value", float(value))
     QMetaObject.invokeMethod(slider, "moved")
-    assert backend.hysteresis != value  # applied once value stays a moment
+    assert backend.cornerTable.hysteresis != value  # applied once value stays a moment
     wait(0.6)
-    assert backend.hysteresis == value
+    assert backend.cornerTable.hysteresis == value
 
 
 def test_axis_labels_follow_tick_step(opener, warnings):

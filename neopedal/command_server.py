@@ -74,7 +74,10 @@ WS_OP_TEXT = 0x1
 WS_OP_CLOSE = 0x8
 WS_OP_PING = 0x9
 WS_OP_PONG = 0xA
+SERVE_POLL_INTERVAL = 0.5  # s, server loop stop check (waited by a worker thread on stop, never by the GUI)
+STOP_WAIT_SECONDS = SERVE_POLL_INTERVAL + 1.0  # new server on the port of one still stopping waits this at most
 STREAM_INTERVAL = 100  # ms, default push interval
+STREAM_KEEPALIVE = 2.0  # s, same telemetry sent again at most this often (full data stream: unchanged data held)
 STREAM_INTERVAL_RANGE = (20, 5000)
 # Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
 # until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
@@ -84,6 +87,7 @@ BIND_RETRY_MS = 5000
 MAX_CONNECTIONS = 64
 MAX_CONNECTIONS_PER_ADDRESS = 16
 REQUEST_SECONDS = 10  # request (line, headers, body) received in this time once started, or connection closed
+MAX_POST_BODY = 65536  # bytes of command request body read (ignored), more never read
 
 
 def is_loopback(address: str) -> bool:
@@ -114,6 +118,13 @@ class LocalHTTPServer(ThreadingHTTPServer):
     if sys.platform == "win32":
         allow_reuse_address = False
 
+    _closing: dict[int, threading.Event] = {}  # port: closed event of a server stopping (worker thread)
+    _closing_lock = threading.Lock()
+
+    def serve_forever(self, poll_interval: float = SERVE_POLL_INTERVAL):
+        """Serve until stop(): its worker thread waits up to poll_interval for the serving loop"""
+        super().serve_forever(poll_interval)
+
     def server_bind(self):
         """Bind without host name lookup: HTTPServer looks up server_name (getfqdn, never used here),
         which blocks the GUI thread with a slow DNS, and raises UnicodeDecodeError (not OSError) for a
@@ -125,11 +136,23 @@ class LocalHTTPServer(ThreadingHTTPServer):
         self.server_name = str(host)
         self.server_port = port
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, server_address, *args, **kwargs):
         self.stopping = threading.Event()  # long running handlers (stream) end when set
+        self.closed = threading.Event()  # listening socket & connections closed (set by stop's worker thread)
         self._connections: dict[socket.socket, str] = {}  # open connection: client address
         self._connections_lock = threading.Lock()
-        super().__init__(*args, **kwargs)
+        with LocalHTTPServer._closing_lock:
+            closing = LocalHTTPServer._closing.get(self.port_of(server_address))
+        if closing is not None:  # same port turned off & on again: previous server's socket closed first
+            closing.wait(STOP_WAIT_SECONDS)
+        super().__init__(server_address, *args, **kwargs)
+
+    @staticmethod
+    def port_of(server_address) -> int:
+        try:
+            return int(server_address[1])
+        except (IndexError, TypeError, ValueError):
+            return -1
 
     def verify_request(self, request, client_address):
         """Accept connection if under limits (refused connection closed by caller)"""
@@ -161,12 +184,43 @@ class LocalHTTPServer(ThreadingHTTPServer):
             with suppress(OSError):  # TLS socket: plain socket shutdown, TLS state left to handler thread
                 socket.socket.shutdown(sock, socket.SHUT_RDWR)
 
-    def stop(self):
-        """Stop serving, close listening socket & open connections"""
+    def stop(self, wait: bool = False):
+        """Stop serving, close listening socket & open connections in a worker thread (serving loop ends within
+        SERVE_POLL_INTERVAL, never waited by the GUI thread). Handlers see stopping set at once.
+
+        Args:
+            wait: return once closed (app quitting, tests).
+        """
         self.stopping.set()
-        self.shutdown()
-        self.server_close()
-        self.close_connections()
+        port = self.port_of(self.server_address)
+        with LocalHTTPServer._closing_lock:
+            LocalHTTPServer._closing[port] = self.closed
+        self.close_connections()  # clients see the end at once (again once listening socket closed)
+        worker = threading.Thread(target=self.__close, args=(port,), daemon=True, name=f"{type(self).__name__} stop")
+        worker.start()
+        if wait:
+            self.closed.wait(STOP_WAIT_SECONDS)
+
+    def __close(self, port: int):
+        try:
+            self.shutdown()
+            self.server_close()
+            self.close_connections()
+        except Exception:  # never left half closed silently
+            logger.debug("%s: stop failed", type(self).__name__, exc_info=True)
+        finally:
+            self.closed.set()
+            with LocalHTTPServer._closing_lock:
+                if LocalHTTPServer._closing.get(port) is self.closed:
+                    del LocalHTTPServer._closing[port]
+
+
+def wait_servers_stopped(timeout: float = STOP_WAIT_SECONDS) -> bool:
+    """Servers stopping (see LocalHTTPServer.stop) closed, False if one is still closing after timeout"""
+    deadline = monotonic() + timeout
+    with LocalHTTPServer._closing_lock:
+        events = list(LocalHTTPServer._closing.values())
+    return all(event.wait(max(deadline - monotonic(), 0)) for event in events)
 
 
 class DeadlineReader(socket.SocketIO):
@@ -434,17 +488,30 @@ class CommandHandler(BoundedRequestHandler):
         else:
             self.send_json(404, {"error": "not found"})
 
+    def read_body(self) -> None:
+        """Read (and ignore) request body, so client gets the response instead of a connection reset"""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:  # bad header: no body read
+            return
+        length = min(length, MAX_POST_BODY)
+        if length > 0:
+            with suppress(OSError):  # client gone or too slow (handler timeout)
+                self.rfile.read(length)
+
     def do_POST(self):
         """Run command"""
+        self.read_body()
         if not self.check_host():
             return
-        if not self.path.startswith("/command/"):
+        route = urlsplit(self.path).path
+        if not route.startswith("/command/"):
             self.send_json(404, {"error": "not found"})
             return
         if self.headers.get(REQUIRED_HEADER) is None and self.headers.get(LEGACY_HEADER) is None:
             self.send_json(403, {"error": f"missing {REQUIRED_HEADER} header"})
             return
-        name = unquote(self.path[len("/command/"):]).strip("/")
+        name = unquote(route[len("/command/"):]).strip("/")
         command = self.commands.get(name)
         if command is None:
             self.send_json(404, {"error": f"unknown command: {name}"})
@@ -477,6 +544,8 @@ class CommandHandler(BoundedRequestHandler):
         # Event of this server: a server started again (reload, port changed) never revives an old stream
         stopping: threading.Event = getattr(self.server, "stopping", None) or threading.Event()
         logger.info("REMOTE CONTROL: stream client connected (%sms)", round(interval * 1000))
+        last_sent = b""  # full data stream: same message held, sent again every STREAM_KEEPALIVE (game closed)
+        sent_at = 0.0
         try:
             while not stopping.is_set():
                 try:
@@ -486,12 +555,17 @@ class CommandHandler(BoundedRequestHandler):
                     data = {"active": False}
                 message = options.payload(data)
                 if message is not None:
-                    sock.sendall(websocket_frame(json.dumps(message).encode("utf-8")))
+                    encoded = json.dumps(message).encode("utf-8")
+                    now = monotonic()
+                    if options.changes or encoded != last_sent or now - sent_at >= STREAM_KEEPALIVE:
+                        sock.sendall(websocket_frame(encoded))
+                        last_sent, sent_at = encoded, now
                 readable, _, _ = select.select([sock], [], [], interval)
                 if readable:
                     opcode, payload = read_websocket_frame(sock)
                     if opcode == WS_OP_TEXT:
                         options.update(payload)
+                        last_sent = b""  # data sent at once after an options message
                     elif opcode == WS_OP_CLOSE:
                         sock.sendall(websocket_frame(payload[:2], WS_OP_CLOSE))
                         break

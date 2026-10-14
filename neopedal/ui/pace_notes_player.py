@@ -34,6 +34,11 @@ from ..module_info import minfo
 from ..setting import cfg
 from ..userfile.track_notes import COLUMN_PACENOTE
 
+# Notes checked this often at most (ms): note index set by notes module, sound loading & audio output add their
+# own delay anyway. 50 ms = 4 m at 300 km/h, global offset moves notes earlier. Faster only costs CPU (older
+# presets kept 10 ms of former default).
+MIN_UPDATE_INTERVAL = 50
+
 
 class PaceNotesPlayer(QMediaPlayer):
     """Pace notes player"""
@@ -69,6 +74,7 @@ class PaceNotesPlayer(QMediaPlayer):
             update_interval = max(
                 self.mcfg["update_interval"],
                 cfg.application["minimum_update_interval"],
+                MIN_UPDATE_INTERVAL,
             )
             self._update_timer.start(update_interval, self)
 

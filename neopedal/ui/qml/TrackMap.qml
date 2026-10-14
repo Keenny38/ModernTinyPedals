@@ -52,6 +52,7 @@ FocusScope {
     readonly property var mapLegend: backend.mapLegend  // read once (dict built by backend on every read)
     // Shown cursor positions: none while hidden (no item updated on every cursor move)
     readonly property var cursorPoints: visible && chart ? chart.cursorMap : []
+    readonly property var cursorXY: visible && chart ? chart.cursorMapXY : []  // x, y, angle of each lap (every frame)
     // Map scale corner labels were placed for: overlaps only depend on scale (moving the map changes none),
     // placed again once scale changed by 2% (zoom easing) and when zoom settles
     property real labelScale: 1  // set at start & by changes below (never a binding: one per frame)
@@ -136,7 +137,7 @@ FocusScope {
         if (canvas.width > 0 && canvas.height > 0) backend.setMapAspect(canvas.width / canvas.height)
     }
     function zoomCorner(row) {
-        var range = backend.cornerRange(row)
+        var range = backend.cornerTable.range(row)
         if (range.length === 2 && chart) chart.zoomRange(range, 0.15)
         backend.setSelectedCorner(row)
     }
@@ -195,8 +196,8 @@ FocusScope {
     Component.onDestruction: if (reportedShown) backend.setMapShown(false)
     function exportPicture(copy) {
         canvas.grabToImage(function(result) {
-            if (copy) backend.copyImage(result.image)
-            else backend.saveImage(result.image)
+            if (copy) backend.exports.copyImage(result.image)
+            else backend.exports.saveImage(result.image)
         })
     }
 
@@ -209,15 +210,14 @@ FocusScope {
     // eased toward target each update: smooth camera
     function trackVehicles(frameTime) {
         var lines = info.lines || []
-        var points = (chart.cursorMap || []).filter(function(point, index) {
-            return point && (highlightKey === "" || (lines[index] && lines[index].lap === highlightKey))
-        })
-        if (points.length === 0 || canvas.width <= 0) return true
-        var x0 = points[0].x, x1 = x0, y0 = points[0].y, y1 = y0
-        for (var i = 1; i < points.length; i++) {
-            x0 = Math.min(x0, points[i].x); x1 = Math.max(x1, points[i].x)
-            y0 = Math.min(y0, points[i].y); y1 = Math.max(y1, points[i].y)
+        var positions = chart.cursorMapXY || []
+        var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+        for (var i = 0; i + 2 < positions.length; i += 3) {
+            if (highlightKey !== "" && !(lines[i / 3] && lines[i / 3].lap === highlightKey)) continue
+            x0 = Math.min(x0, positions[i]); x1 = Math.max(x1, positions[i])
+            y0 = Math.min(y0, positions[i + 1]); y1 = Math.max(y1, positions[i + 1])
         }
+        if (x0 > x1 || canvas.width <= 0) return true
         var fitZoom = Math.min(canvas.width / (x1 - x0 + trackMargin * 2), canvas.height / (y1 - y0 + trackMargin * 2))
                       / canvas.baseScale
         var targetZoom = Math.max(1, Math.min(trackZoom, fitZoom))
@@ -257,7 +257,7 @@ FocusScope {
         id: cardTimer
         interval: 350
         property int row: -1
-        onTriggered: root.card = row >= 0 ? backend.cornerCard(row) : ({})
+        onTriggered: root.card = row >= 0 ? backend.cornerTable.card(row) : ({})
     }
 
     // Digit of key (0-9, else -1), also digit row of layouts typing other characters there without Shift
@@ -420,8 +420,8 @@ FocusScope {
                     text: modelData.label
                     flat: true
                     implicitHeight: theme.em * 1.8
-                    checked: backend.compareKey === modelData.key
-                    onClicked: backend.setCompareKey(modelData.key)
+                    checked: backend.cornerTable.compareKey === modelData.key
+                    onClicked: backend.cornerTable.setCompareKey(modelData.key)
                 }
             }
         }
@@ -495,305 +495,332 @@ FocusScope {
                 color: theme.dimText
             }
 
-            // Circuit shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+            // Map drawing in a multisampled layer while shown (smooth edges, window without MSAA). Cursor, kept
+            // position, corner labels & tooltips outside: moving them draws no layer again
             Item {
-                transform: Matrix4x4 { matrix: canvas.matrix }
-                // Pit lane (official circuit)
-                GpuShape {
-                    visible: root.options.pit === true
-                    key: root.info.pit || ""
-                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.22 : 0.25)
-                    revision: backend.revision
-                }
-                // Circuit: road (between track limits if guessed), edge, sector lines
-                GpuShape {
-                    key: root.info.edge || ""
-                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, root.info.limits ? (theme.dark ? 0.35 : 0.4) : (theme.dark ? 0.16 : 0.22))
-                    revision: backend.revision
-                }
-                GpuShape {
-                    key: root.info.road || ""
-                    color: theme.dark ? Qt.lighter(theme.base, 1.45) : Qt.darker(theme.base, 1.07)
-                    revision: backend.revision
-                }
-                GpuShape {
-                    key: root.info.marks || ""
-                    color: theme.accent
-                    revision: backend.revision
-                }
-                // Braking points range of shown laps in each corner
-                GpuShape {
-                    visible: root.options.spread === true
-                    key: root.info.spread || ""
-                    color: Qt.rgba(0.94, 0.27, 0.27, 0.3)
-                    revision: backend.revision
-                }
-                // Chart markers A-B range & selected corner along reference line
-                GpuShape {
-                    key: root.info.rangeKey || ""
-                    color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.28)
-                    revision: backend.revision
-                }
-                GpuShape {
-                    key: root.info.selectedKey || ""
-                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.16)
-                    revision: backend.revision
-                }
-            }
-            // Distance marks, placed from map origin in an item moved with the map: moving the map moves one item,
-            // not every label (same place on screen as canvas.screenX / screenY)
-            Item {
-                x: canvas.tx
-                y: canvas.ty
-                Repeater {
-                    model: root.options.distances === true ? (root.info.ticks || []) : []
-                    Item {
-                        x: modelData.x * canvas.mapScale
-                        y: canvas.ySign * modelData.y * canvas.mapScale
-                        Rectangle { x: -2; y: -2; width: 4; height: 4; radius: 2; color: theme.dimText }
-                        Text {
-                            x: 4; y: -height - 1
-                            text: modelData.label
-                            color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.68
-                            style: Text.Outline
-                            styleColor: theme.window
-                        }
-                    }
-                }
-            }
-            // Lines & zones: one transform for all of them (not one per shape: zoom & move frames stay cheap)
-            Item {
-                transform: Matrix4x4 { matrix: canvas.matrix }
-                // Driving direction
-                GpuShape {
-                    visible: root.options.arrows === true
-                    key: root.info.arrowsKey || ""
-                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
-                    revision: backend.revision
-                }
-                // Driving lines: faded when zoomed (zoomed part drawn over), or under colored line
-                // (lap rows kept: showing one more lap only adds its shapes)
-                Repeater {
-                    model: backend.mapLaps
+                objectName: "mapLayer"
+                anchors.fill: parent
+                layer.enabled: pageState.active && canvas.visible && root.hasMap
+                layer.samples: 4
+                // Circuit shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+                Item {
+                    transform: Matrix4x4 { matrix: canvas.matrix }
+                    // Pit lane (official circuit)
                     GpuShape {
-                        key: model.key
-                        color: model.color
+                        visible: root.options.pit === true
+                        key: root.info.pit || ""
+                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.22 : 0.25)
                         revision: backend.revision
-                        opacity: (root.mode === "laps" ? (root.chartZoomed ? 0.3 : 0.95)
-                                  : root.mode === "gain" || root.mode === "line" ? (model.reference ? 0.45 : 0) : 0.12)
-                                 * root.lapOpacity(model.lap)
-                        visible: opacity > 0
-                        Behavior on opacity { NumberAnimation { duration: 250 } }
                     }
-                }
-                GpuShape {
-                    key: root.info.colored || ""
-                    opacity: root.mode === "laps" ? 0 : 1
-                    visible: opacity > 0
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
-                    revision: backend.revision
-                }
-                Repeater {
-                    model: backend.mapLaps
+                    // Circuit: road (between track limits if guessed), edge, sector lines
                     GpuShape {
-                        key: model.highlight
-                        color: model.color
-                        visible: root.chartZoomed && root.mode === "laps"
-                        opacity: root.lapOpacity(model.lap)
+                        key: root.info.edge || ""
+                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, root.info.limits ? (theme.dark ? 0.35 : 0.4) : (theme.dark ? 0.16 : 0.22))
+                        revision: backend.revision
+                    }
+                    GpuShape {
+                        key: root.info.road || ""
+                        color: theme.dark ? Qt.lighter(theme.base, 1.45) : Qt.darker(theme.base, 1.07)
+                        revision: backend.revision
+                    }
+                    GpuShape {
+                        key: root.info.marks || ""
+                        color: theme.accent
+                        revision: backend.revision
+                    }
+                    // Braking points range of shown laps in each corner
+                    GpuShape {
+                        visible: root.options.spread === true
+                        key: root.info.spread || ""
+                        color: Qt.rgba(0.94, 0.27, 0.27, 0.3)
+                        revision: backend.revision
+                    }
+                    // Chart markers A-B range & selected corner along reference line
+                    GpuShape {
+                        key: root.info.rangeKey || ""
+                        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.28)
+                        revision: backend.revision
+                    }
+                    GpuShape {
+                        key: root.info.selectedKey || ""
+                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.16)
                         revision: backend.revision
                     }
                 }
-                // Braking & throttle application zones over lines: highlighted lap, else reference lap
-                Repeater {
-                    model: backend.mapLaps
-                    Item {
-                        readonly property var lap: model
-                        visible: root.options.zones === true && (root.highlightKey !== "" ? lap.lap === root.highlightKey : lap.reference)
-                        GpuShape {
-                            key: lap.brakeZones
-                            color: Qt.rgba(0.94, 0.27, 0.27, 0.45)
-                            revision: backend.revision
-                        }
-                        GpuShape {
-                            key: lap.throttleZones
-                            color: root.options.colorblind === true ? Qt.rgba(0.23, 0.51, 0.96, 0.45) : Qt.rgba(0.13, 0.77, 0.37, 0.45)
-                            revision: backend.revision
-                        }
-                    }
-                }
-
-                // Cursor trail: last seconds of each lap, fading in
-                Repeater {
-                    model: backend.mapLaps
-                    GpuShape {
-                        key: model.trail
-                        visible: root.options.trail === true && root.chart !== undefined && root.chart !== null && root.chart.hasCursor
-                        opacity: root.lapOpacity(model.lap)
-                        revision: backend.trailRevision
-                    }
-                }
-            }
-
-            // Start line: checkered bar across circuit
-            Item {
-                id: startLine
-                readonly property var start: root.info.start || []
-                readonly property real x0: canvas.screenX(start[0] || 0)
-                readonly property real y0: canvas.screenY(start[1] || 0)
-                readonly property real x1: canvas.screenX(start[2] || 0)
-                readonly property real y1: canvas.screenY(start[3] || 0)
-                readonly property real length: Math.max(Math.hypot(x1 - x0, y1 - y0), theme.em * 1.2)
-                visible: start.length === 4
-                x: (x0 + x1) / 2
-                y: (y0 + y1) / 2
-                rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
-                Row {
-                    x: -startLine.length / 2
-                    y: -height / 2
-                    height: theme.em * 0.45
+                // Distance marks, placed from map origin in an item moved with the map: moving the map moves one item,
+                // not every label (same place on screen as canvas.screenX / screenY)
+                Item {
+                    x: canvas.tx
+                    y: canvas.ty
                     Repeater {
-                        model: 6
-                        Rectangle {
-                            width: startLine.length / 6
-                            height: theme.em * 0.45
-                            color: index % 2 ? "#111111" : "#F5F5F5"
+                        model: root.options.distances === true ? (root.info.ticks || []) : []
+                        Item {
+                            x: modelData.x * canvas.mapScale
+                            y: canvas.ySign * modelData.y * canvas.mapScale
+                            Rectangle { x: -2; y: -2; width: 4; height: 4; radius: 2; color: theme.dimText }
+                            Text {
+                                x: 4; y: -height - 1
+                                text: modelData.label
+                                color: theme.dimText
+                                font.pointSize: theme.fontTiny
+                                style: Text.Outline
+                                styleColor: theme.window
+                            }
                         }
                     }
                 }
-            }
+                // Lines & zones: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+                Item {
+                    transform: Matrix4x4 { matrix: canvas.matrix }
+                    // Driving direction
+                    GpuShape {
+                        visible: root.options.arrows === true
+                        key: root.info.arrowsKey || ""
+                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
+                        revision: backend.revision
+                    }
+                    // Driving lines: faded when zoomed (zoomed part drawn over), or under colored line
+                    // (lap rows kept: showing one more lap only adds its shapes)
+                    Repeater {
+                        model: backend.mapLaps
+                        GpuShape {
+                            key: model.key
+                            color: model.color
+                            revision: backend.revision
+                            opacity: (root.mode === "laps" ? (root.chartZoomed ? 0.3 : 0.95)
+                                      : root.mode === "gain" || root.mode === "line" ? (model.reference ? 0.45 : 0) : 0.12)
+                                     * root.lapOpacity(model.lap)
+                            visible: opacity > 0
+                            Behavior on opacity { NumberAnimation { duration: theme.motionSlow } }
+                        }
+                    }
+                    GpuShape {
+                        key: root.info.colored || ""
+                        opacity: root.mode === "laps" ? 0 : 1
+                        visible: opacity > 0
+                        Behavior on opacity { NumberAnimation { duration: theme.motionSlow } }
+                        revision: backend.revision
+                    }
+                    Repeater {
+                        model: backend.mapLaps
+                        GpuShape {
+                            key: model.highlight
+                            color: model.color
+                            visible: root.chartZoomed && root.mode === "laps"
+                            opacity: root.lapOpacity(model.lap)
+                            revision: backend.revision
+                        }
+                    }
+                    // Braking & throttle application zones over lines: highlighted lap, else reference lap
+                    Repeater {
+                        model: backend.mapLaps
+                        Item {
+                            readonly property var lap: model
+                            visible: root.options.zones === true && (root.highlightKey !== "" ? lap.lap === root.highlightKey : lap.reference)
+                            GpuShape {
+                                key: lap.brakeZones
+                                color: Qt.rgba(0.94, 0.27, 0.27, 0.45)
+                                revision: backend.revision
+                            }
+                            GpuShape {
+                                key: lap.throttleZones
+                                color: root.options.colorblind === true ? Qt.rgba(0.23, 0.51, 0.96, 0.45) : Qt.rgba(0.13, 0.77, 0.37, 0.45)
+                                revision: backend.revision
+                            }
+                        }
+                    }
 
-            // Sector times: reference lap time, gap of compared lap
-            Repeater {
-                model: root.options.sectors === true ? (root.cornerInfo.sectors || []) : []
-                Rectangle {
-                    readonly property real anchorX: canvas.screenX(modelData.x)
-                    readonly property real anchorY: canvas.screenY(modelData.y)
-                    // Sector on screen: label kept inside map, else hidden (not pinned to map edge)
-                    visible: anchorX >= 0 && anchorX <= canvas.width && anchorY >= 0 && anchorY <= canvas.height
-                    x: Math.max(2, Math.min(anchorX - width / 2, canvas.width - width - 2))
-                    y: anchorY + theme.em * 0.7
-                    width: sectorRow.implicitWidth + theme.em * 0.8
-                    height: sectorRow.implicitHeight + 4
-                    radius: height / 2
-                    color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.82)
-                    border.width: 1
-                    border.color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.6)
+                    // Cursor trail: last seconds of each lap, fading in
+                    Repeater {
+                        model: backend.mapLaps
+                        GpuShape {
+                            key: model.trail
+                            visible: root.options.trail === true && root.chart !== undefined && root.chart !== null && root.chart.hasCursor
+                            opacity: root.lapOpacity(model.lap)
+                            revision: backend.trailRevision
+                        }
+                    }
+                }
+
+                // Start line: checkered bar across circuit
+                Item {
+                    id: startLine
+                    readonly property var start: root.info.start || []
+                    readonly property real x0: canvas.screenX(start[0] || 0)
+                    readonly property real y0: canvas.screenY(start[1] || 0)
+                    readonly property real x1: canvas.screenX(start[2] || 0)
+                    readonly property real y1: canvas.screenY(start[3] || 0)
+                    readonly property real length: Math.max(Math.hypot(x1 - x0, y1 - y0), theme.em * 1.2)
+                    visible: start.length === 4
+                    x: (x0 + x1) / 2
+                    y: (y0 + y1) / 2
+                    rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
                     Row {
-                        id: sectorRow
-                        anchors.centerIn: parent
-                        spacing: theme.em * 0.35
-                        Text { text: modelData.label; color: theme.accent; font.pointSize: theme.fontPoint * 0.78; font.weight: Font.Bold }
-                        Text { visible: modelData.time !== ""; text: modelData.time; color: theme.text; font.pointSize: theme.fontPoint * 0.78; font.features: { "tnum": 1 } }
-                        Text {
-                            visible: modelData.delta !== ""
-                            text: modelData.delta
-                            color: root.tone(modelData.deltaColor, theme.dimText)
-                            font.pointSize: theme.fontPoint * 0.78
-                            font.weight: Font.DemiBold
-                            font.features: { "tnum": 1 }
+                        x: -startLine.length / 2
+                        y: -height / 2
+                        height: theme.em * 0.45
+                        Repeater {
+                            model: 6
+                            Rectangle {
+                                width: startLine.length / 6
+                                height: theme.em * 0.45
+                                color: index % 2 ? "#111111" : "#F5F5F5"
+                            }
                         }
                     }
                 }
-            }
 
-            // Driving points & wheel slips: GPU markers, one shape per lap & kind (outline under fill)
-            Item {
-                transform: Matrix4x4 { matrix: canvas.matrix }
+                // Sector times: reference lap time, gap of compared lap
                 Repeater {
-                    model: backend.mapLaps
-                    Item {
-                        readonly property var lap: model
-                        opacity: root.lapOpacity(lap.lap)
-                        Repeater {
-                            model: lap.shapes
-                            Item {
-                                visible: root.pointShown(modelData.kind)
-                                GpuShape {
-                                    key: modelData.outline
-                                    color: theme.window
-                                    revision: backend.revision
-                                }
-                                GpuShape {
-                                    key: modelData.fill
-                                    color: lap.color
-                                    revision: backend.revision
+                    model: root.options.sectors === true ? (root.cornerInfo.sectors || []) : []
+                    Rectangle {
+                        readonly property real anchorX: canvas.screenX(modelData.x)
+                        readonly property real anchorY: canvas.screenY(modelData.y)
+                        // Sector on screen: label kept inside map, else hidden (not pinned to map edge)
+                        visible: anchorX >= 0 && anchorX <= canvas.width && anchorY >= 0 && anchorY <= canvas.height
+                        x: Math.max(2, Math.min(anchorX - width / 2, canvas.width - width - 2))
+                        y: anchorY + theme.em * 0.7
+                        width: sectorRow.implicitWidth + theme.em * 0.8
+                        height: sectorRow.implicitHeight + 4
+                        radius: height / 2
+                        color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.82)
+                        border.width: 1
+                        border.color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.6)
+                        Row {
+                            id: sectorRow
+                            anchors.centerIn: parent
+                            spacing: theme.em * 0.4
+                            Text { text: modelData.label; color: theme.accent; font.pointSize: theme.fontCaption; font.weight: Font.Bold }
+                            Text { visible: modelData.time !== ""; text: modelData.time; color: theme.text; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
+                            Text {
+                                visible: modelData.delta !== ""
+                                text: modelData.delta
+                                color: root.tone(modelData.deltaColor, theme.dimText)
+                                font.pointSize: theme.fontCaption
+                                font.weight: Font.DemiBold
+                                font.features: { "tnum": 1 }
+                            }
+                        }
+                    }
+                }
+
+                // Driving points & wheel slips: GPU markers, one shape per lap & kind (outline under fill)
+                Item {
+                    transform: Matrix4x4 { matrix: canvas.matrix }
+                    Repeater {
+                        model: backend.mapLaps
+                        Item {
+                            readonly property var lap: model
+                            opacity: root.lapOpacity(lap.lap)
+                            Repeater {
+                                model: lap.shapes
+                                Item {
+                                    visible: root.pointShown(modelData.kind)
+                                    GpuShape {
+                                        key: modelData.outline
+                                        color: theme.window
+                                        revision: backend.revision
+                                    }
+                                    GpuShape {
+                                        key: modelData.fill
+                                        color: lap.color
+                                        revision: backend.revision
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            // Speed next to driving points (option): laps stacked, moved with the map like distance marks
-            Item {
-                x: canvas.tx
-                y: canvas.ty
-                Repeater {
-                    model: root.options.values === true ? (root.info.points || []) : []
-                    Text {
-                        visible: root.pointShown(modelData.kind)
-                        x: modelData.x * canvas.mapScale + theme.em * 0.6
-                        y: canvas.ySign * modelData.y * canvas.mapScale - height / 2 + (modelData.order - 0.5) * height * 0.9
-                        opacity: root.lapOpacity(modelData.lap)
-                        text: modelData.value
-                        color: modelData.color
-                        style: Text.Outline
-                        styleColor: theme.window
-                        font.pointSize: theme.fontPoint * 0.7
-                        font.weight: Font.Bold
-                        font.features: { "tnum": 1 }
+                // Speed next to driving points (option): laps stacked, moved with the map like distance marks.
+                // Placed on a scale set when zoom is not easing (hundreds of texts not placed again every eased
+                // frame), hidden while zoom eases
+                Item {
+                    id: speedLabels
+                    x: canvas.tx
+                    y: canvas.ty
+                    visible: !canvas.zooming
+                    property real pointScale: 1  // set at start & by changes below (never a binding: one per frame)
+                    Component.onCompleted: pointScale = canvas.mapScale
+                    Connections {
+                        target: canvas
+                        function onMapScaleChanged() { if (!canvas.zooming) speedLabels.pointScale = canvas.mapScale }
+                        function onZoomingChanged() { if (!canvas.zooming) speedLabels.pointScale = canvas.mapScale }
+                    }
+                    Repeater {
+                        model: root.options.values === true ? (root.info.points || []) : []
+                        Text {
+                            visible: root.pointShown(modelData.kind)
+                            x: modelData.x * speedLabels.pointScale + theme.em * 0.6
+                            y: canvas.ySign * modelData.y * speedLabels.pointScale - height / 2 + (modelData.order - 0.5) * height * 0.9
+                            opacity: root.lapOpacity(modelData.lap)
+                            text: modelData.value
+                            color: modelData.color
+                            style: Text.Outline
+                            styleColor: theme.window
+                            font.pointSize: theme.fontTiny
+                            font.weight: Font.Bold
+                            font.features: { "tnum": 1 }
+                        }
                     }
                 }
             }
 
-            // Corners: number & time lost / gained. Hover: every lap in corner, click: zoom & select in corner table
-            Repeater {
-                model: root.cornerInfo.corners || []
-                Rectangle {
-                    readonly property real anchorX: canvas.screenX(modelData.x)
-                    readonly property bool selected: modelData.row >= 0 && modelData.row === backend.selectedCorner
-                    visible: root.labelShown[index] === true || cornerArea.containsMouse || selected
-                    x: anchorX + 6 + width <= canvas.width ? anchorX + 6 : anchorX - 6 - width  // kept inside map
-                    y: canvas.screenY(modelData.y) - height - 4
-                    z: 3
-                    width: cornerRow.implicitWidth + theme.em * 0.7
-                    height: cornerRow.implicitHeight + 4
-                    radius: height / 2
-                    color: cornerArea.containsMouse ? theme.raised : Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
-                    border.width: selected ? 1.5 : 1
-                    border.color: cornerArea.containsMouse || selected ? theme.accent : Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.15)
-                    Row {
-                        id: cornerRow
-                        anchors.centerIn: parent
-                        spacing: theme.em * 0.3
-                        Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontPoint * 0.78; font.weight: Font.Bold }
-                        Text {
-                            visible: modelData.delta !== ""
-                            text: modelData.delta
-                            color: root.tone(modelData.deltaColor, theme.dimText)
-                            font.pointSize: theme.fontPoint * 0.78
-                            font.weight: Font.DemiBold
-                            font.features: { "tnum": 1 }
+            // Corners: number & time lost / gained. Hover: every lap in corner, click: zoom & select in corner table.
+            // Moved with the map like distance marks (no binding per label on each move frame)
+            Item {
+                id: cornerLabels
+                objectName: "cornerLabels"
+                x: canvas.tx
+                y: canvas.ty
+                z: 3
+                Repeater {
+                    model: root.cornerInfo.corners || []
+                    Rectangle {
+                        readonly property bool selected: modelData.row >= 0 && modelData.row === backend.selectedCorner
+                        readonly property real anchorX: modelData.x * canvas.mapScale
+                        visible: root.labelShown[index] === true || cornerArea.containsMouse || selected
+                        // Kept inside map: left of corner near right edge (hidden labels never follow map moves)
+                        x: !visible || cornerLabels.x + anchorX + 6 + width <= canvas.width ? anchorX + 6 : anchorX - 6 - width
+                        y: canvas.ySign * modelData.y * canvas.mapScale - height - 4
+                        width: cornerRow.implicitWidth + theme.em * 0.7
+                        height: cornerRow.implicitHeight + 4
+                        radius: height / 2
+                        color: cornerArea.containsMouse ? theme.raised : Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
+                        border.width: selected ? 1.5 : 1
+                        border.color: cornerArea.containsMouse || selected ? theme.accent : Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.15)
+                        Row {
+                            id: cornerRow
+                            anchors.centerIn: parent
+                            spacing: theme.em * 0.3
+                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontCaption; font.weight: Font.Bold }
+                            Text {
+                                visible: modelData.delta !== ""
+                                text: modelData.delta
+                                color: root.tone(modelData.deltaColor, theme.dimText)
+                                font.pointSize: theme.fontCaption
+                                font.weight: Font.DemiBold
+                                font.features: { "tnum": 1 }
+                            }
                         }
-                    }
-                    MouseArea {
-                        id: cornerArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onEntered: if (modelData.row >= 0) {
-                            root.cardAnchor = [parent.x, parent.y + parent.height + 4]
-                            cardTimer.row = modelData.row
-                            cardTimer.restart()
-                        }
-                        onExited: { cardTimer.stop(); root.card = ({}) }
-                        onClicked: {
-                            root.forceActiveFocus()
-                            if (!root.chart) return
-                            if (modelData.row >= 0) { root.zoomCorner(modelData.row); return }
-                            var start = backend.xAtDistance(modelData.start), end = backend.xAtDistance(modelData.end)
-                            var margin = (end - start) * 0.15
-                            root.chart.setView(start - margin, end + margin, true)
+                        MouseArea {
+                            id: cornerArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: if (modelData.row >= 0) {
+                                root.cardAnchor = [cornerLabels.x + parent.x, cornerLabels.y + parent.y + parent.height + 4]
+                                cardTimer.row = modelData.row
+                                cardTimer.restart()
+                            }
+                            onExited: { cardTimer.stop(); root.card = ({}) }
+                            onClicked: {
+                                root.forceActiveFocus()
+                                if (!root.chart) return
+                                if (modelData.row >= 0) { root.zoomCorner(modelData.row); return }
+                                var start = backend.xAtDistance(modelData.start), end = backend.xAtDistance(modelData.end)
+                                var margin = (end - start) * 0.15
+                                root.chart.setView(start - margin, end + margin, true)
+                            }
                         }
                     }
                 }
@@ -805,16 +832,18 @@ FocusScope {
                 Item {
                     id: car
                     readonly property var point: root.cursorPoints[index] || null
+                    readonly property int at: index * 3  // position in flat x, y, angle list
+                    readonly property bool placed: point !== null && root.cursorXY.length > at + 2
                     readonly property real size: theme.em * (model.reference ? 1.15 : 0.95)  // reference lap larger
                     readonly property color lapColor: model.color  // positions at cursor carry no color nor lap
                     readonly property string lapKey: model.lap
-                    visible: point !== null
-                    x: point ? canvas.screenX(point.x) : 0
-                    y: point ? canvas.screenY(point.y) : 0
+                    visible: placed
+                    x: placed ? canvas.screenX(root.cursorXY[at]) : 0
+                    y: placed ? canvas.screenY(root.cursorXY[at + 1]) : 0
                     z: 4
                     opacity: point ? root.lapOpacity(lapKey) : 1
                     Item {
-                        rotation: car.point ? car.point.angle + 90 : 0
+                        rotation: car.placed ? root.cursorXY[car.at + 2] + 90 : 0
                         Rectangle {
                             x: -car.size / 2
                             y: -car.size / 2
@@ -843,7 +872,7 @@ FocusScope {
                         color: car.point ? car.lapColor : theme.text
                         style: Text.Outline
                         styleColor: theme.window
-                        font.pointSize: theme.fontPoint * 0.72
+                        font.pointSize: theme.fontTiny
                         font.weight: Font.Bold
                         font.features: { "tnum": 1 }
                     }
@@ -862,7 +891,7 @@ FocusScope {
                             anchors.centerIn: parent
                             text: car.point ? car.point.gap : ""
                             color: car.point ? car.lapColor : theme.text
-                            font.pointSize: theme.fontPoint * 0.75
+                            font.pointSize: theme.fontCaption
                             font.weight: Font.DemiBold
                             font.features: { "tnum": 1 }
                         }
@@ -922,6 +951,7 @@ FocusScope {
                     width: Math.hypot(bx - ax, by - ay)
                     height: 2
                     color: theme.accent
+                    antialiasing: true  // turned line: smooth edges without window MSAA
                     transformOrigin: Item.Left
                     rotation: Math.atan2(by - ay, bx - ax) * 180 / Math.PI
                 }
@@ -934,7 +964,7 @@ FocusScope {
                     width: rulerText.implicitWidth + theme.em * 0.8
                     height: rulerText.implicitHeight + 4
                     radius: height / 2
-                    color: theme.accent
+                    color: theme.accentFill
                     Text {
                         id: rulerText
                         anchors.centerIn: parent
@@ -951,7 +981,7 @@ FocusScope {
                 anchors { left: parent.left; top: parent.top; margins: theme.em * 0.5 }
                 text: i18n.tr("Ruler: click two points (Esc to quit)")
                 color: theme.accent
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
             }
 
             // Lap across track under mouse: room to each edge, track position
@@ -964,7 +994,7 @@ FocusScope {
                 y: py + theme.em * 1.2 + height < canvas.height ? py + theme.em * 1.2 : py - height - theme.em
                 width: placementText.implicitWidth + theme.em * 0.8
                 height: placementText.implicitHeight + theme.em * 0.4
-                radius: theme.em * 0.3
+                radius: theme.radiusSm
                 color: Qt.rgba(theme.raised.r, theme.raised.g, theme.raised.b, 0.94)
                 border.width: 1
                 border.color: root.placement.out ? theme.warning : (root.placement.color || theme.border)
@@ -973,7 +1003,7 @@ FocusScope {
                     anchors.centerIn: parent
                     text: root.placement.text || ""
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.78
+                    font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
                 }
             }
@@ -982,6 +1012,8 @@ FocusScope {
             Rectangle {
                 id: minimap
                 z: 8
+                layer.enabled: pageState.active && visible  // multisampled (smooth circuit line), small texture
+                layer.samples: 4
                 readonly property real side: Math.min(theme.em * 9, canvas.width * 0.32, canvas.height * 0.32)
                 readonly property real spanX: Math.max((root.info.maxX || 1) - (root.info.minX || 0), 1)
                 readonly property real spanY: Math.max((root.info.maxY || 1) - (root.info.minY || 0), 1)
@@ -992,7 +1024,7 @@ FocusScope {
                 anchors { left: parent.left; bottom: parent.bottom; margins: theme.em * 0.5 }
                 width: side
                 height: side
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
                 border.width: 1
                 border.color: theme.border
@@ -1041,7 +1073,7 @@ FocusScope {
                 y: Math.max(2, py - height - theme.em * 0.6)
                 width: tipText.implicitWidth + theme.em
                 height: tipText.implicitHeight + theme.em * 0.5
-                radius: theme.em * 0.35
+                radius: theme.radiusSm
                 color: theme.raised
                 border.width: 1
                 border.color: root.hoverPoint ? root.hoverPoint.color : theme.border
@@ -1050,7 +1082,7 @@ FocusScope {
                     anchors.centerIn: parent
                     text: root.hoverPoint ? root.hoverPoint.tip : ""
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
                 }
             }
@@ -1063,7 +1095,7 @@ FocusScope {
                 y: Math.min(root.cardAnchor[1], canvas.height - height - 2)
                 width: cardColumn.implicitWidth + theme.em
                 height: cardColumn.implicitHeight + theme.em * 0.6
-                radius: theme.em * 0.4
+                radius: theme.radiusMd
                 color: theme.raised
                 border.width: 1
                 border.color: theme.accent
@@ -1080,41 +1112,41 @@ FocusScope {
                         visible: (root.card.spread || "") !== ""
                         text: "◆ " + (root.card.spread || "")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.8
+                        font.pointSize: theme.fontCaption
                     }
                     Text {
                         visible: (root.card.widthTitle || "") !== ""
                         text: "↔ " + (root.card.widthTitle || "")
                         color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.78
+                        font.pointSize: theme.fontCaption
                     }
                     Repeater {
                         model: root.card.laps || []
                         Row {
                             spacing: theme.em * 0.5
                             Rectangle { width: theme.em * 0.55; height: width; radius: width / 2; color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontPoint * 0.82; width: theme.em * 7.5; elide: Text.ElideRight }
-                            Text { text: modelData.time; color: theme.text; font.pointSize: theme.fontPoint * 0.82; font.features: { "tnum": 1 } }
+                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontSmall; width: theme.em * 7.5; elide: Text.ElideRight }
+                            Text { text: modelData.time; color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 } }
                             Text {
                                 text: modelData.gap
                                 width: theme.em * 3
                                 color: root.tone(modelData.gapColor, theme.dimText)
-                                font.pointSize: theme.fontPoint * 0.82
+                                font.pointSize: theme.fontSmall
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
                             }
-                            Text { text: modelData.speeds; color: theme.dimText; font.pointSize: theme.fontPoint * 0.78; font.features: { "tnum": 1 } }
+                            Text { text: modelData.speeds; color: theme.dimText; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
                             Text {
                                 text: "◆ " + modelData.brake + "  ▲ " + modelData.throttle
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.78
+                                font.pointSize: theme.fontCaption
                                 font.features: { "tnum": 1 }
                             }
                             Text {
                                 visible: (modelData.width || "") !== ""
                                 text: "↔ " + (modelData.width || "")
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.78
+                                font.pointSize: theme.fontCaption
                                 font.features: { "tnum": 1 }
                             }
                         }
@@ -1141,13 +1173,13 @@ FocusScope {
                 Row {
                     spacing: theme.em * 0.3
                     Rectangle { width: theme.em * 0.6; height: width; radius: width / 2; color: modelData[1]; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: modelData[0]; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                    Text { text: modelData[0]; color: theme.text; font.pointSize: theme.fontSmall }
                 }
             }
             Row {
                 visible: root.mapLegend.low !== undefined && (root.mode === "speed" || root.mode === "elevation")
                 spacing: theme.em * 0.4
-                Text { text: root.mapLegend.low || ""; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: root.mapLegend.low || ""; color: theme.text; font.pointSize: theme.fontSmall }
                 Rectangle {
                     id: legendBar
                     readonly property var colors: root.mapLegend.colors || ["#3B82F6", "#EF4444"]
@@ -1165,7 +1197,7 @@ FocusScope {
                 Text {
                     text: (root.mapLegend.high || "") + " " + (root.mapLegend.unit || "")
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                 }
             }
             // Driving point shapes shown
@@ -1180,25 +1212,25 @@ FocusScope {
                              && (modelData[0] !== "offtrack" && modelData[0] !== "limit" || root.hasEvents(modelData[0]))
                     text: modelData[1] + " " + modelData[2]
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.8
+                    font.pointSize: theme.fontCaption
                 }
             }
             Row {
                 visible: root.options.zones === true
                 spacing: theme.em * 0.6
-                Text { text: "▬ " + i18n.tr("Braking zone"); color: "#EF4444"; font.pointSize: theme.fontPoint * 0.8 }
-                Text { text: "▬ " + i18n.tr("Throttle application"); color: root.options.colorblind === true ? "#3B82F6" : "#22C55E"; font.pointSize: theme.fontPoint * 0.8 }
+                Text { text: "▬ " + i18n.tr("Braking zone"); color: "#EF4444"; font.pointSize: theme.fontCaption }
+                Text { text: "▬ " + i18n.tr("Throttle application"); color: root.options.colorblind === true ? "#3B82F6" : "#22C55E"; font.pointSize: theme.fontCaption }
             }
             // Track limits exceeded & off track count of each shown lap
             Repeater {
                 model: root.pointShown("limit") || root.pointShown("offtrack") ? (root.info.violations || []) : []
                 Row {
-                    spacing: theme.em * 0.25
+                    spacing: theme.em * 0.3
                     Rectangle { width: theme.em * 0.5; height: width; radius: width / 2; color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         text: modelData.label + (modelData.limits > 0 ? "  ✕" + modelData.limits : "") + (modelData.offtrack > 0 ? "  ◇" + modelData.offtrack : "")
                         color: modelData.limits > 0 ? theme.warning : theme.dimText
-                        font.pointSize: theme.fontPoint * 0.8
+                        font.pointSize: theme.fontCaption
                         font.features: { "tnum": 1 }
                     }
                 }
@@ -1209,14 +1241,14 @@ FocusScope {
                 Row {
                     spacing: theme.em * 0.3
                     Rectangle { width: theme.em * 0.6; height: width; radius: width / 2; color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: modelData.label + "  " + modelData.count + "/" + (root.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontPoint * 0.85; font.features: { "tnum": 1 } }
+                    Text { text: modelData.label + "  " + modelData.count + "/" + (root.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 } }
                 }
             }
             Text {
                 visible: root.mode === "minisectors" && (root.mapLegend.ideal || "") !== ""
                 text: i18n.tr("Ideal of shown laps:") + " " + (root.mapLegend.ideal || "")
                 color: theme.gold
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 font.weight: Font.DemiBold
             }
             // Consistency: spread (standard deviation) of mini-sector times over laps of stint, session or shown laps
@@ -1230,7 +1262,7 @@ FocusScope {
             Row {
                 visible: root.mode === "consistency" && root.mapLegend.low !== undefined
                 spacing: theme.em * 0.4
-                Text { text: (root.mapLegend.low || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: (root.mapLegend.low || "") + " s"; color: theme.text; font.pointSize: theme.fontSmall }
                 Rectangle {
                     id: spreadBar
                     readonly property var colors: root.mapLegend.colors || ["#22C55E", "#FACC15", "#EF4444"]
@@ -1245,26 +1277,26 @@ FocusScope {
                         GradientStop { position: 1; color: spreadBar.colors[spreadBar.colors.length - 1] }
                     }
                 }
-                Text { text: (root.mapLegend.high || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: (root.mapLegend.high || "") + " s"; color: theme.text; font.pointSize: theme.fontSmall }
             }
             Text {
                 visible: root.mode === "consistency"
                 text: root.mapLegend.text || ""
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 HoverHandler { id: spreadHover }
                 ToolTip.visible: spreadHover.hovered
-                ToolTip.delay: 400
+                ToolTip.delay: theme.tipDelay
                 ToolTip.text: i18n.tr("Green: same time in this mini-sector lap after lap, red: time changes a lot (standard deviation)")
             }
             Text {
                 visible: root.info.official === true
                 text: "✓ " + i18n.tr("Official circuit (game)")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 HoverHandler { id: officialHover }
                 ToolTip.visible: officialHover.hovered
-                ToolTip.delay: 400
+                ToolTip.delay: theme.tipDelay
                 ToolTip.text: i18n.tr("Circuit path & pit lane given by Le Mans Ultimate") + (root.info.layout ? " (" + root.info.layout + ")" : "")
             }
             Text {
@@ -1272,10 +1304,10 @@ FocusScope {
                 text: "┆ " + (backend.limitsSource === "game" ? i18n.tr("Track edges from game")
                                                             : i18n.tr("Track edges estimated from laps"))
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 HoverHandler { id: limitsHover }
                 ToolTip.visible: limitsHover.hovered
-                ToolTip.delay: 400
+                ToolTip.delay: theme.tipDelay
                 ToolTip.text: backend.limitsSource === "game"
                               ? i18n.tr("Track edges & car placement across track given by game")
                               : i18n.tr("Laps recorded before this version: track edges guessed from where laps drove")
@@ -1284,13 +1316,13 @@ FocusScope {
                 visible: root.mode === "elevation" && root.mapLegend.low === undefined
                 text: i18n.tr("Elevation not recorded")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
             }
             Text {
                 visible: (root.mode === "gain" || root.mode === "line" || root.mode === "corners") && root.comparedLaps.length === 0
                 text: i18n.tr("Check a second lap to compare")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
             }
         }
     }

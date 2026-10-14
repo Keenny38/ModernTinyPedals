@@ -24,6 +24,9 @@
  * (pure pass-through) and reports TPVR_LAYER_VERSION_MISMATCH with its own layer_version, so the app can
  * tell the user to restart the game (a game keeps the layer DLL it started with). Version 1 had no tiles:
  * the image itself was placed by width_meters & offsets.
+ * Dirty rect (dirty_* fields, in bytes reserved by earlier builds of version 2, so no version change): the
+ * app may tell which atlas rect changed since the atlas of dirty_base_serial; a layer holding that atlas
+ * copies & uploads only that rect, any other layer (or a layer of an earlier build) copies the whole atlas.
  *
  * Writer (app), seqlock: sequence made odd, fields, tiles & pixels written, sequence made even (+2 in all).
  * Reader (layer): reads sequence (even), copies header, tiles & pixels, reads sequence again: copy kept only
@@ -59,6 +62,9 @@
 /* flags */
 #define TPVR_FLAG_VISIBLE 0x1u /* image shown (cleared while every overlay is hidden, or app closing) */
 #define TPVR_FLAG_ATTACH_TO_HEADSET 0x2u /* placement relative to headset (VIEW space), else seated (LOCAL) */
+
+/* dirty_flags (optional, reserved bytes of older apps & layers: 0 = whole atlas changed) */
+#define TPVR_DIRTY_RECT 0x1u /* atlas of image_serial = atlas of dirty_base_serial except the dirty_* rect */
 
 /* layer_state */
 #define TPVR_LAYER_IDLE 0u /* no session */
@@ -102,7 +108,13 @@ typedef struct TpvrHeader {
     uint32_t canvas_width;             /* 84: pixels, same scale as atlas */
     uint32_t canvas_height;            /* 88 */
     uint32_t tile_count;               /* 92: tiles used in tile table (1 .. TPVR_MAX_TILES when visible) */
-    uint8_t reserved_app[32];          /* 96 .. 127 */
+    uint32_t dirty_flags;              /* 96: TPVR_DIRTY_RECT: only dirty_* atlas rect changed since dirty_base_serial */
+    uint32_t dirty_base_serial;        /* 100: image_serial of the atlas this frame changes */
+    uint32_t dirty_x;                  /* 104: changed atlas rect (may be empty: tiles moved only) */
+    uint32_t dirty_y;                  /* 108 */
+    uint32_t dirty_width;              /* 112 */
+    uint32_t dirty_height;             /* 116 */
+    uint8_t reserved_app[8];           /* 120 .. 127 */
     /* written by layer only */
     uint64_t layer_heartbeat_ms;       /* 128: GetTickCount64() at last frame of an OpenXR session */
     uint32_t layer_pid;                /* 136: game process id */
@@ -132,6 +144,8 @@ static_assert(offsetof(TpvrHeader, app_heartbeat_ms) == 24, "app_heartbeat_ms of
 static_assert(offsetof(TpvrHeader, width_meters) == 56, "width_meters offset");
 static_assert(offsetof(TpvrHeader, app_pid) == 80, "app_pid offset");
 static_assert(offsetof(TpvrHeader, tile_count) == 92, "tile_count offset");
+static_assert(offsetof(TpvrHeader, dirty_flags) == 96, "dirty_flags offset");
+static_assert(offsetof(TpvrHeader, reserved_app) == 120, "reserved_app offset");
 static_assert(offsetof(TpvrHeader, layer_heartbeat_ms) == 128, "layer_heartbeat_ms offset");
 static_assert(offsetof(TpvrHeader, layer_frames_shown) == 152, "layer_frames_shown offset");
 static_assert(offsetof(TpvrHeader, layer_version) == 160, "layer_version offset");

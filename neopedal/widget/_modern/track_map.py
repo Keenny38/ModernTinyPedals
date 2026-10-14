@@ -23,46 +23,38 @@ Track drawn as road with dark edge (readable over any background, optional panel
 start line, sector marks in accent. Cars as dots with position, filled with class color (multi
 class) or race status color, player larger with ring, proximity ring around player. Safety car
 pill, pit out prediction rings (accent: estimated stop) with stop duration badges. Temporary
-circle map until track is recorded. Sector performance: road of each sector colored by player's last
-time in it (purple: session best sector, green: faster than sector of best lap, amber: slower). Cars
-close to player on track (time gap within threshold) ringed.
+circle map until track is recorded. Sector performance: road of each sector colored by player's
+most recent time in it, as game live timing (purple: best of class in session, green: personal best,
+orange: slower). Cars close to player on track (time gap within threshold) ringed.
 """
 
 from __future__ import annotations
 
 from math import atan2, degrees
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
-from ...api_control import api
-from ...const_common import MAX_SECONDS
-from ...module_info import minfo
-from ..track_map import TrackMapMixin
+from ...module_info import minfo, sector_color
+from ..track_map import TrackMapMixin, device_point
 from .base import CENTER, ModernOverlay
 from .cars import car_colors, status_color
 from .draw import panel, readable_on, rounded
 from .rows import class_style
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TrackMapConfig
+
 CHECKER_SQUARES = 4  # squares across road per row of start line
-SECTOR_BEST, SECTOR_FASTER, SECTOR_SLOWER = "best", "positive", "warning"  # theme colors of sector performance
-SAME_TIME = 0.0005  # seconds: sector time this close to best sector is best sector
-
-
-def sector_performance(sectors) -> tuple[str | None, ...]:
-    """Theme color of each sector by player's last time in it (session sectors), None if no time yet:
-    session best sector, faster than sector of personal best lap, slower"""
-    colors: list[str | None] = []
-    for last, best, delta in zip(sectors.sectorPrev, sectors.sectorBestTB, sectors.deltaSectorBestPB):
-        if not 0 < last < MAX_SECONDS:
-            colors.append(None)
-        elif last <= best + SAME_TIME:
-            colors.append(SECTOR_BEST)
-        elif delta < 0:
-            colors.append(SECTOR_FASTER)
-        else:
-            colors.append(SECTOR_SLOWER)
-    return tuple(colors)
+def sector_performance(player) -> tuple[str | None, ...]:
+    """Theme color of each sector by player's most recent time in it, as game live timing & driver lists: best of
+    class in session (purple), personal best (green), slower (yellow); None if no time yet"""
+    if player is None:
+        return ()
+    sectors = player.sectors
+    return tuple(sector_color(value, number, sectors, player.classBestSectors)
+                 for number, value in enumerate(sectors.recent()))
 
 
 def nearby_vehicles(threshold: float) -> frozenset[int]:
@@ -77,6 +69,9 @@ def nearby_vehicles(threshold: float) -> frozenset[int]:
 
 class Realtime(TrackMapMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TrackMapConfig
+    max_repaint_rate = 25  # whole window repainted when any car moves
 
     options = (
         "font_size", "display_orientation", "display_detail_level", "area_size", "area_margin", "map_width",
@@ -164,21 +159,51 @@ class Realtime(TrackMapMixin, ModernOverlay):
             sector_paths, map_full_path = self.create_map_path(raw_data)
             self.map_paths = (map_full_path,)
             self.sector_paths = tuple(sector_paths) if self.map_scaled else ()
+            self.car_positions = None  # map scale changed
             self.redraw_static()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         self.update_map(minfo.mapping.lastModified)
         if self.show_sector_performance:
-            colors = sector_performance(minfo.sectors.sessionBest)
+            vehicles = minfo.vehicles
+            index = vehicles.playerIndex
+            colors = sector_performance(vehicles.dataSet[index] if 0 <= index < len(vehicles.dataSet) else None)
             if colors != self.sector_colors:  # player completed a sector
                 self.sector_colors = colors
                 self.redraw_static()
-        nearby = nearby_vehicles(self.nearby_threshold)
-        if nearby != self.nearby:
-            self.nearby = nearby
-            self.update()
-        self.refresh(minfo.vehicles.dataSetVersion)
+        self.nearby = nearby_vehicles(self.nearby_threshold)
+        # Cars, safety car & pit out predictions: repaint when drawn in other device pixels or style
+        ratio = self.devicePixelRatioF()
+        version = minfo.vehicles.dataSetVersion
+        if version != self.last_veh_data_version or self.car_positions is None:
+            self.last_veh_data_version = version
+            self.car_positions = self.vehicle_positions(self.unit)
+        positions = self.car_positions
+        safetycar = self.update_safetycar()
+        show_duration = self.show_prediction and self.wcfg["show_pitstop_duration"]
+        self.refresh_keyed(positions, (
+            self.vehicles_key(positions, ratio),
+            safetycar and device_point(*safetycar, ratio),
+            tuple((device_point(pos_x, pos_y, ratio), show_duration and self.pitstop_duration_text(pit_time), auto)
+                  for pos_x, pos_y, pit_time, auto in self.update_predictions()),
+        ))
+
+    def vehicles_key(self, positions: tuple, ratio: float) -> tuple:
+        """Cars as drawn: position in device pixels, color, place number, lap outline, nearby ring"""
+        veh_info = minfo.vehicles.dataSet
+        nearby = self.nearby
+        show_places = self.show_places
+        lap_outline = self.lap_outline
+        key = []
+        for index, pos_x, pos_y in positions:
+            data = veh_info[index]
+            key.append((
+                device_point(pos_x, pos_y, ratio), data.isPlayer, self.car_color(data).rgba(),
+                show_places and self.place_number(data), lap_outline and data.isLapped,
+                index in nearby and not data.inPit,
+            ))
+        return tuple(key)
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
@@ -237,15 +262,10 @@ class Realtime(TrackMapMixin, ModernOverlay):
 
     def paint(self, painter: QPainter):
         veh_info = minfo.vehicles.dataSet
-        draw_order = minfo.relative.drawOrder
         on_map = bool(self.map_scaled)
         player = None
-        for index in draw_order:
+        for index, pos_x, pos_y in self.state:  # positions of last update (see timerEvent)
             data = veh_info[index]
-            if on_map:
-                pos_x, pos_y = self.map_position(data)
-            else:
-                pos_x, pos_y = self.circle_position(data, self.unit)
             if data.isPlayer:
                 player = (data, pos_x, pos_y)
                 continue
@@ -258,10 +278,10 @@ class Realtime(TrackMapMixin, ModernOverlay):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawEllipse(QPointF(pos_x, pos_y), radius, radius)
             self.draw_car(painter, data, pos_x, pos_y)
-        if on_map and self.show_safety_car and api.read.lap.safety_car_active():
+        if on_map and self.safetycar_pos is not None:
             self.draw_safety_car(painter)
-        if self.show_prediction and veh_info:
-            self.draw_predictions(painter, veh_info[minfo.vehicles.playerIndex])
+        if self.show_prediction:
+            self.draw_predictions(painter)
 
     def car_color(self, veh_info) -> QColor:
         """Class color (multi class) or race status color"""
@@ -304,8 +324,8 @@ class Realtime(TrackMapMixin, ModernOverlay):
             self.draw_text(painter, rect, f"{self.place_number(data)}", "place", readable_on(color), CENTER, elide=False)
 
     def draw_safety_car(self, painter: QPainter):
-        """Safety car pill"""
-        position = self.safetycar_position(self.map_scaled)
+        """Safety car pill (position set by update_safetycar)"""
+        position = self.safetycar_pos
         if position is None:
             return
         theme = self.theme
@@ -315,11 +335,11 @@ class Realtime(TrackMapMixin, ModernOverlay):
         painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
         self.draw_text(painter, rect, self.safety_car_text, "place", readable_on(theme.caution), CENTER, elide=False)
 
-    def draw_predictions(self, painter: QPainter, player):
-        """Pit out prediction rings, stop duration badges"""
+    def draw_predictions(self, painter: QPainter):
+        """Pit out prediction rings, stop duration badges (positions set by update_predictions)"""
         theme = self.theme
         show_duration = self.wcfg["show_pitstop_duration"]
-        for pos_x, pos_y, pit_time, auto in self.pitout_predictions(self.map_scaled, player):
+        for pos_x, pos_y, pit_time, auto in self.shown_predictions():
             painter.setPen(self.pen_auto_prediction if auto else self.pen_prediction)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QPointF(pos_x, pos_y), self.dot, self.dot)

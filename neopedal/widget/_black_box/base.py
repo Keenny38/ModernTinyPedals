@@ -22,13 +22,16 @@ Black box widget, shared painting helpers: cached background, fitted text, units
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
 from .._painter import fill_rect, fit_font, layer_fits
 from .common import FONT_CACHE_SIZE
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 
 class PaintBase:
@@ -39,7 +42,6 @@ class PaintBase:
     devicePixelRatioF: Any
     fit: Any
     font: Any
-    font_cache: Any
     font_label: Any
     font_small: Any
     height: Any
@@ -53,10 +55,19 @@ class PaintBase:
     size: Any
     unit: Any
     unit_temp: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
     width: Any
 
     static_layer: QPixmap | None
+    _widget_font: QFont | None = None
+    _fitted_fonts: dict[tuple, tuple[QFont, QFont]] | None = None
+
+    def widget_font(self) -> QFont:
+        """Widget font, kept (font() returns a new copy every call; set once, see config_fonts)"""
+        font = self._widget_font
+        if font is None:
+            font = self._widget_font = self.font()
+        return font
 
     def unit_name(self, name: str) -> str:
         """Unit set in widget, or the one in Units setting"""
@@ -75,7 +86,7 @@ class PaintBase:
         layer.fill(Qt.GlobalColor.transparent)
         painter = QPainter(layer)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setFont(self.font())
+        painter.setFont(self.widget_font())
         wcfg = self.wcfg
         fit = self.fit
         fitted = fit.scale != 1 or fit.offset_x or fit.offset_y
@@ -109,7 +120,7 @@ class PaintBase:
         fill_rect(painter, chip, self.wcfg["info_background_color"])
         painter.setPen(QColor(self.wcfg["font_color_module_warning"]))
         self.draw_fit_text(painter, chip, text, self.font_label)
-        painter.setFont(self.font())
+        painter.setFont(self.widget_font())
 
     def apply_fit(self, painter: QPainter):
         """Content transform for fixed width / height: uniform scale, centered"""
@@ -123,16 +134,28 @@ class PaintBase:
         """Draw text with font adapted to box size"""
         painter.setFont(self.fitted_font(painter, font, text, rect.width() * 0.96, rect.height() * 1.1))
         painter.drawText(rect, align, text)
-        painter.setFont(self.font())
+        painter.setFont(self.widget_font())
 
     def fitted_font(self, painter: QPainter, font: QFont, text: str, width: float, height: float) -> QFont:
-        """fit_font result, cached: the same texts come back in the same boxes every frame"""
-        key = (font.key(), text, round(width), round(height))
-        fitted = self.font_cache.get(key)
-        if fitted is None:
-            if len(self.font_cache) >= FONT_CACHE_SIZE:
-                self.font_cache.clear()
-            fitted = self.font_cache[key] = fit_font(painter, font, text, width, height)
+        """fit_font result, cached: the same texts come back in the same boxes every frame
+
+        Keyed by font object: cache holds it, so its id is not reused by another font. Copies of the widget font
+        (font()) share the widget font entries.
+        """
+        cache = self._fitted_fonts
+        if cache is None:
+            cache = self._fitted_fonts = {}
+        key = (id(font), text, round(width), round(height))
+        entry = cache.get(key)
+        if entry is not None:
+            return entry[1]
+        widget_font = self.widget_font()
+        if font is not widget_font and font == widget_font:
+            return self.fitted_font(painter, widget_font, text, width, height)
+        if len(cache) >= FONT_CACHE_SIZE:
+            cache.clear()
+        fitted = fit_font(painter, font, text, width, height)
+        cache[key] = (font, fitted)
         return fitted
 
     def format_temp(self, value: float) -> str:

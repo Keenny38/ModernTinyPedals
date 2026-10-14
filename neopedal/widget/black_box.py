@@ -31,6 +31,7 @@ incident recorder (speed, throttle & brake trace frozen around impacts) and even
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap, QRegion
@@ -45,6 +46,7 @@ from ._black_box.layout import LayoutInput, build_layout
 from ._black_box.modules import ModuleStatus, enable_modules, required_modules
 from ._black_box.panels import PanelPainter
 from ._black_box.persist import keep_records, memory, restore_records
+from ._black_box.popup import PopupPainter
 from ._black_box.reader import DataReader
 from ._black_box.recorder import EventLog, IncidentBrowse, Recorder, open_folder
 from ._black_box.regions import WHEEL_PARTS, RegionMixin
@@ -54,6 +56,7 @@ from ._black_box.state import (
     BumpStop,
     LapStats,
     PressureRange,
+    SettingChanges,
     SteerConvention,
     StintTracker,
     SuspensionTravel,
@@ -72,15 +75,20 @@ from ._common import warning_flash
 from ._painter import DirtyRegion, OverlayStyle
 from ._style import StyledConfig
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BlackBoxConfig
+
 
 class Realtime(
     DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter, StatusPainter,
-    RegionMixin, PaintBase, Overlay,
+    PopupPainter, RegionMixin, PaintBase, Overlay,
 ):
     """Draw widget
 
     Data reading and each painted part live in their own mixin, see _black_box package.
     """
+
+    wcfg: BlackBoxConfig
 
     update_while_hidden = True  # incident recorder & event log keep recording
 
@@ -96,7 +104,7 @@ class Realtime(
         # Display profile & auto compact mode override show options, never saved to file
         overrides = display_overrides(self.wcfg)
         if overrides:
-            self.wcfg = StyledConfig(self.wcfg, overrides)
+            self.wcfg = StyledConfig(self.wcfg, overrides)  # type: ignore[assignment]  # same options
         wcfg = self.wcfg
 
         self.config_fonts(wcfg)
@@ -127,6 +135,7 @@ class Realtime(
         self.font_rpm = self.config_font(name, size * self.rpm_scale, weight)
         self.font_small = self.config_font(name, size * 0.75, weight)
         self.font_battery = self.config_font(name, size * self.battery_scale, weight)
+        self.font_popup = self.config_font(name, size * 2, weight)  # fitted to pop-up box
         # Labels: smaller, lighter and slightly spaced, so values stand out
         self.font_label = QFont(self.font_small)
         self.font_label.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 108)
@@ -149,6 +158,9 @@ class Realtime(
         self.need_locking = "locking" in shown
         self.need_brake_migration = "brake_migration" in side or ("brake_bias" in side and self.merged_brake_bias())
         self.need_motor_map = bool(wcfg["show_motor_map"])
+        self.show_setting_popup = bool(wcfg["show_setting_change_popup"])  # compact layout: over car view
+        self.popup_events = self.show_setting_popup and bool(wcfg["show_setting_popup_driving_events"])
+        self.popup_maximum = self.show_setting_popup and bool(wcfg["show_setting_popup_maximum"])
         self.need_delta = "delta" in shown
         self.need_laptime = "laptime" in shown
         # Justified: speed and RPM use the same label/value rows as brake bias and delta,
@@ -156,6 +168,10 @@ class Realtime(
         self.justify_center = wcfg["center_column_alignment"] == "Justified"
         self.need_limiter = "pit_limiter" in shown
         self.need_lights = bool(wcfg["show_headlights_indicator"])
+        self.need_wipers = bool(wcfg["show_wipers_indicator"])
+        self.need_track_limits = "track_limits" in shown
+        self.need_gaps = "gaps" in shown
+        self.need_lift_coast = "lift_coast" in shown
         self.need_engine = bool(wcfg["show_engine_status"])
         self.need_gear = "gear" in shown or self.show_recorder
         self.need_pedals = "pedals" in shown or self.show_recorder
@@ -347,6 +363,7 @@ class Realtime(
         self.pen_info_label = QPen(QColor(wcfg["font_color_info_label"]))
         self.pen_indicator = QPen(QColor(wcfg["font_color_indicator"]))
         self.pen_indicator_active = QPen(QColor(wcfg["font_color_indicator_active"]))
+        self.pen_setting_popup = QPen(QColor(wcfg["font_color_setting_popup"]))
         # Visual effects
         self.depth_effects = bool(wcfg["enable_depth_effects"])
         # Frequency / duration 0 turns the effect off
@@ -365,7 +382,7 @@ class Realtime(
         gloss.setColorAt(1.0, QColor(0, 0, 0, 80))
         self.brush_gloss = gloss
         self.shadow_offset = self.unit * 0.09
-        # Caches: background layer (rebuilt on resize), fitted fonts, last drawn state
+        # Caches: background layer (rebuilt on resize), grown fonts (see grown_font), last drawn state
         self.static_layer: QPixmap | None = None
         self.font_cache: dict[tuple, QFont] = {}
         self.last_state: tuple = ()  # layout drawn last (whole widget repainted once changed)
@@ -538,12 +555,19 @@ class Realtime(
         self.locking_rear = 0.0
         self.brake_migration = 0.0  # percent
         self.motor_map_level = -1  # engine/motor map, -1 if car has none
+        self.setting_changes = SettingChanges(self.wcfg["setting_popup_duration"])  # see _black_box.popup
         self.delta_best = 0.0  # seconds, negative is faster
         self.delta_shown = False  # reference lap exists & current lap comparable (see delta_available)
         self.laptime_current = 0.0  # seconds
         self.in_pits = False
         self.limiter = False
         self.headlights = False
+        self.wipers = 0  # 0 off, 1 auto, 2 slow, 3 fast
+        self.cut_points = 0.0  # track limits points
+        self.limit_points = 0.0  # points giving a penalty (races only), 0 if none
+        self.gap_ahead = 0.0  # seconds to car ahead / behind on track, 0 if unknown
+        self.gap_behind = 0.0
+        self.lift_coast = 0.0  # lift & coast progress, 0 to 1
         self.ignition = 0  # 0 off, 1 ignition on & engine stopped, 2 engine running
         self.oil_temp = 0.0  # Celsius
         self.water_temp = 0.0
@@ -649,5 +673,7 @@ class Realtime(
             self.draw_trace(painter, self.rect_trace)
         if self.show_event_log and shown("events", region):
             self.draw_event_log(painter)
+        if self.show_setting_popup and shown("popup", region):  # over center column (car view if compact)
+            self.draw_setting_popup(painter)
         if self.show_module_warning and self.modules.missing:  # own chip over car view: always drawn (clipped)
             self.draw_module_warning(painter)

@@ -25,6 +25,8 @@ by state (normal, warning). Subclass reads values & chooses gauge level and colo
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtGui import QColor, QPainter
 
 from .base import ModernOverlay
@@ -38,6 +40,7 @@ GAUGE_WIDTH = 4.0  # tile width, in unit
 class GaugeQuad(QuadMixin, ModernOverlay):
     """Four wheel gauges"""
 
+    wcfg: Any  # common options of gauge widgets (each widget class sets its typed setting)
     label = ""  # section label (English)
     sample = "888"  # widest value text, whole part (decimal places added)
     common_options = ("font_size", "decimal_places")
@@ -78,4 +81,6 @@ class GaugeQuad(QuadMixin, ModernOverlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        self.refresh(self.read())
+        tiles = self.read()
+        rects = self.quad_slots[0].tiles if self.quad_slots else ()
+        self.refresh_keyed(tiles, self.pixel_key(tiles, [rect.width() for rect in rects], "level", "mark"))

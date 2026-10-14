@@ -37,6 +37,8 @@ from .const_common import (
     REL_TIME_DEFAULT,
     WHEELS_ZERO,
 )
+from .penalty_info import NO_PENALTY, Penalty
+from .template.setting_status_colors import SAME_TIME
 
 
 class ConsumptionDataSet(NamedTuple):
@@ -102,6 +104,7 @@ class StintData:
         "lapTimeDelta",
         "lapTimeConsistency",
         "tyreCompound",
+        "tyreCompoundNames",
     )
 
     def __init__(self):
@@ -117,6 +120,7 @@ class StintData:
         self.lapTimeDelta: float = 0.0
         self.lapTimeConsistency: float = 0.0
         self.tyreCompound: str = "----"
+        self.tyreCompoundNames: tuple[str, ...] = ()  # compound class of each wheel, for badges
 
 
 class StintDataSet(NamedTuple):
@@ -130,6 +134,7 @@ class StintDataSet(NamedTuple):
     lapTimeDelta: float = 0.0
     lapTimeConsistency: float = 0.0
     tyreCompound: str = "----"
+    tyreCompoundNames: tuple[str, ...] = ()
 
 
 class DeltaTimeInterval:
@@ -353,6 +358,135 @@ class LicoTimer:
             self._warmup_time = 0
 
 
+class LapSectors:
+    """Sector times of a car as the game live timing shows them: sectors of current & last lap, personal best of
+    each sector from completed laps only (a sector beaten during the lap counts once the lap is completed),
+    sectors of best lap, pit lane in last lap (in lap, out lap)
+
+    Attributes:
+        current: S1, S2 of current lap (0: not completed yet).
+        last: S1, S2, S3 of last lap (0: unknown).
+        best: personal best of S1, S2, S3 from completed laps (0: none yet).
+        best_lap: S1, S2, S3 of best lap (game).
+        sector: sector being driven, 0 = S1, 1 = S2, 2 = S3.
+        out_lap: current lap started in or left pit lane.
+        last_kind: "OUT" (left pit lane in last lap), "IN" (entered it), "" (no pit lane).
+        previous_kind: kind of lap before last.
+        changed: number of updates that changed sectors (cells made again only then).
+    """
+
+    __slots__ = (
+        "current",
+        "last",
+        "best",
+        "best_lap",
+        "sector",
+        "laps",
+        "out_lap",
+        "last_kind",
+        "previous_kind",
+        "_pit_in",
+        "_in_pit",
+        "changed",
+    )
+
+    def __init__(self):
+        self.current = (0.0, 0.0)
+        self.last = (0.0, 0.0, 0.0)
+        self.best = [0.0, 0.0, 0.0]
+        self.best_lap = (0.0, 0.0, 0.0)
+        self.sector = 0
+        self.laps = -1
+        self.out_lap = False
+        self.last_kind = ""
+        self.previous_kind = ""
+        self._pit_in = False
+        self._in_pit = False
+        self.changed = 0
+
+    def _better(self, number: int, value: float):
+        if 0 < value < MAX_SECONDS and (not self.best[number] or value < self.best[number]):
+            self.best[number] = value
+
+    def update(self, laps: int, sector: int, current1: float, current2: float, last1: float, last2: float,
+               last_lap: float, in_pit: bool, best1: float = 0.0, best2: float = 0.0, best_lap: float = 0.0):
+        """Game timing of car (sector times are cumulative: S1, S1 + S2, lap; best ones of best lap)"""
+        old = (self.current, self.last, self.sector, self.last_kind, self.out_lap, self.best_lap)
+        if in_pit and not self._in_pit:
+            self._pit_in = True
+        elif self._in_pit and not in_pit:
+            self.out_lap = True
+        self._in_pit = in_pit
+        self.best_lap = split_sectors(best1, best2, best_lap)
+        if laps != self.laps:
+            if self.laps >= 0 and laps == self.laps + 1:  # lap completed: its sectors count for bests
+                self.previous_kind = self.last_kind
+                self.last_kind = "OUT" if self.out_lap else "IN" if self._pit_in else ""
+                self.last = split_sectors(last1, last2, last_lap)
+                for number, value in enumerate(self.last):
+                    self._better(number, value)
+            else:  # first update, session change or laps jumped: bests of game best lap meanwhile
+                if 0 <= laps < self.laps:  # laps went back: other session, its bests only
+                    self.best = [0.0, 0.0, 0.0]
+                self.last_kind = self.previous_kind = ""
+                self.last = split_sectors(last1, last2, last_lap)
+                for number, value in enumerate((*self.best_lap, *self.last)):
+                    self._better(number % 3, value)
+            self.laps = laps
+            self._pit_in = False
+            self.out_lap = in_pit  # lap started in pit lane: out lap
+        sector1 = current1 if sector >= 1 and 0 < current1 < MAX_SECONDS else 0.0
+        sector2 = current2 - current1 if sector == 2 and 0 < current1 < current2 < MAX_SECONDS else 0.0
+        self.current = (sector1, sector2)
+        self.sector = sector
+        if (self.current, self.last, self.sector, self.last_kind, self.out_lap, self.best_lap) != old:
+            self.changed += 1
+
+    def recent(self) -> tuple[float, float, float]:
+        """Most recent time of each sector: current lap for sectors completed in it, else last lap"""
+        return (self.current[0] if self.sector >= 1 else self.last[0],
+                self.current[1] if self.sector == 2 else self.last[1], self.last[2])
+
+    def shown(self, in_race: bool, pitting: bool) -> tuple[tuple[float, float, float], int]:
+        """Sector times shown as game live timing does & sector being driven (-1: none): last lap while S1 is
+        driven, else completed sectors of current lap; outside races, none on an out lap, best lap while pitting"""
+        if not in_race:
+            if pitting:
+                return self.best_lap, -1
+            if self.out_lap:
+                return (0.0, 0.0, 0.0), -1
+        if self.sector == 0:
+            return self.last, -1
+        return (self.current[0], self.current[1] if self.sector == 2 else 0.0, 0.0), self.sector
+
+
+# Theme color names, as app pages & stream graphics (setting_status_colors): purple, green, yellow
+SECTOR_CLASS_BEST, SECTOR_PERSONAL_BEST, SECTOR_SLOWER = "best", "positive", "caution"
+
+
+def sector_color(value: float, number: int, sectors: LapSectors, class_best: tuple) -> str | None:
+    """Theme color name of a sector time as game live timing: best of class in session (purple), personal best
+    of completed laps (green), slower (yellow); None if no time"""
+    if not 0 < value < MAX_SECONDS:
+        return None
+    if class_best[number] and abs(value - class_best[number]) < SAME_TIME:
+        return SECTOR_CLASS_BEST
+    if sectors.best[number] and abs(value - sectors.best[number]) < SAME_TIME:
+        return SECTOR_PERSONAL_BEST
+    return SECTOR_SLOWER
+
+
+def split_sectors(sector1: float, sector2: float, laptime: float) -> tuple[float, float, float]:
+    """S1, S2, S3 of cumulative game times (S1, S1 + S2, lap), 0 where unknown (invalid lap: no lap time)"""
+    valid1 = 0 < sector1 < MAX_SECONDS
+    valid2 = valid1 and sector1 < sector2 < MAX_SECONDS
+    return (
+        sector1 if valid1 else 0.0,
+        sector2 - sector1 if valid2 else 0.0,
+        laptime - sector2 if valid2 and sector2 < laptime < MAX_SECONDS else 0.0,
+    )
+
+
 class SpeedTrap:
     """Speed trap
 
@@ -521,6 +655,12 @@ class VehicleDataSet:
         "relativeRotatedPositionY",
         "vehicleIntegrity",
         "incidents",
+        "trackLimitsPoints",
+        "penalty",
+        "sectors",
+        "classBestSectors",
+        "classBestLap",
+        "lapStartTime",
         "energyRemaining",
         "estimatedStintLaps",
         "currentStintLaps",
@@ -573,6 +713,12 @@ class VehicleDataSet:
         self.relativeRotatedPositionY: float = 0.0
         self.vehicleIntegrity: float = 0.0
         self.incidents: int = 0
+        self.trackLimitsPoints: float = 0.0  # LMU: track limits points of session
+        self.penalty: Penalty = NO_PENALTY  # LMU: penalties of results stream (kind, time, disqualified)
+        self.sectors: LapSectors = LapSectors()
+        self.classBestSectors: tuple[float, float, float] = (0.0, 0.0, 0.0)  # best S1, S2, S3 of class in session
+        self.classBestLap: float = 0.0  # best lap of class in session (0: none)
+        self.lapStartTime: float = 0.0  # session time current lap started
         self.energyRemaining: float = 0.0
         self.estimatedStintLaps: float = 0.0
         self.currentStintLaps: int = 0
@@ -934,12 +1080,33 @@ class StatsInfo:
         self.metersDriven: float = 0.0
 
 
+class ScoringSnapshot(NamedTuple):
+    """Scoring data of every car read by vehicles module, one game scoring sample (relative module reads it
+    instead of reading & decoding the same data again)
+
+    Attributes:
+        scoringTime: session time of scoring sample (session elapsed).
+        rows: per car index: (in garage, in pit lane or garage, estimated time into lap, class name,
+            overall place, best lap time, last lap time).
+    """
+
+    scoringTime: float
+    rows: tuple[tuple[bool, bool, float, str, int, float, float], ...]
+
+
 class VehiclesInfo:
-    """Vehicles output data"""
+    """Vehicles output data
+
+    Attributes:
+        dataSetVersion: changes only when vehicles module updated dataSet with new game data (overlays skip
+            redraw while unchanged), -1 after reset.
+        scoringSnapshot: scoring data of last low priority update (None until then, see ScoringSnapshot).
+    """
 
     __slots__ = (
         "dataSet",
         "dataSetVersion",
+        "scoringSnapshot",
         "leaderIndex",
         "playerIndex",
         "totalOutPits",
@@ -965,6 +1132,7 @@ class VehiclesInfo:
             VehicleDataSet() for _ in range(MAX_VEHICLES)
         )
         self.dataSetVersion: int = -1
+        self.scoringSnapshot: ScoringSnapshot | None = None
         self.leaderIndex: int = 0
         self.playerIndex: int = -1
         self.totalOutPits: int = 0

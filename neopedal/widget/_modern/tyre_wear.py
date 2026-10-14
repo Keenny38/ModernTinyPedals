@@ -25,13 +25,18 @@ lifespan in laps & minutes, tread left at end of stint. Values past warning thre
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ...module_info import minfo
+from .._data import run_laps, tyre_wear_data, wear_text
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .quad import QuadMixin, Section, Tile
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TyreWearConfig
 
 SECTIONS = (
     ("remaining", "Tread", True),
@@ -44,13 +49,10 @@ SECTIONS = (
 )
 
 
-def number(value: float) -> str:
-    """Value cut to 4 characters"""
-    return f"{value:.2f}"[:4].strip(".")
-
-
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TyreWearConfig
 
     options = (
         "font_size", "layout", "warning_threshold_remaining", "warning_threshold_wear", "warning_threshold_laps",
@@ -80,45 +82,43 @@ class Realtime(QuadMixin, ModernOverlay):
         wcfg = self.wcfg
         wheels = minfo.wheels
         pace = minfo.delta.lapTimePace
-        if minfo.energy.available:
-            run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
-        else:
-            run_laps = minfo.fuel.estimatedLaps
+        laps_left = run_laps(minfo.fuel, minfo.energy)
+        data = [tyre_wear_data(wheels, index, pace, laps_left) for index in range(4)]
         sections = []
         for key in self.keys:
             tiles = []
-            for index in range(4):
-                tread = wheels.currentTreadDepth[index]
-                valid_wear = wheels.estimatedValidTreadWear[index]
+            for wheel in data:
                 if key == "remaining":
-                    value, warn = tread, tread <= wcfg["warning_threshold_remaining"]
+                    value, warn = wheel.remaining, wheel.remaining <= wcfg["warning_threshold_remaining"]
                 elif key == "wear_difference":
-                    value = wheels.estimatedTreadWear[index]
+                    value = wheel.wear
                     warn = value > wcfg["warning_threshold_wear"]
                 elif key == "live_wear_difference":
-                    value = wheels.currentLapTreadWear[index]
+                    value = wheel.live
                     warn = value > wcfg["warning_threshold_wear"]
                 elif key == "flat_spot":
-                    value = wheels.lockingTreadWear[index]
+                    value = wheel.flat_spot
                     warn = value > wcfg["warning_threshold_wear"]
                 elif key == "lifespan_laps":
-                    value = calc.wear_lifespan_in_laps(tread, valid_wear)
+                    value = wheel.laps
                     warn = value <= wcfg["warning_threshold_laps"]
                 elif key == "lifespan_minutes":
-                    value = calc.wear_lifespan_in_mins(tread, valid_wear, pace)
+                    value = wheel.minutes
                     warn = value <= wcfg["warning_threshold_minutes"]
                 else:  # end of stint
-                    value = calc.end_stint_tread(tread, valid_wear, run_laps)
+                    value = wheel.end
                     warn = value <= wcfg["warning_threshold_remaining"]
                 tiles.append(self.tile(key, value, warn))
             sections.append(tuple(tiles))
-        self.refresh(tuple(sections))
+        state = tuple(sections)
+        self.refresh_keyed(state, tuple(self.pixel_key(tiles, [rect.width() for rect in slot.tiles], "level", "mark")
+                                        for slot, tiles in zip(self.quad_slots, state)))
 
     def tile(self, key: str, value: float, warn: bool) -> Tile:
         """Wheel value, gauge of remaining tread"""
         theme = self.theme
         if key in self.gauges:
             color = theme.negative if warn else theme.positive
-            return Tile((number(value),), colors=(theme.negative if warn else theme.text,),
+            return Tile((wear_text(value),), colors=(theme.negative if warn else theme.text,),
                         level=fraction(value / 100), level_color=theme.tint(color, 110))
-        return Tile((number(value),), colors=(theme.negative if warn else theme.text,))
+        return Tile((wear_text(value),), colors=(theme.negative if warn else theme.text,))

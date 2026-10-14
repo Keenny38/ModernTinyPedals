@@ -183,7 +183,7 @@ def test_rate_of_change_has_no_start_spike(widgets, monkeypatch, modern):
     if modern:
         assert engine.rates == {"oil": 0.0, "water": 0.0}
         assert stat_value(engine, "oil").sub == "0.0"  # steady: no arrow
-        assert carcass.rates == [0.0] * 4
+        assert carcass.rates.rates == [0.0] * 4
         tiles, _ = carcass.state
         assert tiles[0].sub == "0.0" and tiles[0].sub_color is None
     else:
@@ -212,7 +212,7 @@ def test_rate_of_change_restarts_on_new_session(widgets, monkeypatch, modern, pa
         carcass.timerEvent(None)
     if modern:
         assert engine.rates == {"oil": 0.0, "water": 0.0}
-        assert carcass.rates == [0.0] * 4
+        assert carcass.rates.rates == [0.0] * 4
     else:
         assert engine.bar_oil_rate.last == 0 and engine.bar_water_rate.last == 0
         assert all(bar.last == 0 for bar in carcass.bars_rdiff)

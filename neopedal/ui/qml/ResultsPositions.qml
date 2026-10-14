@@ -68,8 +68,9 @@ Item {
         var lap = Math.round((mouseX - plotX) / plotWidth * laps)
         lap = Math.max(Math.min(lap, laps), 0)
         var best = -1, bestDistance = theme.em * 1.2
+        var atLap = backend.placesAt(lap)  // place tables of backend: no scan of points per mouse move
         for (var i = 0; i < series.length; i++) {
-            var place = series[i].places[lap]  // place table of backend: no scan of points per mouse move
+            var place = atLap[i]
             if (!(place > 0)) continue
             var distance = Math.abs(py(place) - mouseY)
             if (distance < bestDistance) { bestDistance = distance; best = i }
@@ -108,7 +109,7 @@ Item {
         property: "reveal"
         from: 0
         to: 1
-        duration: 650
+        duration: theme.animate ? 650 : 0  // animations off: lines drawn at once
         easing.type: Easing.OutCubic
     }
 
@@ -121,12 +122,12 @@ Item {
         Row {
             spacing: theme.em * 0.4
             Rectangle { width: theme.em * 1.2; height: 3; radius: 1.5; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: i18n.tr("Your car"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+            Text { text: i18n.tr("Your car"); color: theme.dimText; font.pointSize: theme.fontSmall }
         }
         Row {
             spacing: theme.em * 0.4
             Rectangle { width: theme.em * 1.2; height: 3; radius: 1.5; color: theme.text; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: i18n.tr("Car picked"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+            Text { text: i18n.tr("Car picked"); color: theme.dimText; font.pointSize: theme.fontSmall }
         }
     }
 
@@ -178,7 +179,7 @@ Item {
         width: chart.width
         height: chart.height
         visible: chart.drawn
-        layer.enabled: chart.drawn
+        layer.enabled: chart.drawn && pageState.active  // texture released while page hidden
         layer.samples: 4
         // Drawn up to the lap revealed (whole width once revealed: names at line ends)
         Item {
@@ -248,7 +249,7 @@ Item {
         y: Math.max(area.mouseY - height - theme.em * 0.6, 0)
         width: tipText.implicitWidth + theme.em * 1.2
         height: tipText.implicitHeight + theme.em * 0.6
-        radius: theme.em * 0.4
+        radius: theme.radiusMd
         color: theme.raised
         border.width: 1
         border.color: theme.border

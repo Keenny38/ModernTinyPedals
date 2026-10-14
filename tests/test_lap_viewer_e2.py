@@ -97,22 +97,22 @@ def test_value_axis_and_autoscale(backend):
     show(backend, 1, 2)
     speed = next(panel for panel in backend.panels if panel["column"] == "speed_kph")
     assert speed["autoscale"] is False and speed["ticks"]
-    whole = backend.autoscaleAxis("speed_kph", 0.0, 3000.0)
+    whole = backend.charts.autoscaleAxis("speed_kph", 0.0, 3000.0)
     assert whole["low"] < 120.0 < 180.0 < whole["high"]  # corner & straight speed with margin
-    straight = backend.autoscaleAxis("speed_kph", 100.0, 900.0)  # flat out: flat line kept in middle
+    straight = backend.charts.autoscaleAxis("speed_kph", 100.0, 900.0)  # flat out: flat line kept in middle
     assert straight["low"] < 180.0 < straight["high"] and straight["high"] - straight["low"] < 20
     assert straight["lowText"] and straight["highText"]
-    corner = backend.autoscaleAxis("speed_kph", 1500.0, 1600.0)
+    corner = backend.charts.autoscaleAxis("speed_kph", 1500.0, 1600.0)
     assert corner["low"] < 120.0 < corner["high"] < 140.0  # corner speed only
-    entry = backend.autoscaleAxis("speed_kph", 1200.0, 1500.0)
+    entry = backend.charts.autoscaleAxis("speed_kph", 1200.0, 1500.0)
     assert entry["low"] < 120.0 and entry["high"] > 180.0  # both speeds in view
-    zoomed = backend.valueAxis("throttle", 0.5, 1.0)
+    zoomed = backend.charts.valueAxis("throttle", 0.5, 1.0)
     assert zoomed["lowText"] == "50%" and zoomed["highText"] == "100%" and len(zoomed["ticks"]) == 3
-    assert backend.valueAxis("unknown", 0, 1) == {} and backend.valueAxis("speed_kph", 2, 1) == {}
-    backend.setPanelAutoscale("speed_kph", True)
+    assert backend.charts.valueAxis("unknown", 0, 1) == {} and backend.charts.valueAxis("speed_kph", 2, 1) == {}
+    backend.charts.setPanelAutoscale("speed_kph", True)
     assert next(panel for panel in backend.panels if panel["column"] == "speed_kph")["autoscale"]
     assert load_viewer_setting(cfg.path.telemetry)["panel_autoscale"] == ["speed_kph"]
-    backend.setPanelAutoscale("speed_kph", False)
+    backend.charts.setPanelAutoscale("speed_kph", False)
     assert load_viewer_setting(cfg.path.telemetry)["panel_autoscale"] == []
 
 
@@ -153,10 +153,10 @@ def test_math_channels_on_charts(backend):
     from neopedal.ui.lap_viewer import CHANNEL_MAP, load_viewer_setting
 
     show(backend, 1, 2)
-    assert backend.checkMathChannel("", "Release", "max(-d(brake), 0) * 100") == ""
-    assert backend.checkMathChannel("", "Bad", "nothing * 2") == "Unknown channel: nothing"
-    assert backend.saveMathChannel("", "Release", "max(-d(brake), 0) * 100", "%/s") == ""
-    assert backend.saveMathChannel("", "release", "brake", "") == "Name already used"
+    assert backend.math.check("", "Release", "max(-d(brake), 0) * 100") == ""
+    assert backend.math.check("", "Bad", "nothing * 2") == "Unknown channel: nothing"
+    assert backend.math.save("", "Release", "max(-d(brake), 0) * 100", "%/s") == ""
+    assert backend.math.save("", "release", "brake", "") == "Name already used"
     column = "math:Release"
     assert column in backend.visible and column in CHANNEL_MAP
     panel = next(panel for panel in backend.panels if panel["column"] == column)
@@ -167,24 +167,24 @@ def test_math_channels_on_charts(backend):
     menu = [item for item in backend.channelMenu if item["column"] == column]
     assert menu and menu[0]["visible"] and menu[0]["group"] == "Math Channels"
     assert any(row["column"] == column for row in backend.xyChannels)
-    assert "yaw_rate" in backend.mathInputs and "brake" in backend.mathInputs
+    assert "yaw_rate" in backend.math.inputs and "brake" in backend.math.inputs
     saved = load_viewer_setting(cfg.path.telemetry)
     assert saved["math_channels"] == [{"name": "Release", "expression": "max(-d(brake), 0) * 100", "unit": "%/s"}]
     # Changed expression: drawn again (new vertex key)
     old_key = panel["series"][0]["key"]
-    assert backend.saveMathChannel("Release", "Release", "max(-d(brake), 0) * 50", "%/s") == ""
+    assert backend.math.save("Release", "Release", "max(-d(brake), 0) * 50", "%/s") == ""
     new_panel = next(panel for panel in backend.panels if panel["column"] == column)
     assert new_panel["series"][0]["key"] != old_key
     assert max(backend.data.series(CHANNEL_MAP[column], lap)[1]) == pytest.approx(max(ys) / 2)
     # Built-in understeer angle: yaw rate from recorded heading
-    assert backend.addMathPreset(0) == ""
+    assert backend.math.addPreset(0) == ""
     understeer = CHANNEL_MAP["math:Understeer Angle"]
     assert backend.data.available(understeer)
     values = backend.data.series(understeer, lap)[1]
     assert all(math.isfinite(value) for value in values)
-    assert backend.addMathPreset(0) == "Name already used"
+    assert backend.math.addPreset(0) == "Name already used"
     # Removed: gone from charts & settings
-    backend.removeMathChannel("Release")
+    backend.math.remove("Release")
     assert column not in backend.visible and column not in CHANNEL_MAP
     assert [item["name"] for item in load_viewer_setting(cfg.path.telemetry)["math_channels"]] == ["Understeer Angle"]
 
@@ -194,7 +194,7 @@ def test_math_channels_restored_with_viewer(backend):
 
     from neopedal.ui.quick.lap_backend import LapViewerBackend
 
-    backend.saveMathChannel("", "Twice", "speed_kph * 2", "")
+    backend.math.save("", "Twice", "speed_kph * 2", "")
     parent = QWidget()
     other = LapViewerBackend(parent, backend.folder)
     try:
@@ -209,13 +209,13 @@ def test_laps_aligned_on_braking_point(backend):
     from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     show(backend, 1, 2, 3)
-    assert backend.corners and backend.alignment == {}
-    index = next(row["index"] for row in backend.corners if row["kind"] == "corner")
+    assert backend.cornerTable.items and backend.charts.alignment == {}
+    index = next(row["index"] for row in backend.cornerTable.items if row["kind"] == "corner")
     brake = CHANNEL_MAP["brake"]
     lap2 = next(lap for lap in backend.data.laps if lap.key == lap_path(backend, 2))
     before = backend.data.series(brake, lap2)[0][0]
-    backend.alignBraking(index)
-    info = backend.alignment
+    backend.charts.alignBraking(index)
+    info = backend.charts.alignment
     assert info["index"] == index and len(info["laps"]) == 2
     offset = backend.data.offsets[lap2.key]
     assert offset == pytest.approx(60.0, abs=10.0)  # brakes 2% of 3000 m earlier: shifted forward
@@ -230,23 +230,23 @@ def test_laps_aligned_on_braking_point(backend):
     backend.setTimeAxis(True)  # time axis: never shifted
     assert backend.data.shift_of(lap2) == 0.0
     backend.setTimeAxis(False)
-    backend.alignBrakingAt(backend.data.x_at_distance(1500.0))
-    assert backend.alignment["index"] == index
-    backend.alignBraking(-1)
-    assert backend.alignment == {} and backend.data.offsets == {}
+    backend.charts.alignBrakingAt(backend.data.x_at_distance(1500.0))
+    assert backend.charts.alignment["index"] == index
+    backend.charts.alignBraking(-1)
+    assert backend.charts.alignment == {} and backend.data.offsets == {}
 
 
 # 4. CSV on time base
 def test_csv_on_time_base(backend, tmp_path):
     show(backend, 1, 2)
     target = tmp_path / "time.csv"
-    assert backend.write_csv(str(target), ".", time_base=True)
+    assert backend.exports.write_csv(str(target), ".", time_base=True)
     lines = target.read_text(encoding="utf-8-sig").splitlines()
     assert lines[0].startswith("Time (s),")
     times = [float(line.split(",")[0]) for line in lines[1:]]
     assert times[:3] == pytest.approx([0.0, 0.02, 0.04])
     assert times[-1] == pytest.approx(91.0, abs=0.03)  # longest lap
-    assert backend.write_csv(str(tmp_path / "distance.csv"), ".")
+    assert backend.exports.write_csv(str(tmp_path / "distance.csv"), ".")
     assert (tmp_path / "distance.csv").read_text(encoding="utf-8-sig").splitlines()[2].startswith("1,")
 
 
@@ -262,7 +262,7 @@ def test_import_foreign_laps(backend, tmp_path):
     hidden = other / ".trash"
     hidden.mkdir()
     (hidden / "x lap001 1m30.000s.csv").write_text("x", encoding="utf-8")
-    backend.import_folder(str(other), background=False)
+    backend.exports.import_folder(str(other), background=False)
     wait_loaded(backend)  # status of import shown again once lap is read
     foreign = [entry for entry in backend.external if entry.foreign]
     assert len(foreign) == 1 and "lap007" in foreign[0].file.filename
@@ -284,11 +284,11 @@ def test_import_foreign_laps(backend, tmp_path):
     wait_library(library)  # imported laps listed in background
     assert library.tree.topLevelItem(0).text(library.COL_DRIVER) == "foreign laps"
     library.close()
-    backend.import_folder(str(other), background=False)  # imported again: same group, nothing copied twice
+    backend.exports.import_folder(str(other), background=False)  # imported again: same group, nothing copied twice
     groups = lap_library.list_imported(backend.folder)
     assert [name for name, _ in groups] == ["Teammate"] and len(groups[0][1]) == 1
     assert "1 already imported" in backend.status
-    backend.import_folder(backend.folder, background=False)
+    backend.exports.import_folder(backend.folder, background=False)
     assert "own telemetry folder" in backend.status
     assert lap_library.compatible_lap(lap_info(), lap_info(**{"class": "LMP2"}), "GT3") == "class"
     assert lap_library.compatible_lap(lap_info(), {}, "GT3", os.path.join("x", "Track - LMP2", "a.csv")) == "class"
@@ -300,15 +300,16 @@ def test_reference_in_similar_conditions(backend):
     from neopedal.ui.quick.lap_conditions import lap_compound, similar_best
 
     show(backend, 1, 3, reference=1)  # lap 3 looked at (31 °C): lap 1 (30 °C) is fastest within 3 °C
-    backend.compareSimilarConditions()
+    backend.conditions.compareSimilarConditions()
     assert backend.reference_key == lap_path(backend, 1) and lap_path(backend, 3) in backend.checked
     assert "Reference in similar conditions" in backend.status
     show(backend, 3, 2, reference=3)  # lap 2 at 34.5 °C: no lap within 3 °C
-    backend.compareSimilarConditions()
+    backend.conditions.compareSimilarConditions()
     assert "No other clean lap" in backend.status and backend.reference_key == lap_path(backend, 3)
-    backend.setSimilarTolerance(5)
-    assert backend.similarTolerance == 5 and [row["value"] for row in backend.similarTolerances] == [1, 2, 3, 5, 8]
-    backend.compareSimilarConditions()
+    backend.conditions.setSimilarTolerance(5)
+    conditions = backend.conditions
+    assert conditions.similarTolerance == 5 and [row["value"] for row in conditions.similarTolerances] == [1, 2, 3, 5, 8]
+    backend.conditions.compareSimilarConditions()
     assert backend.reference_key == lap_path(backend, 1)
     assert lap_compound({"compound": ["Soft", "Soft"]}) == "Soft" and lap_compound({}) == ""
     assert lap_compound({"tyre_compound": "Medium"}) == "Medium"
@@ -325,15 +326,15 @@ def test_setup_differences(backend):
     from neopedal.ui.quick.lap_conditions import setup_diff
 
     show(backend, 1, 2, 3, reference=1)
-    diff = backend.setupDiff("", lap_path(backend, 2))
+    diff = backend.conditions.setupDiff("", lap_path(backend, 2))
     assert diff["state"] == "different" and diff["a"] and diff["b"]
     rows = {row["name"]: row for row in diff["rows"]}
     assert rows["Brake Bias"]["differs"] and rows["Brake Bias"]["a"] == "56.0" and rows["Brake Bias"]["b"] == "55.0"
     assert not rows["TC Level"]["differs"] and "ABS Level" not in rows  # car without ABS setting (-1)
     assert rows["Setup"]["a"] == "Quali" and rows["Setup"]["b"] == "—"
-    same = backend.setupDiff("", lap_path(backend, 3))
+    same = backend.conditions.setupDiff("", lap_path(backend, 3))
     assert same["state"] == "same" and "Same setup" in same["note"]
-    assert backend.setupDiff("", lap_path(backend, 1)) == {}  # same lap
+    assert backend.conditions.setupDiff("", lap_path(backend, 1)) == {}  # same lap
     assert setup_diff({}, {}, None, None) == {"state": "unknown", "rows": []}
     assert backend.isCompared(lap_path(backend, 2)) and not backend.isCompared(lap_path(backend, 1))
 
@@ -343,16 +344,16 @@ def test_corner_report(backend, tmp_path):
     from neopedal.ui.quick.corner_report import build_report
 
     show(backend, 1, 2)
-    image = backend.corner_map_image()
+    image = backend.exports.corner_map_image()
     assert image is not None and not image.isNull() and image.width() > 100
     target = tmp_path / "report.html"
-    assert backend.write_report(str(target))
+    assert backend.exports.write_report(str(target))
     text = target.read_text(encoding="utf-8")
     assert text.startswith("<!DOCTYPE html>") and "data:image/png;base64," in text
     assert 'src="http' not in text and "href=" not in text and "<script" not in text  # nothing outside the file
     assert "<table>" in text and "Total" in text
     pdf = tmp_path / "report.pdf"
-    assert backend.write_report(str(pdf))
+    assert backend.exports.write_report(str(pdf))
     assert pdf.read_bytes()[:4] == b"%PDF"
     escaped = build_report("<b>", "", [{"label": "<i>", "color": "#fff"}], ["A"], ["a"], [{"a": "<x>", "aColor": "loss"}],
                            [{"label": "T1", "loss": "+0.1", "causes": ["<y>"]}], "Coach")
@@ -409,9 +410,9 @@ def test_map_g_circle_and_xy_zoom(backend):
     show(backend, 1, 2)
     scatter = backend.scatter("speed_kph", "throttle")
     assert scatter["xRange"][0] < scatter["xRange"][1]
-    ticks = backend.axisTicks("speed_kph", 120.0, 140.0)
+    ticks = backend.charts.axisTicks("speed_kph", 120.0, 140.0)
     assert [tick["value"] for tick in ticks] == [120.0, 125.0, 130.0, 135.0, 140.0]
-    assert backend.axisTicks("speed_kph", 2.0, 1.0) == [] and backend.axisTicks("nothing", 0, 1) == []
+    assert backend.charts.axisTicks("speed_kph", 2.0, 1.0) == [] and backend.charts.axisTicks("nothing", 0, 1) == []
     assert all("lap" in row for row in backend.histogram("throttle")["laps"])
     messages: list[str] = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -472,9 +473,9 @@ def test_qml_page_loads_with_new_parts(backend):
     from neopedal.ui.quick import create_quick_view
 
     show(backend, 1, 2)
-    backend.saveMathChannel("", "Twice", "speed_kph * 2", "")
-    backend.setPanelAutoscale("speed_kph", True)
-    backend.alignBraking(0)
+    backend.math.save("", "Twice", "speed_kph * 2", "")
+    backend.charts.setPanelAutoscale("speed_kph", True)
+    backend.charts.alignBraking(0)
     messages: list[str] = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     parent = QWidget()

@@ -24,7 +24,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+import shiboken6
+from PySide6.QtCore import QEventLoop, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -44,6 +45,7 @@ from ..widget._layout_guide import COLOR_GUIDE, alignment_lines
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog, translate_filter
 
 SNAP_DISTANCE = 8  # screen pixel
+CAPTURE_DELAY_MS = 250  # window hidden this long before screen captured (compositor fade out)
 COLOR_BOX = QColor(255, 255, 255, 50)
 COLOR_BOX_EDGE = QColor(255, 255, 255, 170)
 COLOR_SELECTED = QColor(56, 169, 245, 90)
@@ -371,8 +373,14 @@ class LayoutEditor(BaseDialog):
         # Hiding a page closes it (unapplied moves lost): main window is hidden instead
         window = self.window() if self.in_app_page else self
         window.hide()
-        QGuiApplication.processEvents()
-        pixmap = screen.grabWindow(0)
+        # Hidden window may still be on screen (fade out): short wait, user input left for later
+        wait = QEventLoop()
+        QTimer.singleShot(CAPTURE_DELAY_MS, wait.quit)
+        wait.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        if not shiboken6.isValid(window):
+            return
+        captured = shiboken6.isValid(self) and shiboken6.isValid(screen)  # not closed or removed meanwhile
+        pixmap = screen.grabWindow(0) if captured else QPixmap()
         window.show()
         window.raise_()
         window.activateWindow()

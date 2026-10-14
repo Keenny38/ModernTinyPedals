@@ -24,13 +24,20 @@ Suspension force per wheel (or share of total force) with gauge of force share.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ... import calculation as calc
 from ...api_control import api
 from .gauge_quad import GaugeQuad
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SuspensionForceConfig
+
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: SuspensionForceConfig
 
     options = (*GaugeQuad.common_options, "show_force_ratio")
     label = "Suspension force"

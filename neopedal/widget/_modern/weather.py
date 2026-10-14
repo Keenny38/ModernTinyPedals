@@ -27,6 +27,7 @@ car (up: tailwind, down: headwind).
 from __future__ import annotations
 
 from math import atan2, hypot
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -41,6 +42,9 @@ from .base import ModernOverlay
 from .draw import arrow
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import WeatherConfig
+
 WIND_CALM = 0.3  # m/s, no direction shown below
 
 TREND_SIGN = ("●", "▲", "▼")  # steady, rising, falling
@@ -48,6 +52,8 @@ TREND_SIGN = ("●", "▲", "▼")  # steady, rising, falling
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: WeatherConfig
 
     options = (
         "font_size", "show_temperature", "decimal_places_temperature", "show_rain", "show_wetness",

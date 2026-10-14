@@ -27,11 +27,12 @@ No Qt: commands are sent on a game connection (see game_rest), in background.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 
-from .. import game_rest
-from ..game_rest import GameConnection
+from ... import game_rest
+from ...game_rest import GameConnection
 
 ACTIVE_RESOURCE = "/rest/replay/isActive"  # null outside a session, true while a replay is open
 TOGGLE_REPLAY_RESOURCE = "/rest/replay/toggleactive"  # live session <-> its replay (no setter)
@@ -140,6 +141,19 @@ def leave_replay(connection: GameConnection) -> bool:
     if connection.get(ACTIVE_RESOURCE) is not True:
         return True
     return connection.send("POST", TOGGLE_REPLAY_RESOURCE)
+
+
+def click_game_ui(local: bool = True) -> bool:
+    """Whole game UI (top bar, standings, replay bar & HUD) shown or hidden, as a middle click in game does (no
+    Rest API command for its web panels): middle click posted to the game window of this computer, in background
+    (button held a frame). False if the game is not on this computer (local False) or its window not found"""
+    from . import game_window
+
+    window = game_window.find_game_window() if local else (0, 0, 0)
+    if not window[0]:
+        return False
+    threading.Thread(target=game_window.middle_click, args=(window,), daemon=True, name="Game click").start()
+    return True
 
 
 def send_commands(batch: tuple[Command, ...], address: tuple[str, int] | None = None) -> bool:

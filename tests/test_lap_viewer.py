@@ -309,7 +309,7 @@ def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, mo
     other_file = next((other / "Track - GT3").glob("*.csv"))
     monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
     backend = open_viewer().backend
-    backend.addFiles()
+    backend.exports.addFiles()
     wait_loaded(backend)
     assert [row["kind"] for row in backend.lap_model.rows].count("session") == 2
     assert "1:30.000" in backend.bestText  # added lap sectors left out
@@ -381,7 +381,7 @@ def test_track_map_circuit_falls_back_to_reference_lap(open_viewer):
     backend = open_viewer().backend
     backend.data.set_laps([PlotLap("a", "a", reference, QColor("red")), PlotLap("b", "b", other, QColor("blue"))])
     backend.rebuild_chart()
-    assert backend._road.xs == [d + 1 for d in distance]  # no track map file: reference lap line
+    assert list(backend._road.xs) == [d + 1 for d in distance]  # no track map file: reference lap line
     assert len(backend.trackMap["lines"]) == 2 and backend.trackMap["lines"][0]["reference"]
     backend.data.set_laps([])
     backend.rebuild_chart()

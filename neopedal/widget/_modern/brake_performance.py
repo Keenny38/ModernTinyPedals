@@ -24,15 +24,22 @@ Braking rate (g) of last braking & best, difference to best, front & rear wheel 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BrakePerformanceConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: BrakePerformanceConfig
 
     options = (
         "font_size", "layout", "show_transient_maximum_braking_rate", "show_maximum_braking_rate",

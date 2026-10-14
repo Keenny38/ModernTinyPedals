@@ -13,20 +13,13 @@ Card {
 
     readonly property bool found: info.found === true
 
-    component SectionTitle: Text {
+    component SectionTitle: TpSectionLabel {
         Layout.fillWidth: true
         Layout.topMargin: theme.em * 0.5
-        color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.8
-        font.weight: Font.DemiBold
-        font.capitalization: Font.AllUppercase
-        font.letterSpacing: 0.6
-        elide: Text.ElideRight
     }
     // Action of the grid: icon & text left aligned, text cut to the column (full text in tooltip)
     component ActionButton: TpButton {
         id: action
-        property bool danger: false
         Layout.fillWidth: true
         Layout.preferredWidth: 1  // columns of same width
         flat: true
@@ -45,7 +38,7 @@ Card {
             Text {
                 id: actionText
                 anchors.left: actionIcon.visible ? actionIcon.right : parent.left
-                anchors.leftMargin: theme.em * 0.55
+                anchors.leftMargin: theme.em * 0.6
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: action.text
@@ -67,7 +60,7 @@ Card {
         ColumnLayout {
             id: column
             width: flick.width - theme.em * 0.6
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             visible: details.found
 
             // Name & load
@@ -75,7 +68,7 @@ Card {
                 Layout.fillWidth: true
                 text: details.info.name || ""
                 color: theme.text
-                font.pointSize: theme.fontPoint * 1.3
+                font.pointSize: theme.fontHeading
                 font.weight: Font.DemiBold
                 wrapMode: Text.WrapAnywhere
                 maximumLineCount: 2
@@ -85,7 +78,7 @@ Card {
                 Layout.fillWidth: true
                 text: details.info.date || ""
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
             Flow {
@@ -138,7 +131,6 @@ Card {
                 }
                 ActionButton { glyph: ""; text: i18n.tr("Backup Preset"); onClicked: backend.backup(details.info.key) }  // history
                 ActionButton { glyph: ""; text: i18n.tr("Export Package..."); onClicked: backend.exportPackage(details.info.key) }  // export
-                ActionButton { glyph: ""; text: i18n.tr("Copy Share Code"); onClicked: backend.copyShareCode(details.info.key) }  // share
                 ActionButton {
                     glyph: ""  // library
                     text: i18n.tr("Compare with Loaded Preset")
@@ -162,7 +154,7 @@ Card {
                 text: i18n.tr("No car class or track: this preset is only loaded by hand or by hotkey.")
                 color: theme.dimText
                 wrapMode: Text.WordWrap
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
             }
             Flow {
                 Layout.fillWidth: true
@@ -182,7 +174,7 @@ Card {
                             id: classRow
                             anchors.verticalCenter: parent.verticalCenter
                             x: theme.em * 0.45
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Rectangle {
                                 width: Math.round(theme.em * 0.6)
                                 height: width
@@ -219,7 +211,7 @@ Card {
                             id: trackRow
                             anchors.verticalCenter: parent.verticalCenter
                             x: theme.em * 0.45
-                            spacing: theme.em * 0.35
+                            spacing: theme.em * 0.4
                             Icon { glyph: ""; size: theme.em * 0.75; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }  // flag
                             Text { text: trackTag.modelData; color: theme.text; anchors.verticalCenter: parent.verticalCenter }
                             TpButton {
@@ -265,7 +257,7 @@ Card {
                 text: i18n.trm("Preset hotkeys: " + (details.info.hotkeys || []).join(", "))
                 color: theme.dimText
                 wrapMode: Text.WordWrap
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
             }
 
             // Content
@@ -274,7 +266,7 @@ Card {
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.25
+                spacing: theme.em * 0.3
                 Repeater {
                     model: details.info.overlayNames || []
                     Pill { required property string modelData; text: modelData; tint: theme.dimText }
@@ -286,7 +278,7 @@ Card {
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.25
+                spacing: theme.em * 0.3
                 Repeater {
                     model: details.info.moduleNames || []
                     Pill { required property string modelData; text: modelData; tint: theme.dimText }
@@ -298,7 +290,7 @@ Card {
                 Layout.topMargin: theme.em * 0.5
                 text: (details.info.key || "") + "  ·  " + (details.info.size || "")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 elide: Text.ElideMiddle
             }
         }

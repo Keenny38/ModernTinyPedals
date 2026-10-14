@@ -37,6 +37,12 @@ public:
     virtual bool clear_swapchain() = 0;
     // Copy pixels (width * height, tightly packed, swapchain byte order) to top left of acquired image
     virtual bool upload(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height) = 0;
+    // Copy only rect of the same pixels (rest of the image already holds them). Default: whole upload.
+    virtual bool upload_rect(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height,
+                             const Rect& rect) {
+        (void)rect;
+        return upload(image_index, pixels, width, height);
+    }
 };
 
 // nullptr when binding not usable (never throws)

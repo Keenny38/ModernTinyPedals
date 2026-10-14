@@ -27,7 +27,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import wraps
 from math import isfinite
 from time import monotonic
@@ -71,6 +71,33 @@ def bytes_to_str(bytestring: bytes | Any, char_encoding: str = "utf-8") -> str:
     return ""
 
 
+DECODE_CACHE_SIZE = 1024  # decoded game texts kept per decoder (names of every car: driver, vehicle, class)
+
+
+def cached_bytes_to_str(char_encoding: str = "utf-8", max_size: int = DECODE_CACHE_SIZE) -> Callable[[Any], str]:
+    """Bytes to string decoder (see bytes_to_str) keeping decoded texts, keyed by raw bytes
+
+    Game names are read per car many times a second and rarely change: decoded once. Bounded (cleared once
+    full). Thread safe: dict get & set are atomic, a text cleared meanwhile is decoded again.
+    """
+    cache: dict[bytes, str] = {}
+
+    def tostr(bytestring: bytes | Any) -> str:
+        try:
+            return cache[bytestring]
+        except (KeyError, TypeError):  # not decoded yet, or not bytes (unhashable)
+            pass
+        if not isinstance(bytestring, bytes):
+            return ""
+        text = bytestring.decode(encoding=char_encoding, errors="replace").rstrip()
+        if len(cache) >= max_size:
+            cache.clear()
+        cache[bytestring] = text
+        return text
+
+    return tostr
+
+
 def is_allowed_filename(filename: str) -> bool:
     """Is allowed setting file name"""
     return re.search(CFG_INVALID_FILENAME, filename, flags=re.IGNORECASE) is None
@@ -100,7 +127,7 @@ def _finite_json_float(text: str) -> float:
 
 
 def load_json_strict(data: str | bytes | bytearray) -> Any:
-    """Parse untrusted JSON text (share code, imported file), raise ValueError if invalid
+    """Parse untrusted JSON text (imported file), raise ValueError if invalid
 
     Unlike json.loads, NaN, Infinity & out of range numbers are rejected, and too deeply nested
     data raises ValueError (not RecursionError).

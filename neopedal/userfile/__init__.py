@@ -22,17 +22,24 @@ User file access function
 
 from __future__ import annotations
 
+import errno
 import io
+import json
 import logging
 import os
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from typing import IO, TextIO
+from typing import IO, Any, TextIO
 
 from ..const_app import CONFIG_ID, PLATFORM
+from ..validator import load_json_strict
 
 logger = logging.getLogger(__name__)
+
+REPLACE_ATTEMPTS = 5  # attempts of replacing file locked for a moment (antivirus, cloud sync)
+REPLACE_RETRY_DELAY = 0.05  # seconds before 2nd attempt, longer before each next one
 
 
 def set_user_data_path(filepath: str) -> str:
@@ -40,7 +47,7 @@ def set_user_data_path(filepath: str) -> str:
     if not os.path.exists(filepath):
         logger.info("%s folder does not exist, attempt to create", filepath)
         try:
-            os.mkdir(filepath)
+            os.makedirs(filepath, exist_ok=True)
         except OSError:  # also invalid path (Windows "<" in name: WinError 123)
             logger.error("failed to create %s folder", filepath)
             return ""
@@ -56,6 +63,91 @@ def flush_to_disk(file: IO) -> None:
 def temp_file_name(filename: str) -> str:
     """Temporary file name of target file, unique per process & thread (writers never share one)"""
     return f"{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
+
+
+def replace_retry(src: str, dst: str, attempts: int = REPLACE_ATTEMPTS) -> None:
+    """os.replace, retried a few times on PermissionError
+
+    Windows Defender, OneDrive or a search indexer open a just written file for a moment:
+    replace fails with WinError 5 or 32 until they release it.
+
+    Raises:
+        OSError: last error, if every attempt failed (or any other error at once).
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt >= attempts:
+                raise
+            time.sleep(REPLACE_RETRY_DELAY * attempt)
+
+
+def atomic_replace(path: str, data: bytes, *, verify: bool = False, fsync: bool = True) -> None:
+    """Write bytes to file atomically: temporary file, flushed to disk, then replaces target
+
+    Existing file is never left half-written or empty, temporary file never left on error.
+
+    Args:
+        path: target file name (with path).
+        data: file content.
+        verify: read bytes back before replacing target, OSError (EIO) if they differ.
+        fsync: flush data to disk (not only to OS cache) before replacing target.
+
+    Raises:
+        OSError: unable to save file (target untouched).
+    """
+    temp_filename = temp_file_name(path)
+    try:
+        with open(temp_filename, "wb") as file:
+            file.write(data)
+            if fsync:
+                flush_to_disk(file)
+        if verify:
+            with open(temp_filename, "rb") as file:
+                if file.read() != data:
+                    raise OSError(errno.EIO, "file content differs from written data", path)
+        replace_retry(temp_filename, path)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_filename)
+        raise
+
+
+def read_json(path: str, *, strict: bool = True, default: Any = None, dict_only: bool = False) -> Any:
+    """Read json file (UTF-8, BOM of Notepad or PowerShell allowed), default if missing or invalid
+
+    Args:
+        path: file name (with path).
+        strict: NaN, Infinity & out of range numbers (1e999) make file invalid.
+        default: returned if file missing, unreadable or invalid.
+        dict_only: file not holding a JSON object is invalid.
+    """
+    try:
+        with open(path, encoding="utf-8-sig") as file:
+            text = file.read()
+        data = load_json_strict(text) if strict else json.loads(text)
+    except (OSError, ValueError, RecursionError):
+        return default
+    if dict_only and not isinstance(data, dict):
+        return default
+    return data
+
+
+def append_line(path: str, line: bytes) -> None:
+    """Add line at end of file, on a line of its own (last line cut short by a crash stays apart)
+
+    Raises:
+        OSError: unable to write file.
+    """
+    with open(path, "ab+") as file:
+        file.seek(0, os.SEEK_END)
+        separator = b""
+        if file.tell() > 0:
+            file.seek(-1, os.SEEK_END)
+            separator = b"" if file.read(1) == b"\n" else b"\n"
+        file.write(separator + line)
 
 
 @contextmanager
@@ -83,7 +175,7 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
         with file:
             yield file
             flush_to_disk(file)
-        os.replace(temp_filename, filename)
+        replace_retry(temp_filename, filename)
     except OSError as error:
         logger.error("USERDATA: failed saving %s: %s", filename, error)
         with suppress(OSError):
@@ -98,18 +190,55 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
 
 def write_text_file(filename: str, text: str) -> bool:
     """Write text file atomically, returns True if saved"""
-    temp_filename = temp_file_name(filename)
     try:
-        with open(temp_filename, "w", newline="", encoding="utf-8") as file:
-            file.write(text)
-            flush_to_disk(file)
-        os.replace(temp_filename, filename)
+        atomic_replace(filename, text.encode("utf-8"))
         return True
     except OSError as error:
         logger.error("USERDATA: failed saving %s: %s", filename, error)
-        with suppress(OSError):
-            os.remove(temp_filename)
         return False
+
+
+def encode_text(text: str, newline: str | None = None) -> bytes:
+    """Bytes of text as written to a text file opened with newline mode"""
+    if newline is None:
+        newline = os.linesep
+    if newline and newline != "\n":
+        text = text.replace("\n", newline)
+    return text.encode("utf-8")
+
+
+def write_verified_bytes(filename: str, data: bytes, raise_error: bool = False) -> bool:
+    """Write file atomically, verified by reading bytes back before replacing target
+
+    Returns:
+        True if saved & verified. Error logged (and raised if raise_error) otherwise.
+    """
+    try:
+        atomic_replace(filename, data, verify=True)
+        return True
+    except OSError as error:
+        logger.error("USERDATA: failed saving %s: %s", filename, error)
+        if raise_error:
+            raise
+        return False
+
+
+def write_json(
+    filename: str, data: Any, indent: int | str | None = None, newline: str | None = None,
+    raise_error: bool = False, **kwargs: Any,
+) -> bool:
+    """Write json file atomically in one write, verified by reading bytes back
+
+    json.dumps encodes in one shot (C encoder if not indented), json.dump to a file always
+    encodes in pure Python with many small writes. Output is byte identical to json.dump with
+    same arguments to a text file opened with same newline mode.
+
+    Raises:
+        TypeError, ValueError: data not serializable (file untouched).
+        OSError: unable to save file (logged), only if raise_error.
+    """
+    text = json.dumps(data, indent=indent, **kwargs)
+    return write_verified_bytes(filename, encode_text(text, newline), raise_error)
 
 
 def set_relative_path(filepath: str) -> str:

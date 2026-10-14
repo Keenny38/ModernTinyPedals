@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from neopedal import userfile
 from neopedal.const_file import FileExt
 from neopedal.userfile import json_setting
 from neopedal.userfile.json_setting import (
@@ -328,11 +329,11 @@ def test_save_never_leaves_truncated_file(folder, monkeypatch):
     """Write failing half-way (full disk, power loss): previous file kept as is"""
     write(folder, "config.json", json.dumps({"old": True}))
 
-    def fail_half_way(data, file, **kwargs):
+    def fail_half_way(file):
         file.write('{"new": ')
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(json_setting.json, "dump", fail_half_way)
+    monkeypatch.setattr(userfile, "flush_to_disk", fail_half_way)
     json_setting.save_json_file({"new": True}, "config.json", folder)
     assert read_json(folder, "config.json") == {"old": True}
     assert sorted(os.listdir(folder)) == ["config.json"]  # no temporary file left

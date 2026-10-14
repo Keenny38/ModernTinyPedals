@@ -28,6 +28,8 @@ are kept.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
 
@@ -36,6 +38,9 @@ from .base import DEFAULT_CORNER_SCALE
 from .draw import rounded
 from .restyle import Restyled, restyled_options
 from .theme import build_theme
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 DEPTH_TOP = QColor(255, 255, 255, 14)
 DEPTH_BOTTOM = QColor(0, 0, 0, 26)
@@ -96,6 +101,13 @@ COLOR_TOKENS: dict[str, str | tuple[str, int]] = {
     "delta_loss_color": "negative",
     "pit_active_color": "accent",
     "limiter_active_color": "caution",
+    "setting_popup_color": "accent",
+    "setting_popup_increase_color": "positive",
+    "setting_popup_decrease_color": "negative",
+    "track_limits_warning_color": "warning",
+    "track_limits_penalty_color": "negative",
+    "lift_and_coast_color": "positive",
+    "wipers_active_color": "accent",
     "rpm_bar_color": "accent",
     "rpm_redline_color": "negative",
     "throttle_color": "positive",
@@ -132,6 +144,8 @@ COLOR_TOKENS: dict[str, str | tuple[str, int]] = {
 
 class Realtime(Restyled, Classic):
     """Draw widget"""
+
+    wcfg: BlackBoxConfig
 
     color_tokens = COLOR_TOKENS
     options = restyled_options("black_box", COLOR_TOKENS)

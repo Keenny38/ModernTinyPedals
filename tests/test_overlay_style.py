@@ -83,7 +83,7 @@ def test_styled_config_writes_through():
 
 
 @pytest.mark.parametrize(("theme", "colorblind", "expected"), [
-    ("Modern Dark", False, "#FF4D4F"),
+    ("Modern Dark", False, "#F87171"),  # loss of status colors (app pages, stream graphics)
     ("Modern Dark", True, "#D55E00"),
     ("Legacy Dark", True, "#D55E00"),
 ])
@@ -110,7 +110,7 @@ def test_light_themes_stay_readable(theme):
     assert _contrast(rgb["background_color_gap"], "FFFFFF") < 1.5  # light panel
     assert _contrast(rgb["font_color_gap"], rgb["background_color_gap"]) > 7
     assert _contrast(rgb["font_color_player"], rgb["background_color_player"]) > 7  # dark row, light text
-    assert styled["background_color_flag"] in ("#FFFF00", "#FDE047")  # kept (modern palette only)
+    assert styled["background_color_flag"] in ("#FFFF00", "#FACC15")  # kept (modern palette only: status gold)
     assert styled["font_color_flag"] in ("#000000", "#0E1116")
     assert _contrast(rgb["font_color_gain"], rgb["background_color_gain"]) >= 3
     assert _contrast(rgb["bar_color"], rgb["background_color_gap"]) >= 3

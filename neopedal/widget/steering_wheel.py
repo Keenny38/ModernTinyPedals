@@ -20,7 +20,10 @@
 Steering wheel Widget
 """
 
-from PySide6.QtCore import QRect, Qt
+from math import isfinite, radians
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QBrush, QPainter, QPen
 
 from ..api_control import api
@@ -29,9 +32,14 @@ from ..userfile.custom_image import load_custom_image
 from ._base import Overlay
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SteeringWheelConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SteeringWheelConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -72,16 +80,17 @@ class Realtime(Overlay):
         )
 
         self.rect_bg = QRect(0, 0, area_size, area_size)
-        self.rect_wheel = QRect(-wheel_center, -wheel_center, wheel_size, wheel_size)
-        self.rect_rotation = QRect(
+        self.rect_wheel = QRectF(-wheel_center, -wheel_center, wheel_size, wheel_size)
+        self.rect_rotation = QRectF(
             rotation_size_offset,
             rotation_size_offset,
             rotation_size,
             rotation_size,
         )
-        self.rect_text = QRect(
-            area_size * self.wcfg["steering_angle_offset_x"] - text_width * 0.5,
-            area_size * self.wcfg["steering_angle_offset_y"] - font_m.height * 0.5 + font_m.voffset,
+        self.rim_radius = max(wheel_center, rotation_size * 0.5)  # outermost turning part
+        self.rect_text = QRect(  # whole pixels (truncated): text placed as before
+            int(area_size * self.wcfg["steering_angle_offset_x"] - text_width * 0.5),
+            int(area_size * self.wcfg["steering_angle_offset_y"] - font_m.height * 0.5 + font_m.voffset),
             text_width,
             font_m.height,
         )
@@ -92,26 +101,34 @@ class Realtime(Overlay):
         self.pen_rotation = QPen()
         self.pen_rotation.setCapStyle(Qt.PenCapStyle.FlatCap)
         self.pen_rotation.setColor(self.wcfg["rotation_line_color"])
-        self.pen_rotation.setWidth(self.wcfg["rotation_line_width"])
+        self.pen_rotation.setWidthF(self.wcfg["rotation_line_width"])
         self.pen_text = QPen()
         self.pen_text.setColor(self.wcfg["font_color_steering_angle"])
         self.brush_circle = QBrush(Qt.BrushStyle.SolidPattern)
         self.brush_circle.setColor(self.wcfg["background_color_circle"])
 
         # Last data
-        self.steering_angle = 0
+        self.steering_angle: float = 0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Steering wheel rotation
         if self.wcfg["manual_steering_range"] > 0:
-            temp_rot_range = self.wcfg["manual_steering_range"]
+            temp_rot_range: float = self.wcfg["manual_steering_range"]
         else:
             temp_rot_range = api.read.inputs.steering_range_physical()
 
         # Steering
         temp_steering_angle = api.read.inputs.steering_raw() * temp_rot_range * 0.5
-        if self.steering_angle != temp_steering_angle:
+        # Repaint only on visible change: rotation in device pixels at outer radius (wheel rim or rotation line),
+        # reading text, stationary rotation line
+        rotation = radians(temp_steering_angle) * self.rim_radius * self.devicePixelRatioF()
+        visible = (
+            round(rotation) if isfinite(rotation) else 0,
+            f"{abs(temp_steering_angle):.{self.decimals}f}" if self.wcfg["show_steering_angle"] else "",
+            self.wcfg["show_rotation_line_while_stationary_only"] and api.read.vehicle.speed() < 1,
+        )
+        if self.changed("angle", visible):
             self.steering_angle = temp_steering_angle
             self.update()
 
@@ -131,14 +148,14 @@ class Realtime(Overlay):
         # Draw steering wheel
         painter.translate(self.area_center, self.area_center)
         painter.rotate(self.steering_angle)
-        painter.drawPixmap(self.rect_wheel, self.pixmap_wheel)
+        painter.drawPixmap(self.rect_wheel, self.pixmap_wheel, QRectF())  # whole pixmap scaled to rect
         painter.resetTransform()
         # Draw rotation line
         if self.wcfg["show_rotation_line"] and (not self.wcfg["show_rotation_line_while_stationary_only"] or
             (self.wcfg["show_rotation_line_while_stationary_only"] and
             api.read.vehicle.speed() < 1)):
             painter.setPen(self.pen_rotation)
-            painter.drawArc(self.rect_rotation, 1440, -self.steering_angle * 16)
+            painter.drawArc(self.rect_rotation, 1440, int(-self.steering_angle * 16))  # 1/16 degree
         # Draw text
         if self.wcfg["show_steering_angle"]:
             if self.wcfg["show_degree_sign"]:

@@ -23,7 +23,7 @@ Item {
     required property string contentText  // last change & content, translated by backend
     property bool selected: false
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
-    readonly property bool wide: width > theme.em * 36
+    readonly property bool wide: width > theme.em * 36  // row width (not page): extra column shown
     signal clicked()
     signal loadRequested()
     property bool recycling: false  // in reuse pool: no animation from the previous row's state
@@ -43,14 +43,14 @@ Item {
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.em * 0.55
+        radius: theme.radiusLg
         color: row.selected ? Qt.tint(theme.base, Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.12))
              : area.containsMouse ? theme.hover : theme.base
         border.width: 1
         border.color: row.selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.75)
                     : theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
-        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
+        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
 
         MouseArea {
             id: area
@@ -86,8 +86,8 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.round(theme.em * 2.1)
             height: width
-            radius: theme.em * 0.5
-            color: row.loaded ? theme.accent : Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.15 : 0.1)
+            radius: theme.radiusMd
+            color: row.loaded ? theme.accentFill : Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.15 : 0.1)
             Icon {
                 anchors.centerIn: parent
                 glyph: row.unreadable ? "" : row.loaded ? "" : ""  // warning, check, library
@@ -144,7 +144,7 @@ Item {
                 width: parent.width
                 text: row.contentText
                 color: row.unreadable ? theme.warning : theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
         }
@@ -204,7 +204,7 @@ Item {
                 implicitHeight: Math.round(theme.em * 1.9)
                 opacity: area.containsMouse || hovered || row.current || row.selected ? 1 : 0
                 enabled: opacity > 0
-                Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: 120 } }
+                Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: theme.motionFast } }
                 onClicked: row.loadRequested()
             }
             TpButton {

@@ -31,38 +31,23 @@ TpPage {
         spacing: theme.em * 0.6
 
         // Title, counts & view
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.em * 0.6
-            Text {
-                text: i18n.tr("Overlays")
-                color: theme.text
-                font.pointSize: theme.fontPoint * 1.5
-                font.weight: Font.DemiBold
+        TpPageHeader {
+            title: i18n.tr("Overlays")
+            count: i18n.trm(backend.activeCount + " / " + backend.totalCount + " enabled")
+            countActive: backend.activeCount > 0
+            TpButton {
+                id: shareButton
+                flat: true
+                glyph: ""  // export
+                text: i18n.tr("Share")
+                tip: i18n.tr("Export or import overlay settings as a file")
+                onClicked: shareMenu.popup(shareButton, 0, shareButton.height)
             }
-            Rectangle {
-                id: countPill
-                Layout.alignment: Qt.AlignVCenter
-                implicitHeight: Math.round(theme.em * 1.6)
-                implicitWidth: countText.implicitWidth + theme.em * 1.1
-                radius: height / 2
-                color: backend.activeCount > 0 ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16) : theme.hover
-                Text {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: i18n.trm(backend.activeCount + " / " + backend.totalCount + " enabled")
-                    color: backend.activeCount > 0 ? theme.accent : theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
-                    font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
-                }
-            }
-            Item { Layout.fillWidth: true }
             // Grid / list switch
             Rectangle {
                 implicitHeight: Math.round(theme.em * 2.3)
                 implicitWidth: viewRow.implicitWidth + 6
-                radius: theme.em * 0.6
+                radius: theme.radiusLg
                 color: theme.dark ? Qt.darker(theme.base, 1.25) : Qt.darker(theme.window, 1.04)
                 border.width: 1
                 border.color: theme.border
@@ -98,59 +83,16 @@ TpPage {
         RowLayout {
             Layout.fillWidth: true
             spacing: theme.em * 0.6
-            TextField {
+            TpSearchField {
                 id: search
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 8
-                implicitHeight: Math.round(theme.em * 2.3)
                 focus: true
+                searchDelay: 0  // overlay list filtered at once
                 placeholderText: i18n.tr("Search overlays") + "   /"
-                placeholderTextColor: theme.dimText
-                color: theme.text
-                selectionColor: theme.accent
-                selectedTextColor: "white"
-                selectByMouse: true
-                leftPadding: theme.iconFont !== "" ? theme.em * 2.1 : theme.em * 0.7
-                rightPadding: clearButton.visible ? clearButton.width + theme.em * 0.4 : theme.em * 0.7
-                verticalAlignment: TextInput.AlignVCenter
                 Accessible.name: i18n.tr("Search overlays")
-                background: Rectangle {
-                    radius: theme.em * 0.6
-                    color: theme.base
-                    border.width: search.activeFocus ? 1.5 : 1
-                    border.color: search.activeFocus ? theme.accent : theme.border
-                    Behavior on border.color { ColorAnimation { duration: 120 } }
-                }
-                Icon {
-                    glyph: ""  // search
-                    x: theme.em * 0.7
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: search.activeFocus ? theme.accent : theme.dimText
-                    size: theme.em * 0.95
-                }
-                TpButton {
-                    id: clearButton
-                    visible: search.text !== ""
-                    flat: true
-                    glyph: ""  // cancel
-                    text: theme.iconFont === "" ? "✕" : ""
-                    tip: i18n.tr("Clear")
-                    implicitHeight: Math.round(theme.em * 1.8)
-                    anchors.right: parent.right
-                    anchors.rightMargin: theme.em * 0.25
-                    anchors.verticalCenter: parent.verticalCenter
-                    onClicked: { search.clear(); backend.setSearch(""); search.forceActiveFocus() }
-                }
-                onTextEdited: backend.setSearch(text)
-                Keys.onEscapePressed: function(event) {
-                    if (text !== "") {
-                        clear()
-                        backend.setSearch("")
-                    } else {
-                        overlays.forceActiveFocus()
-                    }
-                }
-                Keys.onDownPressed: overlays.forceActiveFocus()
+                onSearchChanged: function(text) { backend.setSearch(text) }
+                onExitField: overlays.forceActiveFocus()
                 Keys.onReturnPressed: overlays.forceActiveFocus()
                 Keys.onEnterPressed: overlays.forceActiveFocus()
                 Connections {
@@ -171,7 +113,7 @@ TpPage {
         // Category chips
         Flow {
             Layout.fillWidth: true
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             Repeater {
                 model: backend.categories
                 OverlayChip {
@@ -191,7 +133,7 @@ TpPage {
             Layout.fillWidth: true
             visible: backend.safeMode || backend.failedCount > 0
             implicitHeight: noticeRow.implicitHeight + theme.em * 0.9
-            radius: theme.em * 0.6
+            radius: theme.radiusLg
             color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.12)
             border.width: 1
             border.color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.6)
@@ -270,17 +212,17 @@ TpPage {
                 }
 
                 add: Transition {
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 170 }
-                    NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: 170; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase }
+                    NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: theme.motionBase; easing.type: Easing.OutCubic }
                 }
                 remove: Transition {
-                    NumberAnimation { property: "opacity"; to: 0; duration: 130 }
-                    NumberAnimation { property: "scale"; to: 0.94; duration: 130 }
+                    NumberAnimation { property: "opacity"; to: 0; duration: theme.motionFast }
+                    NumberAnimation { property: "scale"; to: 0.94; duration: theme.motionFast }
                 }
                 displaced: Transition {
-                    NumberAnimation { properties: "x,y"; duration: 220; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; to: 1; duration: 220 }  // add interrupted: never left faded
-                    NumberAnimation { property: "scale"; to: 1; duration: 220 }
+                    NumberAnimation { properties: "x,y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; to: 1; duration: theme.motionSlow }  // add interrupted: never left faded
+                    NumberAnimation { property: "scale"; to: 1; duration: theme.motionSlow }
                 }
 
                 Keys.onSpacePressed: if (currentItem) backend.toggle(currentItem.name)
@@ -328,7 +270,7 @@ TpPage {
                 spacing: theme.em * 0.6
                 visible: overlays.count === 0
                 opacity: visible ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 200 } }
+                Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
                 Icon {
                     anchors.horizontalCenter: parent.horizontalCenter
                     glyph: ""  // search
@@ -341,7 +283,7 @@ TpPage {
                     wrapMode: Text.WordWrap
                     text: i18n.tr("No overlay matches the filters")
                     color: theme.text
-                    font.pointSize: theme.fontPoint * 1.1
+                    font.pointSize: theme.fontSubtitle
                     font.weight: Font.DemiBold
                 }
                 TpButton {
@@ -392,6 +334,7 @@ TpPage {
             text: cardMenu.active ? i18n.tr("Disable") : i18n.tr("Enable")
             onTriggered: backend.toggle(cardMenu.name)
         }
+        Action { text: i18n.tr("Export Settings..."); onTriggered: backend.exportSettings(cardMenu.name) }
         MenuSeparator {}
         Action {
             id: showOnlyAction
@@ -399,5 +342,13 @@ TpPage {
             enabled: backend.category !== cardMenu.category
             onTriggered: backend.setCategory(cardMenu.category)
         }
+    }
+    TextMetrics { id: shareMetrics; text: i18n.tr("Import Overlay Settings...") }
+    TpMenu {
+        id: shareMenu
+        width: Math.max(theme.em * 13, shareMetrics.advanceWidth + theme.em * 3.8)  // longest item never cut
+        Action { text: i18n.tr("Export Overlay Settings..."); onTriggered: backend.exportSettings("") }
+        Action { text: i18n.tr("Import Overlay Settings..."); onTriggered: backend.importSettings() }
+        onClosed: overlays.forceActiveFocus()
     }
 }

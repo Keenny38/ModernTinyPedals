@@ -25,19 +25,27 @@ behind catches player; highlighted when it happens within current lap.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from ...const_common import MAX_SECONDS
 from ...formatter import shorten_driver_name
 from ...module_info import minfo
+from .._common import player_vehicle
 from .base import ModernOverlay, display_order_options
 from .rows import DASH, class_style
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TrafficConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TrafficConfig
 
     options = (
         "font_size", "show_race_leader", "show_slower_ahead", "show_faster_behind",
@@ -74,7 +82,6 @@ class Realtime(StatsMixin, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         veh_data = minfo.vehicles.dataSet
-        player_index = minfo.vehicles.playerIndex
         player_laptime = api.read.timing.estimated_laptime()
         ahead = (MAX_SECONDS, 0.0, -1)  # laps, time gap, index
         behind = (MAX_SECONDS, 0.0, -1)
@@ -103,7 +110,7 @@ class Realtime(StatsMixin, ModernOverlay):
             ahead = (0.0, 0.0, ahead[2])
         if behind[0] >= MAX_SECONDS:
             behind = (0.0, 0.0, behind[2])
-        player_progress = 1 - veh_data[player_index].currentLapProgress
+        player_progress = 1 - player_vehicle().currentLapProgress
         ahead_progress = 1 - veh_data[ahead[2]].currentLapProgress if ahead[2] >= 0 else 0
         data = {
             "slower": (ahead, ahead_progress),

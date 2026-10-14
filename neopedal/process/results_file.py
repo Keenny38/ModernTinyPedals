@@ -51,9 +51,12 @@ import logging
 import os
 import re
 import sys
+import threading
+import time
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from collections.abc import Iterable
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +78,19 @@ GAME_FOLDERS = {  # game: Steam folder name
 }
 RESULTS_SUBFOLDER = os.path.join("UserData", "Log", "Results")
 PAGE_SETTINGS_FILE = "race_results.json"  # race results page settings (user config folder), folder chosen
+STAMP_SETTLE = 2.0  # seconds: folder or file changed more recently is read again (timestamp granularity)
+LISTING_MAX_AGE = 60.0  # seconds: folder listing read again at least this often
+STEAM_CACHE_SECONDS = 30.0  # seconds: game folders found in Steam libraries looked up again
+PARSE_CHUNK = 1 << 20  # bytes fed to the parser at once
+CACHE_BYTES = 32 << 20  # memory estimate of results files parsed kept for next readers
+LAP_BYTES = 700  # memory estimate of a lap (named tuple, numbers, sector & wear tuples, compound)
+EVENT_BYTES = 400  # memory estimate of a stream event
+ENTRY_BYTES = 2000  # memory estimate of a car (laps apart)
 
 DOCTYPE = re.compile(rb"<!DOCTYPE[^\[>]*(\[.*?\])?\s*>", re.S)
 INVALID_CHARS = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 ROOT_END = b"</rFactorXML>"
+ESCAPED_BYTE = re.compile("[\udc80-\udcff]")  # byte not valid UTF-8, decoded with surrogateescape
 # "Name(12) reported contact (151.33) with another vehicle Other Name(11)", "... with Immovable"
 CONTACT = re.compile(
     r"^(?P<driver>.+?)\(\d+\) reported contact \((?P<strength>[\d.]+)\) with "
@@ -344,29 +356,108 @@ def entry_order(entry: Entry) -> tuple[int, int]:
     return (entry.position if entry.position > 0 else 1 << 30, entry.class_position)
 
 
-def parse_results(data: bytes, path: str = "", player_names: Iterable[str] = ()) -> SessionResult:
-    """Results file content
+def repair_utf8(data: bytes) -> bytes:
+    """UTF-8 data with each invalid byte read as Windows-1252 (undefined ones as U+FFFD)"""
+    text = data.decode("utf-8", "surrogateescape")
+    return ESCAPED_BYTE.sub(
+        lambda match: bytes((ord(match.group()) - 0xDC00,)).decode("cp1252", "replace"), text,
+    ).encode("utf-8")
+
+
+class _Parsed(NamedTuple):
+    """Results file parsed incrementally: header elements kept, cars & stream parsed (their elements emptied)"""
+
+    root: ET.Element
+    results: ET.Element | None  # first RaceResults element of root
+    session: ET.Element | None  # first session element of results
+    entries: list[Entry]  # cars of session, file order
+    events: tuple[Event, ...]
+
+
+def _parse_tree(data: bytes | memoryview) -> _Parsed:
+    """Cars & stream of the session parsed as soon as read, their elements emptied (a 24 h race file is never
+    held as a whole tree)
+
+    Raises:
+        ET.ParseError: not well formed.
+    """
+    parser: ET.XMLPullParser[ET.Element] = ET.XMLPullParser(("start", "end"))
+    stack: list[ET.Element] = []
+    root: ET.Element | None = None
+    results: ET.Element | None = None
+    session: ET.Element | None = None
+    stream_done = False
+    entries: list[Entry] = []
+    events: tuple[Event, ...] = ()
+
+    def handle() -> None:
+        nonlocal root, results, session, stream_done, events
+        for found in parser.read_events():
+            event, element = cast("tuple[str, ET.Element]", found)  # start & end events: elements
+            if event == "start":
+                depth = len(stack)
+                if depth == 0:
+                    root = element
+                elif depth == 1 and results is None and element.tag == "RaceResults":
+                    results = element
+                elif depth == 2 and session is None and stack[1] is results and session_kind(element.tag):
+                    session = element
+                stack.append(element)
+                continue
+            stack.pop()
+            if session is None or not stack or stack[-1] is not session:
+                continue
+            if element.tag == "Driver":
+                entries.append(parse_entry(element))
+                element.clear()
+            elif element.tag == "Stream" and not stream_done:
+                stream_done = True
+                events = parse_events(element)
+                element.clear()
+
+    view = memoryview(data)
+    for start in range(0, len(view), PARSE_CHUNK):
+        parser.feed(bytes(view[start:start + PARSE_CHUNK]))
+        handle()
+    parser.close()
+    handle()
+    if root is None:  # close raises on empty document: not reached
+        raise ET.ParseError("no element found")
+    return _Parsed(root, results, session, entries, events)
+
+
+def _parse_raw(data: bytes, path: str) -> tuple[SessionResult, tuple[Entry, ...]]:
+    """Results file content without player marked: result (entries left empty), cars in file order
 
     Raises:
         ValueError: not a results file (or not complete yet: game still writing it).
     """
-    data = DOCTYPE.sub(b"", data, count=1)
+    if DOCTYPE.search(data) is not None:
+        data = DOCTYPE.sub(b"", data, count=1)
     end = data.rfind(ROOT_END)
     if end < 0:
         raise ValueError("no results root element")
-    data = INVALID_CHARS.sub(b"", data[:end + len(ROOT_END)])
+    content: bytes | memoryview = memoryview(data)[:end + len(ROOT_END)]
+    if INVALID_CHARS.search(content) is not None:
+        content = INVALID_CHARS.sub(b"", content)
     try:
-        root = ET.fromstring(data)
+        parsed = _parse_tree(content)
     except ET.ParseError as error:
-        raise ValueError(f"invalid results file: {error}") from error
-    results = root.find("RaceResults")
+        original = bytes(content)
+        repaired = repair_utf8(original)
+        if repaired == original:
+            raise ValueError(f"invalid results file: {error}") from error
+        del original
+        try:  # Windows-1252 name in a file declared UTF-8: whole session kept
+            parsed = _parse_tree(repaired)
+        except ET.ParseError as repaired_error:
+            raise ValueError(f"invalid results file: {repaired_error}") from repaired_error
+    results = parsed.results
     if results is None:
         raise ValueError("no RaceResults element")
-    session = next((child for child in results if session_kind(child.tag)), None)
+    session = parsed.session
     if session is None:
         raise ValueError("no session element")
-    entries = mark_player([parse_entry(driver) for driver in session.findall("Driver")], player_names)
-    entries.sort(key=entry_order)
     venue = _text(results, "TrackVenue")
     event_name = _text(results, "TrackEvent")
     lap_limit = _int(_text(session, "Laps"))
@@ -386,23 +477,90 @@ def parse_results(data: bytes, path: str = "", player_names: Iterable[str] = ())
         minutes=_int(_text(session, "Minutes")),
         lap_limit=lap_limit if 0 < lap_limit < NO_LAP_LIMIT else 0,
         most_laps=_int(_text(session, "MostLapsCompleted")),
-        entries=tuple(entries),
-        events=parse_events(session.find("Stream")),
-    )
+        entries=(),
+        events=parsed.events,
+    ), tuple(parsed.entries)
 
 
-def read_results(path: str, player_names: Iterable[str] = ()) -> SessionResult:
+def _with_player(raw: SessionResult, cars: tuple[Entry, ...], player_names: Iterable[str]) -> SessionResult:
+    """Result of raw parse with player marked & cars in classification order"""
+    entries = mark_player(list(cars), player_names)
+    entries.sort(key=entry_order)
+    return raw._replace(entries=tuple(entries))
+
+
+def parse_results(data: bytes, path: str = "", player_names: Iterable[str] = ()) -> SessionResult:
     """Results file content
+
+    Raises:
+        ValueError: not a results file (or not complete yet: game still writing it).
+    """
+    raw, cars = _parse_raw(data, path)
+    return _with_player(raw, cars, player_names)
+
+
+def result_bytes(result: SessionResult, cars: int = -1) -> int:
+    """Memory estimate of results (bytes): laps, events & cars"""
+    laps = sum(len(entry.laps) for entry in result.entries)
+    count = len(result.entries) if cars < 0 else cars
+    return 4096 + laps * LAP_BYTES + len(result.events) * EVENT_BYTES + count * ENTRY_BYTES
+
+
+_cache_lock = threading.Lock()
+# (path, modified time ns, size): (result without cars, cars in file order, memory estimate), oldest use first
+_cache: OrderedDict[tuple[str, int, int], tuple[SessionResult, tuple[Entry, ...], int]] = OrderedDict()
+_cache_size = 0
+
+
+def _cache_put(key: tuple[str, int, int], raw: SessionResult, cars: tuple[Entry, ...]) -> None:
+    global _cache_size
+    size = result_bytes(raw, len(cars)) + sum(len(entry.laps) for entry in cars) * LAP_BYTES
+    if size > CACHE_BYTES:
+        return
+    with _cache_lock:
+        for old in [old for old in _cache if old[0] == key[0]]:  # file changed: older read dropped
+            _cache_size -= _cache.pop(old)[2]
+        _cache[key] = (raw, cars, size)
+        _cache_size += size
+        while _cache_size > CACHE_BYTES and _cache:
+            _cache_size -= _cache.popitem(last=False)[1][2]
+
+
+def forget_results() -> None:
+    """Results files parsed released"""
+    global _cache_size
+    with _cache_lock:
+        _cache.clear()
+        _cache_size = 0
+
+
+def read_results(path: str, player_names: Iterable[str] = (), keep: bool = True) -> SessionResult:
+    """Results file content, file parsed once while unchanged (shared by results, stats & stream pages)
+
+    Args:
+        keep: parsed file kept for next readers (bulk scans: only reused if already kept).
 
     Raises:
         OSError: file not readable.
         ValueError: not a results file.
     """
-    if os.path.getsize(path) > MAX_FILE_SIZE:
+    stat = os.stat(path)
+    if stat.st_size > MAX_FILE_SIZE:
         raise ValueError("file too large")
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is not None:
+            _cache.move_to_end(key)
+    if cached is not None:
+        return _with_player(cached[0], cached[1], player_names)
     with open(path, "rb") as file:
         data = file.read()
-    return parse_results(data, path, player_names)
+    raw, cars = _parse_raw(data, path)
+    del data
+    if keep:
+        _cache_put(key, raw, cars)
+    return _with_player(raw, cars, player_names)
 
 
 def is_results_file(name: str) -> bool:
@@ -411,13 +569,55 @@ def is_results_file(name: str) -> bool:
     return extension.lower() == RESULTS_EXTENSION and stem[:4].isdigit()
 
 
+_lookup_lock = threading.Lock()
+_listings: dict[str, tuple[tuple, float, list[str]]] = {}  # folder: (stamp, time listed, results files)
+_chosen: dict[str, tuple[tuple, str]] = {}  # config folder: (settings file stamp, chosen folder)
+_found: tuple[float, dict[str, str]] | None = None  # time found, game folders of Steam libraries
+
+
+def settled_stamp(path: str) -> tuple | None:
+    """Modified time & size of path unchanged for STAMP_SETTLE seconds, None if missing or changed lately"""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    if time.time() - stat.st_mtime < STAMP_SETTLE:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def forget_lookups() -> None:
+    """Folder listings, chosen folder & game folders found looked up again on next call"""
+    global _found
+    with _lookup_lock:
+        _listings.clear()
+        _chosen.clear()
+        _found = None
+
+
 def results_files(folder: str) -> list[str]:
-    """Results files of folder, newest name first, empty if folder not readable"""
+    """Results files of folder, newest name first, empty if folder not readable
+
+    Listing kept while folder modified time is unchanged (files added, removed or renamed change it).
+    """
+    stamp = settled_stamp(folder)
+    now = time.monotonic()
+    if stamp is not None:
+        with _lookup_lock:
+            cached = _listings.get(folder)
+        if cached is not None and cached[0] == stamp and now - cached[1] < LISTING_MAX_AGE:
+            return list(cached[2])
     try:
         names = [entry.name for entry in os.scandir(folder) if entry.is_file() and is_results_file(entry.name)]
     except OSError:
         return []
-    return [os.path.join(folder, name) for name in sorted(names, reverse=True)]
+    paths = [os.path.join(folder, name) for name in sorted(names, reverse=True)]
+    if stamp is not None:
+        with _lookup_lock:
+            if folder not in _listings and len(_listings) >= 64:
+                _listings.clear()
+            _listings[folder] = (stamp, now, paths)
+    return list(paths)
 
 
 # Game folders
@@ -487,10 +687,22 @@ def steam_libraries(steam: str) -> list[str]:
 
 
 def find_results_folders(libraries: Iterable[str] | None = None) -> dict[str, str]:
-    """Results folder of each game found in Steam libraries: {game: folder}"""
+    """Results folder of each game found in Steam libraries: {game: folder}
+
+    Steam libraries of this computer (libraries None) looked up again after STEAM_CACHE_SECONDS.
+    """
+    global _found
     if libraries is None:
-        libraries = steam_libraries(steam_folder())
-    found: dict[str, str] = {}
+        now = time.monotonic()
+        with _lookup_lock:
+            cached = _found
+        if cached is not None and now - cached[0] < STEAM_CACHE_SECONDS:
+            return dict(cached[1])
+        found = find_results_folders(steam_libraries(steam_folder()))
+        with _lookup_lock:
+            _found = (now, found)
+        return dict(found)
+    found = {}
     for library in libraries:
         for game, folder in GAME_FOLDERS.items():
             path = os.path.join(library, "steamapps", "common", folder, RESULTS_SUBFOLDER)
@@ -500,14 +712,30 @@ def find_results_folders(libraries: Iterable[str] | None = None) -> dict[str, st
 
 
 def chosen_results_folder(config_path: str) -> str:
-    """Results folder chosen by user on race results page ("" if none: game folders found are read)"""
+    """Results folder chosen by user on race results page ("" if none: game folders found are read)
+
+    Settings file read again only when changed.
+    """
+    path = os.path.join(config_path, PAGE_SETTINGS_FILE)
+    stamp = settled_stamp(path)
+    if stamp is not None:
+        with _lookup_lock:
+            cached = _chosen.get(path)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
     try:
-        with open(os.path.join(config_path, PAGE_SETTINGS_FILE), encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             settings = json.load(file)
     except (OSError, ValueError):
         return ""
     folder = settings.get("folder", "") if isinstance(settings, dict) else ""
-    return folder if isinstance(folder, str) else ""
+    folder = folder if isinstance(folder, str) else ""
+    if stamp is not None:
+        with _lookup_lock:
+            if path not in _chosen and len(_chosen) >= 16:
+                _chosen.clear()
+            _chosen[path] = (stamp, folder)
+    return folder
 
 
 def results_folders(chosen: str) -> tuple[str, ...]:

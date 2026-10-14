@@ -74,11 +74,21 @@ EVENT_GAP = 30.0  # meters, events closer than this to the previous one are the 
 
 
 class MapLine(NamedTuple):
-    """Driving line of a lap: positions by increasing distance"""
+    """Driving line of a lap: positions by increasing distance
 
-    distances: list[float]
-    xs: list[float]
-    ys: list[float]
+    Lines of laps hold packed arrays (distances "d", positions of lap columns "f": mm precision on any track, 8 to 4
+    bytes a value instead of a float object), lines built from other points may hold lists.
+    """
+
+    distances: Sequence[float]
+    xs: Sequence[float]
+    ys: Sequence[float]
+
+
+def coordinate_array(column: Sequence[float]) -> array:
+    """Empty packed array for values of a lap column: same type as the column (no precision lost), double if a
+    list (lap not packed)"""
+    return array(column.typecode if isinstance(column, array) and column.typecode in "fd" else "d")
 
 
 def map_line(lap: LapData) -> MapLine | None:
@@ -97,9 +107,8 @@ def map_line_indexes(lap: LapData) -> tuple[MapLine, list[int]] | None:
     xs_column, ys_column = lap.columns.get("pos_x"), lap.columns.get("pos_y")
     if not xs_column or not ys_column:
         return None
-    distances: list[float] = []
-    xs: list[float] = []
-    ys: list[float] = []
+    distances = array("d")
+    xs, ys = coordinate_array(xs_column), coordinate_array(ys_column)
     indexes: list[int] = []
     last = -math.inf
     for index, (distance, x, y) in enumerate(zip(lap.distance, xs_column, ys_column)):
@@ -451,7 +460,7 @@ class Yielder:
         self.cancelled = cancelled
         self.last = time.perf_counter()
 
-    def __call__(self):
+    def __call__(self) -> None:
         if self.cancelled is not None and self.cancelled():
             raise JobCancelled
         now = time.perf_counter()

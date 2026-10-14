@@ -21,7 +21,7 @@ Track notes Widget
 """
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING
 
 from ..api_control import api
 from ..const_common import EMPTY_DICT, TEXT_NOTAVAILABLE
@@ -29,11 +29,14 @@ from ..module_info import minfo
 from ..userfile.track_notes import COLUMN_COMMENT, COLUMN_DISTANCE, COLUMN_TRACKNOTE
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TrackNotesConfig
+
 
 class TrackNotesMixin:
     """Current track note & auto hide, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "TrackNotesConfig"
 
     def setup_notes(self):
         """Last note & auto hide state"""
@@ -90,6 +93,8 @@ class TrackNotesMixin:
 
 class Realtime(TrackNotesMixin, Overlay):
     """Draw widget"""
+
+    wcfg: "TrackNotesConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

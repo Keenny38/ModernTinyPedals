@@ -21,6 +21,7 @@ Friction circle Widget
 """
 
 from collections import deque
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QRadialGradient
@@ -31,9 +32,14 @@ from ..validator import infnan_to_zero as rmnan
 from ._base import Overlay
 from ._painter import fill_pixmap
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import FrictionCircleConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "FrictionCircleConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -85,7 +91,8 @@ class Realtime(Overlay):
         # Config canvas
         self.resize(self.area_size, self.area_size)
         self.pixmap_background = QPixmap(self.area_size, self.area_size)
-        self.pixmap_dot = QPixmap(self.dot_size * 2, self.dot_size * 2)
+        dot_pixels = round(self.dot_size * 2)  # pixmap size: whole pixels
+        self.pixmap_dot = QPixmap(dot_pixels, dot_pixels)
         self.pixmap_trace = QPixmap(self.area_size, self.area_size)
         self.pixmap_trace.fill(Qt.GlobalColor.transparent)
         if self.wcfg["show_trace_fade_out"]:
@@ -95,7 +102,7 @@ class Realtime(Overlay):
 
         self.pen_mark = QPen()
         self.pen_trace = QPen()
-        self.pen_trace.setWidth(self.wcfg["trace_width"])
+        self.pen_trace.setWidthF(self.wcfg["trace_width"])
         self.pen_trace.setColor(self.wcfg["trace_color"])
         self.pen_trace.setStyle(Qt.PenStyle.SolidLine)
         self.pen_trace.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -171,8 +178,8 @@ class Realtime(Overlay):
             painter.drawPixmap(0, 0, self.pixmap_trace)
         # Draw dot
         if self.wcfg["show_dot"]:
-            painter.drawPixmap(
-                self.last_x - self.dot_size, self.last_y - self.dot_size, self.pixmap_dot)
+            painter.drawPixmap(  # whole pixel position (truncated)
+                int(self.last_x - self.dot_size), int(self.last_y - self.dot_size), self.pixmap_dot)
         # Draw text
         if self.wcfg["show_readings"]:
             self.draw_text(painter)
@@ -210,10 +217,10 @@ class Realtime(Overlay):
                 self.pen_mark.setStyle(Qt.PenStyle.SolidLine)
             else:
                 self.pen_mark.setStyle(Qt.PenStyle.DashLine)
-            scale = self.global_scale * min(
+            scale = self.global_scale * min(  # type: ignore[assignment]  # float mark radius
                 self.wcfg["center_mark_radius_g"], self.display_radius_g
             )
-            self.pen_mark.setWidth(self.wcfg["center_mark_width"])
+            self.pen_mark.setWidthF(self.wcfg["center_mark_width"])
             self.pen_mark.setColor(self.wcfg["center_mark_color"])
             painter.setPen(self.pen_mark)
             painter.drawLine(center, center, center - scale, center)
@@ -268,7 +275,7 @@ class Realtime(Overlay):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if self.wcfg["dot_outline_width"] > 0:
             pen = QPen()
-            pen.setWidth(self.wcfg["dot_outline_width"])
+            pen.setWidthF(self.wcfg["dot_outline_width"])
             pen.setColor(self.wcfg["dot_outline_color"])
             painter.setPen(pen)
         else:
@@ -276,7 +283,7 @@ class Realtime(Overlay):
         brush = QBrush(Qt.BrushStyle.SolidPattern)
         brush.setColor(self.wcfg["dot_color"])
         painter.setBrush(brush)
-        painter.drawEllipse(self.dot_size * 0.5, self.dot_size * 0.5, self.dot_size, self.dot_size)
+        painter.drawEllipse(QRectF(self.dot_size * 0.5, self.dot_size * 0.5, self.dot_size, self.dot_size))
 
     def draw_text(self, painter):
         """Draw text"""

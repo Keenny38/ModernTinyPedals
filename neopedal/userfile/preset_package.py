@@ -41,7 +41,7 @@ from typing import NamedTuple
 from ..const_app import LEGACY_PACKAGE
 from ..const_file import FileExt
 from ..validator import is_allowed_filename, load_json_strict
-from . import flush_to_disk, temp_file_name
+from . import atomic_replace, replace_retry
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ NOTES_FOLDERS = {  # package folder: allowed file extensions
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # refuse suspiciously large entry
 MAX_MANIFEST_SIZE = 64 * 1024  # manifest is a few lines
+WINDOWS_RESERVED_CHARS = frozenset('<>:"|?*')  # ":" would write an NTFS alternate stream
+WINDOWS_RESERVED_NAMES = frozenset(
+    ("CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(1, 10)), *(f"LPT{index}" for index in range(1, 10))))
 
 
 class ImportResult(NamedTuple):
@@ -92,7 +95,7 @@ def export_preset_package(
     temp_name = f"{zip_filename}.part"
     try:
         count = write_preset_package(temp_name, settings_path, preset_filename, include_styles, notes_paths)
-        os.replace(temp_name, zip_filename)
+        replace_retry(temp_name, zip_filename)
     except BaseException:
         with suppress(OSError):
             os.remove(temp_name)
@@ -196,6 +199,10 @@ def import_preset_package(
             if not filename or "/" in folder or info.file_size > MAX_FILE_SIZE:
                 skipped.append(info.filename)
                 continue
+            if not is_windows_filename(filename):  # never a stray file or failed import of the rest
+                logger.info("USERDATA: skipped package entry of invalid file name %r", info.filename)
+                skipped.append(info.filename)
+                continue
             data = read_entry(package, info)
             if folder == "presets" and filename.lower().endswith(FileExt.JSON):
                 if not is_allowed_filename(filename[:-len(FileExt.JSON)]) or not is_json_dict(data):
@@ -226,6 +233,15 @@ def import_preset_package(
     return ImportResult(presets, styles, notes, skipped)
 
 
+def is_windows_filename(filename: str) -> bool:
+    """Check file name can be written as is on Windows (no reserved character, device name, trailing dot)"""
+    return (
+        not any(char in WINDOWS_RESERVED_CHARS or ord(char) < 32 for char in filename)
+        and not filename.endswith((".", " "))
+        and filename.split(".", 1)[0].strip().upper() not in WINDOWS_RESERVED_NAMES
+    )
+
+
 def read_entry(package: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
     """Read package entry, raise ValueError if corrupted, encrypted or unsupported compression"""
     try:
@@ -237,20 +253,11 @@ def read_entry(package: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
 def is_json_dict(data: bytes) -> bool:
     """Check if data is valid json object (NaN & Infinity not allowed)"""
     try:
-        return isinstance(load_json_strict(data.decode("utf-8")), dict)
+        return isinstance(load_json_strict(data.decode("utf-8-sig")), dict)
     except ValueError:  # UnicodeDecodeError & JSONDecodeError included
         return False
 
 
-def write_file(filename: str, data: bytes):
+def write_file(filename: str, data: bytes) -> None:
     """Write file atomically (temporary file replaces target): existing file never left half-written"""
-    temp_filename = temp_file_name(filename)
-    try:
-        with open(temp_filename, "wb") as file:
-            file.write(data)
-            flush_to_disk(file)
-        os.replace(temp_filename, filename)
-    except BaseException:
-        with suppress(OSError):
-            os.remove(temp_filename)
-        raise
+    atomic_replace(filename, data)

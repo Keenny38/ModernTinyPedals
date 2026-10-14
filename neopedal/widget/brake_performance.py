@@ -20,12 +20,19 @@
 Brake performance Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..module_info import minfo
 from ._base import Overlay
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import BrakePerformanceConfig
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "BrakePerformanceConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

@@ -39,7 +39,7 @@ from ..userfile.track_notes import (
     parse_csv_notes_only,
 )
 from ..validator import generator_init
-from ._base import DataModule, data_stamp
+from ._base import WAIT_STATE_CHANGE, DataModule, derived_stamp
 
 
 class Realtime(DataModule):
@@ -77,7 +77,7 @@ class Realtime(DataModule):
                     last_stamp = ()  # never skip first tick
 
                 # Skip while game data not updated since last tick
-                stamp = (data_stamp(), minfo.delta.lapDistance)  # pace notes follow delta module position
+                stamp = derived_stamp(minfo.delta)  # pace notes follow delta module position
                 if last_stamp == stamp:
                     continue
                 last_stamp = stamp
@@ -150,7 +150,7 @@ class Realtime(DataModule):
             else:
                 if reset:
                     reset = False
-                    update_interval = self.idle_interval
+                    update_interval = WAIT_STATE_CHANGE  # idle until activity changes
 
 
 def offset_position(position: float, offset: float, track_length: float) -> float:

@@ -11,7 +11,7 @@ Popup {
     readonly property var rows: diff.rows || []
 
     function show(lapKey) {
-        diff = backend.setupDiff("", lapKey)
+        diff = backend.conditions.setupDiff("", lapKey)
         if (diff.rows !== undefined) open()
     }
 
@@ -22,18 +22,18 @@ Popup {
     width: Math.min((parent ? parent.width : theme.em * 40) - theme.em * 4, theme.em * 36)
     x: parent ? (parent.width - width) / 2 : 0
     y: parent ? (parent.height - height) / 2 : 0
-    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 } }
-    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
+    enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
+    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
     background: Rectangle {
-        radius: theme.em * 0.8
+        radius: theme.radiusXl
         color: theme.raised
         border.width: 1
         border.color: theme.border
     }
 
     contentItem: ColumnLayout {
-        spacing: theme.em * 0.45
-        Text { text: i18n.tr("Setup Differences"); color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontPoint * 1.15 }
+        spacing: theme.em * 0.5
+        Text { text: i18n.tr("Setup Differences"); color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontSubtitle }
         Text {
             Layout.fillWidth: true
             text: popup.diff.note || ""
@@ -74,7 +74,7 @@ Popup {
             Layout.fillWidth: true
             text: popup.diff.values || ""
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.82
+            font.pointSize: theme.fontSmall
             wrapMode: Text.WordWrap
         }
         TpButton { Layout.alignment: Qt.AlignRight; text: i18n.tr("Close"); onClicked: popup.close() }

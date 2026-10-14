@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Files dropped on main window: preset (.json), preset package or plugin (.zip)
+Files dropped on main window: preset (.json), preset package, overlay settings or plugin (.zip), MoTeC log (.ld)
 """
 
 from __future__ import annotations
@@ -33,12 +33,14 @@ from .. import app_signal
 from ..const_file import FileExt
 from ..i18n import tr, trm
 from ..setting import cfg
+from ..userfile import write_json
 from ..validator import is_allowed_filename
 
 logger = logging.getLogger(__name__)
 
 DROP_PRESET = "preset"
 DROP_PACKAGE = "package"
+DROP_OVERLAYS = "overlays"  # overlay settings package
 DROP_PLUGIN = "plugin"
 DROP_MOTEC = "motec"
 MAX_PRESET_SIZE = 20 * 1024 * 1024
@@ -68,7 +70,9 @@ def classify(path: str) -> str:
         except (OSError, zipfile.BadZipFile):
             return ""
         if "manifest.json" in names:
-            return DROP_PACKAGE
+            from ..userfile.overlay_package import is_overlay_package
+
+            return DROP_OVERLAYS if is_overlay_package(path) else DROP_PACKAGE
         if any(name.replace("\\", "/").endswith("/widget.py") for name in names):
             return DROP_PLUGIN
     return ""
@@ -107,11 +111,7 @@ def import_preset_file(path: str, folder: str) -> str:
     if not is_allowed_filename(base) or not any(name in data for name in WIDGET_FILENAME):
         raise ValueError("not a widget preset (global config & style presets are not imported)")
     filename = unique_preset_name(folder, os.path.basename(path))
-    target = os.path.join(folder, filename)
-    temp = f"{target}.tmp"
-    with open(temp, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4)
-    os.replace(temp, target)
+    write_json(os.path.join(folder, filename), data, indent=4, raise_error=True)
     logger.info("PRESET: imported %s", filename)
     return filename
 
@@ -136,6 +136,10 @@ def handle_drop(window, paths: list[str]) -> list[str]:
         elif kind == DROP_PACKAGE:
             window.centralWidget().set_current_index(PAGE_INDEX["preset"])
             window.centralWidget().preset_tab.import_package_file(path)
+        elif kind == DROP_OVERLAYS:
+            from .overlay_share import import_overlay_file
+
+            import_overlay_file(window, path)
         elif kind == DROP_MOTEC:
             from .lap_viewer import import_motec_log
 

@@ -25,6 +25,8 @@ area below in gain color, previous lap as faint line, current position mark & re
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
@@ -34,9 +36,14 @@ from ..delta_graph import DeltaGraphMixin
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DeltaGraphConfig
+
 
 class Realtime(DeltaGraphMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: DeltaGraphConfig
 
     options = (
         "font_size", "display_width", "display_height", "deltabest_source", "delta_display_range",

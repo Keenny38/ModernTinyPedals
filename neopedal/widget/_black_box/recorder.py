@@ -28,7 +28,6 @@ events (puncture, flat spot, detached wheel, damage, incident) with lap and sess
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import math
 import os
@@ -36,6 +35,8 @@ import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import NamedTuple
+
+from ...userfile import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -362,8 +363,7 @@ def export_incident(incident: Incident, folder: str, export_format: str = "JSON"
                 "session_time": round(incident.session_time, 3),
                 "samples": rows,
             }
-            with open(filepath, "w", encoding="utf-8") as file:
-                json.dump(data, file, indent=1)
+            write_json(filepath, data, indent=1, raise_error=True)
         if export_format in ("CSV", "Both") and rows:
             filepath = f"{base}.csv"
             with open(filepath, "w", encoding="utf-8", newline="") as file:
@@ -372,7 +372,7 @@ def export_incident(incident: Incident, folder: str, export_format: str = "JSON"
                 writer.writerows(rows)
         return filepath
     except (OSError, ValueError) as error:
-        logger.warning("BLACK BOX: unable to save incident: %s", error)
+        logger.warning("DASHBOARD HUD: unable to save incident: %s", error)
         return ""
 
 
@@ -409,7 +409,7 @@ def open_folder(folder: str) -> bool:
             os.startfile(folder)  # pylint: disable=no-member
             return True
     except OSError as error:
-        logger.warning("BLACK BOX: unable to open incident folder: %s", error)
+        logger.warning("DASHBOARD HUD: unable to open incident folder: %s", error)
         return False
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices

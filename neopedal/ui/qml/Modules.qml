@@ -46,7 +46,7 @@ TpPage {
         signal action()
         Layout.fillWidth: true
         implicitHeight: noticeRow.implicitHeight + theme.em * 0.9
-        radius: theme.em * 0.6
+        radius: theme.radiusLg
         color: Qt.rgba(tint.r, tint.g, tint.b, 0.12)
         border.width: 1
         border.color: Qt.rgba(tint.r, tint.g, tint.b, 0.6)
@@ -79,32 +79,10 @@ TpPage {
         spacing: theme.em * 0.6
 
         // Title & counts
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.em * 0.6
-            Text {
-                text: i18n.tr("Module")  // navigation bar name ("Modules" in French)
-                color: theme.text
-                font.pointSize: theme.fontPoint * 1.5
-                font.weight: Font.DemiBold
-            }
-            Rectangle {
-                Layout.alignment: Qt.AlignVCenter
-                implicitHeight: Math.round(theme.em * 1.6)
-                implicitWidth: countText.implicitWidth + theme.em * 1.1
-                radius: height / 2
-                color: backend.activeCount > 0 ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16) : theme.hover
-                Text {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: i18n.trm(backend.activeCount + " / " + backend.totalCount + " enabled")
-                    color: backend.activeCount > 0 ? theme.accent : theme.dimText
-                    font.pointSize: theme.fontPoint * 0.9
-                    font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
-                }
-            }
-            Item { Layout.fillWidth: true }
+        TpPageHeader {
+            title: i18n.tr("Module")  // navigation bar name ("Modules" in French)
+            count: i18n.trm(backend.activeCount + " / " + backend.totalCount + " enabled")
+            countActive: backend.activeCount > 0
         }
         Text {
             Layout.fillWidth: true
@@ -187,17 +165,17 @@ TpPage {
                 }
 
                 add: Transition {
-                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 170 }
-                    NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: 170; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase }
+                    NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: theme.motionBase; easing.type: Easing.OutCubic }
                 }
                 remove: Transition {
-                    NumberAnimation { property: "opacity"; to: 0; duration: 130 }
-                    NumberAnimation { property: "scale"; to: 0.95; duration: 130 }
+                    NumberAnimation { property: "opacity"; to: 0; duration: theme.motionFast }
+                    NumberAnimation { property: "scale"; to: 0.95; duration: theme.motionFast }
                 }
                 displaced: Transition {
-                    NumberAnimation { properties: "x,y"; duration: 220; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; to: 1; duration: 220 }  // add interrupted: never left faded
-                    NumberAnimation { property: "scale"; to: 1; duration: 220 }
+                    NumberAnimation { properties: "x,y"; duration: theme.motionSlow; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; to: 1; duration: theme.motionSlow }  // add interrupted: never left faded
+                    NumberAnimation { property: "scale"; to: 1; duration: theme.motionSlow }
                 }
 
                 Keys.onSpacePressed: if (currentItem) backend.toggle(currentItem.key)

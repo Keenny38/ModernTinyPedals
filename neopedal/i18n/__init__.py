@@ -34,6 +34,8 @@ import re
 from types import MappingProxyType
 from typing import Any
 
+from ..const_app import FORMAT_PREFIX, LEGACY_FORMAT_PREFIX
+
 logger = logging.getLogger(__name__)
 
 # Display name: language code (built-in, then language packs found by load_language_packs)
@@ -45,7 +47,8 @@ LANGUAGES = MappingProxyType(_LANGUAGES)
 BUILTIN_CODES = frozenset(_LANGUAGES.values())
 
 # Language pack: JSON file "<code>.json" in languages folder (see docs/customization.md)
-LANGUAGE_PACK_FORMAT = "modern-tiny-pedals-language"
+LANGUAGE_PACK_FORMAT = f"{FORMAT_PREFIX}-language"
+LANGUAGE_PACK_FORMATS = (LANGUAGE_PACK_FORMAT, f"{LEGACY_FORMAT_PREFIX}-language")  # packs of versions until 0.23.0 too
 LANGUAGE_PACK_FOLDER = "languages"
 MAX_PACK_SIZE = 5 * 1024 * 1024
 _valid_code = re.compile(r"^[a-z]{2,3}(_[A-Za-z]{2,4})?$")
@@ -64,6 +67,24 @@ def current_language() -> str:
     return _current_code
 
 
+@functools.lru_cache(maxsize=8)
+def _locale_decimal(code: str) -> str:
+    from PySide6.QtCore import QLocale
+
+    return QLocale(code).decimalPoint() or "."
+
+
+def decimal_point() -> str:
+    """Decimal separator of app language (comma in French), numbers shown in pages & stream graphics"""
+    return _locale_decimal(current_language())
+
+
+def localized(text: str) -> str:
+    """Number text with decimal separator of app language (lap times keep their dot)"""
+    point = decimal_point()
+    return text if point == "." else text.replace(".", point)
+
+
 def read_language_pack(filename: str) -> dict:
     """Read & validate language pack file
 
@@ -71,12 +92,12 @@ def read_language_pack(filename: str) -> dict:
         ValueError: invalid language pack.
         OSError: file error.
     """
-    with open(filename, encoding="utf-8") as file:
+    with open(filename, encoding="utf-8-sig") as file:  # BOM of Notepad, PowerShell
         content = file.read(MAX_PACK_SIZE + 1)
     if len(content) > MAX_PACK_SIZE:
         raise ValueError("file too large")
     data = json.loads(content)
-    if not isinstance(data, dict) or data.get("format") != LANGUAGE_PACK_FORMAT:
+    if not isinstance(data, dict) or data.get("format") not in LANGUAGE_PACK_FORMATS:
         raise ValueError("not a language pack")
     name, code = data.get("name"), data.get("code")
     if not isinstance(name, str) or not name.strip() or not isinstance(code, str) or not _valid_code.match(code):

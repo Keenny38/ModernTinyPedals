@@ -41,6 +41,7 @@ from ...module.module_relative import (
     standings_index_from_same_class,
 )
 from ...module_info import VehicleDataSet
+from ...penalty_info import NO_PENALTY, Penalty
 
 LAP_TIME = 104.0  # estimated lap time (seconds), relative gaps wrap around it
 PLAYER = 9
@@ -66,6 +67,7 @@ CLASS_LAPS_DOWN = {"Hypercar": 0, "LMP2": 1, "GT3": 2}  # laps behind overall le
 CLASS_GAP = {"LMP2": 38.62, "GT3": 51.17}  # class leader interval to last car of class ahead
 IN_PIT = 6  # car in pit lane
 PIT_REQUEST = 11  # car with pit stop requested
+PENALTY = 10  # car with a stop & go to serve (ahead of player)
 QUALIFY_SHIFT = (0, 1, -1, 0, 2, -1, -1, 0, 1, 2, -2, -1, 0, -1)  # qualify place - race place
 
 
@@ -117,11 +119,13 @@ def sample_field() -> SampleField:
         veh.pitTimer.elapsed = 21.4 if index == IN_PIT else 0.0
         veh.pitRequested = index == PIT_REQUEST
         veh.isClassFastestLastLap = index in (1, 5, 8)
-        veh.numPitStops = 2 if index % 3 else 1
+        veh.numPitStops = -1 if index == PENALTY else 2 if index % 3 else 1
+        veh.penalty = Penalty(1, "Stop/Go", 10) if index == PENALTY else NO_PENALTY
         compound = "Soft" if index % 4 == 1 else "Medium"
         veh.tireCompoundName = (compound, compound, "Medium", "Medium") if index == 4 else (compound,) * 4
         veh.vehicleIntegrity = 0.82 if index in (3, 12) else 1.0
         veh.incidents = (index * 5) % 9
+        veh.trackLimitsPoints = (0.0, 1.25, 0.0, 2.5, 4.25)[index % 5]
         veh.energyRemaining = 0.28 + (index * 13 % 60) / 100
         veh.currentStintLaps = 6 + index % 7
         veh.estimatedStintLaps = 14 + index % 4
@@ -132,6 +136,7 @@ def sample_field() -> SampleField:
         veh.lapTimeHistory.best = best
         veh.lapTimeHistory.last = veh.lastLapTime
         veh.lapTimeHistory.average = best + 0.46
+        set_sample_sectors(veh, index, best)
     ahead = []
     behind = []
     for index, entry in enumerate(FIELD):
@@ -143,7 +148,41 @@ def sample_field() -> SampleField:
     behind.sort(reverse=True)
     classes = sorted((veh.vehicleClass, veh.positionOverall, index, veh.bestLapTime, veh.lastLapTime)
                      for index, veh in enumerate(vehicles))
+    class_best_sectors(vehicles)
     return SampleField(vehicles, PLAYER, ahead, behind, classes)
+
+
+SECTOR_SHARES = (0.33, 0.35, 0.32)  # sample lap split into sectors
+OUT_LAP = 13  # car on its out lap (last of GT3, away from player)
+
+
+def set_sample_sectors(veh, index: int, best: float):
+    """Sector times of sample car: last lap, sectors of lap being driven, personal bests; out lap"""
+    sectors = veh.sectors
+    last = veh.lastLapTime
+    sectors.best = [best * share - (index % 3) * 0.02 for share in SECTOR_SHARES]
+    # Last lap: some sectors are personal bests (green, purple when best of session), others slower (yellow)
+    sectors.last = tuple(sectors.best[number] if (index + number) % 3 == 0 else last * share
+                         for number, share in enumerate(SECTOR_SHARES))
+    sectors.sector = (index + 1) % 3
+    first = sectors.best[0] if index % 2 else sectors.best[0] + 0.15  # S1 being driven: personal best or slower
+    sectors.current = (first if sectors.sector >= 1 else 0.0, sectors.best[1] + 0.2 if sectors.sector == 2 else 0.0)
+    sectors.laps = 12
+    sectors.last_kind = "OUT" if index == OUT_LAP else ""
+
+
+def class_best_sectors(vehicles) -> None:
+    """Best sectors & best lap of each class told to its cars"""
+    best: dict[str, list[float]] = {}
+    for veh in vehicles:
+        found = best.setdefault(veh.vehicleClass, [0.0, 0.0, 0.0, 0.0])
+        for number, value in enumerate((*veh.sectors.best, veh.bestLapTime)):
+            if value and (not found[number] or value < found[number]):
+                found[number] = value
+    for veh in vehicles:
+        found = best[veh.vehicleClass]
+        veh.classBestSectors = (found[0], found[1], found[2])
+        veh.classBestLap = found[3]
 
 
 def sample_standings(field: SampleField, setting: Mapping[str, Any]) -> list[int]:

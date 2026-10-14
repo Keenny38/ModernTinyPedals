@@ -8,6 +8,7 @@ import pytest
 from neopedal.widget import _painter as painter_mod
 from neopedal.widget import black_box
 from neopedal.widget._black_box import center as center_mod
+from neopedal.widget._black_box import reader as black_box_reader
 from neopedal.widget._black_box import state as wheel_state
 
 
@@ -29,9 +30,10 @@ def widget(ui_env, monkeypatch):
             flat=lambda: (False, False, False, False),
             compound_class=lambda: ("", "", "", ""),
         ),
-        brake=SimpleNamespace(temperature=lambda: (400.0, 410.0, 300.0, 310.0), bias_front=lambda: 0.56),
+        brake=SimpleNamespace(temperature=lambda: (400.0, 410.0, 300.0, 310.0), bias_front=lambda: 0.56,
+                              migration=lambda: 0.0),
         vehicle=SimpleNamespace(
-            speed=lambda: 30.0, in_pits=lambda: False, vehicle_name=lambda: "car",
+            speed=lambda: 30.0, in_pits=lambda: False, in_garage=lambda: False, vehicle_name=lambda: "car",
             class_name=lambda: "GT3",
             damage_severity=lambda: (0, 1, 0, 0, 3, 0, 0, 0),
             aero_damage=lambda: -1.0, impact_time=lambda: 0.0, impact_position=lambda: (0.0, 0.0),
@@ -51,6 +53,8 @@ def widget(ui_env, monkeypatch):
         switch=SimpleNamespace(
             abs_active=lambda: True, tc_active=lambda: False, abs_level=lambda: 4, tc_level=lambda: -1,
             tc_cut_level=lambda: -1, tc_slip_level=lambda: -1, speed_limiter=lambda: 1, headlights=lambda: 1, ignition_starter=lambda: 1,
+            motor_map_level=lambda: -1, brake_migration_level=lambda: -1, front_arb_level=lambda: -1,
+            rear_arb_level=lambda: -1, wipers=lambda: 0, level_maximum=lambda name: -1,
         ),
     )
     monkeypatch.setattr(api, "read", fake)
@@ -83,6 +87,104 @@ def test_paint(widget):
     widget.timerEvent(None)
     image = widget.grab().toImage()
     assert image.width() > 100 and image.height() > 50
+
+
+def shown(changes, now):
+    return [change[:4] for change in changes.current(now)]
+
+
+def test_setting_changes_shown_a_while():
+    changes = wheel_state.SettingChanges(2.0)
+    changes.update("car", {"tc": "3", "abs": None}, 0.0)  # first readings of a car: no change
+    assert changes.current(0.0) == ()
+    changes.update("car", {"tc": "4", "abs": "2"}, 1.0)  # ABS appears: no old value, no change
+    assert shown(changes, 1.5) == [("tc", "3", "4", 1)]
+    assert changes.current(3.0) == ()  # time over
+    changes.update("car", {"tc": "5", "abs": "2"}, 4.0, quiet=True)  # garage: taken, not shown
+    assert changes.current(4.0) == ()
+    changes.update("car", {"tc": "4", "abs": "2"}, 5.0)
+    assert shown(changes, 5.0) == [("tc", "5", "4", -1)]
+    changes.update("other car", {"tc": "1", "abs": "1"}, 6.0)  # new car: settings are no change
+    assert changes.current(6.0) == ()
+
+
+def test_setting_changes_stack_merge_and_fade():
+    changes = wheel_state.SettingChanges(2.0)
+    changes.update("car", {"tc": "3", "tc_slip": "2", "map": "1", "mode": "A"}, 0.0)
+    changes.update("car", {"tc": "4", "tc_slip": "3", "map": "1", "mode": "A"}, 1.0)  # two at once
+    assert shown(changes, 1.0) == [("tc_slip", "2", "3", 1), ("tc", "3", "4", 1)]  # newest first
+    changes.update("car", {"tc": "5", "tc_slip": "3", "map": "1", "mode": "A"}, 1.2)  # again: first old kept
+    assert shown(changes, 1.2) == [("tc", "3", "5", 1), ("tc_slip", "2", "3", 1)]
+    changes.update("car", {"tc": "5", "tc_slip": "3", "map": "2", "mode": "B"}, 1.3)  # two lines at most
+    assert [change[0] for change in changes.current(1.3)] == ["mode", "map"]
+    assert changes.current(1.3)[0].direction == 0  # not a number: no arrow
+    changes.update("car", {"tc": "5", "tc_slip": "3", "map": "1", "mode": "B"}, 1.4)  # back to first: last step
+    assert shown(changes, 1.4) == [("map", "2", "1", -1), ("mode", "A", "B", 0)]
+    # Fades in once when it appears (not on each change), out before the newest change ends
+    assert changes.opacity(1.0) == 0.0 and changes.opacity(1.06) == pytest.approx(0.5)
+    assert changes.opacity(1.4) == 1.0
+    assert 0 < changes.opacity(3.2) < 1 and changes.opacity(3.41) == 0.0
+
+
+def test_setting_change_during_fade_out_shown():
+    """A change while the pop-up fades out shows at once, also one going back to the value before"""
+    changes = wheel_state.SettingChanges(2.0)
+    changes.update("car", {"tc": "3"}, 0.0)
+    changes.update("car", {"tc": "4"}, 0.1)
+    assert 0 < changes.opacity(1.9) < 1  # fading out
+    changes.update("car", {"tc": "3"}, 1.9)  # back to 3 before the end
+    assert shown(changes, 1.9) == [("tc", "4", "3", -1)] and changes.opacity(1.9) == 1.0
+    changes.update("car", {"tc": "4"}, 3.8)  # fading out again: 3 > 4 (first value kept)
+    assert shown(changes, 3.8) == [("tc", "3", "4", 1)]  # back to first value again: last step
+    assert changes.opacity(3.8) == 1.0
+
+
+def test_setting_popup_part(widget, monkeypatch):
+    from neopedal.api_control import api
+    from neopedal.widget._black_box import popup as popup_mod
+
+    clock = [100.0]
+    for module in (popup_mod, black_box_reader):
+        monkeypatch.setattr(module, "monotonic", lambda: clock[0])
+    widget.timerEvent(None)
+    assert widget.setting_popup() == () and widget.part_states()["popup"] == ()
+    monkeypatch.setattr(api.read.brake, "bias_front", lambda: 0.565)
+    widget.timerEvent(None)
+    assert [change[:4] for change in widget.setting_popup()] == [("brake_bias", "56.0", "56.5", 1)]
+    assert widget.setting_popup_fading() and "popup" in widget.animating_parts()  # fading in
+    clock[0] += 0.5
+    assert not widget.setting_popup_fading() and widget.part_states()["popup"]
+    assert widget.rect_center.contains(widget.setting_popup_rect())
+    assert widget.part_rects()["popup"].intersects(widget.part_rects()["center"])  # center drawn below it
+    image = widget.grab().toImage()
+    assert image.width() > 100
+    for position in ("Middle", "Bottom"):
+        monkeypatch.setitem(widget.wcfg, "setting_popup_position", position)
+        assert widget.rect_center.contains(widget.setting_popup_rect())
+    clock[0] += widget.wcfg["setting_popup_duration"]
+    widget.timerEvent(None)
+    assert widget.setting_popup() == () and widget.part_states()["popup"] == ()
+
+
+def test_setting_popup_over_car_view_in_compact_layout(ui_env, widget, monkeypatch):
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
+    from neopedal.widget._black_box import popup as popup_mod
+
+    monkeypatch.setitem(cfg.user.setting["black_box"], "layout", 2)  # compact: no center column
+    compact = black_box.Realtime(cfg, "black_box")
+    try:
+        assert compact.rect_center.isNull() and compact.show_setting_popup
+        monkeypatch.setattr(popup_mod, "monotonic", lambda: 50.0)
+        monkeypatch.setattr(black_box_reader, "monotonic", lambda: 49.0)
+        compact.timerEvent(None)
+        monkeypatch.setattr(api.read.switch, "abs_level", lambda: 5)
+        compact.timerEvent(None)
+        assert [change[:4] for change in compact.setting_popup()] == [("abs", "4", "5", 1)]
+        assert compact.rect_car_view.contains(compact.setting_popup_rect())
+        assert compact.grab().toImage().width() > 50
+    finally:
+        compact.deleteLater()
 
 
 def test_abs_tc_shown_only_if_car_has_them(widget, monkeypatch):
@@ -400,6 +502,7 @@ def test_compact_layout_skips_center_data(ui_env, monkeypatch):
     calls = []
     monkeypatch.setattr(api.read.switch, "speed_limiter", lambda: calls.append("speed_limiter") or 0)
     cfg.user.setting["black_box"]["layout"] = 2
+    monkeypatch.setitem(cfg.user.setting["black_box"], "show_setting_popup_driving_events", False)  # reads limiter
     widget = black_box.Realtime(cfg, "black_box")
     try:
         widget.timerEvent(None)
@@ -891,6 +994,26 @@ def test_few_readings_are_all_kept(ui_env):
         instance.deleteLater()
 
 
+def test_compound_badge_beside_wear(ui_env):
+    """Tyre compound & wear shown together: badge drawn on the wear line, no line of its own to drop"""
+    from neopedal.widget._black_box.state import READING_COMPOUND, READING_WEAR
+
+    instance = new_widget({"show_tyre_compound": True, "show_tyre_wear": True, "show_tyre_wear_end_stint": True})
+    try:
+        wheel = instance.wheels[0]
+        wheel.compound, wheel.compound_color, wheel.compound_ink, wheel.tread = "M", "#FFCC00", "#000000", 91.0
+        wheel.tread_end, wheel.tread_end_known = 8.0, True
+        lines = instance.tyre_lines(0, wheel)
+        assert READING_COMPOUND not in [line[0] for line in lines]
+        wear = next(line for line in lines if line[0] == READING_WEAR)
+        assert wear[6] == ("M", "#FFCC00", "#000000")
+        instance.grab()  # badge drawn beside wear text
+        instance.wcfg["show_tyre_wear"] = False  # no wear line: compound keeps its own line
+        assert READING_COMPOUND in [line[0] for line in instance.tyre_lines(0, wheel)]
+    finally:
+        instance.deleteLater()
+
+
 def test_old_damage_marks_removed(ui_env):
     """Body marks & suspension bars are replaced by the damage panel"""
     from neopedal.setting import cfg
@@ -1331,14 +1454,20 @@ def test_shift_flash_keeps_repainting(widget, monkeypatch):
     from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.engine, "rpm", lambda: 7900.0)
+    clock = [0.0]
+    monkeypatch.setattr(center_mod, "monotonic", lambda: clock[0])
     calls = []
     monkeypatch.setattr(widget, "update", lambda *args: calls.append(args))
     widget.timerEvent(None)
     assert calls == [()]  # first update: whole widget
     calls.clear()
+    clock[0] += widget.wcfg["shift_flash_interval"]  # next flash phase
     widget.timerEvent(None)
-    # Over redline, LEDs flash without data change (repaint rects widened over gradients, see regions)
-    assert QRegion(widget.part_rects()["leds"]).subtracted(sum((QRegion(rect) for (rect,) in calls), QRegion())).isEmpty()
+    # Over redline, LEDs flash without data change: flash phase in their key (repaint rects widened over
+    # gradients, see regions; whole widget when most of it changes)
+    assert calls == [()] or QRegion(widget.part_rects()["leds"]).subtracted(
+        sum((QRegion(rect) for (rect,) in calls), QRegion())).isEmpty()
+    assert calls
 
 
 def test_fitted_font_cached(widget):
@@ -1511,3 +1640,157 @@ def test_battery_percentage_follows_fill_level(ui_env, monkeypatch):
         assert chips[4].top() == pytest.approx(0, abs=1)  # full: kept inside at top
     finally:
         instance.deleteLater()
+
+
+def trace_sample(time, speed=30.0):
+    from neopedal.widget._black_box.recorder import Sample
+
+    return Sample(time, speed, 0.5, 0.0, 3, False, False, "")
+
+
+def test_new_incident_in_full_list_repaints_trace(widget, monkeypatch):
+    """Incident list full: a new incident keeps the count, its time tells the trace changed"""
+    from neopedal.setting import cfg
+    from neopedal.widget._black_box import persist
+    from neopedal.widget._black_box.recorder import Incident
+
+    monkeypatch.setattr(persist, "MEMORY", {})  # no incidents carried over from other tests
+    monkeypatch.setitem(cfg.user.setting["black_box"], "show_incident_recorder", True)
+    monkeypatch.setitem(cfg.user.setting["black_box"], "enable_incident_replay", False)  # trace not animating
+    recording = black_box.Realtime(cfg, "black_box")
+    try:
+        monkeypatch.setattr(recording, "recorder_now", lambda: 100.0)
+        incidents = recording.recorder.incidents
+        for index in range(incidents.maxlen or 10):
+            incidents.append(Incident(80.0 + index, "impact", 5.0, 1, 0.0,
+                                      tuple(trace_sample(70.0 + index + step * 0.1) for step in range(20))))
+        before = recording.part_states()["trace"]
+        incidents.append(Incident(99.0, "impact", 7.0, 2, 0.0,
+                                  tuple(trace_sample(90.0 + step * 0.1) for step in range(20))))
+        assert recording.displayed_incident().time == 99.0
+        assert recording.part_states()["trace"] != before and "trace" not in recording.animating_parts()
+    finally:
+        recording.deleteLater()
+
+
+def test_previous_incident_line_kept_inside_trace(widget):
+    """Previous incident recorded over a longer window (duration changed): its line stays in the trace"""
+    from PySide6.QtCore import QRectF
+
+    from neopedal.widget._black_box.recorder import Incident
+
+    inner = QRectF(10, 10, 200, 60)
+    shown = Incident(50.0, "impact", 5.0, 2, 0.0, tuple(trace_sample(35.0 + step * 0.5) for step in range(41)))
+    previous = Incident(20.0, "impact", 5.0, 1, 0.0, tuple(trace_sample(-10.0 + step * 0.5) for step in range(81)))
+    start, span = shown.samples[0].time, shown.samples[-1].time - shown.samples[0].time
+
+    def x_at(time):
+        return inner.left() + (time - start) / span * inner.width()
+
+    shapes = widget.trace_shapes(shown.samples, inner, x_at, widget.trace_style(), shown, previous)
+    bounds = shapes.compared.boundingRect()
+    assert bounds.left() >= inner.left() - 0.01 and bounds.right() <= inner.right() + 0.01
+
+
+def test_long_live_recording_uses_live_polygons(widget):
+    """More samples than pixel columns: live polygons still (no Python rebuild), same top speed scaling"""
+    from collections import deque
+
+    from PySide6.QtCore import QRectF
+
+    inner = QRectF(0, 0, 100, 40)
+    samples = deque(trace_sample(step * 0.05, speed=10.0 + step % 50) for step in range(1000))
+    start, span = samples[0].time, samples[-1].time - samples[0].time
+
+    def x_at(time):
+        return inner.left() + (time - start) / span * inner.width()
+
+    widget._live_trace = None
+    live = widget.live_trace(samples, inner, x_at, start, span, widget.trace_style())
+    assert widget._live_trace is not None and widget._live_trace.speed.size() == len(samples)
+    full = widget.trace_shapes(samples, inner, x_at, widget.trace_style())
+    assert abs(live.speed.boundingRect().top() - full.speed.boundingRect().top()) < 0.5  # top speed at same height
+
+
+def test_new_center_items_values(widget, monkeypatch):
+    """Track limits points (penalty limit in races), gaps ahead | behind, lift & coast bar"""
+    wcfg = widget.wcfg
+    widget.cut_points, widget.limit_points = 0.0, 0.0
+    assert widget.track_limits_value() == ("0", "")
+    widget.cut_points = 1.25
+    assert widget.track_limits_value() == ("1.25", wcfg["track_limits_warning_color"])
+    widget.limit_points = 5.0
+    assert widget.track_limits_value() == ("1.25/5", wcfg["track_limits_warning_color"])
+    widget.cut_points = 4.0  # one point left
+    assert widget.track_limits_value()[1] == wcfg["track_limits_penalty_color"]
+    widget.gap_ahead, widget.gap_behind = 0.84, 0.0
+    assert widget.gaps_text() == "0.8 | -"
+    widget.lift_coast = 1.7
+    assert widget.lift_coast_ratio() == 1.0
+    for option in ("show_track_limits_points", "show_gap_ahead_behind", "show_lift_and_coast"):
+        monkeypatch.setitem(wcfg, option, True)
+    items = widget.ordered_center_items()
+    assert items[-3:] == ["track_limits", "gaps", "lift_coast"]
+
+
+def test_new_center_items_read_and_drawn(ui_env, monkeypatch):
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
+
+    for option in ("show_track_limits_points", "show_gap_ahead_behind", "show_lift_and_coast"):
+        monkeypatch.setitem(cfg.user.setting["black_box"], option, True)
+    monkeypatch.setattr(api.read.session, "cut_points", lambda: 2.5)
+    monkeypatch.setattr(api.read.session, "limits_points", lambda: 5.0)
+    monkeypatch.setattr(api.read.session, "in_race", lambda: True)
+    monkeypatch.setattr(api.read.timing, "gap_car_ahead", lambda: 1.24)
+    monkeypatch.setattr(api.read.timing, "gap_car_behind", lambda: 3.0)
+    monkeypatch.setattr(api.read.engine, "lift_and_coast_progress", lambda: 0.5)
+    widget = black_box.Realtime(cfg, "black_box")
+    try:
+        widget.timerEvent(None)
+        assert (widget.cut_points, widget.limit_points) == (2.5, 5.0)
+        keys = dict(zip(*widget.center_key()))
+        assert keys["track_limits"][0] == "2.5/5" and keys["gaps"] == "1.2 | 3.0" and keys["lift_coast"] == 0.5
+        assert widget.grab().toImage().width() > 50
+    finally:
+        widget.deleteLater()
+
+
+def test_wipers_icon_shares_status_gap(widget, monkeypatch):
+    from neopedal.api_control import api
+
+    lights, wipers, engine, _ = widget.status_icon_layout()
+    assert lights is not None and wipers is not None and engine is not None
+    assert lights.right() < wipers.left() and wipers.right() < engine.left()
+    monkeypatch.setattr(api.read.switch, "wipers", lambda: 2)
+    before = widget.status_key()
+    widget.timerEvent(None)
+    assert widget.wipers == 2 and widget.status_key() != before
+    assert widget.grab().toImage().width() > 50
+    monkeypatch.setitem(widget.wcfg, "show_wipers_indicator", False)
+    assert widget.wipers_icon_box() is None
+
+
+def test_setting_popup_maximum_events_and_direction_color(widget, monkeypatch):
+    from neopedal.api_control import api
+    from neopedal.widget._black_box import popup as popup_mod
+    from neopedal.widget._black_box.state import SettingChange
+
+    monkeypatch.setattr(popup_mod, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(black_box_reader, "monotonic", lambda: 10.0)
+    monkeypatch.setattr(api.read.switch, "level_maximum", lambda name: 9 if name == "abs" else -1)
+    widget.timerEvent(None)
+    monkeypatch.setattr(api.read.switch, "abs_level", lambda: 5)
+    monkeypatch.setattr(api.read.switch, "speed_limiter", lambda: 0)  # limiter off: driving event
+    widget.timerEvent(None)
+    changes = {change.name: change for change in widget.setting_popup()}
+    assert widget.setting_value(changes["abs"]) == "5/9"  # new value & highest level, arrow tells the way
+    assert changes["limiter"].event and widget.setting_value(changes["limiter"]) == widget.wcfg["text_state_off"]
+    up = SettingChange("tc", "3", "4", 1, 0.0)
+    assert widget.setting_popup_color(up) == widget.wcfg["setting_popup_increase_color"]  # green up, red down
+    assert widget.setting_popup_color(up._replace(direction=0)) == widget.wcfg["setting_popup_color"]
+    monkeypatch.setitem(widget.wcfg, "enable_setting_popup_direction_color", False)
+    assert widget.setting_popup_color(up) == widget.wcfg["setting_popup_color"]
+    monkeypatch.setitem(widget.wcfg, "enable_setting_popup_direction_color", True)
+    assert widget.setting_popup_color(up._replace(direction=-1)) == widget.wcfg["setting_popup_decrease_color"]
+    assert widget.wipers_text(1) == widget.wcfg["text_wipers_auto"]

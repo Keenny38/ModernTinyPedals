@@ -24,6 +24,8 @@ Lowest differential locking of last power (on throttle) & coast phases, front & 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
@@ -32,6 +34,9 @@ from ..differential import DiffLockingTimer
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DifferentialConfig
 
 ITEMS = (
     ("power_locking_front", "Power F", True, True),
@@ -43,6 +48,8 @@ ITEMS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: DifferentialConfig
 
     options = (
         "font_size", "layout", "show_inverted_locking", "decimal_places", "off_throttle_threshold",
@@ -95,4 +102,5 @@ class Realtime(StatsMixin, ModernOverlay):
             if wcfg["show_inverted_locking"]:
                 value = 1 - value
             values.append(Value(f"{value:.{self.decimals}%}", bar=fraction(value)))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

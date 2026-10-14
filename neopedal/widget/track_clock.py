@@ -21,6 +21,7 @@ Track clock Widget
 """
 
 from time import gmtime, strftime
+from typing import TYPE_CHECKING
 
 from .. import calculation as calc
 from ..api_control import api
@@ -28,9 +29,14 @@ from ..const_common import TEXT_NA, TEXT_TREND_SIGN
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TrackClockConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "TrackClockConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

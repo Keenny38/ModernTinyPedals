@@ -50,7 +50,7 @@ import time
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from .const_app import LEGACY_NAME
+from .const_app import APP_ID, LEGACY_FORK_NAME, LEGACY_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,7 @@ FORMAT_RGBA8_STRAIGHT = 1
 FORMAT_RGBA8_PREMULTIPLIED = 2
 FLAG_VISIBLE = 0x1
 FLAG_ATTACH_TO_HEADSET = 0x2
+DIRTY_RECT = 0x1  # dirty_flags: only the dirty rect of the atlas changed since dirty_base_serial
 
 LAYER_IDLE = 0
 LAYER_ACTIVE = 1
@@ -90,6 +91,7 @@ OFFSET_APP_HEARTBEAT = 24
 OFFSET_FRAME = 32  # "<6I4f3I": atlas width, height, stride, pixel_format, flags, image_serial,
                    # 4 canvas placement floats, data_offset, data_capacity, app_pid
 OFFSET_CANVAS = 84  # "<3I": canvas_width, canvas_height, tile_count
+OFFSET_DIRTY = 96  # "<6I": dirty_flags, dirty_base_serial, dirty x, y, width, height (ignored by older layers)
 OFFSET_LAYER = 128  # written by layer
 TILE_FORMAT = "<6I8x"  # atlas_x, atlas_y, width, height, canvas_x, canvas_y
 LAYER_FORMAT = "<QIIIiQI"  # heartbeat, pid, state, graphics_api, last_result, frames_shown, version
@@ -102,6 +104,9 @@ LAYER_MANIFEST = "NeoPedalXrLayer.json"
 LAYER_MANIFESTS = (LAYER_MANIFEST.lower(), f"{LEGACY_NAME}XrLayer.json".lower())
 LAYER_FOLDER = "openxr_layer_bundle"  # in bundled lib folder: copied to LAYER_INSTALL_FOLDER, never loaded there
 LAYER_INSTALL_FOLDER = "openxr_layer"  # next to executable: one subfolder per layer build, loaded by games
+# ASCII copies (non-ASCII app folder): <base>\NeoPedal\openxr_layer\<user>, ModernTinyPedals until 0.23.0
+LAYER_COPY_FOLDER = APP_ID
+LEGACY_LAYER_COPY_FOLDER = LEGACY_FORK_NAME
 REGISTRY_KEY = r"SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit"
 DISABLE_ENVIRONMENT = "DISABLE_NEOPEDAL_XR_LAYER"
 
@@ -439,6 +444,7 @@ class SharedFrameWriter:
         self._size = (0, 0, 0)  # width, height, stride of last atlas
         self._tiles: tuple[Tile, ...] = ()  # tiles of last atlas
         self._canvas = (0, 0)  # canvas width & height of last atlas
+        self._pixels_valid = False  # memory holds the last atlas whole (dirty rect writes allowed)
         self._words: dict[int, ctypes.c_uint64] = {}  # views of sequence & heartbeat (released before close)
         self.warning: str | None = None  # problem to report to the user (set by open)
 
@@ -535,9 +541,14 @@ class SharedFrameWriter:
         self.write_tiles(pixels, width, height, stride, [Tile(0, 0, width, height, x, y)], (canvas_width, canvas_height))
 
     def write_tiles(self, pixels: Any, width: int, height: int, stride: int, tiles: Sequence[Tile],
-                    canvas: tuple[int, int]):
+                    canvas: tuple[int, int], dirty: Rect | None = None):
         """Show new atlas: RGBA8 rows (straight alpha, sRGB colors), stride bytes per row, of which tiles
         are shown on a canvas_width x canvas_height canvas (placed in VR by placement)
+
+        Args:
+            dirty: (x, y, width, height) of the atlas changed since the last atlas written (may be empty: tiles
+                moved only), None: whole atlas. Used only when that atlas was written whole & of the same size:
+                only its rows copied, the layer (if it holds the last atlas) copies & uploads only that rect.
 
         Raises:
             ValueError: atlas too big for shared memory (caller scales it down first), tiles outside atlas or
@@ -556,8 +567,13 @@ class SharedFrameWriter:
                     or tile.atlas_x + tile.width > width or tile.atlas_y + tile.height > height
                     or tile.canvas_x + tile.width > canvas_width or tile.canvas_y + tile.height > canvas_height):
                 raise ValueError(f"VR overlay tile outside atlas or canvas: {tile}")
+        if dirty is not None and not (
+                self._pixels_valid and self._size == (width, height, stride) and min(dirty) >= 0
+                and dirty[0] + dirty[2] <= width and dirty[1] + dirty[3] <= height):
+            dirty = None  # last atlas not in memory as is (other size, failed write, other app run): whole
         if self._buffer is not None:
-            self.__write((pixels, width, height, stride, tuple(Tile(*tile) for tile in tiles), canvas), visible=True)
+            self.__write((pixels, width, height, stride, tuple(Tile(*tile) for tile in tiles), canvas, dirty),
+                         visible=True)
 
     def hide(self):
         """Nothing shown (all overlays hidden)"""
@@ -594,12 +610,21 @@ class SharedFrameWriter:
     def __write_fields(self, buffer: Any, image: tuple | None, visible: bool):
         """Fields (& pixels) of a seqlock write"""
         if image is not None:
-            pixels, width, height, stride, tiles, canvas = image
+            pixels, width, height, stride, tiles, canvas, dirty = image
             view = memoryview(pixels).cast("B")
             size = stride * height
             if len(view) < size:
                 raise ValueError("VR overlay image buffer smaller than its size")
-            buffer[DATA_OFFSET:DATA_OFFSET + size] = view[:size]
+            self._pixels_valid = False  # memory not a whole atlas until copied
+            if dirty is None:
+                buffer[DATA_OFFSET:DATA_OFFSET + size] = view[:size]
+                struct.pack_into("<6I", buffer, OFFSET_DIRTY, 0, 0, 0, 0, 0, 0)
+            else:  # rows of the dirty rect only (rest is the last atlas, same size)
+                start, end = dirty[1] * stride, (dirty[1] + dirty[3]) * stride
+                if end > start:
+                    buffer[DATA_OFFSET + start:DATA_OFFSET + end] = view[start:end]
+                struct.pack_into("<6I", buffer, OFFSET_DIRTY, DIRTY_RECT, self._serial, *dirty)
+            self._pixels_valid = True
             self._serial = (self._serial + 1) & 0xFFFFFFFF
             self._size = (width, height, stride)
             self._tiles = tiles
@@ -740,7 +765,7 @@ def short_path(path: str) -> str | None:
     return str(buffer.value)
 
 
-def ascii_layer_roots() -> list[str]:
+def ascii_layer_roots(copy_folder: str = LAYER_COPY_FOLDER) -> list[str]:
     """Folders for a layer copy when its path is not ASCII: ASCII folders users can write without admin
     rights (ProgramData, Public, system drive root), one subfolder per Windows user (removing older copies
     never touches another user's registered copy)"""
@@ -748,8 +773,23 @@ def ascii_layer_roots() -> list[str]:
     roots = []
     for base in (os.environ.get("PROGRAMDATA"), os.environ.get("PUBLIC"), os.environ.get("SYSTEMDRIVE", "C:") + "\\"):
         if base and base.isascii():
-            roots.append(os.path.join(base, "ModernTinyPedals", LAYER_INSTALL_FOLDER, user))
+            roots.append(os.path.join(base, copy_folder, LAYER_INSTALL_FOLDER, user))
     return roots
+
+
+def remove_legacy_copies(roots: Sequence[str] | None = None) -> int:
+    """Once registered: every copy of the ASCII folders of versions until 0.23.0 (roots, default
+    ModernTinyPedals folders of ascii_layer_roots) removed with its emptied folders, returns number removed"""
+    removed = 0
+    for root in ascii_layer_roots(LEGACY_LAYER_COPY_FOLDER) if roots is None else roots:
+        removed += remove_old_layers(root, root)  # keep root itself: none of its copies
+        install_folder = os.path.dirname(root)
+        for folder in (root, install_folder, os.path.dirname(install_folder)):  # user, openxr_layer, fork folder
+            try:
+                os.rmdir(folder)  # empty only: copy still loaded by a game, or another user's copies, kept
+            except OSError:
+                break
+    return removed
 
 
 def loadable_manifest(manifest: str, roots: Sequence[str] | None = None) -> str | None:
@@ -781,12 +821,13 @@ def loadable_manifest(manifest: str, roots: Sequence[str] | None = None) -> str 
 
 def remove_old_copies(*manifests: str, roots: Sequence[str] | None = None) -> int:
     """Once registered: other layer copies of the folders (roots, default install & ASCII roots) holding
-    manifests removed, returns number removed"""
+    manifests removed, returns number removed (default roots: copies of versions until 0.23.0 too)"""
+    removed = 0
     if roots is None:
         install_root = layer_install_root()
         roots = [*([install_root] if install_root else []), *ascii_layer_roots()]
+        removed += remove_legacy_copies()
     known = {os.path.normcase(os.path.abspath(root)) for root in roots}
-    removed = 0
     for manifest in manifests:
         folder = os.path.dirname(os.path.abspath(manifest))
         root = os.path.dirname(folder)
@@ -894,9 +935,10 @@ def remove_missing_layers(winreg_module: Any = None) -> int:
 
 
 def unregister_layer(winreg_module: Any = None) -> int:
-    """Remove every NeoPedal layer entry of current user, returns number removed"""
+    """Remove enabled NeoPedal layer entries of current user, returns number removed.
+    Disabled by the user (value not 0): kept, so register_layer keeps it disabled (reload, restart)."""
     reg = _winreg(winreg_module)
-    existing = registered_layers(reg)
+    existing = [name for name, value in registered_layers(reg).items() if value == 0]
     if not existing:
         return 0
     removed = 0

@@ -27,7 +27,7 @@ traffic, pit request, finish state, scheduled repairs, sector yellow flags, full
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath
@@ -38,9 +38,13 @@ from ...api_control import api
 from ...const_common import MAX_SECONDS
 from ...i18n import tr_overlay as tr
 from ...module_info import minfo
+from .._data import run_laps
 from ..flag import BlueFlagTimer, GreenFlagTimer, PitTimer, TrafficTimer
 from .base import CENTER, DASH, ModernOverlay, display_order_options
 from .draw import readable_on, rounded
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import FlagConfig
 
 SHINE = QColor(255, 255, 255, 34)  # light top of chip, fading out at middle
 CAPTION_ALPHA = 190  # caption over value, on chip color
@@ -53,6 +57,7 @@ ITEMS = (
     "pit_timer", "low_fuel", "speed_limiter", "yellow_flag", "blue_flag", "start_lights", "traffic", "pit_request",
     "finish_state", "scheduled_repairs", "sector_yellow_flags", "full_course_yellow",
 )
+
 # Value samples (chip width), captions are measured too
 VALUE_SAMPLES = ("888.88", "+888m", "88.8s", "8.8 - 8.8", "Pits closed")
 # Item -> caption, sample value & color of picture drawn before any update (Overlays page)
@@ -88,6 +93,8 @@ class Item(NamedTuple):
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: FlagConfig
 
     options = (
         "font_size", "layout", "show_pit_timer", "pit_time_highlight_duration", "pit_in_text", "pit_out_text",
@@ -302,10 +309,7 @@ class Realtime(ModernOverlay):
     def read_pit_request(self, lap_etime: float, in_pits: bool, in_race: bool) -> Chip | None:
         if not api.read.vehicle.pit_request():
             return None
-        if minfo.energy.available:
-            laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
-        else:
-            laps = minfo.fuel.estimatedLaps
+        laps = run_laps(minfo.fuel, minfo.energy)
         safe = calc.pit_in_countdown_laps(laps, api.read.lap.progress())
         return Chip(self.captions["pit_request"], f"{lap_text(safe)} - {lap_text(laps)}", "positive")
 

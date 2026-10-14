@@ -25,6 +25,8 @@ activated.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter, QPen
 
@@ -32,9 +34,14 @@ from ...api_control import api
 from .base import CENTER, ModernOverlay
 from .draw import readable_on, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DrsConfig
+
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: DrsConfig
 
     options = ("font_size", "drs_text")
 

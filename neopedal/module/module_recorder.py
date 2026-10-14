@@ -54,7 +54,7 @@ from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
 from ..validator import generator_init
-from ._base import MODULE_STOP, DataModule
+from ._base import MODULE_STOP, WAIT_STATE_CHANGE, DataModule
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,11 @@ class Realtime(DataModule):
                         waiting = gen_recorder.send(None)  # discard incomplete lap
                     elif waiting:  # completed lap left before validation: keep checking lap time
                         waiting = gen_recorder.send(None)
+                    # Idle until activity changes, unless a lap waits for validation or automatic replay
+                    # recording waits to stop (replay state changes are not notified: checked every IDLE_WAIT)
+                    update_interval = (
+                        self.idle_interval if waiting or (auto_replay is not None and auto_replay.started)
+                        else WAIT_STATE_CHANGE)
         finally:
             # Module stopped (reload, quit): save completed lap still waiting for validation
             if reset or waiting:
@@ -168,6 +173,11 @@ LAP_SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Lap saver")
 LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for laps being saved when module stops
 PENDING_WAIT = 10.0  # seconds to validate completed lap after leaving track just after start line
 LAP_TEXT_CHUNK = 250  # CSV rows written at once (about 5 ms), GIL released in between
+# Car stopped (pit box, red flag): speed under STOPPED_SPEED (m/s) & lap distance unchanged since last sample
+# kept, then one sample kept every STOPPED_SAMPLE_INTERVAL seconds (game time) only
+STOPPED_SPEED = 0.5
+STOPPED_SAMPLE_INTERVAL = 1.0
+MAX_LAP_ROWS = 90_000  # samples of a lap (30 minutes at 50 per second): lap dropped beyond (memory)
 
 
 def wait_lap_saver(timeout: float | None = None) -> bool:
@@ -456,6 +466,8 @@ def record_telemetry(
     lap_complete_start = False  # whether recording started from start line
     started_in_pits = False
     rows = LapSamples()
+    kept_distance: float | None = None  # lap distance of last sample kept, None: none in lap yet
+    kept_elapsed = float("-inf")  # game time of last sample kept
     pending: PendingLap | None = None  # completed lap waiting for validation
     pending_deadline = 0.0  # clock time limit to validate pending lap left before validation delay, 0 if not
     options = SaveOptions(filepath, max_saved_laps, save_invalid, keep_best, compress)
@@ -477,6 +489,7 @@ def record_telemetry(
             last_elapsed = float("-inf")
             lap_complete_start = False
             rows = LapSamples()
+            kept_distance = None
 
         # Validate pending lap left before validation delay
         if pending is not None and pending_deadline:
@@ -534,11 +547,27 @@ def record_telemetry(
                 )
                 pending.info["finished"] = round(pending.timestamp, 3)  # exact lap end (lap viewer replay link)
             rows = LapSamples()
+            kept_distance = None
             lap_complete_start = True
             started_in_pits = in_pits
             last_lap_start = lap_start
 
+        # Car stopped: few samples kept (first & last of stop kept within STOPPED_SAMPLE_INTERVAL)
+        distance = api.read.lap.distance()
+        if (
+            distance == kept_distance
+            and elapsed - kept_elapsed < STOPPED_SAMPLE_INTERVAL
+            and api.read.vehicle.speed() < STOPPED_SPEED
+        ):
+            continue
+        kept_distance = distance
+        kept_elapsed = elapsed
         rows.append(read_sample(last_lap_start))
+        if len(rows) >= MAX_LAP_ROWS:  # never completed (stuck on track, session left running)
+            logger.warning("RECORDER: lap longer than %s samples dropped", MAX_LAP_ROWS)
+            rows = LapSamples()
+            kept_distance = None
+            lap_complete_start = False  # partial lap from here never saved
 
 
 def confirmed_lap(pending: PendingLap) -> bool:

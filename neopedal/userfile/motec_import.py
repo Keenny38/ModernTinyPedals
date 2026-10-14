@@ -39,6 +39,7 @@ from contextlib import suppress
 from itertools import pairwise
 from typing import NamedTuple
 
+from . import replace_retry
 from .motec_ld import Channel, LdInfo, read_ld
 from .telemetry_lap import INFO_PREFIX, is_lap_file, lap_number_of, lap_time_of, lap_timestamp_of
 
@@ -449,7 +450,7 @@ def save_imported_lap(lap: ImportedLap, folder: str, timestamp: float) -> str:
             writer.writerow(header)
             for row in zip(*(lap.columns[name] for name in header)):
                 writer.writerow([round(value, 4) for value in row])
-        os.replace(temporary, path)
+        replace_retry(temporary, path)
     except OSError:
         with suppress(OSError):
             os.remove(temporary)

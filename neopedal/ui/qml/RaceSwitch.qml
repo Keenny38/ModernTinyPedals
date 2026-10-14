@@ -17,14 +17,14 @@ AbstractButton {
     Layout.fillWidth: true
     implicitHeight: Math.max(Math.round(theme.em * 2), label.implicitHeight + theme.em * 0.4)
     implicitWidth: track.width + label.implicitWidth + theme.em * 0.6
-    opacity: enabled ? 1 : 0.5
+    opacity: enabled ? 1 : theme.disabledOpacity
     Accessible.role: Accessible.CheckBox
     Accessible.checked: on
     Accessible.name: text
 
     ToolTip.visible: tip !== "" && hovered
     ToolTip.text: tip
-    ToolTip.delay: 600
+    ToolTip.delay: theme.tipDelay
 
     onClicked: {
         if (key !== "")
@@ -40,10 +40,10 @@ AbstractButton {
             height: theme.em * 1.2
             radius: height / 2
             anchors.verticalCenter: parent.verticalCenter
-            color: control.on ? theme.accent : (control.hovered ? theme.hover : theme.raised)
+            color: control.on ? theme.accentFill : (control.hovered ? theme.hover : theme.raised)
             border.width: control.on ? 0 : 1
             border.color: control.activeFocus ? theme.accent : theme.border
-            Behavior on color { ColorAnimation { duration: 150 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
             Rectangle {
                 width: parent.height - theme.em * 0.36
                 height: width
@@ -51,7 +51,7 @@ AbstractButton {
                 anchors.verticalCenter: parent.verticalCenter
                 x: control.on ? parent.width - width - theme.em * 0.18 : theme.em * 0.18
                 color: control.on ? "white" : theme.dimText
-                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                Behavior on x { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
             }
         }
         Text {

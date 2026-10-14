@@ -24,6 +24,8 @@ Front, left & cross weight share, each with a split bar.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -31,6 +33,9 @@ from ...module_info import minfo
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import WeightDistributionConfig
 
 ITEMS = (
     ("front_to_rear_distribution", "Front", "frontWeightRatio"),
@@ -41,6 +46,8 @@ ITEMS = (
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: WeightDistributionConfig
 
     options = (
         "font_size", "layout", "show_percentage_sign", "decimal_places", "smoothing_samples",
@@ -76,4 +83,5 @@ class Realtime(StatsMixin, ModernOverlay):
             ratio = self.ratios[key]
             values.append(Value(f"{ratio * 100:.{self.decimals}f}{self.sign}", bar=fraction(ratio),
                                 bar_color=self.theme.accent))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

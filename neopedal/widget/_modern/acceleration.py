@@ -24,6 +24,8 @@ One column per speed range: last (or running) acceleration time, best time, diff
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
@@ -34,9 +36,14 @@ from ..acceleration import AccelTimer
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import AccelerationConfig
+
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: AccelerationConfig
 
     options = (
         "font_size", "layout", "bar_width", "speed_drop_threshold", "decimal_places_timer", "decimal_places_delta",

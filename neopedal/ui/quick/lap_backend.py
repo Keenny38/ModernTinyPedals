@@ -21,8 +21,11 @@ Lap telemetry viewer state for QML page: laps, chart series, track map, G circle
 
 Charts, map & G circle vertices go to VertexStore (drawn by GpuShape items),
 everything else is exposed as properties of plain values (lists of dicts) & a lap list model.
-Track map (lap_map_view), corners (lap_corners), session tab (lap_session) & exports (lap_export) are mixins of
-LapViewerBackend: QML properties & signals are declared here (a property's notify signal must be of its class).
+Page parts are child QObjects of LapViewerBackend with their own state, slots & properties (QML backend.<part>):
+conditions (lap_conditions), dashboard (lap_dashboard), session (lap_session), math & charts (lap_charts), exports
+(lap_export), cornerTable (lap_corners). Each reaches the page through an explicit host (Protocol of what it uses);
+the page owns the jobs & timers. Track map (lap_map_view) is still a mixin: its state is shared with lap loading,
+cursor & playback of this class.
 """
 
 from __future__ import annotations
@@ -61,13 +64,11 @@ from ... import app_signal
 from ...const_api import API_LMU_CONFIG
 from ...i18n import tr, trm
 from ...setting import cfg
-from ...userfile import track_geometry
+from ...userfile import track_geometry, write_json
 from ...userfile.circuit_match import same_imported_circuit
 from ...userfile.corner_analysis import (
-    SPEED_HYSTERESIS,
     CornerComparison,
     CornerStats,
-    IdealLap,
     ResampledLap,
 )
 from ...userfile.lap_cache import (  # noqa: F401  (INFO_FOLDER & INFO_READERS re-exported)
@@ -86,6 +87,7 @@ from ...userfile.lap_cache import (  # noqa: F401  (INFO_FOLDER & INFO_READERS r
 from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_bounds re-exported)
     JobCancelled,
     Yielder,
+    coordinate_array,
     limits_part,
     median_bounds,
     session_values,
@@ -99,6 +101,7 @@ from ...userfile.telemetry_lap import (
     LapFile,
     best_laps,
     decimate_minmax,
+    forget_increasing,
     group_sessions,
     interpolate,
     is_valid_name,
@@ -113,7 +116,6 @@ from ...userfile.telemetry_lap import (
     same_circuit,
     theoretical_best,
 )
-from ...userfile.track_corners import TrackCorner
 from .. import lap_viewer
 from .._common import TextInputDialog
 from ..lap_viewer import (
@@ -148,11 +150,19 @@ from ..lap_viewer import (
     signed,
 )
 from . import lap_map
+from .formatting import day_month, day_month_minutes, file_stamp
 from .game_pictures import brand_logo_url, notifier, track_logo_url
-from .lap_base import COLOR_GAIN, COLOR_LOSS, format_diff, keys_match  # noqa: F401  (re-exported)
-from .lap_charts import ChartTools
-from .lap_conditions import SIMILAR_TOLERANCE, SIMILAR_TOLERANCES, LapConditions
-from .lap_corners import CORNER_SORTS, CornerTable
+from .lap_base import (  # noqa: F401  (re-exported)
+    COLOR_GAIN,
+    COLOR_LOSS,
+    PagePart,
+    format_diff,
+    int_setting,
+    keys_match,
+)
+from .lap_charts import ChartTools, MathChannels, axis_ticks, legend_offset, shift_key
+from .lap_conditions import LapConditions
+from .lap_corners import CornerTable
 from .lap_dashboard import DashboardTab, pedal_value  # noqa: F401  (re-exported)
 from .lap_export import LapExports
 from .lap_map_view import (  # noqa: F401  (re-exported: lap_backend.scale_step...)
@@ -176,20 +186,14 @@ from .lines import (
     range_band,
     step_strip,
 )
-from .math_channels import PRESETS as MATH_PRESETS
-from .math_channels import MathChannel
 from .models import DictListModel, FoldedListModel
+from .page_backend import PageBackend
 from .trace_data import TraceData, align_laps
 
 logger = logging.getLogger(__name__)
 
 PANEL_ROLES = ("column", "low", "high", "ticks", "envelope", "note", "available", "seriesModel")
 SERIES_ROLES = ("key", "lods", "color", "lap")
-CORNER_ROLES = (
-    "id", "index", "label", "apex", "kind", "best", "time", "timeColor", "bar", "speed", "speedColor", "brake",
-    "throttle", "trail", "coast", "overlap", "coastColor", "overlapColor", "entry", "exit", "entryColor", "exitColor",
-    "gear", "peakBrake",
-)
 LEGEND_ROLES = ("key", "label", "full", "color", "reference", "clean", "tip", "excluded", "offset")
 MAP_LAP_ROLES = ("lap", "key", "highlight", "trail", "color", "reference", "shapes", "brakeZones", "throttleZones")
 LAP_ROLES = (
@@ -225,7 +229,7 @@ def percentile(values: list[float], share: float) -> float:
     return ordered[min(int(len(ordered) * share), len(ordered) - 1)]
 
 
-def g_envelope(xs: list[float], ys: list[float]) -> tuple[list[float], list[float]]:
+def g_envelope(xs: Sequence[float], ys: Sequence[float]) -> tuple[list[float], list[float]]:
     """Closed G-G envelope: grip used in every direction (high quantile radius per direction sector)"""
     radii: list[list[float]] = [[] for _ in range(G_SECTORS)]
     for x, y in zip(xs, ys):
@@ -423,14 +427,17 @@ def run_fallback_jobs():
     """Fallback thread: jobs in order (cancelled ones skipped), result or error told by their future"""
     while True:
         future, work = _fallback_jobs.get()
-        if not future.set_running_or_notify_cancel():
-            continue
+        result = None
         try:
-            result = work()
-        except BaseException as error:  # any failure: future done (logged by JobHandle.result)
-            future.set_exception(error)
-        else:
-            future.set_result(result)
+            if future.set_running_or_notify_cancel():
+                try:
+                    result = work()
+                except BaseException as error:  # any failure: future done (logged by JobHandle.result)
+                    future.set_exception(error)
+                else:
+                    future.set_result(result)
+        finally:  # job, its data & result (lap data, tens of MB) never kept while waiting for the next job
+            del future, work, result
 
 
 def mark_worker_broken():
@@ -534,11 +541,10 @@ def circuit_name(info: dict, path: str) -> str:
     return ""
 
 
-class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExports, ChartTools, LapConditions,
-                       QObject):
+class LapViewerBackend(MapView, PageBackend):
     """Lap telemetry viewer page state (QML context property "backend")
 
-    Track map, corners, session tab & exports in their own modules (mixins): QML properties & signals here.
+    Parts (child QObjects, see module docstring) as constant properties; track map in its own module (mixin).
     """
 
     tracksChanged = Signal()
@@ -554,8 +560,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
     pinChanged = Signal()  # position kept by clicking charts or map
     viewRestored = Signal(float, float)  # chart zoom to show again (laps reloaded after release)
     pageHidden = Signal()  # page in background: lap playback stopped
-    sessionChanged = Signal()  # session tab laps
-    dashboardChanged = Signal()  # channels shown (Show menu, simple view items), also sent by chartChanged & mathChanged
     undoChanged = Signal()  # deleted laps that can be restored
     mathChanged = Signal()  # math channels added, changed or removed
     gCircleChanged = Signal()  # G circle built (laps changed while its tab is hidden: built once shown)
@@ -568,8 +572,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
     picturesChanged = Signal()  # car brand & circuit logos fetched from game
 
     def __init__(self, parent: QWidget, folder: str):
-        super().__init__(parent)
+        super().__init__(parent, "Lap viewer")
         self._window = parent
+        self.widget = parent  # page host (dialogs parent)
         self._picture_version = 0
         notifier().changed.connect(self.pictures_changed)
         for part in (self.panelsChanged, self.cornersChanged, self.mapDataChanged):
@@ -577,11 +582,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         # Lists rebuilt only when charts change, not on every QML read (connected first: dropped before QML reads)
         self._chart_lists: dict[str, tuple[tuple, list[dict]]] = {}
         self.chartChanged.connect(self._chart_lists.clear)
-        self.chartChanged.connect(self.dashboardChanged)  # items recorded in shown laps
-        self.mathChanged.connect(self.dashboardChanged)
-        self._session_state: dict | None = None  # session tab state, built once until sessionChanged (see session_state)
-        self.sessionChanged.connect(self.drop_session_state)  # connected first: dropped before QML reads
-        self.chartChanged.connect(self.drop_session_state)  # laps shown (colors) read again on next read
         self.folder = folder
         self.prefix = f"lap_viewer_{id(self)}|"  # vertex store keys of this page
         self.data = TraceData()
@@ -594,7 +594,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self.panel_model = DictListModel(PANEL_ROLES, self)
         self.series_models: dict[str, DictListModel] = {}  # channel column: series of its panel
         self.legend_model = DictListModel(LEGEND_ROLES, self)
-        self.corner_model = DictListModel(CORNER_ROLES, self)  # corner table rows (kept while their corner stays)
         self.mapDataChanged.connect(self.mapCornersChanged)
         self.map_lap_model = DictListModel(MAP_LAP_ROLES, self)
         self._tracks: list[str] = []
@@ -610,12 +609,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._map: dict = {}
         self._gcircle: dict = {}
         self._gcircle_stale = False  # laps changed while G circle tab hidden: built once shown (or read)
-        self._corners: list[dict] = []
-        self._corner_marks: list[dict] = []
-        self._corner_rows: list[CornerComparison] = []
-        self._corner_key: tuple = ()  # laps & sensitivity of corner rows (computed again only if changed)
-        self._ideal: IdealLap | None = None
-        self._lap_corners: dict[str, tuple[tuple, ResampledLap, list[CornerStats | None]]] = {}  # stats of each lap
         self._line_offsets: dict[str, Any] = {}  # compared line distance to reference line (line mode): key, offsets
         self._band_cache: OrderedDict[float, dict[str, object]] = OrderedDict()  # map scale step: thick lines
         self._preview_step = math.nan  # scale step of thick lines shown
@@ -644,16 +637,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._zones: dict[str, tuple[LapData, tuple]] = {}  # lap key: lap data, braking & throttle zones
         # Per lap & per reference results kept while laps stay the same (showing one more lap computes only it)
         self._official_line: tuple = ()  # (key, official circuit path line)
-        self._official_key: tuple | None = None  # reference & track of placed official corners
         self._edges_cache: tuple = ()  # (key, track edge offsets along base line)
         self._placements: dict[str, tuple[tuple, tuple]] = {}  # lap key: (key, placement)
         self._prepared_placements: dict[str, tuple[tuple, tuple]] = {}  # measured by loading thread (same keys)
         self._placing = 0  # lap placement jobs running (charts & map built again once done)
-        self._trackouts: dict[str, tuple[tuple, dict[int, float]]] = {}  # lap key: (key, track-out point by corner)
         self._slips: dict[str, tuple[LapData, list]] = {}  # lap key: lap data, wheel slip events
         self._g_laps: dict[str, tuple] = {}  # lap key: lap data, distances, x, y, peak G
         self._g_drawn: dict[str, tuple] = {}  # lap key: lap data & G scale of dots in vertex store
-        self._resampled: dict[str, ResampledLap] = {}  # lap key: columns on corner grid (same lap, same object)
         self._normals: dict[str, tuple] = {}  # lap key: lap data, map angle, point count, normals of map line
         self._turned: dict[str, tuple] = {}  # lap key: lap data, map angle, lap line turned like map
         self._arrows: tuple = ()  # (line, direction arrows along it)
@@ -668,12 +658,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._undo: list[tuple[str, str, dict, bool, bool]] = []
         self._pending_delete: list[str] = []  # laps deleted once background loading is done
         self._loaded_paths: set[str] = set()  # laps read by background loading
-        self._coaching: list[dict] = []  # corners where compared lap loses most time, causes
         self._xy_keys: set[str] = set()  # scatter vertices shown (kept when laps change)
         self._xy = {"mode": "scatter", "x": "speed_kph", "y": "accel_lat", "histogram": "throttle"}  # XY tab
-        self._session_key = ""  # session shown in session tab
-        self._session_extra: dict[str, tuple[float, dict]] = {}  # lap path: file time, values read from lap
-        self._session_busy = False
+        self._session = SessionTab(self, self)
         self._yaw: dict[str, tuple[LapData, float, float]] = {}  # lap key: lap data, yaw sign & offset to map heading
         self._grids: dict[str, lap_map.LineGrid] = {}  # lap key: driving line points by grid cell (mouse)
         self._limits: lap_map.TrackLimits | None = None  # track edges of current track (game coordinates)
@@ -695,15 +682,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._selected_corner = -1
         self._map_range = (-1.0, -1.0)  # chart markers A & B (reference distances), shown on map
         self._map_shown = 0  # track maps shown (trails built only if any)
-        self._official: list[TrackCorner] = []  # official corner numbers (or names) of circuit
-        self._official_numbered = True
         self._map_lines: list[tuple[lap_map.MapLine, PlotLap]] = []
         self._pit: list[lap_map.MapLine] = []  # pit lane parts (official circuit), turned like map
         self._line_cache: dict[str, tuple[LapData, lap_map.MapLine | None]] = {}  # lap key: data, driving line
         self._road = lap_map.MapLine([], [], [])  # circuit: track map file, else reference line
         self._map_angle = 0.0  # radians, map turned by (auto orientation & quarter turns)
         self._map_aspect = 1.0  # map view width / height (auto orientation)
-        self._g_points: list[tuple[list[float], list[float], list[float], PlotLap]] = []  # distance, x, y
+        self._g_points: list[tuple[Sequence[float], Sequence[float], Sequence[float], PlotLap]] = []  # distance, x, y
         self._map_view = (0.0, 0.0, 1.0)  # highlighted reference distances & map meters per pixel
         self._chart_view = (0.0, 0.0)  # chart axis range shown, kept while laps are released
         self._restore_view: tuple[float, float] | None = None
@@ -723,10 +708,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         # background (load_laps), None if none: another selection picked meanwhile is measured in background too
         self._prepared: tuple | None = None
         self._preparing: tuple | None = None  # selection measured by loading thread
-        self._compare_key = ""  # lap compared corner by corner & on gain map, first compared lap if not shown
         self._loader: threading.Thread | None = None
-        self._exports = 0  # MoTeC & CSV export jobs running
-        self._imports = 0  # MoTeC logs being imported
+        self._exports = LapExports(self, self._lap_cache, self)
         self._loaded: dict[str, LapData | None] = {}
         self._prepared_laps: list[tuple[dict, dict]] = []  # shape checks & aligned laps measured by loading thread
         self._prepared_charts: list[tuple[TraceData, dict[str, Vertices], dict]] = []  # prepared by loading thread
@@ -801,10 +784,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._map_options = {name: bool(saved_options.get(name, default)) for name, default in MAP_OPTIONS.items()}
         self._map_auto_orient = bool(setting.get("map_auto_orient", False))
         self._map_quarters = self.int_setting(setting, "map_rotation", 0) % 4
-        saved = setting.get("corner_hysteresis", SPEED_HYSTERESIS)
-        self._hysteresis = int(saved) if isinstance(saved, (int, float)) else int(SPEED_HYSTERESIS)
-        sort = setting.get("corner_sort", "track")
-        self._corner_sort = sort if sort in CORNER_SORTS else "track"
+        self._corner_table = CornerTable(self, setting, self)
         self._smoothing = min(max(self.int_setting(setting, "smoothing", 0), 0), len(SMOOTHING_LEVELS) - 1)
         self.data.set_smoothing(SMOOTHING_LEVELS[self._smoothing])
         window = self.int_setting(setting, "delta_window", 40)
@@ -827,17 +807,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._side_tab = 0 if side_tab == 6 else min(max(side_tab, 0), 5)  # track map under simple view
         layout = setting.get("layout", "")
         self._layout = layout if isinstance(layout, str) else ""
-        self._math: list[MathChannel] = []
-        self.load_math_channels(setting)  # before saved channels: math channels shown are kept
-        self.load_dashboard(setting)
-        self._dashboard_opened = self._simple_view
-        autoscale = setting.get("panel_autoscale", [])
-        self._autoscale: set[str] = {
-            column for column in autoscale if isinstance(column, str) and column in CHANNEL_MAP
-        } if isinstance(autoscale, list) else set()
-        self._align_apex = -1.0  # reference distance of corner laps are aligned on (braking start), -1 if none
-        tolerance = self.int_setting(setting, "similar_tolerance", SIMILAR_TOLERANCE)
-        self._similar_tolerance = tolerance if tolerance in SIMILAR_TOLERANCES else SIMILAR_TOLERANCE
+        self._math = MathChannels(self, setting, self)  # before saved channels: math channels shown are kept
+        self._dashboard = DashboardTab(self, self.data, self._simple_view, self)
+        self._charts = ChartTools(self, setting, self)
+        self._conditions = LapConditions(self, setting, self)
         scope = setting.get("consistency_scope", "session")
         self._consistency_scope = scope if scope in CONSISTENCY_SCOPES else "session"
         self._consistency: dict = {}  # spread of mini-sector times shown on map (consistency mode)
@@ -860,12 +833,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         app_signal.refresh.connect(self.units_refresh)  # unit setting changed in settings dialog
         self._units_connected = True
 
-    @staticmethod
-    def int_setting(setting: dict, name: str, default: int) -> int:
-        value = setting.get(name, default)
-        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else default
+    int_setting = staticmethod(int_setting)
 
-    def release(self):
+    def release_resources(self):
         """Forget page vertices (page closed), worker process stopped (page timers that would stop it go too)
 
         Exports still running finish in worker process (other jobs dropped): files written whole. Page timers
@@ -879,7 +849,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         for handle in [job[0] for job in self._jobs] + ([self._limits_job] if self._limits_job is not None else []):
             if handle.future is not None and handle.name not in EXPORT_JOBS:
                 handle.future.cancel()  # waiting page jobs not done (running one ends soon), in fallback thread too
-        if self._exports > 0 or self._imports > 0:
+        if self._exports.exporting() or self._exports.importing():
             stop_worker(finish=True)
         else:
             kill_worker()
@@ -892,6 +862,25 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             self._units_connected = False
             with suppress(RuntimeError, TypeError):
                 app_signal.refresh.disconnect(self.units_refresh)
+        for part in self.parts():
+            part.release()
+        self.release_lap_data()
+
+    def release_lap_data(self):
+        """Page closed: loaded laps & everything kept per lap forgotten at once (not after 60 s like a hidden page,
+        see release_laps), a loading still running ends unread (load timer stopped)"""
+        self._lap_cache.clear()
+        self._cache_mtime.clear()
+        self._loaded = {}
+        self._prepared_laps, self._prepared_charts, self._prepared_chart = [], [], None
+        self.clear_lap_caches()
+        forget_increasing()
+        self.data.release()  # never reads unit settings (unloaded while app quits)
+
+    def parts(self) -> tuple[PagePart, ...]:
+        """Page parts (children of page)"""
+        return (self._conditions, self._dashboard, self._session, self._math, self._charts, self._exports,
+                self._corner_table)
 
     def run_job(self, name: str, work: Callable[[], Any], done: Callable[[Any], None]):
         """Run work in a thread, done(result) called on page thread once finished (result None if failed)"""
@@ -966,7 +955,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         entries = {entry.file.path: entry for entry in self.all_entries()}
         self.lap_model.update_rows(  # conditions tooltip (temperatures, fuel) in new units, list kept in place
             lambda row: {"tip": self.entry_conditions(entries[row["path"]])} if row["path"] in entries else {})
-        self.sessionChanged.emit()
+        self._session.changed.emit()
 
     # Properties
     def _tracks_get(self) -> list[str]:
@@ -1012,6 +1001,138 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self.lap_model.update_rows(  # car brand logos of session headers, list kept in place
             lambda row: {"logo": brand_logo_url(row["brand"])} if row["kind"] == "session" and row.get("brand") else {})
 
+    # Page parts (composed children, own state & slots): QML backend.<part>.<member>
+    @Property(QObject, constant=True)
+    def conditions(self) -> LapConditions:
+        """Similar conditions reference & setup differences (see lap_conditions)"""
+        return self._conditions
+
+    @Property(QObject, constant=True)
+    def dashboard(self) -> DashboardTab:
+        """Simple view & Show menu (see lap_dashboard)"""
+        return self._dashboard
+
+    @Property(QObject, constant=True)
+    def session(self) -> SessionTab:
+        """Session tab: every lap of a session of current track (see lap_session)"""
+        return self._session
+
+    def session_shown(self) -> bool:
+        """Session tab shown (its lap values read)"""
+        return self._side_tab == 4
+
+    @Property(QObject, constant=True)
+    def math(self) -> MathChannels:
+        """Math channels (see lap_charts)"""
+        return self._math
+
+    @Property(QObject, constant=True)
+    def charts(self) -> ChartTools:
+        """Value axis of panels & laps aligned on a braking point (see lap_charts)"""
+        return self._charts
+
+    @Property(QObject, constant=True)
+    def cornerTable(self) -> CornerTable:
+        """Corner by corner comparison with reference lap, coaching, corner card (see lap_corners)"""
+        return self._corner_table
+
+    def corner_rows(self) -> list[CornerComparison]:
+        """Corners of reference lap compared (corner table rows)"""
+        return self._corner_table.rows
+
+    def compared_lap(self) -> PlotLap | None:
+        """Lap compared corner by corner & on gain map"""
+        return self._corner_table.compared_lap()
+
+    def row_label(self, row: CornerComparison) -> str:
+        return self._corner_table.row_label(row)
+
+    def lap_corner_stats(self, lap: PlotLap) -> tuple[ResampledLap, list[CornerStats | None]]:
+        return self._corner_table.lap_corner_stats(lap)
+
+    def resampled(self, lap: PlotLap) -> ResampledLap:
+        return self._corner_table.resampled(lap)
+
+    def track_name(self) -> str:
+        """Track of displayed laps (see CornerTable.track_name)"""
+        return self._corner_table.track_name()
+
+    def track_limits(self) -> lap_map.TrackLimits | None:
+        """Track edges of current track (game coordinates), None if unknown"""
+        return self._limits
+
+    def track_edges(self) -> tuple[list[float], list[float]]:
+        """Track edge offsets along base line"""
+        return self._edges
+
+    def compared_changed(self):
+        """Compared lap changed: corner labels & colors of map (rest of map unchanged: not read again by QML)"""
+        if self._map:
+            self._map["corners"] = self.map_corner_points()
+            self._map["sectors"] = self.map_sector_labels()
+            if self._map_mode in ("gain", "line", "corners"):  # colors depend on compared lap
+                self.build_colored_line(self._map_view[2])
+                self.bump_revision()
+            self.mapCornersChanged.emit()
+
+    def corners_found(self):
+        """Corners found again (sensitivity changed): map corners, driving points & thick lines built again"""
+        if self._map:
+            self._map["corners"] = self.map_corner_points()
+            self._map["points"] = self.map_driving_points()
+            self._band_cache = OrderedDict()
+            self._band_generation += 1
+            self._preview_step = math.nan
+            self._band_cache_applied = False
+            self.build_map_bands()
+            self.bump_revision()
+            self.mapDataChanged.emit()
+
+    def alignment_moved(self):
+        """Laps shifted on another braking point: legend offsets, panels & charts again"""
+        self._legend = [dict(row, offset=legend_offset(self.data, row["key"])) for row in self._legend]
+        self.legend_model.sync(self._legend)
+        self.build_panels()
+        self.drop_unused_vertices()
+        self.bump_revision()
+        self.chartChanged.emit()
+
+    def autoscale_changed(self, autoscale: set[str]):
+        """Panels fitted to visible part of lap changed"""
+        self._panels = [dict(panel, autoscale=panel["column"] in autoscale) for panel in self._panels]
+        self.panelsChanged.emit()
+
+    def drop_panel_weight(self, column: str) -> dict[str, float]:
+        """Panel height of a channel no longer shown forgotten, panel heights left"""
+        self._weights.pop(column, None)
+        return self._weights
+
+    @Property(QObject, constant=True)
+    def exports(self) -> LapExports:
+        """MoTeC & CSV exports, imports, delta best, pictures & corner report (see lap_export)"""
+        return self._exports
+
+    def import_motec(self, filenames: list[str], background: bool = True,
+                     done: Callable[[list[tuple[str, list[str], str]]], None] | None = None):
+        """MoTeC logs imported as page jobs (read by ui/lap_library.py as page.import_motec, see LapExports)"""
+        self._exports.import_motec(filenames, background, done)
+
+    def shown_track(self) -> str:
+        """Track folder shown ("Track - Class"), empty if none (laps of another circuit opened)"""
+        return self._track
+
+    def track_map(self) -> dict:
+        """Track map shapes & labels (see trackMap), empty if none"""
+        return self._map
+
+    def corner_table(self) -> list[dict]:
+        """Corner table rows (see CornerTable.items)"""
+        return self._corner_table.table()
+
+    def coaching_rows(self) -> list[dict]:
+        """Corners where compared lap loses most time (see CornerTable.coaching)"""
+        return self._corner_table.coaching_rows()
+
     @Property(QObject, constant=True)
     def laps(self) -> QObject:
         return self.lap_model
@@ -1049,7 +1170,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
     @Property(bool, notify=statusChanged)
     def loading(self) -> bool:
         """Laps or lap infos being read or MoTeC logs imported (busy indicator)"""
-        return self._loader is not None or self._imports > 0 or self.reading_infos()
+        return self._loader is not None or self._exports.importing() or self.reading_infos()
 
     @Property(int, notify=revisionChanged)
     def revision(self) -> int:
@@ -1095,35 +1216,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             lambda: [{"x": self.data.x_at_distance(distance), "label": f"S{index + 2}", "index": index + 1}
                      for index, distance in enumerate(self.data.sector_lines)])
 
-    @Property(QObject, constant=True)
-    def cornerModel(self) -> QObject:
-        """Corner table rows (see corners), rows kept while their corner stays: QML keeps their items"""
-        return self.corner_model
-
-    @Property(int, notify=cornersChanged)
-    def cornerCount(self) -> int:
-        """Corners found on reference lap (cornerRanges length, without building it)"""
-        return len(self._corner_rows)
-
-    @Property(float, notify=cornersChanged)
-    def cornerMaxDelta(self) -> float:
-        """Largest corner time delta (bars of corner table scaled on it), at least 0.05 s"""
-        return max((abs(row["bar"]) for row in self._corners if row["kind"] == "corner"), default=0.0) or 0.05
-
-    @Slot(int, result=int)
-    def cornerPosition(self, index: int) -> int:
-        """Corner table row of corner (shown when selected on map), -1 if none"""
-        return next((number for number, row in enumerate(self._corners)
-                     if row["kind"] == "corner" and row["index"] == index), -1)
-
     @Property(dict, notify=mapCornersChanged)
     def mapCorners(self) -> dict:
         """Corner labels & sector labels of map (also in trackMap): changed alone when compared lap changes"""
         return {"corners": self._map.get("corners", []), "sectors": self._map.get("sectors", [])} if self._map else {}
-
-    @Property(list, notify=cornersChanged)
-    def cornerMarks(self) -> list[dict]:
-        return self._corner_marks
 
     @Property(dict, notify=mapDataChanged)
     def trackMap(self) -> dict:
@@ -1136,14 +1232,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             self.build_gcircle(True)
         return self._gcircle
 
-    @Property(list, notify=cornersChanged)
-    def corners(self) -> list[dict]:
-        return self._corners
-
-    @Property(int, notify=cornersChanged)
-    def hysteresis(self) -> int:
-        return self._hysteresis
-
     @Property(list, notify=chartChanged)
     def comparedLaps(self) -> list[dict]:
         """Laps that can be compared with reference (corner table, gain map): key, label, color"""
@@ -1151,15 +1239,6 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         return self.chart_list(
             "comparedLaps", tuple((lap.key, lap.color.rgba()) for lap in laps),
             lambda: [{"key": lap.key, "label": self.short_label(lap.key), "color": lap.color.name()} for lap in laps])
-
-    @Property(str, notify=cornersChanged)
-    def compareKey(self) -> str:
-        lap = self.compared_lap()
-        return lap.key if lap is not None else ""
-
-    @Property(str, notify=cornersChanged)
-    def cornerSort(self) -> str:
-        return self._corner_sort
 
     @Property(str, notify=chartChanged)
     def speedUnit(self) -> str:
@@ -1315,7 +1394,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 "visible": channel.column in self.visible,
                 "available": not self.data.laps or self.data.available(channel),
             })
-        return menu + self.math_menu()
+        return menu + self._math.math_menu()
 
     @Property(list, constant=True)
     def channelPresets(self) -> list[dict]:
@@ -1323,36 +1402,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
 
     @Property(list, notify=mathChanged)
     def mathChannels(self) -> list[dict]:
-        """Math channels: name, expression, unit, column"""
-        return [{"name": channel.name, "expression": channel.expression, "unit": channel.unit,
-                 "column": channel.column} for channel in self._math]
-
-    @Property(list, constant=True)
-    def mathPresets(self) -> list[dict]:
-        """Built-in math channels: understeer angle, brake release & throttle application rates"""
-        return [{"title": tr(name), "expression": expression, "unit": unit} for name, expression, unit in MATH_PRESETS]
-
-    @Property(list, notify=channelsChanged)
-    def mathInputs(self) -> list[str]:
-        """Channel names math channels can use (editor list)"""
-        return self.math_inputs()
-
-    @Property(dict, notify=cornersChanged)
-    def alignment(self) -> dict:
-        """Corner laps are aligned on (braking start) & offset of each lap, empty if not aligned"""
-        return self.alignment_info()
-
-    @Property(int, notify=optionsChanged)
-    def similarTolerance(self) -> int:
-        """Track temperature difference (°C) of laps in similar conditions"""
-        return self._similar_tolerance
-
-    @Property(list, notify=optionsChanged)
-    def similarTolerances(self) -> list[dict]:
-        """Track temperature differences to choose from: degrees, text in user unit"""
-        symbol = lap_viewer.display_units()["temperature"][1]
-        factor = 1.8 if symbol.endswith("F") else 1.0
-        return [{"value": degrees, "text": f"±{number_text(degrees * factor)}{symbol}"} for degrees in SIMILAR_TOLERANCES]
+        """Math channels: name, expression, unit, column (also backend.math.items)"""
+        return self._math.math_items()
 
     @Property(int, notify=optionsChanged)
     def smoothing(self) -> int:
@@ -1485,14 +1536,14 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self.fill_list()
         self.load_laps()
         if self._side_tab == 4:  # session tab shown (page opened on it, track changed): its laps read
-            self.start_session_job()
+            self._session.start_job()
 
     def reset_circuit_state(self):
         """Analysis of former circuit laps not carried over: corner alignment, compared lap, session tab, chart
         markers, selected corner (track or circuit changed)"""
-        self._align_apex = -1.0  # laps aligned on a corner
-        self._compare_key = ""
-        self._session_key = ""
+        self._charts.align_apex = -1.0  # laps aligned on a corner
+        self._corner_table.compare_key = ""
+        self._session.reset()
         self._map_range = (-1.0, -1.0)  # chart markers A & B
         if self._selected_corner != -1:
             self._selected_corner = -1
@@ -1765,16 +1816,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 for side, line in (("left", limits.left), ("right", limits.right)):
                     saved[side] = [[round(d, 2), round(x, 2), round(y, 2)]
                                    for d, x, y in zip(line.distances, line.xs, line.ys)]
-            temp = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"
             try:  # written whole (temporary file renamed): never read half written
                 os.makedirs(os.path.dirname(target), exist_ok=True)
-                with open(temp, "w", encoding="utf-8") as file:
-                    json.dump(saved, file)
-                os.replace(temp, target)
+                write_json(target, saved, raise_error=True)
             except OSError as error:
                 logger.warning("LAP VIEWER: unable to save track limits: %s", error)
-                with suppress(OSError):
-                    os.remove(temp)
 
         self.run_job("track limits cache", saving, lambda _: None)
 
@@ -2109,7 +2155,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 extra = os.path.basename(os.path.dirname(key))
             else:
                 timestamp = lap_timestamp_of(entry.file.filename)
-                extra = time.strftime("%d/%m %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
+                extra = day_month_minutes(timestamp)
             labels[key] = f"{label} ({extra})" if extra else label
         counts = Counter(labels.values())
         seen: Counter = Counter()
@@ -2175,7 +2221,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._expanded = expanded
         self.show_rows(rows)
         self._no_match = not matched and bool(self.entries or self.external)
-        self.sessionChanged.emit()
+        self._session.changed.emit()
         self._best_text = trm(f"Theoretical best: {format_laptime(best_total)}") if best_total > 0 else ""
         self.listChanged.emit()
 
@@ -2214,7 +2260,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             start = first.info.get("session_start")  # recorded, else when first lap started
             timestamp = start if isinstance(start, (int, float)) else (
                 lap_timestamp_of(first.file.filename) - first.file.lap_time)
-            date = time.strftime("%d/%m %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
+            date = day_month_minutes(timestamp)
             title = f"{tr(session)}  {date}".strip()
             key = f"{session} {first.file.filename[:19]}"
         best = min((entry.file.lap_time for entry in group if entry.file.valid and entry.file.lap_time > 0), default=0)
@@ -2461,7 +2507,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
 
     def trash_folder(self) -> str:
         """New trash batch folder (deletion time)"""
-        return os.path.join(self.folder, TRASH_FOLDER, time.strftime("%Y-%m-%d %H-%M-%S"))
+        return os.path.join(self.folder, TRASH_FOLDER, file_stamp())
 
     def apply_delete(self, paths: list[str], pending: bool = False) -> bool:
         """Move laps to trash, forget their caches, undo kept (pending: laps deleted while being read, restored with
@@ -2828,7 +2874,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
 
     def is_loading(self) -> bool:
         """Laps or lap infos loading, charts built, importing or exporting in background"""
-        return (self._loader is not None or self._exports > 0 or self._imports > 0 or self.reading_infos()
+        return (self._loader is not None or self._exports.exporting() or self._exports.importing() or self.reading_infos()
                 or bool(self._chart_afters) or self._placing > 0 or self.map_pending() or self._limits_reading)
 
     def map_pending(self) -> bool:
@@ -3042,7 +3088,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         thread: trace data snapshot, lap list entries, visible channels, envelope shown, lap color placeholder"""
         placing = (self._limits, self._geometry, self._official_line, dict(self._line_cache))  # see prepare_placements
         return (self.data.snapshot(), {entry.file.path: entry for entry in self.all_entries()}, list(self.visible),
-                self._envelope, lap_color(0), placing, self.dashboard_columns())
+                self._envelope, lap_color(0), placing, self._dashboard.columns())
 
     def prepare_chart(self, chart: tuple, plan: tuple, laps: dict[str, LapData | None], prepared: tuple[dict, dict],
                       checks: dict) -> tuple[TraceData, dict[str, Vertices], dict]:
@@ -3175,7 +3221,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             return f"{os.path.basename(os.path.dirname(path))}: {label}"
         session = str(entry.info.get("session", ""))
         timestamp = lap_timestamp_of(entry.file.filename)
-        date = time.strftime("%d/%m", time.localtime(timestamp)) if timestamp > 0 else ""
+        date = day_month(timestamp)
         where = " ".join(filter(None, [tr(session) if session else "", date]))
         return f"{label} · {where}" if where else label
 
@@ -3225,23 +3271,21 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         self._cache_mtime.clear()
         self.data.set_laps([])
         self.clear_lap_caches()
+        forget_increasing()
         self.rebuild_chart()
         self._released = True
         logger.info("LAP VIEWER: loaded laps released while hidden")
 
     def clear_lap_caches(self):
         """Forget results kept per loaded lap (they keep lap data in memory)"""
-        for cache in (self._line_cache, self._lap_corners, self._lap_offsets, self._events, self._yaw, self._grids,
-                      self._zones, self._placements, self._trackouts, self._slips, self._g_laps, self._g_drawn,
-                      self._resampled, self._normals, self._turned, self._lap_shapes):
+        for cache in (self._line_cache, self._lap_offsets, self._events, self._yaw, self._grids,
+                      self._zones, self._placements, self._slips, self._g_laps, self._g_drawn,
+                      self._normals, self._turned, self._lap_shapes):
             cache.clear()
-        self._corner_key = ()
-        self._corner_rows = []
-        self._ideal = None
+        self._corner_table.forget()
         self._color_lines = ()
         self._colored_steps = {}
         self._line_offsets = {}
-        self._official_key = None
         self._edges_cache = ()
         self._edge_normals = ()
         self._g_points = []
@@ -3282,7 +3326,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         elif index == 1:  # G circle: zoomed part of charts (not followed while hidden)
             self.update_gcircle_zoom()
         if index == 4:  # session tab: values read from lap files
-            self.start_session_job()
+            self._session.start_job()
 
     @Slot(bool)
     def setSimpleView(self, enabled: bool):
@@ -3292,12 +3336,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             self._simple_view = enabled
             save_viewer_setting(self.folder, simple_view=enabled)
             self.optionsChanged.emit()
-        if enabled and not self._dashboard_opened:  # simple view: its series built in background from now on
-            self._dashboard_opened = True
+        if enabled and not self._dashboard.opened:  # simple view: its series built in background from now on
+            self._dashboard.opened = True
             self.update_chart(self.dashboard_warmed)
 
     def dashboard_warmed(self):
-        """Simple view series & ranges built (see dashboard_columns): read at cursor without computing"""
+        """Simple view series & ranges built (see DashboardTab.columns): read at cursor without computing"""
 
     @Slot("QVariant")
     def setLayoutState(self, state):
@@ -3390,7 +3434,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         """Vertex key of lap series (trace data of page by default)"""
         data = data or self.data
         signature = data.signature(channel, lap)  # only rescaled laps drawn again (reference lap changed)
-        return f"{self.prefix}{lap.key}|{channel.column}|{signature}{self.shift_key(lap.key, channel, data)}"
+        return f"{self.prefix}{lap.key}|{channel.column}|{signature}{shift_key(data or self.data, lap.key, channel)}"
 
     def envelope_key(self, column: str, data: TraceData | None = None) -> str:
         """Vertex key of channel envelope over shown laps (trace data of page by default)"""
@@ -3469,7 +3513,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 work += sum(len(lap.data) for lap in laps if not VertexStore.has(self.series_key(lap, part_channel)))
             if self._envelope and not channel.parts and len(laps) >= 3 and column not in DELTA_CHANNELS:
                 work += 0 if VertexStore.has(self.envelope_key(column)) else sum(len(lap.data) for lap in laps)
-        for column in self.dashboard_columns():  # simple view values (tab opened)
+        for column in self._dashboard.columns():  # simple view values (tab opened)
             channel = CHANNEL_MAP.get(column)
             if channel is not None and not channel.parts and self.data.available(channel):
                 work += sum(len(lap.data) for lap in laps if not self.data.series_cached(channel, lap))
@@ -3505,7 +3549,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         generation = self._chart_generation
         snapshot = self.data.snapshot()
         changes, visible, envelope = list(self._chart_changes), list(self.visible), self._envelope
-        dashboard = self.dashboard_columns()
+        dashboard = self._dashboard.columns()
 
         def building() -> dict[str, Vertices]:
             pause = Yielder(cancelled=lambda: generation != self._chart_generation)
@@ -3553,16 +3597,16 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
     def rebuild_chart_now(self):
         """Vertices & properties of every view from displayed laps"""
         self.update_base()
-        self.build_official()
-        self.build_corners()
-        self.update_alignment()  # laps aligned on a braking point: shifted before charts are built
+        self._corner_table.build_official()
+        self._corner_table.build_corners()
+        self._charts.update_alignment()  # laps aligned on a braking point: shifted before charts are built
         entries = {entry.file.path: entry for entry in self.all_entries()}
         self._legend = [
             {"key": lap.key, "label": self.short_label(lap.key), "full": lap.label,
              "color": lap.color.name(), "reference": lap is self.data.reference, "clean": lap.clean,
              "tip": self.entry_conditions(entries[lap.key]) if lap.key in entries
              else self.entry_conditions(LapEntry(LapFile("", lap.key, True), lap.data.meta)),
-             "excluded": self.excluded_text(lap), "offset": self.legend_offset(lap.key)}
+             "excluded": self.excluded_text(lap), "offset": legend_offset(self.data, lap.key)}
             for lap in self.data.laps
         ]
         self.legend_model.sync(self._legend)
@@ -3594,6 +3638,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         keep = {series["key"] for panel in self._panels for series in panel["series"]}
         keep.update(key for panel in self._panels for series in panel["series"] for _, key in series["lods"])
         keep.update(self._xy_keys)
+        keep.update(self._session.shape_keys().values())
         keep.update(panel["envelope"] for panel in self._panels if panel["envelope"])
         if self._overview:
             keep.add(self._overview["key"])
@@ -3654,12 +3699,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 else:
                     note = tr("Check a second lap to compare")
             panels.append({
-                "ticks": self.axis_ticks(channel, low, high),  # value grid between range limits
+                "ticks": axis_ticks(channel, low, high),  # value grid between range limits
                 "column": column, "title": channel_title(channel), "unit": self.data.unit_of(channel),
                 "weight": self._weights.get(column, channel.weight), "low": low, "high": high,
                 "lowText": format_axis_value(channel, low, span), "highText": format_axis_value(channel, high, span),
                 "zero": low < 0 < high, "percent": channel.fixed_range in PERCENT_RANGES, "series": series,
-                "available": available, "note": note, "envelope": envelope, "autoscale": column in self._autoscale,
+                "available": available, "note": note, "envelope": envelope, "autoscale": column in self._charts.autoscale,
                 "parts": [
                     {"label": part_label(part),
                      "color": part_color(part) if single or reference is None
@@ -3731,7 +3776,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         """Visible channels or chart settings changed: panels built again (series built in background if long)"""
         if save:
             save_viewer_setting(self.folder, channels=self.visible)
-        self.dashboardChanged.emit()  # Show menu & simple view items follow at once (charts once built)
+        self._dashboard.changed.emit()  # Show menu & simple view items follow at once (charts once built)
         self.update_chart(self.panels_updated)
 
     def panels_updated(self):
@@ -3766,7 +3811,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             start, end = self.data.distance_at_x(start, shown), self.data.distance_at_x(end, shown)
         self.build_panels()
         self.build_overview()
-        self.build_corner_marks()
+        self._corner_table.build_corner_marks()
         self.drop_unused_vertices()  # series along former axis forgotten
         self.bump_revision()
         self.chartChanged.emit()
@@ -3860,7 +3905,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         same state, nothing worked out.
         """
         key = (x, self._revision, self.data.version, id(self._panels), id(self._map), self._map_shown, self._side_tab,
-               self._simple_view, id(self._dashboard_items), self._map_view, self._map_options.get("trail"))
+               self._simple_view, id(self._dashboard.items), self._map_view, self._map_options.get("trail"))
         cached = self._cursor_state
         if cached is not None and cached[0] == key:
             return cached[1]
@@ -3868,10 +3913,22 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
         state = {"title": self.cursorTitle(x), "values": self.cursor_values(x, False),
                  "map": self.map_cursor(x, False) if self._map_shown else [],
                  "g": self.gCursor(x) if self._side_tab == 1 else [],
-                 "inputs": self.inputsCursor(x) if self._simple_view else [],
-                 "dashboard": self.dashboardCursor(x) if self._simple_view else []}
+                 "inputs": self._dashboard.inputs_at(x) if self._simple_view else [],
+                 "dashboard": self._dashboard.cursor_values(x) if self._simple_view else []}
         self._cursor_state = (key, state)
         return state
+
+    @Slot(float, bool, result=dict)
+    def playbackStep(self, seconds: float, full: bool) -> dict:
+        """Playback frame in one call: axis position at reference lap time, cursor state if full (values & texts,
+        a few times a second), else only map & G circle positions as flat lists (cars move every frame, see
+        map_positions) while shown"""
+        x = self.data.x_at_reference_time(seconds)
+        if full:
+            return {"x": x, "state": self.cursorState(x)}
+        self.build_trails(x)
+        return {"x": x, "mapXY": self.map_positions(x)[0] if self._map_shown else [],
+                "gXY": self.g_positions(x) if self._side_tab == 1 else []}
 
     @Slot(float)
     def copyValues(self, x: float):
@@ -3927,7 +3984,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
     @Slot(float, float, result=dict)
     def rangeStats(self, start: float, end: float) -> dict:
         """Between markers A & B: each lap time taken (and gap to reference), min / max / mean of channels"""
-        channels = [channel for channel in self.csv_channels() if channel.column not in DELTA_CHANNELS]
+        channels = [channel for channel in self._exports.csv_channels() if channel.column not in DELTA_CHANNELS]
         stats = self.data.range_stats(start, end, channels)
         if not stats:
             return {}
@@ -3956,58 +4013,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             "title": f"{self.cursorTitle(low)} → {self.cursorTitle(high)}", "laps": laps, "channels": channel_rows,
         }
 
-    # Show menu & simple view (see lap_dashboard)
-    @Property(list, notify=dashboardChanged)
-    def dashboardCatalog(self) -> list[dict]:
-        """Show menu: every group & its channels, shown & recorded"""
-        return self.dashboard_catalog()
-
-    @Property(list, notify=dashboardChanged)
-    def dashboardLayout(self) -> list[dict]:
-        """Groups & items shown (recorded & picked)"""
-        return self.dashboard_layout()
-
-    # Session tab (see lap_session)
-    @Property(dict, notify=sessionChanged)
-    def sessionState(self) -> dict:
-        """Sessions of track (key, title), session shown (key) & its laps (data, see sessionData): one read"""
-        return self.session_state()
-
-    @Property(list, notify=sessionChanged)
-    def sessions(self) -> list[dict]:
-        return self.session_state()["sessions"]
-
-    @Property(str, notify=sessionChanged)
-    def sessionKey(self) -> str:
-        return self.session_state()["key"]
-
-    @Property(dict, notify=sessionChanged)
-    def sessionData(self) -> dict:
-        """Laps of shown session: number, time, valid, fuel & tyre wear used, off tracks, track limits, shown"""
-        return self.session_state()["data"]
-
-    # Corners (see lap_corners)
-    @Property(list, notify=cornersChanged)
-    def coaching(self) -> list[dict]:
-        """Corners where compared lap loses most time (up to 3): row index, name, time lost, causes"""
-        return self._coaching
-
-    @Property(str, notify=cornersChanged)
-    def coachingLap(self) -> str:
-        lap = self.compared_lap()
-        return self.short_label(lap.key) if lap is not None else ""
-
-    @Property(list, notify=cornersChanged)
-    def cornerRanges(self) -> list[list[float]]:
-        """Axis range of every corner in lap order (previous / next corner keys)"""
-        return [self.cornerRange(index) for index in range(len(self._corner_rows))]
-
     # XY tab: scatter of two channels, time spent in value ranges (histogram)
     @Property(list, notify=channelsChanged)
     def xyChannels(self) -> list[dict]:
         """Single channels available in shown laps: column, title (unit)"""
         rows = []
-        for channel in (*CHANNELS, *(CHANNEL_MAP[channel.column] for channel in self._math)):
+        for channel in (*CHANNELS, *(CHANNEL_MAP[channel.column] for channel in self._math.channels)):
             if channel.parts or (self.data.laps and not self.data.available(channel)):
                 continue
             unit = self.data.unit_of(channel)
@@ -4162,9 +4173,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
                 if not lat or not lon:
                     continue
                 # Game: lateral positive to the left, longitudinal positive when braking
-                xs, ys = [-value for value in lat], [-value for value in lon]
-                peak = percentile([max(abs(x), abs(y)) for x, y in zip(xs, ys)], G_PERCENTILE)
-                cached = self._g_laps[lap.key] = (lap.data, lap.data.distance, xs, ys, peak)
+                lat_g, long_g = coordinate_array(lat), coordinate_array(lon)  # packed like lap columns (kept per lap)
+                lat_g.extend([-value for value in lat])
+                long_g.extend([-value for value in lon])
+                peak = percentile([max(abs(x), abs(y)) for x, y in zip(lat_g, long_g)], G_PERCENTILE)
+                cached = self._g_laps[lap.key] = (lap.data, lap.data.distance, lat_g, long_g, peak)
             self._g_points.append((cached[1], cached[2], cached[3], lap))
             peaks.append(cached[4])
         if not self._g_points:
@@ -4208,6 +4221,16 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, DashboardTab, LapExport
             points.append({"x": interpolate(distances, xs, distance), "y": interpolate(distances, ys, distance),
                            "color": lap.color.name(), "lap": lap.key})
         return points
+
+    def g_positions(self, x: float) -> list[float]:
+        """G circle position of each lap at cursor as one flat list (x, y of each lap, see gCursor)"""
+        if self._gcircle_stale:
+            self.build_gcircle(True)
+        positions: list[float] = []
+        for distances, xs, ys, lap in self._g_points:
+            distance = self.data.lap_distance_at_x(lap, x)
+            positions += (interpolate(distances, xs, distance), interpolate(distances, ys, distance))
+        return positions
 
     # Replay
     def replay_target(self, lap: PlotLap, x: float) -> tuple[str, float] | None:

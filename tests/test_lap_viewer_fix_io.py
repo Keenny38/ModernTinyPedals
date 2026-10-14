@@ -261,32 +261,32 @@ def test_library_import_is_page_job(viewer, monkeypatch, tmp_path):  # noqa: F81
     page = viewer.backend
     library = open_library(viewer)
     library.import_logs()
-    assert page._imports == 1 and page.loading  # page close lets it finish, busy indicator shown
+    assert page.exports._imports == 1 and page.loading  # page close lets it finish, busy indicator shown
     assert "MoTeC import" in [handle.name for handle, *_ in page._jobs]
     assert "MoTeC import" in lap_backend.EXPORT_JOBS  # app exit waits for it
     page.wait_jobs()
     wait_library(library)
-    assert page._imports == 0 and library.top_items()[0].text(0) == "Monza run"
+    assert page.exports._imports == 0 and library.top_items()[0].text(0) == "Monza run"
     assert not page.external  # library import: laps not added to viewer
     library.import_logs()
     library.close()
     library.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     page.wait_jobs()  # library gone before import ended: nothing to update
-    assert page._imports == 0
+    assert page.exports._imports == 0
 
 
 def test_import_stopped_with_worker(backend, monkeypatch, tmp_path):  # noqa: F811
     """Worker process died with an import (never run again in page process): done gets None, told clearly"""
     jobs = []
     monkeypatch.setattr(backend, "run_process_job", lambda name, done, function, *args: jobs.append(done))
-    backend.import_motec([str(tmp_path / "huge.ld")])
-    assert backend._imports == 1
+    backend.exports.import_motec([str(tmp_path / "huge.ld")])
+    assert backend.exports._imports == 1
     jobs.pop()(None)
-    assert "import stopped, file too big or unreadable" in backend.status and backend._imports == 0
-    backend.import_folder(str(tmp_path))
+    assert "import stopped, file too big or unreadable" in backend.status and backend.exports._imports == 0
+    backend.exports.import_folder(str(tmp_path))
     jobs.pop()(None)
-    assert "Unable to import laps: import stopped" in backend.status and backend._imports == 0
+    assert "Unable to import laps: import stopped" in backend.status and backend.exports._imports == 0
 
 
 # --- Laps of other drivers' folders (J29, J30, J31, J32)
@@ -359,19 +359,19 @@ def test_added_lap_as_delta_best(backend, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     mate = tmp_path / "Teammate"
     write_lap(str(mate), 7, 88.5, info=lap_info(combo=TRACK))
-    backend.import_folder(str(mate), background=False)
+    backend.exports.import_folder(str(mate), background=False)
     foreign = next(entry.file.path for entry in backend.external)
-    backend.exportDeltaBest(foreign)  # teammate lap of this track & class as delta target
+    backend.exports.exportDeltaBest(foreign)  # teammate lap of this track & class as delta target
     backend.wait_jobs()  # lap read, then delta best written in background
     target = os.path.join(cfg.path.delta_best, f"{TRACK}.csv")
     assert os.path.exists(target) and "1:28.500" in backend.status
 
     other = import_log(backend.folder, "Monza log", [100.0], track="Monza")
     backend.add_external(other)
-    backend.exportDeltaBest(other[0])  # was: nothing done, nothing told
+    backend.exports.exportDeltaBest(other[0])  # was: nothing done, nothing told
     assert "another track" in backend.status
     backend.reference_key = ""
-    backend.exportDeltaBest("")
+    backend.exports.exportDeltaBest("")
     assert "Check laps" in backend.status
 
 

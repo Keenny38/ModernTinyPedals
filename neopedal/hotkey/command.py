@@ -224,13 +224,34 @@ def open_director():
     return module.active_director() if module is not None else None
 
 
+def director_page():
+    """Director of the Broadcast Director page if open, turned on or off"""
+    module = sys.modules.get("neopedal.ui.quick.director_backend")
+    return module.director_page() if module is not None else None
+
+
+def hotkey_director_toggle():
+    """Command - Broadcast Director: director on or off (page open)"""
+    director = director_page()
+    if director is not None:
+        director.setEnabled(not director.enabled)
+
+
+def hotkey_race_calculator_toggle():
+    """Command - Race Calculator on or off (page open)"""
+    module = sys.modules.get("neopedal.ui.quick.race_backend")  # imported only by the page
+    backend = module.race_page() if module is not None else None
+    if backend is not None:
+        backend.setGameData(not backend.game_data)
+
+
 def director_step(offset: int):
     """Car on air: next (1) or previous (-1) by place; page closed: game camera on next or previous car"""
     director = open_director()
     if director is not None:
         director.stepCar(offset)
         return
-    from ..ui.game_rest import game_command
+    from ..game_rest import game_command
 
     resource = "/rest/watch/focusForward" if offset > 0 else "/rest/watch/focusBackward"
     threading.Thread(target=game_command, args=("PUT", resource), daemon=True, name="Game camera").start()
@@ -271,45 +292,45 @@ def hotkey_director_starting_grid():
     """Command - Broadcast Director: starting grid on the graphics, or hidden (page open)"""
     director = open_director()
     if director is not None:
-        director.showOnDemand("grid")
+        director.graphics.showOnDemand("grid")
 
 
 def hotkey_director_event_card():
     """Command - Broadcast Director: event card on the graphics, or hidden (page open)"""
     director = open_director()
     if director is not None:
-        director.showOnDemand("event")
+        director.graphics.showOnDemand("event")
 
 
 def hotkey_director_classification():
     """Command - Broadcast Director: classification captured & shown, or hidden when shown (page open)"""
     director = open_director()
     if director is not None:
-        if director.onDemand == "results":
-            director.showOnDemand("results")
+        if director.graphics.onDemand == "results":
+            director.graphics.showOnDemand("results")
         else:
-            director.captureResults()
+            director.graphics.captureResults()
 
 
 def hotkey_director_championship():
     """Command - Broadcast Director: championship standings on the graphics, or hidden (page open)"""
     director = open_director()
     if director is not None:
-        director.showOnDemand("champ")
+        director.graphics.showOnDemand("champ")
 
 
 def hotkey_director_hide_graphics():
     """Command - Broadcast Director: every graphic hidden, or shown again (page open)"""
     director = open_director()
     if director is not None:
-        director.setGraphic("hidden", not director.graphicsSettings["hidden"])
+        director.graphics.setGraphic("hidden", not director.graphics.graphicsSettings["hidden"])
 
 
 def hotkey_director_next_layout():
     """Command - Broadcast Director: next layout preset of the graphics (page open)"""
     director = open_director()
     if director is not None:
-        director.nextLayoutPreset()
+        director.graphics.nextLayoutPreset()
 
 
 def hotkey_pace_notes_playback():
@@ -398,6 +419,7 @@ COMMANDS_GENERAL = (
     ("spectate_mode", hotkey_spectate_mode),
     ("spectate_next_driver", hotkey_spectate_next_driver),
     ("spectate_previous_driver", hotkey_spectate_previous_driver),
+    ("director_toggle", hotkey_director_toggle),
     ("director_next_car", hotkey_director_next_car),
     ("director_previous_car", hotkey_director_previous_car),
     ("director_auto", hotkey_director_auto),
@@ -409,6 +431,7 @@ COMMANDS_GENERAL = (
     ("director_championship", hotkey_director_championship),
     ("director_hide_graphics", hotkey_director_hide_graphics),
     ("director_next_layout", hotkey_director_next_layout),
+    ("race_calculator_toggle", hotkey_race_calculator_toggle),
     ("pace_notes_playback", hotkey_pace_notes_playback),
     ("cycle_deltabest_source", hotkey_cycle_deltabest_source),
     ("black_box_next_incident", hotkey_black_box_next_incident),

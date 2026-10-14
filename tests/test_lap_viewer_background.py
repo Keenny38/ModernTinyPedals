@@ -260,7 +260,7 @@ def test_motec_and_delta_best_exports_are_jobs(backend, monkeypatch, tmp_path): 
     page = backend
     target = tmp_path / "lap.ld"
     monkeypatch.setattr(lap_export.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
-    page.exportMotec(page.reference_key)
+    page.exports.exportMotec(page.reference_key)
     assert page.is_loading() and "MoTeC export" in [handle.name for handle, *_ in page._jobs]
     page.wait_jobs()
     assert target.exists() and page.status == "Exported: lap.ld" and not page.is_loading()
@@ -270,7 +270,7 @@ def test_motec_and_delta_best_exports_are_jobs(backend, monkeypatch, tmp_path): 
     monkeypatch.setattr(lap_export, "load_cached_lap", record_threads(lap_export, "load_cached_lap", calls))
     path = page.entries[0].file.path
     page._lap_cache.pop(path, None)  # read by job
-    page.exportDeltaBest(path)
+    page.exports.exportDeltaBest(path)
     assert "delta best" in [handle.name for handle, *_ in page._jobs]
     page.wait_jobs()
     assert off_thread(calls) and os.path.isfile(os.path.join(cfg.path.delta_best, f"{TRACK}.csv"))

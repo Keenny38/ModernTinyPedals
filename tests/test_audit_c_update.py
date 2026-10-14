@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -156,7 +157,8 @@ def test_run_installer_checks_signature(monkeypatch, signature, started):
     ("someone/fork", update.SIGNATURE_UNSIGNED, False),  # other repository: signature required
     ("", update.SIGNATURE_UNSIGNED, False),
     ("someone/fork", update.SIGNATURE_VALID, True),
-    ("someone/fork", update.SIGNATURE_UNKNOWN, True),  # not checked (not Windows)
+    ("someone/fork", update.SIGNATURE_UNKNOWN, False),  # not checked: signature required too
+    ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNKNOWN, True),
     ("someone/fork", update.SIGNATURE_INVALID, False),
 ])
 def test_run_installer_custom_repository_requires_signature(ui_env, monkeypatch, repo, signature, started):
@@ -831,3 +833,10 @@ def test_installer_matches_app_names():
     assert 'Type: files; Name: "{app}\\{#LegacyName}.exe"' in script
     assert f'#define AppFolder "{APP_ID}"' in script
     assert f"{APP_ID.lower()}.exe" == update.APP_EXECUTABLE
+    # Installed apps list shows NeoPedal as publisher; shortcuts of earlier names (old executable) removed
+    assert re.search(r"^AppPublisher=\{#AppName\}$", script, re.MULTILINE)
+    assert "TinyPedal" not in script.split("[Setup]", 1)[1].split("[Languages]", 1)[0]
+    for old_name in ("Modern Tiny Pedals", "ModernPedal"):
+        for shortcut in (f"{{group}}\\{old_name}.lnk", f"{{userdesktop}}\\{old_name}.lnk",
+                         f"{{group}}\\{{cm:UninstallProgram,{old_name}}}.lnk"):
+            assert f'Type: files; Name: "{shortcut}"' in script

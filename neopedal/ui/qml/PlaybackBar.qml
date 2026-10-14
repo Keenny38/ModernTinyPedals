@@ -67,7 +67,7 @@ RowLayout {
         onMoved: bar.chart.playSpeed = bar.chart.playSpeeds[Math.round(value)]
         ToolTip.visible: hovered && !pressed
         ToolTip.text: i18n.tr("Playback speed") + " (, .)"
-        ToolTip.delay: 600
+        ToolTip.delay: theme.tipDelay
         background: Item {
             x: speedSlider.leftPadding
             width: speedSlider.availableWidth
@@ -108,7 +108,7 @@ RowLayout {
             border.width: 2
             border.color: theme.base
             scale: speedSlider.pressed || speedSlider.hovered ? 1.15 : 1
-            Behavior on scale { NumberAnimation { duration: 120 } }
+            Behavior on scale { NumberAnimation { duration: theme.motionFast } }
         }
     }
     TpButton {
@@ -134,7 +134,7 @@ RowLayout {
         onMoved: bar.chart.setCursor(value, "key")
         ToolTip.visible: hovered && !pressed && !(bar.ready && bar.chart.hasCursor)
         ToolTip.text: i18n.tr("Drag to move along lap")
-        ToolTip.delay: 600
+        ToolTip.delay: theme.tipDelay
         Binding on value {
             when: !scrub.pressed
             value: bar.ready && bar.chart.hasCursor ? bar.chart.cursorX : 0
@@ -165,7 +165,7 @@ RowLayout {
             border.width: 2
             border.color: theme.base
             scale: scrub.pressed || scrub.hovered ? 1.15 : 1
-            Behavior on scale { NumberAnimation { duration: 120 } }
+            Behavior on scale { NumberAnimation { duration: theme.motionFast } }
         }
     }
     Text {

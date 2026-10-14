@@ -40,6 +40,7 @@ from typing import Any, get_type_hints
 from ..const_common import MAX_SECONDS
 from ..const_file import FileExt, StatsFile
 from ..validator import convert_value_type, purge_data_key
+from . import read_json
 from .json_setting import (
     create_backup_file,
     create_versioned_backup,
@@ -232,12 +233,7 @@ def load_stats_backup(filepath: str, name: str, filename: str = StatsFile.DRIVER
     """Stats of an automatic backup, None if invalid"""
     if not name.startswith(backup_prefix(filename)) or os.path.basename(name) != name:
         return None
-    try:
-        with open(os.path.join(filepath, name), encoding="utf-8") as jsonfile:
-            stats_user = json.load(jsonfile)
-    except (OSError, ValueError):
-        return None
-    return stats_user if isinstance(stats_user, dict) else None
+    return read_json(os.path.join(filepath, name), strict=False, dict_only=True)
 
 
 def get_sub_dict(source: dict, key_name: str) -> dict:
@@ -333,6 +329,9 @@ def add_driver_stats(
         # Check value type, auto correct if mismatch
         if not isinstance(loaded_dict[key], default_type[key]):
             loaded_dict[key] = convert_value_type(loaded_dict[key], default_dict[key], default_type[key])
+        # Reset NaN & infinity (json accepts them): never replaced by any new value otherwise
+        if isinstance(loaded_dict[key], float) and not isfinite(loaded_dict[key]):
+            loaded_dict[key] = default_dict[key]
         # Update laptime value faster than old value
         if DriverStats.is_lap_time(key):
             if loaded_dict[key] <= 0:  # reset invalid time
@@ -355,7 +354,7 @@ def load_stats_json_file(
 ) -> dict | None:
     """Load stats json file, create new if not exists, or returns "None" if invalid"""
     try:
-        with open(f"{filepath}{filename}{extension}", encoding="utf-8") as jsonfile:
+        with open(f"{filepath}{filename}{extension}", encoding="utf-8-sig") as jsonfile:  # BOM if edited by user
             stats_user = json.load(jsonfile)
             if not isinstance(stats_user, dict):
                 raise TypeError

@@ -83,7 +83,7 @@ def test_read_summaries_cached(tmp_path, monkeypatch):
     found = ri.read_summaries([str(folder)])
     assert [item.kind for item in found] == ["Practice"]  # race without player (online), broken file skipped
     calls = []
-    monkeypatch.setattr(rf, "read_results", lambda *args: calls.append(args))
+    monkeypatch.setattr(rf, "read_results", lambda *args, **kwargs: calls.append(args))
     assert ri.read_summaries([str(folder)]) == found and not calls  # files unchanged: not read again
     os.remove(folder / practice)
     assert ri.read_summaries([str(folder)]) == []
@@ -319,20 +319,20 @@ def lmu_results(tmp_path, ui_env, monkeypatch):
 
 
 def test_results_replay_button(lmu_results, monkeypatch):
-    from neopedal.ui import tools_view
+    from neopedal.ui.quick.replays_backend import ReplayAction
+    from neopedal.ui.quick.results_backend import REPLAY_TAB
 
     page, folder = lmu_results
     assert page.sessionHeader["replay"] == "24 Heures du Mans R1 1"
     assert [row["replay"] for row in page.sessionModel.rows] == [True, False]
     watched = []
-    replays = SimpleNamespace(backend=SimpleNamespace(watch_named=watched.append))
-    monkeypatch.setattr(tools_view, "open_tool", lambda path, parent: replays)
-    page.watchReplay()
-    assert watched == ["24 Heures du Mans R1 1"]
+    page.watchWanted.connect(watched.append)
+    page.watchReplay()  # replay of session opened, replay tab shown
+    assert watched == [ReplayAction("24 Heures du Mans R1 1")] and page.tabIndex == REPLAY_TAB
     page.select(str(folder / "2026_09_21_18_00_00-10P1.xml"))
     assert wait_until(lambda: page.sessionHeader.get("replay") == "")
     page.watchReplay()  # no replay: nothing opened
-    assert watched == ["24 Heures du Mans R1 1"]
+    assert len(watched) == 1
 
 
 def test_results_open_path(lmu_results):
@@ -373,8 +373,9 @@ def test_watch_named_waits_for_replays_list():
     notices, watched, asked = [], [], []
     known = {"Spa R1 1"}
     fake = SimpleNamespace(
-        pending_watch="", replays_answered=False, notify=lambda text, error=False: notices.append(text),
-        watchReplay=watched.append, ask_replays=lambda: asked.append(1),
+        pending_watch="", pending_action=None, replays_answered=False,
+        notify=lambda text, error=False: notices.append(text),
+        watch=lambda name, action=None: watched.append(name), ask_replays=lambda: asked.append(1),
         replay_of=lambda name: name if name in known else None)
     fake.watch_pending = lambda: GameReplaysBackend.watch_pending(fake)
     GameReplaysBackend.watch_named(fake, "Spa R1 1")
@@ -400,7 +401,10 @@ def test_stats_driver_card_ranks(backend, monkeypatch, tmp_path):  # noqa: F811
 
     settle(backend)
     history = tmp_path / dr.HISTORY_FILE
-    dr.append_history(str(history), dr.HistoryEntry(1_700_000_000, dr.Rank("Silver", 1, 90), dr.Rank("Platinum", 3, 50)))
+    dr.append_history(str(history), dr.HistoryEntry(1_700_000_000, dr.Rank("Silver", 1, 90), dr.Rank("Platinum", 3, 50),
+                                                    steam_id="1"))
+    dr.append_history(str(history), dr.HistoryEntry(1_700_000_100, dr.Rank("Gold", 3, 10), dr.Rank("Bronze", 1, 0),
+                                                    steam_id="2"))  # other Steam account: left out
     monkeypatch.setattr(rank_info, "history_path", lambda: str(history))
     monkeypatch.setattr(stats_backend, "ranks_history_path", lambda: str(history))
     monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
@@ -417,3 +421,36 @@ def test_stats_driver_card_ranks(backend, monkeypatch, tmp_path):  # noqa: F811
     assert rows["Driver Rank"]["change"] == "+50%" and rows["Driver Rank"]["changeTone"] == 1  # 90% S1 -> 40% S2
     assert rows["Safety Rank"]["value"] == "Platinum 3" and rows["Safety Rank"]["change"] == ""  # no change
     assert "updated" in driver["ranksInfo"]
+
+
+def test_results_watch_event_and_lap(lmu_results):
+    """Event or lap of results: replay of session opened there, camera on every driver's car (team swaps)"""
+    from neopedal.ui.quick.results_backend import LAP_LEAD, REPLAY_TAB
+
+    page, _ = lmu_results
+    watched = []
+    page.watchWanted.connect(watched.append)
+    page.setTab(3)
+    page.setEventKind(3)  # track limits
+    row = page.eventModel.rows[0]
+    page.watchEvent(row["key"])
+    assert watched[-1].replay == "24 Heures du Mans R1 1" and watched[-1].time == 450.0
+    assert watched[-1].drivers == ("Bob Racer",) and watched[-1].lap == 0 and page.tabIndex == REPLAY_TAB
+    page.watchEvent("99")  # unknown event: nothing
+    assert len(watched) == 1
+    alice = next(key for key, entry in enumerate(page.result.entries) if entry.name == "Alice Driver")
+    page.selectEntry(str(alice))
+    page.watchLap(2)
+    lap = page.result.entries[alice].laps[1]
+    action = watched[-1]
+    assert action.time == lap.start and action.lap == 2 and action.lead == LAP_LEAD
+    assert set(action.drivers) == {"Alice Driver", "Zed Partner"}
+
+
+def test_replays_linked_to_results(lmu_results):
+    page, folder = lmu_results
+    links = []
+    page.replaysLinked.connect(links.append)
+    page.reload()
+    assert wait_until(lambda: links)
+    assert links[-1] == {"24 Heures du Mans R1 1": str(folder / RACE_NAME)}

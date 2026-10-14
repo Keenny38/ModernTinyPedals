@@ -21,15 +21,21 @@ Session Widget
 """
 
 from time import strftime
+from typing import TYPE_CHECKING
 
 from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SessionConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SessionConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

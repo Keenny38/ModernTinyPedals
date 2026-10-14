@@ -10,6 +10,7 @@ Popup {
     property string acceptText: "OK"
     property string cancelText: i18n.tr("Cancel")
     property bool acceptEnabled: true
+    property bool danger: false  // accept button in red (action cannot be undone)
     property bool closeOnAccept: true  // false: page closes it with done() once the action succeeded
     default property alias content: body.data
     signal accepted()
@@ -39,18 +40,18 @@ Popup {
     onClosed: if (!acceptedNow) cancelled()
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 }
-        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 160; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast }
+        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: theme.motionBase; easing.type: Easing.OutCubic }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast }
     }
     Overlay.modal: Rectangle {
         color: Qt.rgba(0, 0, 0, theme.dark ? 0.45 : 0.25)
-        Behavior on opacity { NumberAnimation { duration: 140 } }
+        Behavior on opacity { NumberAnimation { duration: theme.motionFast } }
     }
     background: Rectangle {
-        radius: theme.em * 0.8
+        radius: theme.radiusXl
         color: theme.dark ? Qt.lighter(theme.base, 1.12) : theme.base
         border.width: 1
         border.color: theme.border
@@ -64,7 +65,7 @@ Popup {
             visible: text !== ""
             color: theme.text
             wrapMode: Text.WordWrap
-            font.pointSize: theme.fontPoint * 1.2
+            font.pointSize: theme.fontHeading
             font.weight: Font.DemiBold
         }
         ColumnLayout {
@@ -83,6 +84,7 @@ Popup {
             }
             TpButton {
                 accent: true
+                danger: dialog.danger
                 text: dialog.acceptText
                 enabled: dialog.acceptEnabled
                 onClicked: dialog.accept()

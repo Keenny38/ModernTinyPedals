@@ -40,6 +40,11 @@ HANDLE_SIZE = 14
 SCALE_RANGE = (0.3, 4.0)
 FILL_EDITING = 16  # tint alpha over overlay in edit mode: area shown, grabbable even if overlay draws nothing
 FILL_SELECTED = 30
+TINT_EDITING = QColor(EDIT_COLOR)
+TINT_EDITING.setAlpha(FILL_EDITING)
+TINT_SELECTED = QColor(EDIT_COLOR)
+TINT_SELECTED.setAlpha(FILL_SELECTED)
+LABEL_TEXT_COLOR = QColor("#FFFFFF")
 OUTLINE_HOVER, OUTLINE_EDITING, OUTLINE_SELECTED = range(3)
 
 
@@ -77,6 +82,7 @@ class EditOutline(QWidget):
         super().__init__(parent)
         self.title = title
         self.mode = OUTLINE_HOVER
+        self.label_cache: tuple | None = None  # (title, font key, label font, label text width)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
@@ -89,9 +95,7 @@ class EditOutline(QWidget):
         painter = QPainter(self)
         mode = self.mode
         if mode != OUTLINE_HOVER:
-            tint = QColor(EDIT_COLOR)
-            tint.setAlpha(FILL_SELECTED if mode == OUTLINE_SELECTED else FILL_EDITING)
-            painter.fillRect(self.rect(), tint)
+            painter.fillRect(self.rect(), TINT_SELECTED if mode == OUTLINE_SELECTED else TINT_EDITING)
         if mode == OUTLINE_SELECTED:
             painter.setPen(QPen(EDIT_COLOR, 2))
             painter.drawRect(QRectF(self.rect()).adjusted(1, 1, -1, -1))
@@ -100,14 +104,22 @@ class EditOutline(QWidget):
             painter.drawRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5))
         if self.height() < 30:  # name would hide content of thin widget, shown as tooltip instead
             return
-        font = QFont(self.font())
-        font.setPixelSize(11)
-        font.setBold(True)
-        painter.setFont(font)
-        text_width = painter.fontMetrics().horizontalAdvance(self.title) + 8
-        label = QRect(0, 0, min(text_width, self.width()), 15)
+        # Label font & width built once per title & widget font (outline repainted with overlay)
+        base_font = self.font()
+        cache = self.label_cache
+        if cache is None or cache[0] != self.title or cache[1] != base_font.key():
+            font = QFont(base_font)
+            font.setPixelSize(11)
+            font.setBold(True)
+            painter.setFont(font)
+            cache = self.label_cache = (
+                self.title, base_font.key(), font, painter.fontMetrics().horizontalAdvance(self.title) + 8)
+        label = QRect(0, 0, min(cache[3], self.width()), 15)
+        if not event.rect().intersects(label):  # label not in repainted area
+            return
+        painter.setFont(cache[2])
         painter.fillRect(label, EDIT_COLOR)
-        painter.setPen(QColor("#FFFFFF"))
+        painter.setPen(LABEL_TEXT_COLOR)
         painter.drawText(label, Qt.AlignmentFlag.AlignCenter, self.title)
 
 

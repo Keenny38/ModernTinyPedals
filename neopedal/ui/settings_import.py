@@ -57,7 +57,7 @@ def import_settings(parent: QWidget | None) -> None:
     answer = QMessageBox.question(
         parent, tr("Import Settings"),
         tr("Import settings from this folder?") + f"\n{os.path.normpath(source)}\n\n" + tr(
-            "Options, shortcuts, driver stats, language packs and Black box incidents are copied, "
+            "Options, shortcuts, driver stats, language packs and Dashboard HUD incidents are copied, "
             "the folder is not changed. Current settings are set aside in a backup folder (never "
             "deleted), then the app restarts with the imported settings."),
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,

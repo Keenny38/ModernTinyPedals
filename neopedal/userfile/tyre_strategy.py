@@ -29,12 +29,12 @@ import math
 
 from ..setting_validator import PresetValidator
 from ..userfile.json_setting import copy_setting
-from . import atomic_write
+from . import atomic_write, write_json
 
 logger = logging.getLogger(__name__)
 
 
-def set_default_tyre_setting(limited_stock: bool, starting_tread: float, wear_per_stint: float):
+def set_default_tyre_setting(limited_stock: bool, starting_tread: float, wear_per_stint: float) -> dict:
     return {
         "enable_limited_stock": limited_stock,
         "front_left_starting_tread":  starting_tread,
@@ -113,7 +113,7 @@ def verify_tyre_name(tyre_name: str) -> bool:
     if "#" not in tyre_name:
         return False
     name_split = tyre_name.split("#")
-    if not name_split[-1].isdigit():
+    if not (name_split[-1].isascii() and name_split[-1].isdecimal()):  # isdigit() accepts "²", int() fails
         return False
     return name_split[0].strip() in DEFAULT_TYRE_SET
 
@@ -219,7 +219,7 @@ def validate_tyre_strategy(user_data: dict) -> dict:
 
 
 # Create, load, save, export file function
-def create_tyre_strategy():
+def create_tyre_strategy() -> dict:
     """Create new tyre strategy data"""
     return {
         "file_version": TYRE_STRATEGY_FILE_VERSION,
@@ -231,11 +231,11 @@ def create_tyre_strategy():
     }
 
 
-def load_tyre_strategy_file(filename: str, filepath: str, extension: str = ""):
+def load_tyre_strategy_file(filename: str, filepath: str, extension: str = "") -> dict | None:
     """Load tyre strategy file (*.tyres)"""
     filename_source = f"{filepath}{filename}{extension}"
     try:
-        with open(filename_source, encoding="utf-8") as jsonfile:
+        with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM if edited by user
             data = json.load(jsonfile)
             if not isinstance(data, dict):
                 raise TypeError
@@ -247,15 +247,14 @@ def load_tyre_strategy_file(filename: str, filepath: str, extension: str = ""):
     return None
 
 
-def save_tyre_strategy_file(dict_user: dict, filename: str, filepath: str, extension: str = ""):
+def save_tyre_strategy_file(dict_user: dict, filename: str, filepath: str, extension: str = "") -> None:
     """Save tyre strategy file (*.tyres) atomically, as race plan widget reads it meanwhile
 
     Raises:
         OSError: unable to save file.
     """
     filename_source = f"{filepath}{filename}{extension}"
-    with atomic_write(filename_source, raise_error=True) as jsonfile:
-        json.dump(dict_user, jsonfile, indent=2)
+    write_json(filename_source, dict_user, indent=2, raise_error=True)
 
 
 def export_tyre_strategy_file(

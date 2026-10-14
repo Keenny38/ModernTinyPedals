@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Lap viewer simple view (mixin of LapViewerBackend): channels at chart cursor drawn like overlays, in groups
+Lap viewer simple view (part of LapViewerBackend, QML backend.dashboard): channels at chart cursor drawn like overlays, in groups
 (pedals & steering wheel, timing, engine, tyres, brakes, chassis, electronics, track, math channels)
 
 One selection for both views: channels shown on charts (advanced view, Show menu) are the items of simple view (pedal
@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import bisect
 import math
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ...i18n import tr
 from ..lap_viewer import (
@@ -51,7 +51,12 @@ from ..lap_viewer import (
     format_channel_value,
     number_text,
 )
-from .lap_base import BackendBase
+from .lap_base import PagePart, weak_host
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import SignalInstance
+
+    from .trace_data import TraceData
 
 INPUTS_ITEM = "inputs"  # pedals & steering wheel cards of each lap
 G_ITEM = "g"  # lateral & longitudinal G on a small circle
@@ -142,14 +147,69 @@ def fraction(value: float, low: float, high: float) -> float:
     return min(max((value - low) / (high - low), 0.0), 1.0) if high > low else 0.0
 
 
-class DashboardTab(BackendBase):
-    """Simple view of lap viewer page (dashboardChanged, dashboardCatalog & dashboardLayout: see lap_backend)"""
+class DashboardHost(Protocol):
+    """What the simple view part uses of the lap viewer page"""
 
-    def load_dashboard(self, setting: dict):
-        """Simple view state (items shown: channels shown on charts)"""
-        self._dashboard_items: list[tuple[Item, Channel | None]] = []  # shown items in layout order
+    visible: list[str]  # channels shown on charts (items shown)
+
+    @property
+    def chartChanged(self) -> SignalInstance: ...
+    @property
+    def mathChanged(self) -> SignalInstance: ...
+    def channels_updated(self, save: bool = True): ...
+    def short_label(self, key: str) -> str: ...
+
+
+class DashboardTab(PagePart):
+    """Simple view & Show menu of lap viewer page (QML backend.dashboard)"""
+
+    changed = Signal()  # channels shown (Show menu, simple view items), also sent by chartChanged & mathChanged
+    channelsChanged = Signal()  # Show menu channels or their availability changed (not their shown state)
+
+    def __init__(self, page: DashboardHost, data: TraceData, opened: bool, parent: QObject | None = None):
+        super().__init__(parent)
+        self._page = weak_host(page)
+        self.data = data  # trace data of page (same object for page life)
+        self.items: list[tuple[Item, Channel | None]] = []  # shown items in layout order (read at cursor)
         self._clutch_used: dict[str, tuple] = {}  # lap key: lap data, clutch pressed in lap (pedal cards)
-        self._dashboard_opened = False  # simple view shown once: its series built with charts
+        self.opened = opened  # simple view shown once: its series built with charts
+        self._catalog: list[dict] | None = None  # Show menu channels last read (see channels)
+        page.chartChanged.connect(self.changed)  # items recorded in shown laps
+        page.mathChanged.connect(self.changed)
+        self.changed.connect(self.check_catalog)
+
+    @Property(list, notify=changed)
+    def catalog(self) -> list[dict]:
+        """Show menu: every group & its channels, shown & recorded"""
+        return self.catalog_list()
+
+    @Property(list, notify=channelsChanged)
+    def channels(self) -> list[dict]:
+        """Show menu groups & channels without shown state (shownChannels): same list until channels or their
+        availability change, chips kept while channels are toggled"""
+        if self._catalog is None:
+            self._catalog = self.catalog_list(False)
+        return self._catalog
+
+    @Slot()
+    def check_catalog(self):
+        """Show menu channels told again only if they changed (laps, math channels), not on every toggle"""
+        if self._catalog is None:  # never read: built when first read
+            return
+        catalog = self.catalog_list(False)
+        if catalog != self._catalog:
+            self._catalog = catalog
+            self.channelsChanged.emit()
+
+    @Property(list, notify=changed)
+    def shownChannels(self) -> list[str]:
+        """Channels shown on charts (Show menu chips)"""
+        return list(self._page.visible)
+
+    @Property(list, notify=changed)
+    def layout(self) -> list[dict]:
+        """Groups & items shown (recorded & picked)"""
+        return self.layout_list()
 
     def dashboard_groups(self) -> list[tuple[str, str, list[Item]]]:
         """Every group with its items: math channels & channels of no group in groups of their own"""
@@ -162,10 +222,10 @@ class DashboardTab(BackendBase):
             groups.append(("other", "Other", extra))
         return groups
 
-    def dashboard_columns(self) -> list[str]:
+    def columns(self) -> list[str]:
         """Channels simple view reads at cursor (shown items, pedal cards) once it was opened, else none: their
         series & value ranges built with charts in background (see update_chart)"""
-        if not self._dashboard_opened:
+        if not self.opened:
             return []
         columns: list[str] = []
         for _, _, items in self.dashboard_groups():
@@ -183,7 +243,8 @@ class DashboardTab(BackendBase):
         return list(dict.fromkeys(columns))
 
     def item_shown(self, item: Item) -> bool:
-        return any(column in self.visible for column in item_columns(item))
+        visible = self._page.visible
+        return any(column in visible for column in item_columns(item))
 
     def item_available(self, item: Item) -> bool:
         """Item recorded in at least one shown lap"""
@@ -203,10 +264,11 @@ class DashboardTab(BackendBase):
         channel = CHANNEL_MAP[item.key]
         return tr(channel.group) if item.kind == "wheels" and channel.group else channel_title(channel)
 
-    def dashboard_catalog(self) -> list[dict]:
-        """Show menu: every group & its chart channels, shown, recorded in shown laps; channel of one wheel as
-        detail (listed while shown or searched)"""
+    def catalog_list(self, with_shown: bool = True) -> list[dict]:
+        """Show menu: every group & its chart channels, shown (unless not with_shown), recorded in shown laps;
+        channel of one wheel as detail (listed while shown or searched)"""
         catalog = []
+        visible = self._page.visible
         for key, title, items in self.dashboard_groups():
             channels = []
             for item in items:
@@ -214,18 +276,21 @@ class DashboardTab(BackendBase):
                     channel = CHANNEL_MAP.get(column)
                     if channel is None:
                         continue
-                    channels.append({
-                        "key": column, "title": channel_title(channel), "shown": column in self.visible,
+                    entry = {
+                        "key": column, "title": channel_title(channel),
                         "available": not self.data.laps or self.data.available(channel),
                         "detail": item.kind == "wheels" and column != item.key,
                         "search": f"{channel_title(channel)} {channel.title} {tr(title)}".lower(),
-                    })
+                    }
+                    if with_shown:
+                        entry["shown"] = column in visible
+                    channels.append(entry)
             catalog.append({"key": key, "title": tr(title), "items": channels})
         return catalog
 
-    def dashboard_layout(self) -> list[dict]:
+    def layout_list(self) -> list[dict]:
         """Groups & items shown (recorded & picked), index of each item in values read at cursor"""
-        self._dashboard_items = []
+        self.items = []
         layout = []
         for key, title, items in self.dashboard_groups():
             shown = []
@@ -235,25 +300,26 @@ class DashboardTab(BackendBase):
                 channel = CHANNEL_MAP.get(item.key)
                 unit = self.data.unit_of(channel) if channel is not None else ""
                 shown.append({"key": item.key, "kind": item.kind, "title": self.item_title(item), "unit": unit,
-                              "heat": item.heat, "index": len(self._dashboard_items)})
-                self._dashboard_items.append((item, channel))
+                              "heat": item.heat, "index": len(self.items)})
+                self.items.append((item, channel))
             if shown:
                 layout.append({"key": key, "title": tr(title), "items": shown})
         return layout
 
     @Slot(str, bool)
-    def setDashboardGroup(self, group: str, shown: bool):
+    def setGroup(self, group: str, shown: bool):
         """Every channel of group (one wheel ones aside) shown on charts, or none of it"""
+        page = self._page
         for key, _, items in self.dashboard_groups():
             if key != group:
                 continue
             columns = [column for item in items for column in item_columns(item) if column in CHANNEL_MAP]
             if shown:
                 details = {column for item in items if item.kind == "wheels" for column in wheel_columns(item.key)}
-                self.visible += [column for column in columns if column not in self.visible and column not in details]
+                page.visible += [column for column in columns if column not in page.visible and column not in details]
             else:
-                self.visible = [column for column in self.visible if column not in columns]
-            self.channels_updated()
+                page.visible = [column for column in page.visible if column not in columns]
+            page.channels_updated()
 
     # Values at cursor
     def item_range(self, item: Item, channel: Channel) -> tuple[float, float]:
@@ -267,8 +333,7 @@ class DashboardTab(BackendBase):
             return -limit, limit
         return low, high
 
-    @Slot(float, result=list)
-    def dashboardCursor(self, x: float) -> list[dict]:
+    def cursor_values(self, x: float) -> list[dict]:
         """Value of each shown item (key: item shown, values of laps) for each shown lap at axis position, in layout
         order (key: values of former layout not read by QML once items shown change)
 
@@ -277,7 +342,7 @@ class DashboardTab(BackendBase):
         """
         result: list[dict] = []
         laps = self.data.laps
-        for item, channel in self._dashboard_items:
+        for item, channel in self.items:
             if item.kind == "inputs":
                 result.append({"key": item.key, "laps": []})
                 continue
@@ -332,14 +397,14 @@ class DashboardTab(BackendBase):
         return result
 
     # Pedals & steering wheel cards: each lap at cursor, drawn like overlays
-    @Slot(float, result=list)
-    def inputsCursor(self, x: float) -> list[dict]:
+    def inputs_at(self, x: float) -> list[dict]:
         """Throttle, brake & clutch (0-1, -1 if not recorded), steering (-1 to 1), steering wheel angle (degrees,
         0 if wheel rotation not recorded), gear & speed of each shown lap at axis position"""
         if len(self._clutch_used) > len(self.data.laps):  # laps no longer shown forgotten
             shown = {lap.key for lap in self.data.laps}
             self._clutch_used = {key: value for key, value in self._clutch_used.items() if key in shown}
         laps = []
+        short_label = self._page.short_label
         for lap in self.data.laps:
             values = {column: self.data.value_at(CHANNEL_MAP[column], lap, x)
                       for column in ("throttle", "brake", "clutch", "steering", "speed_kph")}
@@ -351,7 +416,7 @@ class DashboardTab(BackendBase):
             rotation = float(rotation) if isinstance(rotation, (int, float)) and rotation > 0 else 0.0
             speed = values["speed_kph"]
             laps.append({
-                "lap": lap.key, "label": self.short_label(lap.key), "color": lap.color.name(),
+                "lap": lap.key, "label": short_label(lap.key), "color": lap.color.name(),
                 "ended": all(value is None for value in values.values()),  # past end of lap
                 "throttle": pedal_value(values["throttle"]),
                 "brake": pedal_value(values["brake"]),
@@ -371,3 +436,7 @@ class DashboardTab(BackendBase):
         if cached is None or cached[0] is not lap.data:
             cached = self._clutch_used[lap.key] = (lap.data, max(lap.data.columns.get("clutch") or [0.0]) > 0.05)
         return cached[1]
+
+    def release(self):
+        self.items = []
+        self._clutch_used = {}

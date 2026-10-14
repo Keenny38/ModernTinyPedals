@@ -20,14 +20,21 @@
 Deltabest extended Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
 from ._common import delta_shown, game_deltabest, lap_delta_shown
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import DeltabestExtendedConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "DeltabestExtendedConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

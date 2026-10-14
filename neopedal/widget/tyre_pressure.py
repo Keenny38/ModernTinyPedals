@@ -20,6 +20,8 @@
 Tyre pressure Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
@@ -27,9 +29,14 @@ from ..const_common import TEXT_NA, TEXT_PLACEHOLDER, WHEELS_ZERO
 from ..userfile.heatmap import select_compound_color, select_compound_symbol
 from ._base import Overlay
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TyrePressureConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "TyrePressureConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

@@ -43,6 +43,10 @@ class FakeResults(QObject):
     def setChartView(self, width, height, thin, thick, wide):
         self.views.append((width, height))
 
+    @Slot(int, result=list)
+    def placesAt(self, lap):
+        return [s["places"][lap] if 0 <= lap < len(s["places"]) else 0 for s in self._positions["series"]]
+
 
 def positions_data(cars=20, laps=40):
     series = []
@@ -83,7 +87,7 @@ def chart_view(ui_env, tmp_path):
     """Chart component in a QQuickWidget with app theme & translator"""
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from neopedal.ui.quick import QML_FOLDER, Theme, Translator, register_types, theme_copy
+    from neopedal.ui.quick import QML_FOLDER, PageState, Theme, Translator, register_types, theme_copy
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -100,6 +104,7 @@ def chart_view(ui_env, tmp_path):
         context.setContextProperty("theme", theme_copy(view.engine(), Theme(view)))
         context.setContextProperty("i18n", Translator(view))
         context.setContextProperty("backend", backend)
+        context.setContextProperty("pageState", PageState(view))
         view.setSource(QUrl.fromLocalFile(str(wrapper)))
         assert not view.errors(), [error.toString() for error in view.errors()]
         view.resize(900, 500)

@@ -23,14 +23,17 @@ Black box widget, draw RPM LEDs and center column items
 from __future__ import annotations
 
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
 
 from ... import calculation as calc
 from .._painter import fill_chip, fill_chip_gradient, fill_glow, fill_rect
 from .common import CENTER_ITEMS, LAYOUT_NORMAL, qcolor
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BlackBoxConfig
 
 
 class CenterPainter:
@@ -39,6 +42,11 @@ class CenterPainter:
     # Attributes set by black box widget class (widget/black_box.py) or other parts
     brake: Any
     brake_heat_balance: Any
+    cut_points: Any
+    gap_ahead: Any
+    gap_behind: Any
+    lift_coast: Any
+    limit_points: Any
     center_order: Any
     clutch: Any
     delta_best: Any
@@ -80,7 +88,8 @@ class CenterPainter:
     unit_temp: Any
     use_delta: Any
     use_wheels: Any
-    wcfg: Any
+    wcfg: BlackBoxConfig
+    widget_font: Any
 
     def ordered_center_items(self) -> list[str]:
         """Enabled center items sorted by display order"""
@@ -94,6 +103,9 @@ class CenterPainter:
             "rpm": self.wcfg["show_rpm"],
             "pedals": self.wcfg["show_pedal_bars"],
             "brake_heat": self.wcfg["show_brake_heat_balance"],
+            "track_limits": self.wcfg["show_track_limits_points"],
+            "gaps": self.wcfg["show_gap_ahead_behind"],
+            "lift_coast": self.wcfg["show_lift_and_coast"],
         }
         items = [name for name in CENTER_ITEMS if enabled[name]]
         # Gear & speed cluster: speed drawn inside the gear block
@@ -215,6 +227,23 @@ class CenterPainter:
             return "-", ""
         return f"{self.delta_best:+.3f}", self.wcfg["delta_gain_color" if self.delta_best < 0 else "delta_loss_color"]
 
+    def track_limits_value(self) -> tuple[str, str]:
+        """Track limits points (of penalty limit in races) & color: warning once any, penalty color
+        within one point of the limit"""
+        points, limit = self.cut_points, self.limit_points
+        text = f"{points:g}/{limit:g}" if limit > 0 else f"{points:g}"
+        if limit > 0 and limit - points <= 1:
+            return text, self.wcfg["track_limits_penalty_color"]
+        return text, self.wcfg["track_limits_warning_color"] if points > 0 else ""
+
+    def gaps_text(self) -> str:
+        """Gap to car ahead | car behind on track (seconds), "-" if unknown"""
+        return " | ".join(f"{gap:.1f}" if gap > 0 else "-" for gap in (self.gap_ahead, self.gap_behind))
+
+    def lift_coast_ratio(self) -> float:
+        """Lift & coast bar fill, 0 to 1 in 1% steps"""
+        return round(min(max(self.lift_coast, 0.0), 1.0), 2)
+
     def laptime_text(self) -> str:
         return calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-"
 
@@ -251,6 +280,12 @@ class CenterPainter:
             return self.delta_value()
         if name == "laptime":
             return self.laptime_text()
+        if name == "track_limits":
+            return self.track_limits_value()
+        if name == "gaps":
+            return self.gaps_text()
+        if name == "lift_coast":
+            return self.lift_coast_ratio()
         if name == "locking":
             return self.locking_text()
         if name == "pit_limiter":
@@ -280,6 +315,12 @@ class CenterPainter:
             self.draw_info_row(painter, rect, label, *self.delta_value())
         elif name == "laptime":
             self.draw_info_row(painter, rect, self.text["laptime"], self.laptime_text())
+        elif name == "track_limits":
+            self.draw_info_row(painter, rect, self.text["track_limits"], *self.track_limits_value())
+        elif name == "gaps":
+            self.draw_info_row(painter, rect, self.text["gap"], self.gaps_text())
+        elif name == "lift_coast":
+            self.draw_lift_coast(painter, rect)
         elif name == "locking":
             self.draw_info_row(painter, rect, self.text["locking"], self.locking_text())
         elif name == "pit_limiter":
@@ -330,6 +371,26 @@ class CenterPainter:
                 if value > 0.001:
                     fill_chip_gradient(
                         painter, QRectF(back.left(), back.top(), back.width() * min(value, 1), bar_h), color)
+
+    def draw_lift_coast(self, painter: QPainter, rect: QRectF):
+        """Lift & coast: label, then bar filled by progress of the lift asked by the game"""
+        unit = self.unit
+        fill_rect(painter, rect, self.wcfg["info_background_color"])
+        inner = rect.adjusted(unit * 0.25, 0, -unit * 0.25, 0)
+        painter.setPen(self.pen_info_label)
+        label = self.text["lift_and_coast"]
+        painter.setFont(self.font_label)
+        label_w = painter.fontMetrics().horizontalAdvance(label)
+        painter.drawText(inner, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+        painter.setFont(self.widget_font())
+        bar_h = rect.height() * 0.4
+        bar = QRectF(inner.left() + label_w + unit * 0.3, rect.center().y() - bar_h / 2,
+                     max(inner.width() - label_w - unit * 0.3, 0), bar_h)
+        fill_chip(painter, bar, self.wcfg["indicator_inactive_color"])
+        ratio = self.lift_coast_ratio()
+        if ratio > 0:
+            fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()),
+                               self.wcfg["lift_and_coast_color"])
 
     def draw_gear_speed_cluster(self, painter: QPainter, rect: QRectF):
         """Gear & speed in one block: RPM accent on top, large gear, large speed, unit below"""
@@ -402,4 +463,5 @@ class CenterPainter:
     def draw_indicator(self, painter: QPainter, rect: QRectF, text: str, active: bool, color: str):
         fill_chip(painter, rect, color if active else self.wcfg["indicator_inactive_color"])
         painter.setPen(self.pen_indicator_active if active else self.pen_indicator)
-        self.draw_fit_text(painter, rect.adjusted(rect.width() * 0.04, 0, -rect.width() * 0.04, 0), text, self.font())
+        self.draw_fit_text(painter, rect.adjusted(rect.width() * 0.04, 0, -rect.width() * 0.04, 0), text,
+                           self.widget_font())

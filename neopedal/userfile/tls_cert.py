@@ -33,6 +33,8 @@ import os
 import ssl
 import threading
 
+from . import replace_retry
+
 logger = logging.getLogger(__name__)
 
 CERT_FILE = "web_dashboard_cert.pem"
@@ -96,8 +98,8 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
     # Both written in full first, then replaced (never a truncated file); key readable by current user only (POSIX)
     _write_new(key_file, key_bytes, 0o600)
     _write_new(cert_file, cert.public_bytes(serialization.Encoding.PEM), 0o644)
-    os.replace(f"{key_file}.tmp", key_file)
-    os.replace(f"{cert_file}.tmp", cert_file)
+    replace_retry(f"{key_file}.tmp", key_file)
+    replace_retry(f"{cert_file}.tmp", cert_file)
     logger.info("WEB DASHBOARD: created self-signed certificate for %s", ", ".join(["localhost", *addresses]))
 
 

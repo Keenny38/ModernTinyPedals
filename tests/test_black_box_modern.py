@@ -1634,6 +1634,7 @@ def test_pedal_source(ui_env, monkeypatch, source, expected):
 
 def test_status_icons_reserve_room_between_axles(ui_env):
     hidden = new_widget({"show_headlights_indicator": False, "show_engine_status": False, "font_scale_engine": 1.0,
+                         "show_wipers_indicator": False,
                          "show_brake_bias": False, "show_motor_map": False,
                          "show_abs_indicator": False, "show_tc_indicator": False})
     shown = new_widget({"show_headlights_indicator": True, "show_engine_status": True, "font_scale_engine": 3.0,

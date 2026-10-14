@@ -39,7 +39,8 @@ from ..validator import (
     valid_delta_raw,
     vehicle_position_sync,
 )
-from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp, round6
+from ._base import PENDING_CHECK, WAIT_STATE_CHANGE, DataModule, PendingLap, data_stamp, derived_updates, round6
+from ._lap_state import LOAD, SKIP, LapState
 
 
 class Realtime(DataModule):
@@ -80,6 +81,7 @@ class Realtime(DataModule):
                         reset = True
                         update_interval = self.active_interval
                         last_stamp = ()  # never skip first tick
+                        derived_updates.set_active(True)  # fuel & notes now follow delta updates
 
                     # Skip while game data not updated since last tick
                     stamp = data_stamp()
@@ -93,14 +95,19 @@ class Realtime(DataModule):
                     waiting = gen_delta_time.send(vehicle_resets)
                     if output.lapDistance != lap_distance:  # wake modules following delta position
                         notifier.notify_derived()
+                    derived_updates.publish()  # fuel & notes computed once per sample, after delta position
 
                 else:
                     if reset:
                         reset = False
                         update_interval = self.idle_interval
+                        derived_updates.set_active(False)  # fuel & notes follow game data again
                     if waiting:  # left track just after line: keep validating lap just completed
                         waiting = gen_delta_time.send(PENDING_CHECK)
+                    # Idle until activity changes, unless a lap waits for validation
+                    update_interval = self.idle_interval if waiting else WAIT_STATE_CHANGE
         finally:
+            derived_updates.set_active(False)
             # Module stopped (reload, quit): last check of lap waiting for validation
             if waiting:
                 self.save_on_stop(gen_delta_time)
@@ -186,9 +193,6 @@ def calc_delta_time(
     (reset, inactive: PENDING_CHECK sent) keeps being validated for up to PENDING_WAIT seconds before
     data is reset (MODULE_STOP: last check). Yields whether a lap is waiting for validation.
     """
-    last_reset = None  # reset check
-    sent_reset = None  # last reset value sent
-    pending: PendingLap | None = None  # lap just completed waiting for validation
     best_readable = True  # delta best file readable at load, False if not accessible (never saved over)
     session_readable = True  # same for session file
 
@@ -276,40 +280,21 @@ def calc_delta_time(
             delta_array_session, delta_array_stint,
         )
 
-    def resolve_pending(final: bool = False):
-        """Validate lap waiting for validation after player left track"""
-        nonlocal pending
-        if pending is None:
-            return
-        valid = pending.resolve(final)
-        if valid is None:
-            return
+    def resolved_lap(lap: PendingLap, valid: bool):
+        """Lap waiting for validation after player left track resolved"""
         if valid:
-            validated_lap(pending, api.read.timing.last_laptime())
-        pending = None
+            validated_lap(lap, api.read.timing.last_laptime())
+
+    # Lap waiting for validation (player inactive: only validated, data of lap kept until reset)
+    lap_state = LapState(resolved_lap, reset_on_check=False)
 
     while True:
-        reset = yield pending is not None
-
-        # Player inactive: only validate lap just completed (data of lap kept until reset)
-        if reset is PENDING_CHECK:
-            resolve_pending()
+        step = lap_state.receive((yield lap_state.pending is not None))
+        if step == SKIP:
             continue
-        if reset is not MODULE_STOP:
-            sent_reset = reset
 
-        # Reset
-        if last_reset != sent_reset or reset is MODULE_STOP:
-            # Left track just after line: validate lap just completed before reset (bounded wait)
-            if pending is not None:
-                resolve_pending(final=reset is MODULE_STOP)
-                if pending is not None:
-                    continue
-            # Delay reset until driving (module stopping: last check only)
-            if reset is MODULE_STOP or not realtime_state.active:
-                continue
-            last_reset = reset
-
+        # Reset (module stopping: last check only)
+        if step == LOAD:
             # Load data
             recording = False
             is_pit_lap = 0  # whether pit in or pit out lap
@@ -384,7 +369,7 @@ def calc_delta_time(
                 ))
                 delta_array_last = tuple(delta_array_raw)
                 # Lap data kept until validated (new lap may start meanwhile: back to garage)
-                pending = PendingLap(
+                lap_state.pending = PendingLap(
                     laptime_last, api.read.timing.elapsed(),
                     (delta_array_last, not is_pit_lap, not is_invalid_lap),
                 )
@@ -420,17 +405,18 @@ def calc_delta_time(
             pos_last = pos_curr  # reset last position
 
         # Validating 1s after passing finish line
+        pending = lap_state.pending
         if pending is not None:
             if pending.deadline:  # player left track meanwhile (inactive without reset)
-                resolve_pending()
+                lap_state.resolve()
             else:
                 timer = api.read.timing.elapsed() - pending.finish
                 if timer > 10:  # switch off after 10s
-                    pending = None
+                    lap_state.pending = None
                 elif (timer > 1 and  # compare current time
                     pending.matched(laptime_valid)):  # is valid & matched laptime
                     validated_lap(pending, laptime_valid)
-                    pending = None
+                    lap_state.pending = None
 
         # Calc delta
         if pos_synced_last != pos_synced:

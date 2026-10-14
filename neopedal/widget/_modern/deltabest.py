@@ -28,6 +28,7 @@ delta to show (out lap from pit lane or garage, in pit lane before start line).
 from __future__ import annotations
 
 from math import isfinite
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
@@ -39,9 +40,14 @@ from .._common import delta_shown, game_deltabest, lap_delta_shown
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, readable_on, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import DeltabestConfig
+
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: DeltabestConfig
 
     options = (
         "font_size", "layout", "decimal_places", "deltabest_source", "show_game_deltabest_if_available",
@@ -99,9 +105,18 @@ class Realtime(ModernOverlay):
             if delta is not None and self.game_delta:
                 delta = game_deltabest(delta)
         invalid = self.show_invalid and api.read.lap.invalidated()
-        if delta is not None:
-            delta = round(delta, self.decimals + 1) if isfinite(delta) else 0.0
-        self.refresh((delta, invalid))
+        if delta is None:
+            self.refresh_keyed((None, invalid), (None, invalid))
+            return
+        delta = round(delta, self.decimals + 1) if isfinite(delta) else 0.0
+        # Key: delta text as displayed, color, bar & animated pill moves in device pixels
+        moved = calc.sym_max(delta, self.bar_range) / self.bar_range if self.rect_bar.height() else 0.0
+        key = (self.delta_text(delta), delta > 0, self.pixel_steps(moved, self.rect_bar.width() / 2), invalid)
+        self.refresh_keyed((delta, invalid), key)
+
+    def delta_text(self, delta: float) -> str:
+        """Delta as displayed"""
+        return f"{calc.sym_max(delta, self.delta_range):+.{self.decimals}f}"
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
@@ -135,7 +150,7 @@ class Realtime(ModernOverlay):
         if self.animated:
             left = center - fraction * bar.width() / 2 - pill.width() / 2
             pill.moveLeft(min(max(left, bar.left()), bar.right() - pill.width()))
-        text = f"{calc.sym_max(delta, self.delta_range):+.{self.decimals}f}"
+        text = self.delta_text(delta)
         if self.swap_style:  # delta color as pill fill
             rounded(painter, pill, self.radius(0.4), color)
             self.draw_text(painter, pill, text, "delta", readable_on(color), CENTER, elide=False)

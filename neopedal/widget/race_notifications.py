@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from itertools import islice
 from time import monotonic
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter
@@ -41,6 +41,9 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import LEFT, ClassicCells, HiddenPreview, finite, option_colors
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RaceNotificationsConfig
+
 # Message kinds (color)
 GAIN = 0
 LOSS = 1
@@ -50,6 +53,7 @@ BEST = 4
 KIND_OPTIONS = ("highlight_color_gain", "highlight_color_loss", "highlight_color_warning", "highlight_color_info",
                 "highlight_color_best")
 SETTLE_TIME = 1.0  # seconds a new position must hold before notified (no back & forth at line)
+RESTART_STEP = 5.0  # seconds: session time going back more than this is a restarted session (same identifier)
 FADE_TIME = 0.6  # seconds of fade out at end of display
 FADE_STEPS = 8  # opacity steps of fade (widget redrawn only on step change)
 # Message titles (English, translated when shown), for widget width
@@ -105,6 +109,7 @@ class RaceEvents:
     def __init__(self, enabled: dict[str, bool]):
         self.enabled = enabled
         self.session: Any = None
+        self.last_elapsed = -1.0  # session time of last poll, restart detected when it goes back
         self.position = Settled(SETTLE_TIME)
         self.class_position = Settled(SETTLE_TIME)
         self.penalties = -1
@@ -125,9 +130,13 @@ class RaceEvents:
     def poll(self, now: float) -> list[Message]:
         """New messages since last poll"""
         session = api.read.session.identifier()[0]
-        if session != self.session:
+        elapsed = api.read.session.elapsed()
+        restarted = finite(elapsed) and elapsed < self.last_elapsed - RESTART_STEP
+        if session != self.session or restarted:
             self.session = session
             self.reset()
+        if finite(elapsed):
+            self.last_elapsed = elapsed
         in_race = api.read.session.in_race() and not api.read.session.pre_race()
         messages: list[Message] = []
         self.poll_positions(now, in_race, messages)
@@ -211,7 +220,7 @@ class Toast(NamedTuple):
 class NotificationsMixin:
     """Message queue & fading, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: RaceNotificationsConfig
 
     def setup_notifications(self):
         """Options, queue"""
@@ -248,6 +257,14 @@ class NotificationsMixin:
             shown.append((toast.message, step))
         return tuple(shown)
 
+    def post_update(self):
+        """Updates paused (garage, monitor): messages cleared, not left frozen on screen until next update"""
+        super().post_update()  # type: ignore[misc]
+        self.toasts.clear()
+        if self.state:  # type: ignore[has-type]
+            self.state = ()
+            self.update()  # type: ignore[attr-defined]
+
     def slot_order(self, shown: tuple) -> tuple:
         """Messages in slot order (top to bottom)"""
         if self.newest_first:
@@ -263,6 +280,8 @@ class NotificationsMixin:
 
 class Realtime(HiddenPreview, NotificationsMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: RaceNotificationsConfig
 
     update_while_hidden = True  # race state followed while hidden (no stale message when shown)
 

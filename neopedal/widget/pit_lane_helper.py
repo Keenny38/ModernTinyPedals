@@ -26,7 +26,7 @@ Nothing drawn otherwise (unless always shown, or in overlay edit mode).
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
@@ -37,6 +37,9 @@ from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import ClassicCells, HiddenPreview, finite, option_colors
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import PitLaneHelperConfig
 
 DASH = chr(0x2013)
 SPEED_TOLERANCE = 0.2  # m/s over pit speed limit still shown as under (limiter oscillation)
@@ -86,7 +89,7 @@ def box_distance(position: float, box: float, track_length: float) -> float:
 class PitLaneMixin:
     """Pit lane readings, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: PitLaneHelperConfig
     cfg: Any
 
     def setup_pit(self):
@@ -206,6 +209,8 @@ def seconds_text(seconds: float) -> str:
 
 class Realtime(HiddenPreview, PitLaneMixin, ClassicCells, Overlay):
     """Draw widget"""
+
+    wcfg: PitLaneHelperConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

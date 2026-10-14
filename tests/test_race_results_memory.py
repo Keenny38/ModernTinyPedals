@@ -123,7 +123,8 @@ def test_chart_lines_follow_view(results_folder, english):  # noqa: F811
     backend = make_backend()
     try:
         series = backend.positions["series"]
-        assert series and "points" not in series[0] and series[0]["places"][0] == 2  # Alice: P2 on grid
+        assert series and "points" not in series[0] and "places" not in series[0]
+        assert backend.placesAt(0)[0] == 2  # Alice: P2 on grid
         assert not VertexStore.has(series[0]["thin"])  # no plot size yet
         backend.setChartView(400, 200, 1.5, 3, 4)
         thin = VertexStore.get(series[0]["thin"])

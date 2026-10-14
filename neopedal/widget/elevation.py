@@ -20,6 +20,8 @@
 Elevation Widget
 """
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap
 
@@ -30,9 +32,14 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import ElevationConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "ElevationConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -81,7 +88,7 @@ class Realtime(Overlay):
         self.pixmap_marks = QPixmap(self.display_width, self.display_height)
 
         self.pen_mark = QPen()
-        self.pen_mark.setWidth(self.wcfg["position_mark_width"])
+        self.pen_mark.setWidthF(self.wcfg["position_mark_width"])
         self.pen_mark.setColor(self.wcfg["position_mark_color"])
         self.pen_text_elevation = QPen()
         self.pen_text_elevation.setColor(self.wcfg["font_color_elevation_reading"])
@@ -272,7 +279,7 @@ class Realtime(Overlay):
         # Draw elevation progress line
         pen = QPen()
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        pen.setWidth(self.wcfg["elevation_progress_line_width"])
+        pen.setWidthF(self.wcfg["elevation_progress_line_width"])
         pen.setColor(self.wcfg["elevation_progress_line_color"])
         painter.setPen(pen)
         painter.drawPath(map_path)
@@ -296,14 +303,14 @@ class Realtime(Overlay):
 
         # Draw elevation line
         if self.wcfg["show_elevation_line"]:
-            pen.setWidth(self.wcfg["elevation_line_width"])
+            pen.setWidthF(self.wcfg["elevation_line_width"])
             pen.setColor(self.wcfg["elevation_line_color"])
             painter.setPen(pen)
             painter.drawPath(map_path)
 
         # Draw start line
         if self.wcfg["show_start_line"]:
-            pen.setWidth(self.wcfg["start_line_width"])
+            pen.setWidthF(self.wcfg["start_line_width"])
             pen.setColor(self.wcfg["start_line_color"])
             painter.setPen(pen)
             painter.drawLine(0, -999, 0, 999)
@@ -312,7 +319,7 @@ class Realtime(Overlay):
         # Draw sector line
         sectors_index = minfo.mapping.sectors
         if self.wcfg["show_sector_line"] and self.map_scaled and isinstance(sectors_index, tuple):
-            pen.setWidth(self.wcfg["sector_line_width"])
+            pen.setWidthF(self.wcfg["sector_line_width"])
             pen.setColor(self.wcfg["sector_line_color"])
             painter.setPen(pen)
             for index in sectors_index:
@@ -323,7 +330,7 @@ class Realtime(Overlay):
 
         # Draw zero elevation line
         if self.wcfg["show_zero_elevation_line"] and self.map_scaled:
-            pen.setWidth(self.wcfg["zero_elevation_line_width"])
+            pen.setWidthF(self.wcfg["zero_elevation_line_width"])
             pen.setColor(self.wcfg["zero_elevation_line_color"])
             painter.setPen(pen)
             # scale * (0pos - min_range)

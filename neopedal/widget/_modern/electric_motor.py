@@ -24,6 +24,8 @@ Motor & water temperature (overheat highlight), RPM, torque, power, regeneration
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -32,9 +34,14 @@ from ...api_control import api
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import ElectricMotorConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: ElectricMotorConfig
 
     options = (
         "font_size", "layout", "overheat_threshold_motor", "overheat_threshold_water", "show_motor_temperature",

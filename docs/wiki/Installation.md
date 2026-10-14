@@ -37,13 +37,13 @@ Compare the result with the release notes. Full details: [Updates and Security](
 |---|---|
 | Program | `%LOCALAPPDATA%\Programs\NeoPedal` (`neopedal.exe`, `neopedal.exe` until 0.23.0) |
 | Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `neopedal.exe`, in the program folder |
-| Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Black box incidents | `%APPDATA%\NeoPedal` |
+| Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Dashboard HUD incidents | `%APPDATA%\NeoPedal` |
 
 Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
 
 ### Import settings
 
-`Config` > `Import Settings...` takes the global settings of another copy of the app (an older version, another computer, a backup): choose its global settings folder (the one holding `config.json`, for example in `%APPDATA%` on Windows or `~/.config` on Linux). After you confirm, the app restarts and copies options, shortcuts, driver stats, language packs and Black box incidents before loading them. The chosen folder is never changed, your current settings are set aside next to it (`NeoPedal.before-import-<date>`, never deleted), and they stay in place if the copy fails. On Linux, the data folder of the same name in `~/.local/share` is imported too.
+`Config` > `Import Settings...` takes the global settings of another copy of the app (an older version, another computer, a backup): choose its global settings folder (the one holding `config.json`, for example in `%APPDATA%` on Windows or `~/.config` on Linux). After you confirm, the app restarts and copies options, shortcuts, driver stats, language packs and Dashboard HUD incidents before loading them. The chosen folder is never changed, your current settings are set aside next to it (`NeoPedal.before-import-<date>`, never deleted), and they stay in place if the copy fails. On Linux, the data folder of the same name in `~/.local/share` is imported too.
 
 Presets are separate files: drop them (`.json`) or a preset package (`.zip`) on the main window to add them.
 

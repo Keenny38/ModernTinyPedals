@@ -21,6 +21,7 @@ Init logger, state, signal
 """
 
 import logging
+import threading
 
 from PySide6.QtCore import QObject, Signal
 
@@ -46,6 +47,11 @@ class RealtimeState:
         overriding: whether is state override mode enabled.
         spectating: whether is spectate mode enabled.
         singleton: whether is single-instance mode enabled.
+        overlays: names of overlays running (widget control), for data fetched only while an overlay reads it.
+        version: activity change counter (active, paused, shown, resets, connector freeze & resume).
+
+    Activity change: notify_change wakes threads idle until activity changes (wait_change, subscribed wake
+    events) and emits overlay_signal.activity, instead of polling state while game is closed or inactive.
     """
 
     __slots__ = (
@@ -60,6 +66,10 @@ class RealtimeState:
         "overriding",
         "spectating",
         "singleton",
+        "overlays",
+        "version",
+        "_change",
+        "_wakes",
     )
 
     def __init__(self):
@@ -74,6 +84,50 @@ class RealtimeState:
         self.overriding: bool = False
         self.spectating: bool = False
         self.singleton: bool = False
+        self.overlays: frozenset[str] = frozenset()
+        self.version = 0
+        self._change = threading.Condition()
+        self._wakes: tuple[threading.Event, ...] = ()  # copy on write, set without lock
+
+    def notify_change(self) -> None:
+        """Activity changed: wake waiting threads & subscribed events, emit overlay_signal.activity"""
+        with self._change:
+            self.version += 1
+            self._change.notify_all()
+        for wake in self._wakes:
+            wake.set()
+        overlay_signal.activity.emit()
+
+    def subscribe(self, wake: threading.Event) -> None:
+        """Set wake event on every activity change (thread waiting with its own stop wake)"""
+        with self._change:
+            if wake not in self._wakes:
+                self._wakes += (wake,)
+
+    def unsubscribe(self, wake: threading.Event) -> None:
+        """Stop setting wake event"""
+        with self._change:
+            self._wakes = tuple(_wake for _wake in self._wakes if _wake is not wake)
+
+    def wait_change(self, timeout: float, wake: threading.Event | None = None, since: int | None = None) -> bool:
+        """Wait up to timeout seconds until activity changed, True if changed (or woken) before timeout
+
+        Args:
+            timeout: longest wait, seconds.
+            wake: subscribed wake event (see subscribe), also set by owner to stop: waited, then cleared.
+                Change notified while caller was busy is never missed (event kept set).
+            since: without wake, version read before (change since then returns at once), current if None.
+        """
+        if wake is not None:
+            if not wake.is_set():
+                wake.wait(timeout)
+            woken = wake.is_set()
+            wake.clear()
+            return woken
+        with self._change:
+            if since is None:
+                since = self.version
+            return self._change.wait_for(lambda: self.version != since, timeout)
 
 
 class OverlaySignal(QObject):
@@ -86,6 +140,7 @@ class OverlaySignal(QObject):
         iconify: signal for toggling taskbar icon visibility state (for VR compatibility).
         context: signal for session type or pit state changed (widget visibility context).
         editing: signal for overlay edit mode started or ended.
+        activity: signal for activity state changed (see RealtimeState.notify_change), any thread.
     """
 
     hidden = Signal(bool)
@@ -94,6 +149,7 @@ class OverlaySignal(QObject):
     paused = Signal(bool)
     iconify = Signal(bool)
     editing = Signal(bool)
+    activity = Signal()
     __slots__ = ()
 
 

@@ -26,7 +26,7 @@ Card {
         anchors.verticalCenter: parent.verticalCenter
         color: tile.warning ? theme.loss : tile.tint
         opacity: tile.value === "-" ? 0.35 : 0.9
-        Behavior on color { ColorAnimation { duration: 200 } }
+        Behavior on color { ColorAnimation { duration: theme.motionBase } }
     }
 
     ColumnLayout {
@@ -37,13 +37,13 @@ Card {
         anchors.topMargin: theme.em * 0.6
         spacing: 1
         RowLayout {
-            spacing: theme.em * 0.35
+            spacing: theme.em * 0.4
             Layout.fillWidth: true
             Icon { glyph: tile.glyph; size: theme.em * 0.85; color: tile.warning ? theme.loss : tile.tint }
             Text {
                 text: tile.title
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.88
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
@@ -51,17 +51,17 @@ Card {
         Text {
             text: tile.value
             color: tile.warning ? theme.loss : theme.text
-            font.pointSize: theme.fontPoint * 1.55
+            font.pointSize: theme.fontTitle
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
             elide: Text.ElideRight
             Layout.fillWidth: true
-            Behavior on color { ColorAnimation { duration: 200 } }
+            Behavior on color { ColorAnimation { duration: theme.motionBase } }
         }
         Text {
             text: tile.detail !== "" ? tile.detail : " "
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.86
+            font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
             elide: Text.ElideRight
             Layout.fillWidth: true
@@ -71,5 +71,5 @@ Card {
     HoverHandler { id: hover; enabled: tile.tip !== "" }
     ToolTip.visible: hover.hovered
     ToolTip.text: tile.tip
-    ToolTip.delay: 600
+    ToolTip.delay: theme.tipDelay
 }

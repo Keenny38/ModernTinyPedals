@@ -17,23 +17,22 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Lap viewer corners (mixin of LapViewerBackend): corner by corner comparison with reference lap, ideal lap, coaching,
+Lap viewer corners (part of LapViewerBackend, QML backend.cornerTable): corner by corner comparison with reference lap, ideal lap, coaching,
 official corner names, corner card
 """
 
 from __future__ import annotations
 
 import bisect
-import math
 import os
-from collections import OrderedDict
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile.corner_analysis import (
+    SPEED_HYSTERESIS,
     CornerComparison,
     CornerStats,
     IdealLap,
@@ -60,42 +59,177 @@ from ..lap_viewer import (
     signed,
 )
 from . import lap_map
-from .lap_base import COLOR_GAIN, COLOR_LOSS, BackendBase, keys_match
+from .lap_base import COLOR_GAIN, COLOR_LOSS, PagePart, keys_match, weak_host
+from .models import DictListModel
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import SignalInstance
+
+    from .trace_data import TraceData
+
+CORNER_ROLES = (
+    "id", "index", "label", "apex", "kind", "best", "time", "timeColor", "bar", "speed", "speedColor", "brake",
+    "throttle", "trail", "coast", "overlap", "coastColor", "overlapColor", "entry", "exit", "entryColor", "exitColor",
+    "gear", "peakBrake",
+)
 
 CORNER_SORTS = ("track", "loss")
 SUM_LENGTH_TOLERANCE = 0.1  # compared lap length difference (fraction) over which Straights & Total rows are left out
 
 
-class CornerTable(BackendBase):
+class CornerHost(Protocol):
+    """What the corner table part uses of the lap viewer page"""
+
+    data: TraceData
+    folder: str
+
+    @property
+    def cornersChanged(self) -> SignalInstance: ...
+    def short_label(self, key: str) -> str: ...
+    def lap_line(self, lap: PlotLap) -> lap_map.MapLine | None: ...
+    def lap_offsets(self, lap: PlotLap) -> tuple[lap_map.MapLine, list[float], list[int]] | None: ...
+    def lap_placement(self, lap: PlotLap, distance: float) -> tuple[float, float, float] | None: ...
+    def track_limits(self) -> lap_map.TrackLimits | None: ...
+    def track_edges(self) -> tuple[list[float], list[float]]: ...
+    def compared_changed(self): ...
+    def corners_found(self): ...
+
+
+class CornerTable(PagePart):
+    """Corner table of lap viewer page (QML backend.cornerTable): corner by corner comparison with reference lap"""
+
+    changed = Signal()  # corner rows, sort, sensitivity, compared lap (page cornersChanged)
+
+    def __init__(self, page: CornerHost, setting: dict, parent: QObject | None = None):
+        super().__init__(parent)
+        self._page = weak_host(page)
+        self.row_model = DictListModel(CORNER_ROLES, self)  # corner table rows (kept while their corner stays)
+        self._table: list[dict] = []  # corner table rows
+        self._marks: list[dict] = []  # corner numbers on charts
+        self.rows: list[CornerComparison] = []  # corners of reference lap compared
+        self.key: tuple = ()  # laps & sensitivity of corner rows (computed again only if changed)
+        self.ideal: IdealLap | None = None
+        self._lap_corners: dict[str, tuple[tuple, ResampledLap, list[CornerStats | None]]] = {}  # stats of each lap
+        self._trackouts: dict[str, tuple[tuple, dict[int, float]]] = {}  # lap key: (key, track-out point by corner)
+        self._resampled: dict[str, ResampledLap] = {}  # lap key: columns on corner grid (same lap, same object)
+        self._coaching: list[dict] = []  # corners where compared lap loses most time, causes
+        self.official: list[TrackCorner] = []  # official corner numbers (or names) of circuit
+        self.official_numbered = True
+        self._official_key: tuple | None = None  # reference & track of placed official corners
+        self.compare_key = ""  # lap compared corner by corner & on gain map, first compared lap if not shown
+        saved = setting.get("corner_hysteresis", SPEED_HYSTERESIS)
+        self._hysteresis = int(saved) if isinstance(saved, (int, float)) else int(SPEED_HYSTERESIS)
+        sort = setting.get("corner_sort", "track")
+        self._sort = sort if sort in CORNER_SORTS else "track"
+        page.cornersChanged.connect(self.changed)
+
     """Corner table of lap viewer page"""
 
     # Corners
+    @Property(QObject, constant=True)
+    def model(self) -> QObject:
+        """Corner table rows (see items), rows kept while their corner stays: QML keeps their items"""
+        return self.row_model
+
+    @Property(int, notify=changed)
+    def count(self) -> int:
+        """Corners found on reference lap (ranges length, without building it)"""
+        return len(self.rows)
+
+    @Property(float, notify=changed)
+    def maxDelta(self) -> float:
+        """Largest corner time delta (bars of corner table scaled on it), at least 0.05 s"""
+        return max((abs(row["bar"]) for row in self._table if row["kind"] == "corner"), default=0.0) or 0.05
+
+    @Slot(int, result=int)
+    def position(self, index: int) -> int:
+        """Corner table row of corner (shown when selected on map), -1 if none"""
+        return next((number for number, row in enumerate(self._table)
+                     if row["kind"] == "corner" and row["index"] == index), -1)
+
+    @Property(list, notify=changed)
+    def marks(self) -> list[dict]:
+        """Corner numbers on charts"""
+        return self._marks
+
+    @Property(list, notify=changed)
+    def items(self) -> list[dict]:
+        """Corner table rows"""
+        return self._table
+
+    @Property(int, notify=changed)
+    def hysteresis(self) -> int:
+        return self._hysteresis
+
+    @Property(str, notify=changed)
+    def compareKey(self) -> str:
+        lap = self.compared_lap()
+        return lap.key if lap is not None else ""
+
+    @Property(str, notify=changed)
+    def sort(self) -> str:
+        return self._sort
+
+    @Property(list, notify=changed)
+    def coaching(self) -> list[dict]:
+        """Corners where compared lap loses most time (up to 3): row index, name, time lost, causes"""
+        return self._coaching
+
+    @Property(str, notify=changed)
+    def coachingLap(self) -> str:
+        lap = self.compared_lap()
+        return self._page.short_label(lap.key) if lap is not None else ""
+
+    @Property(list, notify=changed)
+    def ranges(self) -> list[list[float]]:
+        """Axis range of every corner in lap order (previous / next corner keys)"""
+        return [self.range(index) for index in range(len(self.rows))]
+
+    def table(self) -> list[dict]:
+        """Corner table rows (see items)"""
+        return self._table
+
+    def coaching_rows(self) -> list[dict]:
+        """Coaching tips (see coaching)"""
+        return self._coaching
+
+    def sensitivity(self) -> int:
+        """Speed hysteresis corners are found with (see hysteresis)"""
+        return self._hysteresis
+
+    def forget(self):
+        """Results kept per loaded lap forgotten (they keep lap data in memory)"""
+        for cache in (self._lap_corners, self._trackouts, self._resampled):
+            cache.clear()
+        self.key = ()
+        self.rows = []
+        self.ideal = None
+        self._official_key = None
+
+    def release(self):
+        self.forget()
+        self._table, self._marks, self._coaching = [], [], []
+
     def compared_lap(self) -> PlotLap | None:
         """Lap compared corner by corner & on gain map: chosen lap if shown, else first compared lap"""
-        compared = self.data.compared()
-        return next((lap for lap in compared if lap.key == self._compare_key), compared[0] if compared else None)
+        compared = self._page.data.compared()
+        return next((lap for lap in compared if lap.key == self.compare_key), compared[0] if compared else None)
 
     @Slot(str)
     def setCompareKey(self, key: str):
-        if key != self._compare_key:
-            self._compare_key = key
+        if key != self.compare_key:
+            self.compare_key = key
             self.build_corners()
-            if self._map:
-                self._map["corners"] = self.map_corner_points()
-                self._map["sectors"] = self.map_sector_labels()
-                if self._map_mode in ("gain", "line", "corners"):  # colors depend on compared lap
-                    self.build_colored_line(self._map_view[2])
-                    self.bump_revision()
-                self.mapCornersChanged.emit()  # rest of map unchanged: not read again by QML
-            self.cornersChanged.emit()
+            self._page.compared_changed()
+            self._page.cornersChanged.emit()
 
     @Slot(str)
-    def setCornerSort(self, sort: str):
-        if sort in CORNER_SORTS and sort != self._corner_sort:
-            self._corner_sort = sort
-            save_viewer_setting(self.folder, corner_sort=sort)
+    def setSort(self, sort: str):
+        if sort in CORNER_SORTS and sort != self._sort:
+            self._sort = sort
+            save_viewer_setting(self._page.folder, corner_sort=sort)
             self.build_corners()
-            self.cornersChanged.emit()
+            self._page.cornersChanged.emit()
 
     def build_corners(self):
         """Corner by corner comparison of chosen compared lap with reference lap
@@ -103,19 +237,19 @@ class CornerTable(BackendBase):
         Time: positive = compared lap slower. Braking: positive = brakes later.
         Full throttle: negative = full throttle earlier.
         """
-        reference = self.data.reference.data if self.data.reference else None
+        reference = self._page.data.reference.data if self._page.data.reference else None
         compared_lap = self.compared_lap()
         other = compared_lap.data if compared_lap is not None else None
-        scales = tuple(self.data.scale_of(lap) for lap in self.data.laps)
-        key = (reference, other, self._hysteresis, tuple(lap.data for lap in self.data.laps), scales,
-               tuple(lap.clean for lap in self.data.laps))
-        if not keys_match(self._corner_key, key):
-            self._corner_key = key
-            self._corner_rows = compare_corners(
-                self.resampled(self.data.reference), self.resampled(compared_lap) if compared_lap is not None else None,
-                self._hysteresis) if self.data.reference is not None else []
-            self._ideal = self.clean_ideal_lap()
-        convert = self.data.units["speed"][0]
+        scales = tuple(self._page.data.scale_of(lap) for lap in self._page.data.laps)
+        key = (reference, other, self._hysteresis, tuple(lap.data for lap in self._page.data.laps), scales,
+               tuple(lap.clean for lap in self._page.data.laps))
+        if not keys_match(self.key, key):
+            self.key = key
+            self.rows = compare_corners(
+                self.resampled(self._page.data.reference), self.resampled(compared_lap) if compared_lap is not None else None,
+                self._hysteresis) if self._page.data.reference is not None else []
+            self.ideal = self.clean_ideal_lap()
+        convert = self._page.data.units["speed"][0]
 
         def speed(value: float) -> float:
             return convert(value) if convert is not None else value
@@ -139,7 +273,7 @@ class CornerTable(BackendBase):
 
         best_of = self.corner_best_laps()
         rows = []
-        for index, row in enumerate(self._corner_rows):
+        for index, row in enumerate(self.rows):
             ref, comp = row.reference, row.compared
             item: dict[str, Any] = {
                 "index": index, "label": self.row_label(row), "apex": distance_text(row.corner.apex),
@@ -182,27 +316,27 @@ class CornerTable(BackendBase):
                     "peakBrake": f"{ref.peak_brake * 100:.0f} / {comp.peak_brake * 100:.0f}%",
                 })
             rows.append(item)
-        if self._corner_sort == "loss":
+        if self._sort == "loss":
             rows.sort(key=lambda item: -item["bar"])
         if reference is not None and other is not None and self.sums_comparable(reference, other):
-            for text, kind, delta in ((tr("Straights"), "sum", straights_delta(self._corner_rows, reference, other)),
+            for text, kind, delta in ((tr("Straights"), "sum", straights_delta(self.rows, reference, other)),
                                       (tr("Total"), "total", lap_time_delta(reference, other))):
                 rows.append({"index": -1, "label": text, "apex": "", "kind": kind, "time": signed(delta, 2),
                              "timeColor": judged(delta), "bar": delta})
-        if self._ideal is not None and reference is not None:
-            gap = self._ideal.time - total_lap_time(reference)  # same lap time as ideal lap parts & Total row
-            rows.append({"index": -1, "label": tr("Ideal Lap"), "apex": "", "speed": format_laptime(self._ideal.time),
+        if self.ideal is not None and reference is not None:
+            gap = self.ideal.time - total_lap_time(reference)  # same lap time as ideal lap parts & Total row
+            rows.append({"index": -1, "label": tr("Ideal Lap"), "apex": "", "speed": format_laptime(self.ideal.time),
                          "speedColor": "", "kind": "ideal", "time": signed(gap, 2), "timeColor": judged(gap),
                          "bar": gap})
-        self._corners = rows
-        self.corner_model.sync([{**row, "id": f"{row['kind']}|{row['index']}"} for row in rows], "id")
+        self._table = rows
+        self.row_model.sync([{**row, "id": f"{row['kind']}|{row['index']}"} for row in rows], "id")
         self.build_coaching()
         self.build_corner_marks()
 
     def sums_comparable(self, reference: LapData, other: LapData) -> bool:
         """Whether corners + straights = lap delta rows mean something: compared lap has stats in every corner & about
         the same length (else straights take time of missing corners, or of a stub lap)"""
-        if not self._corner_rows or any(row.compared is None for row in self._corner_rows):
+        if not self.rows or any(row.compared is None for row in self.rows):
             return False
         length, other_length = max(reference.distance, default=0.0), max(other.distance, default=0.0)
         return length > 0 and abs(other_length / length - 1) <= SUM_LENGTH_TOLERANCE
@@ -210,16 +344,16 @@ class CornerTable(BackendBase):
     def clean_ideal_lap(self) -> IdealLap | None:
         """Ideal lap (fastest lap in each corner & straight) among clean shown laps: invalid, out & in laps
         (cut track) never count; best lap indexes are shown lap indexes"""
-        clean = [index for index, lap in enumerate(self.data.laps) if lap.clean]
-        found = ideal_lap([self.resampled(self.data.laps[index]) for index in clean],
-                          [row.corner for row in self._corner_rows])
+        clean = [index for index, lap in enumerate(self._page.data.laps) if lap.clean]
+        found = ideal_lap([self.resampled(self._page.data.laps[index]) for index in clean],
+                          [row.corner for row in self.rows])
         if found is None:
             return None
         return found._replace(best=[clean[position] for position in found.best])
 
     def build_coaching(self):
         """Corners where compared lap loses most time against reference lap & likely causes (corner table)"""
-        convert, unit = self.data.units["speed"]
+        convert, unit = self._page.data.units["speed"]
 
         def speed(value: float) -> float:
             return convert(value) if convert is not None else value
@@ -234,44 +368,44 @@ class CornerTable(BackendBase):
             "exit_speed": lambda value: trm(f"Exit speed {speed(value):.0f} {unit} lower"),
         }
         self._coaching = [
-            {"index": tip.row, "label": self.row_label(self._corner_rows[tip.row]), "loss": signed(tip.loss, 2, " s"),
+            {"index": tip.row, "label": self.row_label(self.rows[tip.row]), "loss": signed(tip.loss, 2, " s"),
              "causes": [texts[kind](value) for kind, value in tip.causes[:3]]
              or [tr("No clear cause: compare traces of this corner")]}
-            for tip in coaching_tips(self._corner_rows)
+            for tip in coaching_tips(self.rows)
         ]
 
     def corner_best_laps(self) -> dict[int, str]:
         """Fastest lap through each corner (ideal lap), corner row index: short lap name"""
-        ideal = self._ideal
+        ideal = self.ideal
         if ideal is None:
             return {}
         result = {}
-        for index, row in enumerate(self._corner_rows):
+        for index, row in enumerate(self.rows):
             if row.corner.start in ideal.bounds:
                 part = ideal.bounds.index(row.corner.start)
                 if part < len(ideal.best):
-                    result[index] = self.short_label(self.data.laps[ideal.best[part]].key)
+                    result[index] = self._page.short_label(self._page.data.laps[ideal.best[part]].key)
         return result
 
     def build_corner_marks(self):
         """Corner numbers on charts: official corners of circuit, else corners found on reference lap"""
-        if self._official:
-            self._corner_marks = [
-                {"x": self.data.x_at_distance(corner.distance), "label": self.official_text(corner.label),
+        if self.official:
+            self._marks = [
+                {"x": self._page.data.x_at_distance(corner.distance), "label": self.official_text(corner.label),
                  "distance": corner.distance}
-                for corner in self._official
+                for corner in self.official
             ]
             return
-        self._corner_marks = [
-            {"x": self.data.x_at_distance(row.corner.apex), "label": corner_label(row.corner.number),
+        self._marks = [
+            {"x": self._page.data.x_at_distance(row.corner.apex), "label": corner_label(row.corner.number),
              "distance": row.corner.apex}
-            for row in self._corner_rows
+            for row in self.rows
         ]
 
     # Official corners
     def track_name(self) -> str:
         """Track of displayed laps, from lap info or older lap files folder ("<track> - <class>")"""
-        laps = self.data.laps
+        laps = self._page.data.laps
         if not laps:
             return ""
         track = str(laps[0].data.meta.get("track", ""))
@@ -279,15 +413,15 @@ class CornerTable(BackendBase):
 
     def build_official(self):
         """Official corners of circuit placed on reference line (or track map file), once per reference lap"""
-        reference = self.data.reference
+        reference = self._page.data.reference
         key = (reference.data if reference is not None else None, self.track_name())
         if self._official_key is not None and keys_match(self._official_key, key):
             return
         self._official_key = key
-        self._official, self._official_numbered = [], True
+        self.official, self.official_numbered = [], True
         if reference is None:
             return
-        line = self.lap_line(reference)
+        line = self._page.lap_line(reference)
         if line is not None:
             distances, xs, ys = line.distances, line.xs, line.ys
         else:  # positions not recorded (imported log): track map file
@@ -298,77 +432,68 @@ class CornerTable(BackendBase):
             distances = [distance for distance, _ in nodes]
             xs = [float(coord[0]) for _, coord in nodes]
             ys = [float(coord[1]) for _, coord in nodes]
-        self._official, self._official_numbered = track_corners(self.track_name(), distances, xs, ys)
+        self.official, self.official_numbered = track_corners(self.track_name(), distances, xs, ys)
 
     def official_text(self, label: str) -> str:
         """Official corner shown: "T5" ("V5" in French), or translated name"""
-        return trm(f"T{label}") if self._official_numbered else tr(label)
+        return trm(f"T{label}") if self.official_numbered else tr(label)
 
     def official_in(self, row: CornerComparison) -> list[TrackCorner]:
         """Official corners inside corner found on reference lap"""
-        return [corner for corner in self._official if row.corner.start <= corner.distance <= row.corner.end]
+        return [corner for corner in self.official if row.corner.start <= corner.distance <= row.corner.end]
 
     def row_label(self, row: CornerComparison) -> str:
         """Corner found on reference lap named after official corners it covers: "T5", "T5-6" """
-        if not self._official:
+        if not self.official:
             return corner_label(row.corner.number)
         inside = self.official_in(row)
         if not inside:
-            nearest = min(self._official, key=lambda corner: abs(corner.distance - row.corner.apex))
+            nearest = min(self.official, key=lambda corner: abs(corner.distance - row.corner.apex))
             if abs(nearest.distance - row.corner.apex) > 200:
                 return "—"
             inside = [nearest]
         if len(inside) == 1:
             return self.official_text(inside[0].label)
-        if self._official_numbered:
+        if self.official_numbered:
             return trm(f"T{inside[0].label}-{inside[-1].label}")
         return " / ".join(tr(corner.label) for corner in inside)
 
     @Slot(int, result=list)
-    def cornerRange(self, index: int) -> list[float]:
+    def range(self, index: int) -> list[float]:
         """Axis range of corner (zoom on it)"""
-        if not 0 <= index < len(self._corner_rows):
+        if not 0 <= index < len(self.rows):
             return []
-        corner = self._corner_rows[index].corner
-        return [self.data.x_at_distance(corner.start), self.data.x_at_distance(corner.end)]
+        corner = self.rows[index].corner
+        return [self._page.data.x_at_distance(corner.start), self._page.data.x_at_distance(corner.end)]
 
     @Slot(int)
     def setHysteresis(self, value: int):
         if value != self._hysteresis:
             self._hysteresis = value
-            save_viewer_setting(self.folder, corner_hysteresis=value)
+            save_viewer_setting(self._page.folder, corner_hysteresis=value)
             self.build_corners()
-            if self._map:
-                self._map["corners"] = self.map_corner_points()
-                self._map["points"] = self.map_driving_points()
-                self._band_cache = OrderedDict()
-                self._band_generation += 1
-                self._preview_step = math.nan
-                self._band_cache_applied = False
-                self.build_map_bands()
-                self.bump_revision()
-                self.mapDataChanged.emit()
-            self.cornersChanged.emit()
+            self._page.corners_found()
+            self._page.cornersChanged.emit()
 
     def lap_corner_stats(self, lap: PlotLap) -> tuple[ResampledLap, list[CornerStats | None]]:
         """Driving of lap in each corner found on reference lap, computed again only if laps or corners changed"""
-        key = (lap.data, self._corner_key, self.data.scale_of(lap))
+        key = (lap.data, self.key, self._page.data.scale_of(lap))
         cached = self._lap_corners.get(lap.key)
         if cached is None or not keys_match(cached[0], key):
             sampled = self.resampled(lap)
-            cached = (key, sampled, [corner_stats(sampled, row.corner) for row in self._corner_rows])
+            cached = (key, sampled, [corner_stats(sampled, row.corner) for row in self.rows])
             self._lap_corners = {name: value for name, value in self._lap_corners.items()
-                                 if name in {shown.key for shown in self.data.laps}}
+                                 if name in {shown.key for shown in self._page.data.laps}}
             self._lap_corners[lap.key] = cached
         return cached[1], cached[2]
 
     def resampled(self, lap: PlotLap) -> ResampledLap:
         """Lap columns on corner grid, resampled once per loaded lap (columns resampled at first use)"""
-        scale = self.data.scale_of(lap)
+        scale = self._page.data.scale_of(lap)
         cached = self._resampled.get(lap.key)
         if cached is None or cached.lap is not lap.data or cached.scale != scale:
             cached = ResampledLap(lap.data, scale=scale)
-            shown = {shown_lap.key for shown_lap in self.data.laps}
+            shown = {shown_lap.key for shown_lap in self._page.data.laps}
             self._resampled = {name: value for name, value in self._resampled.items() if name in shown}
             self._resampled[lap.key] = cached
         return cached
@@ -376,43 +501,43 @@ class CornerTable(BackendBase):
     def lap_trackouts(self, lap: PlotLap, stats: list[CornerStats | None], turns: dict[int, float],
                       reference_line: lap_map.MapLine) -> dict[int, float]:
         """Track-out point of lap in each corner (reference distance), computed once per lap, corners & edges"""
-        scale = self.data.scale_of(lap)
-        reference = self.data.reference
-        key = (lap.data, reference.data if reference is not None else None, self._limits, self._corner_key, scale,
-               self._edges)
+        scale = self._page.data.scale_of(lap)
+        reference = self._page.data.reference
+        key = (lap.data, reference.data if reference is not None else None, self._page.track_limits(), self.key, scale,
+               self._page.track_edges())
         cached = self._trackouts.get(lap.key)
         if cached is not None and keys_match(cached[0], key):
             return cached[1]
-        placed = self.lap_offsets(lap)  # offsets from base line, edges along it: no line search again
+        placed = self._page.lap_offsets(lap)  # offsets from base line, edges along it: no line search again
         found: dict[int, float] = {}
-        if placed is not None and placed[1] and self._edges[0]:
+        if placed is not None and placed[1] and self._page.track_edges()[0]:
             line, sides, indexes = placed
-            for index, row in enumerate(self._corner_rows):
+            for index, row in enumerate(self.rows):
                 stat = stats[index]
                 if stat is None or index not in turns:
                     continue
-                distance = lap_map.trackout_from_offsets(line.distances, sides, indexes, self._edges,
+                distance = lap_map.trackout_from_offsets(line.distances, sides, indexes, self._page.track_edges(),
                                                          stat.apex / scale, row.corner.end / scale,
                                                          turns[index])
                 found[index] = distance * scale if distance >= 0 else -1.0
-        shown = {shown_lap.key for shown_lap in self.data.laps}
+        shown = {shown_lap.key for shown_lap in self._page.data.laps}
         self._trackouts = {name: value for name, value in self._trackouts.items() if name in shown}
         self._trackouts[lap.key] = (key, found)
         return found
 
     @Slot(int, result=dict)
-    def cornerCard(self, index: int) -> dict:
+    def card(self, index: int) -> dict:
         """Every shown lap in corner (row of corner table): time, gap, speeds, braking & throttle points"""
-        if not 0 <= index < len(self._corner_rows) or self.data.reference is None:
+        if not 0 <= index < len(self.rows) or self._page.data.reference is None:
             return {}
-        row = self._corner_rows[index]
-        convert, unit = self.data.units["speed"]
+        row = self.rows[index]
+        convert, unit = self._page.data.units["speed"]
 
         def speed(value: float) -> str:
             return f"{convert(value) if convert else value:.0f}"
 
-        reference = self.lap_corner_stats(self.data.reference)[1][index]
-        reference_line = self.lap_line(self.data.reference)
+        reference = self.lap_corner_stats(self._page.data.reference)[1][index]
+        reference_line = self._page.lap_line(self._page.data.reference)
         turn = 0.0
         if reference_line is not None and len(reference_line.xs) > 2:
             turn = lap_map.turning(reference_line, min(bisect.bisect_left(reference_line.distances, row.corner.apex),
@@ -420,7 +545,7 @@ class CornerTable(BackendBase):
 
         def room(lap: PlotLap, distance: float, inside: bool) -> str:
             """Room left to inside (apex) or outside edge (entry, exit), meters (distance: reference distance)"""
-            found = self.lap_placement(lap, distance / self.data.scale_of(lap)) if distance >= 0 else None
+            found = self._page.lap_placement(lap, distance / self._page.data.scale_of(lap)) if distance >= 0 else None
             if found is None:
                 return "—"
             left, right, _ = found
@@ -429,15 +554,15 @@ class CornerTable(BackendBase):
 
         laps = []
         brakes = []
-        for lap in self.data.laps:
+        for lap in self._page.data.laps:
             stats = self.lap_corner_stats(lap)[1][index]
             if stats is None:
                 continue
             if stats.brake_point >= 0:
                 brakes.append(stats.brake_point)
-            gap = stats.time - reference.time if reference is not None and lap is not self.data.reference else None
+            gap = stats.time - reference.time if reference is not None and lap is not self._page.data.reference else None
             laps.append({
-                "label": self.short_label(lap.key), "color": lap.color.name(),
+                "label": self._page.short_label(lap.key), "color": lap.color.name(),
                 "time": f"{number_text(stats.time, 2)} s", "gap": signed(gap, 2) if gap is not None else "",
                 "gapColor": COLOR_LOSS if gap is not None and gap > 0.005 else COLOR_GAIN if gap is not None
                 and gap < -0.005 else "",
@@ -447,10 +572,10 @@ class CornerTable(BackendBase):
                 "throttle": distance_text(stats.throttle_point) if stats.throttle_point >= 0 else "—",
                 # Room to edge: outside at braking point, inside at apex, outside at full throttle
                 "width": (f"{room(lap, stats.brake_point, False)} → {room(lap, stats.apex, True)} → "
-                          f"{room(lap, stats.throttle_point, False)} {distance_unit()[1]}") if self._edges[0] else "",
+                          f"{room(lap, stats.throttle_point, False)} {distance_unit()[1]}") if self._page.track_edges()[0] else "",
             })
         spread = max(brakes) - min(brakes) if len(brakes) > 1 else -1.0
         return {"title": self.row_label(row), "apex": distance_text(row.corner.apex), "laps": laps,
                 "spread": trm(f"Braking points spread: {distance_text(spread)}") if spread >= 0 else "",
                 "widthTitle": tr("Room to edge: outside at braking, inside at apex, outside at exit")
-                if self._edges[0] else ""}
+                if self._page.track_edges()[0] else ""}

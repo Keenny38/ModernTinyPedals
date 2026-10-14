@@ -25,8 +25,6 @@ state in quick/lap_backend.py. This module keeps channels, value formats & viewe
 
 from __future__ import annotations
 
-import contextlib
-import functools
 import json
 import logging
 import math
@@ -34,15 +32,16 @@ import os
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
-from PySide6.QtCore import QLocale, QMetaObject, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QMetaObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
 from .. import units
-from ..i18n import current_language, tr, trm
+from ..i18n import localized, tr, trm  # localized: shared with stream graphics
 from ..setting import cfg
+from ..userfile import write_json
 from ..userfile.motec_import import import_ld_file
-from ..userfile.telemetry_lap import IMPORT_FOLDER, LapData, LapFile, csv_number, lap_number_of, lap_stem, lap_time_of
+from ..userfile.telemetry_lap import IMPORT_FOLDER, LapData, LapFile, lap_number_of, lap_stem, lap_time_of
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
 logger = logging.getLogger(__name__)
@@ -190,22 +189,6 @@ def set_math_channels(channels: Sequence[Channel]):
 
 FEET_PER_METER = 3.280839895
 MM_PER_INCH = 25.4
-
-
-@functools.lru_cache(maxsize=8)
-def _locale_decimal(code: str) -> str:
-    return QLocale(code).decimalPoint() or "."
-
-
-def decimal_point() -> str:
-    """Decimal separator of app language (comma in French), numbers shown in pages"""
-    return _locale_decimal(current_language())
-
-
-def localized(text: str) -> str:
-    """Number text with decimal separator of app language (lap times keep their dot)"""
-    point = decimal_point()
-    return text if point == "." else text.replace(".", point)
 
 
 def number_text(value: float, decimals: int = 0) -> str:
@@ -405,21 +388,10 @@ def save_viewer_setting(folder: str, **values):
     """
     setting = load_viewer_setting(folder)
     setting.update(values)
-    target = os.path.join(folder, VIEWER_SETTING)
-    temporary = f"{target}.tmp"
     try:
-        with open(temporary, "w", encoding="utf-8") as file:
-            json.dump(setting, file)
-        os.replace(temporary, target)
+        write_json(os.path.join(folder, VIEWER_SETTING), setting, raise_error=True)
     except OSError as error:
         logger.warning("LAP VIEWER: unable to save setting: %s", error)
-        with contextlib.suppress(OSError):
-            os.remove(temporary)
-
-
-def save_visible_channels(folder: str, columns: list[str]):
-    save_viewer_setting(folder, channels=columns)
-
 
 
 def delta_limit(series: Sequence[Sequence[float]]) -> float:
@@ -463,16 +435,6 @@ def gain_color(rate: float, colorblind: bool = False) -> QColor:
     return shades[round(min(abs(rate) / GAIN_FULL_SCALE, 1.0) * GAIN_SHADES)]
 
 
-def lap_positions(lap: LapData | None) -> list[tuple[float, float, float]]:
-    """(distance, x, y) of lap, empty if positions not recorded"""
-    if lap is None:
-        return []
-    xs, ys = lap.columns.get("pos_x"), lap.columns.get("pos_y")
-    if not xs or not ys:
-        return []
-    return [(distance, x, y) for distance, x, y in zip(lap.distance, xs, ys) if x or y]
-
-
 def signed(value: float, decimals: int = 0, unit: str = "") -> str:
     """Signed number text, minus sign as typeset, decimal separator of app language"""
     return f"{localized(f'{value:+.{decimals}f}')}{unit}".replace("-", chr(0x2212))  # minus sign
@@ -507,14 +469,14 @@ def import_motec_log(window, filename: str) -> str:
         if type(viewer).__name__ == "LapViewer" and viewer.isVisibleTo(window)
     ]
     if viewers:
-        viewers[-1].backend.import_motec([filename])
+        viewers[-1].backend.exports.import_motec([filename])
         return trm(f"Importing MoTeC log: <b>{name}</b>...")
     # Viewer not available: imported now
     try:
         paths = import_ld_file(filename, os.path.join(cfg.path.telemetry, IMPORT_FOLDER))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, MemoryError) as error:  # memory: huge log (or sizes made up by a broken file)
         logger.error("LAP VIEWER: unable to import %s: %s", filename, error)
-        return trm(f"Unable to import <b>{name}</b>: {error}")
+        return trm(f"Unable to import <b>{name}</b>: {str(error) or type(error).__name__}")
     if not paths:
         return trm(f"No complete lap in: {name}")
     return trm(f"MoTeC log imported: <b>{name}</b> ({len(paths)} laps)")
@@ -601,14 +563,10 @@ class LapViewer(BaseDialog):
         if not event.spontaneous():  # page shown (not app window restored): after focus given by dialog show
             QTimer.singleShot(0, self, self.focus_charts)
 
-    def closeEvent(self, event):
+    def free_page(self):
         self.backend.release()
+        self.view.setSource(QUrl())  # QML gone before the backend it binds to (deleted first: created first)
+
+    def closeEvent(self, event):
+        self.release_page()
         super().closeEvent(event)
-        if event.isAccepted():  # QML gone before the backend it binds to (deleted first: created first)
-            self.view.setSource(QUrl())
-
-
-def format_csv_number(value: float, decimal: str) -> str:
-    """Number with up to 4 decimals, locale decimal separator"""
-    return csv_number(value, decimal)
-

@@ -22,11 +22,13 @@ Driver rank Widget
 
 Le Mans Ultimate Driver Rank (DR) & Safety Rank (SR) of player, as shown by game menu (rank, tier &
 progress to next tier, read from game folder, see rank_info), and track limits points of session against
-points allowed per penalty. A dash while unknown (game folder not found, never signed in online, no
-limit given for session).
+points allowed per penalty in races. A dash while unknown (game folder not found, never signed in online,
+no limit given, practice & qualifying).
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from ..api_control import api
 from ..demo_state import drawing_demo
@@ -34,6 +36,9 @@ from ..formatter import format_points
 from ..process.driver_ranks import DriverRanks, Rank
 from ..rank_info import ranks
 from ._base import Overlay
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import DriverRankConfig
 
 ITEMS = ("driver_rank", "safety_rank", "track_limits")  # option key suffixes, design order
 DEMO_PLAYER = DriverRanks("", "", "", "", Rank("Silver", 2, 40), Rank("Platinum", 3, 50))  # overlay pictures
@@ -48,8 +53,9 @@ def player_ranks() -> DriverRanks | None:
 
 
 def track_limits() -> tuple[float, float]:
-    """Track limits points of player & points allowed per penalty of session (0: no limit given)"""
-    return api.read.session.cut_points(), api.read.session.limits_points()
+    """Track limits points of player & points allowed per penalty in race (0: no limit given, or practice &
+    qualifying, which have no penalty)"""
+    return api.read.session.cut_points(), api.read.session.limits_points() * api.read.session.in_race()
 
 
 def track_limits_text(points: float, limit: float, dash: str = "-") -> str:
@@ -59,6 +65,8 @@ def track_limits_text(points: float, limit: float, dash: str = "-") -> str:
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: DriverRankConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

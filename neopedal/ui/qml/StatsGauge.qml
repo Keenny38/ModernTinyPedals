@@ -46,7 +46,7 @@ Item {
                 radius: height / 2
                 color: segment.modelData.color
                 opacity: segment.lit ? 1 : gauge.litSegment < 0 ? 0.7 : 0.42
-                Behavior on opacity { NumberAnimation { duration: 260 } }
+                Behavior on opacity { NumberAnimation { duration: theme.motionSlow } }
             }
             Text {
                 y: gauge.barHeight + theme.em * 0.25
@@ -54,13 +54,13 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 text: segment.modelData.letter
                 color: segment.lit ? segment.modelData.color : theme.dimText
-                font.pointSize: theme.fontPoint * 0.8
+                font.pointSize: theme.fontCaption
                 font.weight: segment.lit ? Font.Bold : Font.Normal
             }
             HoverHandler { id: segmentHover }
             ToolTip.visible: segmentHover.hovered
             ToolTip.text: segment.modelData.name + "  " + segment.modelData.limit
-            ToolTip.delay: 300
+            ToolTip.delay: theme.tipDelay
         }
     }
 
@@ -76,7 +76,7 @@ Item {
             width: theme.em * 1.6
             height: gauge.barY + gauge.barHeight + theme.em * 0.3
             z: mark.main ? 2 : 1
-            Behavior on centerX { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+            Behavior on centerX { NumberAnimation { duration: theme.animate ? 380 : 0; easing.type: Easing.OutCubic } }
 
             Text {  // label: personal best name, else first letter (hidden next to personal best label)
                 visible: marker.mark.main === true || gauge.mainPos < 0
@@ -85,7 +85,7 @@ Item {
                 y: 0
                 text: (marker.mark.main ? marker.mark.label : marker.mark.short) || ""
                 color: marker.mark.main ? theme.text : theme.dimText
-                font.pointSize: theme.fontPoint * (marker.mark.main ? 0.85 : 0.78)
+                font.pointSize: (marker.mark.main ? theme.fontSmall : theme.fontCaption)
                 font.weight: marker.mark.main ? Font.Bold : Font.DemiBold
             }
             Rectangle {  // qualifying / race best: diamond above bar
@@ -108,12 +108,12 @@ Item {
                 color: marker.mark.color || theme.accent
                 border.width: Math.max(2, Math.round(theme.em * 0.16))
                 border.color: theme.base
-                Behavior on color { ColorAnimation { duration: 260 } }
+                Behavior on color { ColorAnimation { duration: theme.motionSlow } }
             }
             HoverHandler { id: markerHover }
             ToolTip.visible: markerHover.hovered
             ToolTip.text: marker.mark.tip || ""
-            ToolTip.delay: 200
+            ToolTip.delay: theme.tipDelay
         }
     }
 }

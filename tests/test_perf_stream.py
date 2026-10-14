@@ -182,15 +182,20 @@ def test_capture_copies_only_painted_overlays(monkeypatch):
         capture.capture()
         assert copied == ["fuel"] and store.seq > seq
         copied.clear()
-        gear.paint_serial = 4  # painted the same: copied, not sent
+        checked = []
+        original_checksum = stream_overlay.backing_checksum
+        monkeypatch.setattr(
+            stream_overlay, "backing_checksum", lambda widget: checked.append(widget.widget_name)
+            or original_checksum(widget))
+        gear.paint_serial = 4  # painted the same: checksum in place, not copied, not sent
         seq = store.seq
         capture.capture()
-        assert copied == ["gear"]
-        del gear.paint_serial  # window not counted: copied every time
-        copied.clear()
+        assert checked == ["gear"] and not copied and store.seq == seq
+        del gear.paint_serial  # window not counted: checksum every time, copied only when changed
+        checked.clear()
         capture.capture()
         capture.capture()
-        assert copied == ["gear", "gear"]
+        assert checked == ["gear", "gear"] and not copied
         # Canvas found once until an overlay moves
         screens = []
         original = stream_overlay.canvas_screen
@@ -260,6 +265,7 @@ def test_vr_update_skipped_while_nothing_painted(monkeypatch):
     composed = []
     original = vr_overlay.compose_widgets
     monkeypatch.setattr(vr_overlay, "compose_widgets", lambda widgets: composed.append(1) or original(widgets))
+    monkeypatch.setattr(vr_overlay, "STEAMVR_MIN_INTERVAL_MS", 0)  # rate limit tested in test_res_vr
     control = vr_overlay.VROverlay()
     fake = FakeVR()
     control._overlay, control._handle, control._visible = fake, 1, True

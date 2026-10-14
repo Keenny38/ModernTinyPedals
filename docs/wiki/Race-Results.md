@@ -1,8 +1,8 @@
-# Race Results
+# Results & Replays
 
-The **Race Results** page shows the results of every session you played: classification, positions lap by lap, the laps of each car and what happened during the session (contacts, penalties, track limits, chat). It reads the results files that Le Mans Ultimate and rFactor 2 write at the end of each session, so it works for online races and single player sessions, and the game does not need to run.
+The **Results & Replays** page shows the results of every session you played: classification, positions lap by lap, the laps of each car and what happened during the session (contacts, penalties, track limits, chat). It reads the results files that Le Mans Ultimate and rFactor 2 write at the end of each session, so it works for online races and single player sessions, and the game does not need to run. With Le Mans Ultimate, the same page lists the **replays saved by the game** and controls them in the `Replay` tab: each session is linked to its replay, so an event or a lap of the results opens the replay right there.
 
-Open it with the `Results` entry of the navigation bar, `Tools` > `Race Results`, or the command palette (`Ctrl+K`).
+Open it with the `Results` entry of the navigation bar, `Tools` > `Results & Replays`, or the command palette (`Ctrl+K`). It replaces the former `Race Results` and `Game Replays` pages (a `Replays` entry kept in your navigation bar or quick access opens it on the replays list).
 
 ![Race results: classification of a multiclass race](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results.png)
 
@@ -14,6 +14,14 @@ At the end of each session (practice, qualifying, warmup, race), the game writes
 - Files are read in background (about half a second for a hundred files). A session ending while the page is open is added at once; if the newest session was shown, the new one is shown. `F5` reads the files again.
 - **Your car** is found by the driver name of your game profile (`UserData/player/Settings.JSON`), also when you are one of the drivers of a team car. In single player, it is the only car driven by a person. Online, the game marks every person as a player: the name is what tells your car apart.
 - When you leave a race before its end, the game writes the classification of that moment, without finish times: the session is marked `Unfinished` and gaps come from the lap times.
+
+## Sessions or replays
+
+The switch at the top of the list shows the **sessions** of the results files or the **replays** saved by Le Mans Ultimate (see [Game replays](Connections.md#game-replays-le-mans-ultimate) for everything the replays list does: watch, add, export, rename, protect, delete, clean up).
+
+- A replay whose session has a results file has a flag icon: pick it and its results are shown on the right. Right-click: `Show Results`.
+- A session with a replay has a camera icon: pick it and its replay is picked in the replays list too.
+- The game is asked only while the replays list or the `Replay` tab is shown.
 
 ## Sessions
 
@@ -34,7 +42,9 @@ The header shows the track and layout, date, online server or single player, ses
 
 Class chips (multiclass sessions) show one class: positions and gaps become class positions and gaps.
 
-**Watch Replay** (Le Mans Ultimate): when the game saved the replay of the session (`UserData/Replays/<track> R1 3.Vcr`, written a few minutes after the results file), a button in the header opens it in the game through [Game Replays](Connections.md#game-replays-le-mans-ultimate), which checks the game state, asks for confirmation (with a warning in a live session) and has the playback controls. Sessions with a replay have a camera icon in the list. The game must run to play it; if it is closed, `Game Replays` tells you.
+**Watch Replay** (Le Mans Ultimate): when the game saved the replay of the session (`UserData/Replays/<track> R1 3.Vcr`, written a few minutes after the results file), a button in the header opens it in the game and shows the `Replay` tab, after confirmation (with a warning in a live session). Sessions with a replay have a camera icon in the list. The game must run to play it; if it is closed, the page tells you.
+
+**Watch in replay**: in the `Events` tab, the play button of an event (or a double-click) opens the replay of the session `Seconds Before` that moment, camera on the car concerned (your car when you are in the contact). In the `Laps` tab, the play button of a lap opens the replay at the start of that lap, camera on that car. A team car is found by any of its drivers. When the replay is already open in the game, it moves there at once, without confirmation.
 
 ### Classification
 
@@ -49,6 +59,10 @@ The place of every car at the end of each lap, starting from the grid. Your car 
 ### Laps
 
 The laps of the car picked (your car first, any other car from the list): place, lap time (session best in purple, own best in green), gap to its own best, the three sectors (same colors), top speed in your speed unit, front tyre compound and laps through the pit lane. For your car, the virtual energy (or fuel) used on each lap and the tyre tread left. On top: best lap, average and consistency of clean laps (no pit lane, not the first lap), theoretical best from the best sectors, top speed.
+
+### Replay (Le Mans Ultimate)
+
+The replay open in the game, or the live session: game state, playback (play / pause with `Space`, speeds, previous / next lap of the car followed), camera and game HUD, then the incidents of the session on a timeline and in a list, the drivers and the track map. Same controls as described in [Game replays](Connections.md#game-replays-le-mans-ultimate).
 
 ### Events
 

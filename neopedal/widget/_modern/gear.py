@@ -27,6 +27,8 @@ while car limiter is off).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter
 
@@ -39,6 +41,9 @@ from ...module_info import minfo
 from .base import CENTER, LEFT, RIGHT, ModernOverlay
 from .draw import bar, panel, readable_on, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import GearConfig
+
 NORMAL, SAFE, REDLINE, OVER_REV = 0, 1, 2, 3
 LIMITER_OFF, LIMITER_ON, LIMITER_REMINDER = 0, 1, 2
 READING_ALIGN = {"left": LEFT, "right": RIGHT, "1": LEFT, "2": RIGHT}  # else center
@@ -46,6 +51,8 @@ READING_ALIGN = {"left": LEFT, "right": RIGHT, "1": LEFT, "2": RIGHT}  # else ce
 
 class Realtime(ModernOverlay):
     """Draw widget"""
+
+    wcfg: GearConfig
 
     options = (
         "font_size", "show_speed", "show_speed_below_gear", "show_speed_limiter", "speed_limiter_text",
@@ -305,11 +312,19 @@ class Realtime(ModernOverlay):
             level = min(max(rate / self.max_fuel_rate, 0.0), 1.0) if self.max_fuel_rate > 0 else 0.0
             consumption = (round(level ** self.cons_exp, 3), level >= wcfg["high_consumption_threshold"])
             consumption_text = self.reading_text("consumption", rate)
-        self.refresh((
-            GEAR_SEQUENCE(gear, "N"), f"{self.unit_speed(speed):.0f}", zone, round(min(rpm_fraction, 1.0), 3),
-            battery, consumption, self.limiter_state(),
-            (self.reading_text("rpm", rpm), battery_text, consumption_text),
-        ))
+        rpm_fraction = round(min(rpm_fraction, 1.0), 3)
+        limiter = self.limiter_state()
+        readings = (self.reading_text("rpm", rpm), battery_text, consumption_text)
+        gear_text = GEAR_SEQUENCE(gear, "N")
+        speed_text = f"{self.unit_speed(speed):.0f}"
+        # Repaint when drawn: texts, bar ends in device pixels
+        steps = self.pixel_steps
+        self.refresh_keyed(
+            (gear_text, speed_text, zone, rpm_fraction, battery, consumption, limiter, readings),
+            (gear_text, speed_text, zone, steps(max(rpm_fraction, 0.0), self.rect_rpm.width()),
+             battery and (steps(min(max(battery[0], 0.0), 1.0), self.rect_battery.width()), battery[1]),
+             (steps(consumption[0], self.rect_consumption.width()), consumption[1]), limiter, readings),
+        )
 
     def limiter_state(self) -> int:
         """Speed limiter on (switched on or active), or reminder: in pit lane with car limiter off"""

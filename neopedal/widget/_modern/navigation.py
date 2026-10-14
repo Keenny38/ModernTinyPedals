@@ -26,20 +26,28 @@ player car glowing at its place in view; view fades out at its edge.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QPixmap, QRadialGradient
 
 from ... import calculation as calc
 from ...module_info import minfo
+from .._common import player_vehicle
 from .._painter import layer_fits
 from ..navigation import NavigationMixin
 from .base import CENTER, ModernOverlay
 from .cars import car_colors, chevron, status_color
 from .draw import disc, readable_on, rounded
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import NavigationConfig
+
 
 class Realtime(NavigationMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: NavigationConfig
 
     options = (
         "font_size", "display_size", "view_radius", "vehicle_size", "vehicle_offset", "map_width",
@@ -160,7 +168,10 @@ class Realtime(NavigationMixin, ModernOverlay):
         """Opponents in view range"""
         veh_info = minfo.vehicles.dataSet
         painter.setPen(self.pen_car)
+        total = len(veh_info)
         for index in minfo.relative.drawOrder:
+            if index >= total:  # car left since relative order made
+                continue
             data = veh_info[index]
             if data.isPlayer or data.relativeStraightDistance >= self.view_range:
                 continue
@@ -197,7 +208,7 @@ class Realtime(NavigationMixin, ModernOverlay):
             painter.drawPath(self.car_path)
             painter.restore()
         if self.show_places:
-            player = minfo.vehicles.dataSet[minfo.vehicles.playerIndex]
+            player = player_vehicle()
             self.draw_place(painter, pos.x(), pos.y(), player.positionOverall, theme.accent)
 
     def draw_place(self, painter: QPainter, pos_x: float, pos_y: float, place: int, color):

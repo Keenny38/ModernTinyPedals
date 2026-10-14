@@ -295,7 +295,7 @@ def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
             file_drop.import_preset_file(str(path), cfg.path.settings)
 
 
-def test_plugin_manager_status_badges(ui_env, monkeypatch):
+def test_plugin_manager_status_badges(ui_env, monkeypatch, app_ctx):
     from types import SimpleNamespace
 
     from neopedal.plugin_loader import PLUGIN_ERRORS, UNTRUSTED_ERROR
@@ -303,7 +303,7 @@ def test_plugin_manager_status_badges(ui_env, monkeypatch):
 
     names = ["plugin_ok", "plugin_bad", "plugin_new", "plugin_unsafe"]
     monkeypatch.setattr(plugin_manager, "discover_plugins", lambda: names)
-    monkeypatch.setattr(plugin_manager, "wctrl", SimpleNamespace(names=["plugin_ok", "plugin_bad", "plugin_unsafe"]))
+    app_ctx(wctrl=SimpleNamespace(names=["plugin_ok", "plugin_bad", "plugin_unsafe"]))
     monkeypatch.setitem(PLUGIN_ERRORS, "plugin_bad", "SyntaxError")
     monkeypatch.setitem(PLUGIN_ERRORS, "plugin_unsafe", UNTRUSTED_ERROR)
     dialog = plugin_manager.PluginManager(None)

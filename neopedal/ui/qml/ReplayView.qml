@@ -2,41 +2,35 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Game replays page (LMU): replays saved by the game (watch one in game), playback of the replay open in game,
-// incidents of the session on a timeline & in a list (jump to one: replay goes there, camera on a car).
-// Space: play / pause, F5: ask game again.
-TpPage {
+// Game replay & live session (LMU), replay tab of results & replays page: game state, playback of the replay
+// open in game, camera & HUD, incidents of the session on a timeline & in a list (jump to one: replay goes there,
+// camera on a car), standings & track map. Space: play / pause. Game state & requests: "replays" context property.
+Item {
     id: page
 
-    readonly property string gameState: backend.gameState
-    readonly property bool wide: width > theme.em * 64
+    readonly property string gameState: replays.gameState
+    readonly property bool wide: width > theme.em * 64  // content-tuned: button texts
     // Replay clock of last game answer, read once per answer (clock timers tick between answers)
-    readonly property real replayTime: backend.replayTime
-    readonly property real replayRate: backend.replayRate
-    readonly property real timeReceived: backend.timeReceived
-    readonly property real liveTime: backend.liveTime
+    readonly property real replayTime: replays.replayTime
+    readonly property real replayRate: replays.replayRate
+    readonly property real timeReceived: replays.timeReceived
+    readonly property real liveTime: replays.liveTime
 
     function stateColor(name) {
         return name === "replay" ? theme.accent : name === "session" ? theme.gain : name === "menu" ? theme.warning : theme.loss
-    }
-    function clock(seconds) {
-        var total = Math.max(Math.floor(seconds), 0)
-        var hours = Math.floor(total / 3600), minutes = Math.floor(total / 60) % 60, rest = total % 60
-        return hours + ":" + (minutes < 10 ? "0" : "") + minutes + ":" + (rest < 10 ? "0" : "") + rest
     }
 
     // Text being typed (search, seconds before): Space is a character, not play / pause
     readonly property bool typing: Window.activeFocusItem !== null && Window.activeFocusItem.cursorPosition !== undefined
     Shortcut {
         sequence: "Space"
-        enabled: backend.replayActive && !page.typing
-        onActivated: backend.togglePlay()
+        enabled: pageState.active && page.visible && replays.replayActive && !page.typing  // hidden page: not its keys
+        onActivated: replays.togglePlay()
     }
-    Shortcut { sequences: [StandardKey.Refresh]; onActivated: backend.refresh() }
 
     // Camera menu as in game: section titles (groups) then cameras of group (list constant: built once)
     readonly property var cameraEntries: {
-        var result = [], group = "", cameras = backend.cameras
+        var result = [], group = "", cameras = replays.cameras
         for (var i = 0; i < cameras.length; i++) {
             if (cameras[i].group !== group) {
                 group = cameras[i].group
@@ -52,9 +46,13 @@ TpPage {
         property string key: ""
         objectName: "hud_" + key
         checkable: true
-        enabled: backend.hudState[key] !== undefined
-        onTriggered: backend.toggleHudComponent(key)
-        Binding on checked { value: backend.hudState[key] === true }
+        enabled: replays.hudState[key] !== undefined
+        checked: replays.hudState[key] === true
+        onTriggered: {
+            replays.toggleHudComponent(key)
+            // click toggled checked by itself: state of game shown again (also when the toggle was refused)
+            checked = Qt.binding(function() { return replays.hudState[key] === true })
+        }
     }
 
     // Round transport button: glyph (rotated for backwards), highlighted while its command is the last sent
@@ -66,29 +64,29 @@ TpPage {
         property string command: ""
         property string tip: ""
         property string caption: ""  // speed shown on glyph (slow: ½)
-        readonly property bool current: command !== "" && backend.lastCommand === command
+        readonly property bool current: command !== "" && replays.lastCommand === command
         Accessible.role: Accessible.Button
         Accessible.name: tip
         hoverEnabled: true
         focusPolicy: Qt.NoFocus
         implicitWidth: Math.round(theme.em * (primary ? 3.3 : 2.6))
         implicitHeight: implicitWidth
-        opacity: enabled ? 1 : 0.4
+        opacity: enabled ? 1 : theme.disabledOpacity
         scale: down ? 0.92 : 1
-        Behavior on scale { NumberAnimation { duration: 90 } }
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        onClicked: if (command !== "") backend.playback(command)
+        Behavior on scale { NumberAnimation { duration: theme.motionFast } }
+        Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
+        onClicked: if (command !== "") replays.playback(command)
         ToolTip.visible: tip !== "" && hovered
         ToolTip.text: tip
-        ToolTip.delay: 600
+        ToolTip.delay: theme.tipDelay
         background: Rectangle {
             radius: width / 2
-            color: control.primary ? (control.down ? Qt.darker(theme.accent, 1.15) : control.hovered ? Qt.lighter(theme.accent, 1.08) : theme.accent)
+            color: control.primary ? (control.down ? Qt.darker(theme.accentFill, 1.15) : control.hovered ? Qt.lighter(theme.accentFill, 1.08) : theme.accentFill)
                  : control.current ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
                  : control.down ? theme.border : control.hovered ? theme.hover : "transparent"
             border.width: control.primary || control.current ? 0 : 1
             border.color: theme.border
-            Behavior on color { ColorAnimation { duration: 120 } }
+            Behavior on color { ColorAnimation { duration: theme.motionFast } }
         }
         contentItem: Item {
             Icon {
@@ -102,10 +100,10 @@ TpPage {
                 visible: control.caption !== ""
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.rightMargin: theme.em * 0.12
+                anchors.rightMargin: theme.em * 0.1
                 text: control.caption
                 color: control.current ? theme.accent : theme.dimText
-                font.pointSize: theme.fontPoint * 0.72
+                font.pointSize: theme.fontTiny
                 font.weight: Font.Bold
             }
         }
@@ -130,26 +128,16 @@ TpPage {
                 color: Qt.rgba(tone.r, tone.g, tone.b, 0.12)
                 border.width: 1
                 border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.4)
-                Behavior on color { ColorAnimation { duration: 250 } }
+                Behavior on color { ColorAnimation { duration: theme.motionSlow } }
                 ToolTip.visible: stateArea.containsMouse && stateText.truncated
-                ToolTip.text: backend.statusText
+                ToolTip.text: replays.statusText
                 MouseArea { id: stateArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
-                Rectangle {
+                TpPulseDot {
                     id: stateDot
                     x: theme.em * 0.8
                     anchors.verticalCenter: parent.verticalCenter
-                    width: theme.em * 0.6
-                    height: width
-                    radius: width / 2
                     color: statePill.tone
-                    SequentialAnimation on opacity {  // replay open: pulse
-                        // A few pulses when state starts or page shows again, then still: no endless redraw
-                        running: page.gameState === "replay" && pageState.active
-                        loops: 3
-                        onRunningChanged: if (!running) stateDot.opacity = 1
-                        NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-                    }
+                    pulsing: page.gameState === "replay"  // replay open: pulse
                 }
                 Text {
                     id: stateText
@@ -158,7 +146,7 @@ TpPage {
                     anchors.right: parent.right
                     anchors.rightMargin: theme.em * 0.7
                     anchors.verticalCenter: parent.verticalCenter
-                    text: backend.statusText
+                    text: replays.statusText
                     color: theme.text
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -166,47 +154,37 @@ TpPage {
             }
             Text {
                 Layout.fillWidth: true
-                text: backend.updatedText
+                text: replays.updatedText
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.9
+                font.pointSize: theme.fontLabel
                 elide: Text.ElideRight
             }
             TpButton {
                 glyph: ""  // open folder
                 text: page.wide ? i18n.tr("Open Folder") : ""
-                tip: backend.replayFolder !== "" ? backend.replayFolder : i18n.tr("Replay folder of the game, known once the game lists its replays")
-                enabled: backend.replayFolder !== ""
-                onClicked: backend.openFolder()
+                tip: replays.replayFolder !== "" ? replays.replayFolder : i18n.tr("Replay folder of the game, known once the game lists its replays")
+                enabled: replays.replayFolder !== ""
+                onClicked: replays.openFolder()
             }
             TpButton {
                 glyph: ""  // refresh
                 text: page.wide ? i18n.tr("Refresh") : ""
                 tip: i18n.tr("Ask game again (F5)")
-                onClicked: backend.refresh()
+                onClicked: replays.refresh()
             }
         }
 
         GridLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            columns: page.wide ? 2 : 1
+            columns: 1
             columnSpacing: theme.em * 0.6
             rowSpacing: theme.em * 0.6
 
-            // Replays saved by the game
-            Card {
-                Layout.fillWidth: true
-                Layout.fillHeight: page.wide  // narrow: one column, incidents below get the rest
-                Layout.preferredWidth: page.wide ? page.width * 0.55 : -1
-                Layout.preferredHeight: page.wide ? -1 : page.height * 0.38
-                ReplayList { id: replayList; anchors.fill: parent }
-            }
 
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.preferredWidth: page.wide ? page.width * 0.45 : -1
-                Layout.minimumWidth: page.wide ? theme.em * 26 : 0
                 spacing: theme.em * 0.6
 
                 // Playback of the replay open in game
@@ -226,11 +204,11 @@ TpPage {
                                 text: i18n.tr("Replay Playback")
                                 color: theme.text
                                 font.weight: Font.DemiBold
-                                font.pointSize: theme.fontPoint * 1.1
+                                font.pointSize: theme.fontSubtitle
                             }
                             Item { Layout.fillWidth: true }
                             Rectangle {  // replay speed measured between game answers (game shows 1x, 2x...)
-                                visible: replayClock.visible && Math.abs(backend.replayRate) > 0.02
+                                visible: replayClock.visible && Math.abs(replays.replayRate) > 0.02
                                 implicitHeight: speedText.implicitHeight + 4
                                 implicitWidth: speedText.implicitWidth + theme.em * 0.8
                                 radius: height / 2
@@ -238,83 +216,68 @@ TpPage {
                                 Text {
                                     id: speedText
                                     anchors.centerIn: parent
-                                    readonly property real rate: backend.replayRate
+                                    readonly property real rate: replays.replayRate
                                     text: (rate < 0 ? "-" : "") + (Math.abs(rate) >= 1.5 ? Math.round(Math.abs(rate))
                                           : (Math.round(Math.abs(rate) * 4) / 4).toString().replace(".", theme.decimalPoint)) + "x"
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     font.features: { "tnum": 1 }
                                 }
                             }
                             Row {  // live session: session time (as game shows "EN DIRECT")
                                 id: liveClock
-                                visible: backend.inSession && !backend.replayActive && backend.liveTime >= 0
+                                visible: replays.inSession && !replays.replayActive && replays.liveTime >= 0
                                 spacing: theme.em * 0.4
-                                property real now: backend.liveTime
-                                Rectangle {
+                                TpPulseDot {
                                     id: liveClockDot
                                     width: theme.em * 0.55
-                                    height: width
-                                    radius: width / 2
                                     color: theme.loss
                                     anchors.verticalCenter: parent.verticalCenter
-                                    SequentialAnimation on opacity {
-                                        // A few pulses when state starts or page shows again, then still: no endless redraw
-                                        running: liveClock.visible && pageState.active
-                                        loops: 3
-                                        onRunningChanged: if (!running) liveClockDot.opacity = 1
-                                        NumberAnimation { to: 0.3; duration: 800 }
-                                        NumberAnimation { to: 1; duration: 800 }
-                                    }
+                                    pulsing: liveClock.visible
+                                    low: 0.3
+                                    pulseDuration: 800
+                                    pulseEasing: Easing.Linear
                                 }
                                 Text {
                                     text: i18n.tr("Live").toUpperCase()
                                     color: theme.loss
                                     font.weight: Font.Bold
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Text {
-                                    text: page.clock(liveClock.now)
+                                    text: liveTicker.format(liveTicker.now)
                                     color: theme.text
-                                    font.pointSize: theme.fontPoint * 1.25
+                                    font.pointSize: theme.fontHeading
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
-                                Timer {
+                                LiveClock {
+                                    id: liveTicker
+                                    time: page.liveTime
+                                    received: page.timeReceived
+                                    maxGap: 10
                                     interval: 500
-                                    repeat: true
-                                    running: liveClock.visible && pageState.active  // stopped while page hidden
                                     triggeredOnStart: true
-                                    onTriggered: liveClock.now = page.liveTime
-                                                 + Math.min(Math.max((Date.now() - page.timeReceived) / 1000, 0), 10)
-                                }
-                                Connections {
-                                    target: backend
-                                    function onReplayTimeChanged() { liveClock.now = backend.liveTime }
+                                    active: liveClock.visible && pageState.active  // stopped while page hidden
                                 }
                             }
                             Text {  // replay time, moves between game answers at measured rate
                                 id: replayClock
-                                visible: backend.replayActive && backend.replayTime >= 0
-                                property real now: backend.replayTime
-                                text: page.clock(now)
+                                visible: replays.replayActive && replays.replayTime >= 0
+                                text: replayTicker.format(replayTicker.now)
                                 color: theme.accent
-                                font.pointSize: theme.fontPoint * 1.25
+                                font.pointSize: theme.fontHeading
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
-                                Timer {
-                                    interval: 250
-                                    repeat: true
-                                    running: replayClock.visible && page.replayRate !== 0 && pageState.active
+                                LiveClock {
+                                    id: replayTicker
+                                    time: page.replayTime
+                                    received: page.timeReceived
+                                    rate: page.replayRate
                                     triggeredOnStart: true
-                                    onTriggered: replayClock.now = page.replayTime + page.replayRate
-                                                 * Math.min(Math.max((Date.now() - page.timeReceived) / 1000, 0), 3)
-                                }
-                                Connections {
-                                    target: backend
-                                    function onReplayTimeChanged() { replayClock.now = backend.replayTime }
+                                    active: replayClock.visible && pageState.active
                                 }
                             }
                         }
@@ -323,7 +286,7 @@ TpPage {
                         Row {
                             Layout.alignment: Qt.AlignHCenter
                             spacing: theme.em * 0.5
-                            enabled: backend.replayActive
+                            enabled: replays.replayActive
                             TransportButton {
                                 anchors.verticalCenter: parent.verticalCenter
                                 glyph: ""; command: "VCRCOMMAND_REVERSESCAN"; tip: i18n.tr("Rewind")
@@ -333,12 +296,12 @@ TpPage {
                                 glyph: ""; glyphRotation: 180; command: "VCRCOMMAND_PLAYBACKWARDS"; tip: i18n.tr("Play backwards")
                             }
                             TransportButton {
-                                readonly property bool moving: backend.lastCommand !== "" && backend.lastCommand !== "VCRCOMMAND_STOP"
+                                readonly property bool moving: replays.lastCommand !== "" && replays.lastCommand !== "VCRCOMMAND_STOP"
                                 anchors.verticalCenter: parent.verticalCenter
                                 primary: true
                                 glyph: moving ? "" : ""  // pause, play
                                 tip: (moving ? i18n.tr("Pause replay") : i18n.tr("Play replay")) + " (" + i18n.tr("Space") + ")"
-                                onClicked: backend.togglePlay()
+                                onClicked: replays.togglePlay()
                             }
                             TransportButton {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -357,13 +320,13 @@ TpPage {
                                 TpMenu {
                                     id: speedsMenu
                                     Instantiator {
-                                        model: backend.playbackModes
+                                        model: replays.playbackModes
                                         delegate: Action {
                                             required property var modelData
                                             text: modelData.text
                                             checkable: true
-                                            checked: backend.lastCommand === modelData.command
-                                            onTriggered: backend.playback(modelData.command)
+                                            checked: replays.lastCommand === modelData.command
+                                            onTriggered: replays.playback(modelData.command)
                                         }
                                         onObjectAdded: function(index, object) { speedsMenu.insertAction(index, object) }
                                         onObjectRemoved: function(index, object) { speedsMenu.removeAction(object) }
@@ -378,7 +341,7 @@ TpPage {
                             visible: lapNavigator.visible || liveButton.visible
                             Row {
                                 id: lapNavigator
-                                visible: backend.replayActive && backend.cameraLap > 0
+                                visible: replays.replayActive && replays.cameraLap > 0
                                 spacing: theme.em * 0.2
                                 anchors.verticalCenter: parent.verticalCenter
                                 TpButton {
@@ -386,21 +349,21 @@ TpPage {
                                     flat: true
                                     implicitHeight: Math.round(theme.em * 2.0)
                                     tip: i18n.tr("Previous lap of the car followed by the camera")
-                                    enabled: backend.cameraLap > 1
-                                    onClicked: backend.stepLap(-1)
+                                    enabled: replays.cameraLap > 1
+                                    onClicked: replays.stepLap(-1)
                                 }
                                 Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter
                                     implicitHeight: Math.round(theme.em * 2.0)
                                     implicitWidth: lapText.implicitWidth + theme.em * 1.4
-                                    radius: theme.em * 0.45
+                                    radius: theme.radiusMd
                                     color: "transparent"
                                     border.width: 1
                                     border.color: theme.border
                                     Text {
                                         id: lapText
                                         anchors.centerIn: parent
-                                        text: i18n.tr("Lap") + " " + backend.cameraLap
+                                        text: i18n.tr("Lap") + " " + replays.cameraLap
                                         color: theme.text
                                         font.weight: Font.DemiBold
                                         font.features: { "tnum": 1 }
@@ -411,17 +374,17 @@ TpPage {
                                     flat: true
                                     implicitHeight: Math.round(theme.em * 2.0)
                                     tip: i18n.tr("Next lap of the car followed by the camera")
-                                    onClicked: backend.stepLap(1)
+                                    onClicked: replays.stepLap(1)
                                 }
                             }
                             TpButton {  // replay of live session opened from page
                                 id: liveButton
                                 anchors.verticalCenter: parent.verticalCenter
-                                visible: backend.canGoLive
+                                visible: replays.canGoLive
                                 accent: true
                                 text: i18n.tr("Back to Live")
                                 tip: i18n.tr("Leave the replay of this session, back to the live session")
-                                onClicked: backend.backToLive()
+                                onClicked: replays.backToLive()
                             }
                         }
 
@@ -429,53 +392,53 @@ TpPage {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: theme.em * 0.4
-                            enabled: backend.inSession
-                            opacity: enabled ? 1 : 0.45
-                            TpButton { glyph: ""; flat: true; tip: i18n.tr("Camera on previous car"); onClicked: backend.focusCar(-1) }  // chevron left
+                            enabled: replays.inSession
+                            opacity: enabled ? 1 : theme.disabledOpacity
+                            TpButton { glyph: ""; flat: true; tip: i18n.tr("Camera on previous car"); onClicked: replays.focusCar(-1) }  // chevron left
                             Rectangle {
                                 Layout.fillWidth: true
                                 implicitHeight: Math.round(theme.em * 2.1)
-                                radius: theme.em * 0.5
+                                radius: theme.radiusMd
                                 color: theme.dark ? Qt.darker(theme.base, 1.2) : Qt.darker(theme.window, 1.03)
                                 border.width: 1
                                 border.color: theme.border
                                 Row {
                                     anchors.centerIn: parent
                                     width: Math.min(implicitWidth, parent.width - theme.em)
-                                    spacing: theme.em * 0.45
+                                    spacing: theme.em * 0.5
                                     Icon { glyph: ""; color: theme.dimText; size: theme.em * 0.9; anchors.verticalCenter: parent.verticalCenter }  // camera
                                     Text {
                                         width: Math.min(implicitWidth, parent.parent.width - theme.em * 2.6)
-                                        text: backend.focusedDriver !== "" ? backend.focusedDriver : i18n.tr("Camera car")
-                                        color: backend.focusedDriver !== "" ? theme.text : theme.dimText
-                                        font.weight: backend.focusedDriver !== "" ? Font.DemiBold : Font.Normal
+                                        text: replays.focusedDriver !== "" ? replays.focusedDriver : i18n.tr("Camera car")
+                                        color: replays.focusedDriver !== "" ? theme.text : theme.dimText
+                                        font.weight: replays.focusedDriver !== "" ? Font.DemiBold : Font.Normal
                                         elide: Text.ElideRight
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                 }
                             }
-                            TpButton { glyph: ""; flat: true; tip: i18n.tr("Camera on next car"); onClicked: backend.focusCar(1) }  // chevron right
+                            TpButton { glyph: ""; flat: true; tip: i18n.tr("Camera on next car"); onClicked: replays.focusCar(1) }  // chevron right
                         }
 
                         // Camera of game: menu of game cameras, previous / next angle of group shown
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: theme.em * 0.4
-                            enabled: backend.inSession
-                            opacity: enabled ? 1 : 0.45
-                            readonly property string group: backend.cameraGroup !== "" ? backend.cameraGroup : "Driving"
+                            enabled: replays.inSession
+                            opacity: enabled ? 1 : theme.disabledOpacity
+                            readonly property string group: replays.cameraGroup !== "" ? replays.cameraGroup : "Driving"
                             TpButton {
                                 glyph: ""  // chevron left
                                 flat: true
                                 tip: i18n.tr("Previous camera angle")
-                                onClicked: backend.setCamera(parent.group, -1)
+                                onClicked: replays.setCamera(parent.group, -1)
                             }
                             TpButton {  // camera menu of game: driving, onboard & trackside cameras
                                 id: cameraButton
                                 objectName: "cameraButton"
                                 Layout.fillWidth: true
                                 glyph: ""  // camera
-                                text: backend.cameraLabel !== "" ? backend.cameraLabel : i18n.tr("Change Camera")
+                                text: replays.cameraLabel !== "" ? replays.cameraLabel : i18n.tr("Change Camera")
                                 tip: i18n.tr("Change Camera")
                                 checked: cameraMenu.visible
                                 onClicked: cameraMenu.visible ? cameraMenu.close()
@@ -492,8 +455,14 @@ TpPage {
                                             text: modelData.header ? modelData.text.toUpperCase() : modelData.text
                                             enabled: !modelData.header
                                             checkable: !modelData.header
-                                            onTriggered: backend.selectCamera(modelData.key)
-                                            Binding on checked { value: backend.cameraKey === modelData.key && modelData.key !== "" }
+                                            checked: replays.cameraKey === modelData.key && modelData.key !== ""
+                                            onTriggered: {
+                                                replays.selectCamera(modelData.key)
+                                                // click toggled checked (current camera: unchecked): camera of game shown again
+                                                checked = Qt.binding(function() {
+                                                    return replays.cameraKey === modelData.key && modelData.key !== ""
+                                                })
+                                            }
                                         }
                                         onObjectAdded: function(index, object) { cameraMenu.insertAction(index, object) }
                                         onObjectRemoved: function(index, object) { cameraMenu.removeAction(object) }
@@ -504,7 +473,7 @@ TpPage {
                                 glyph: ""  // chevron right
                                 flat: true
                                 tip: i18n.tr("Next camera angle")
-                                onClicked: backend.setCamera(parent.group, 1)
+                                onClicked: replays.setCamera(parent.group, 1)
                             }
                             TpButton {  // HUD of game: all or each part, clean pictures & videos
                                 id: hudButton
@@ -519,10 +488,10 @@ TpPage {
                                     id: hudMenu
                                     width: Math.max(implicitWidth, theme.em * 20)
                                     // As a middle click in game: its web panels too (no Rest API command for them)
-                                    Action { text: i18n.tr("Show / Hide Game UI (middle click)"); onTriggered: backend.toggleGameUi() }
+                                    Action { text: i18n.tr("Show / Hide Game UI (middle click)"); onTriggered: replays.toggleGameUi() }
                                     MenuSeparator {}
-                                    Action { text: i18n.tr("Show HUD"); onTriggered: backend.setHudShown(true) }
-                                    Action { text: i18n.tr("Hide HUD"); onTriggered: backend.setHudShown(false) }
+                                    Action { text: i18n.tr("Show HUD"); onTriggered: replays.setHudShown(true) }
+                                    Action { text: i18n.tr("Hide HUD"); onTriggered: replays.setHudShown(false) }
                                     MenuSeparator {}
                                     HudAction { key: "chat"; text: i18n.tr("Chat") }
                                     HudAction { key: "mfd"; text: i18n.tr("MFD") }
@@ -536,12 +505,12 @@ TpPage {
 
                         Text {
                             Layout.fillWidth: true
-                            visible: !backend.replayActive
+                            visible: !replays.replayActive
                             text: page.gameState === "offline" ? i18n.tr("Start LMU: replays, playback & incidents come from the game.")
                                 : page.gameState === "menu" ? i18n.tr("Watch a replay from the list to control it from here.")
                                 : i18n.tr("Open the replay of this session in the game, or watch one from the list.")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.9
+                            font.pointSize: theme.fontLabel
                             wrapMode: Text.WordWrap
                             horizontalAlignment: Text.AlignHCenter
                         }
@@ -558,106 +527,32 @@ TpPage {
                         TpSegmented {
                             Layout.topMargin: theme.em * 0.7
                             Layout.leftMargin: theme.em * 0.7
-                            options: [i18n.tr("Incidents") + (backend.incidentCount > 0 ? "  " + backend.incidentCount : ""),
-                                      i18n.tr("Drivers") + (backend.carCount > 0 ? "  " + backend.carCount : ""),
+                            options: [i18n.tr("Incidents") + (replays.incidentCount > 0 ? "  " + replays.incidentCount : ""),
+                                      i18n.tr("Drivers") + (replays.carCount > 0 ? "  " + replays.carCount : ""),
                                       i18n.tr("Map")]
-                            currentIndex: backend.panelIndex
-                            onActivated: function(index) { backend.setPanel(index) }
+                            currentIndex: replays.panelIndex
+                            onActivated: function(index) { replays.setPanel(index) }
                         }
                         StackLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            currentIndex: backend.panelIndex
+                            currentIndex: replays.panelIndex
                             // Panels built when first shown, then kept
                             Loader {
-                                active: backend.panelIndex === 0 || item !== null
+                                active: replays.panelIndex === 0 || item !== null
                                 sourceComponent: IncidentPanel {}
                             }
                             Loader {
-                                active: backend.panelIndex === 1 || item !== null
+                                active: replays.panelIndex === 1 || item !== null
                                 sourceComponent: StandingsPanel {}
                             }
                             Loader {
-                                active: backend.panelIndex === 2 || item !== null
+                                active: replays.panelIndex === 2 || item !== null
                                 sourceComponent: MapPanel {}
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // Replay files dropped on page: copied to replay folder of game
-    DropArea {
-        id: dropArea
-        anchors.fill: parent
-        onEntered: function(drag) { drag.accepted = drag.hasUrls }
-        onDropped: function(drop) {
-            if (!drop.hasUrls) return
-            backend.addFiles(drop.urls)
-            drop.acceptProposedAction()
-        }
-    }
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: theme.em * 0.4
-        visible: dropArea.containsDrag
-        radius: theme.em * 0.8
-        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.12)
-        border.width: 2
-        border.color: theme.accent
-        Column {
-            anchors.centerIn: parent
-            spacing: theme.em * 0.6
-            Icon { anchors.horizontalCenter: parent.horizontalCenter; glyph: ""; size: theme.em * 3; color: theme.accent }  // download
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: i18n.tr("Drop replays (.Vcr) to add them to the game")
-                color: theme.text
-                font.weight: Font.DemiBold
-                font.pointSize: theme.fontPoint * 1.2
-            }
-        }
-    }
-
-    // Message of last file operation or refused command, a few seconds
-    Rectangle {
-        id: toast
-        property bool shown: false
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: shown ? parent.height - height - theme.em * 1.2 : parent.height + theme.em
-        width: Math.min(toastRow.implicitWidth + theme.em * 2.4, page.width - theme.em * 4)
-        height: toastRow.implicitHeight + theme.em * 1.1
-        radius: theme.em * 0.8
-        color: theme.raised
-        border.width: 1
-        border.color: backend.noticeError ? theme.loss : theme.border
-        opacity: shown ? 1 : 0
-        visible: opacity > 0
-        Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Behavior on opacity { NumberAnimation { duration: 220 } }
-        Timer { id: toastTimer; interval: 6000; onTriggered: toast.shown = false }
-        Connections {
-            target: backend
-            function onNoticeChanged() { toast.shown = true; toastTimer.restart() }
-        }
-        MouseArea { anchors.fill: parent; onClicked: toast.shown = false }
-        Row {
-            id: toastRow
-            anchors.centerIn: parent
-            spacing: theme.em * 0.6
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                glyph: backend.noticeError ? "" : ""  // warning, check
-                color: backend.noticeError ? theme.loss : theme.gain
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, page.width - theme.em * 7)
-                text: backend.noticeText
-                color: theme.text
-                wrapMode: Text.WordWrap
             }
         }
     }

@@ -1,10 +1,8 @@
-"""Audit fixes: share code numbers, preset deletion & rename, preset comparison saving, translations, theme colors"""
+"""Audit fixes: preset deletion & rename, preset comparison saving, translations, theme colors"""
 
-import base64
 import json
 import os
 import time
-import zlib
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
@@ -68,38 +66,6 @@ def choose(page, preset: str, text: str):
     """Run action of preset menu (English text)"""
     actions = {"Delete": page.backend.remove}
     actions[text](f"{preset}.json")
-
-
-def share_code(raw: str) -> str:
-    from neopedal.userfile.preset_share import SHARE_PREFIX
-
-    return SHARE_PREFIX + base64.urlsafe_b64encode(zlib.compress(raw.encode("utf-8"))).decode("ascii")
-
-
-# Share code
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999", "deep"])
-def test_share_code_with_invalid_numbers_rejected(page, warnings, monkeypatch, value):
-    from neopedal.ui import preset_view
-
-    if value == "deep":  # nested beyond recursion limit
-        value = "[" * 100000 + "]" * 100000
-    raw = f'{{"speedometer": {{"enable": true, "font_size": {value}}}}}'
-    opened = []
-    monkeypatch.setattr(preset_view, "TextInputDialog", lambda *args, **kwargs: opened.append(args))
-    before = sorted(os.listdir(cfg.path.settings))
-    assert page.share_code_entered(share_code(raw)) is False  # code input stays open
-    assert warnings and "Invalid share code" in warnings[0][1]
-    assert not opened and sorted(os.listdir(cfg.path.settings)) == before  # nothing imported
-
-
-def test_share_code_valid_still_accepted(page, warnings, monkeypatch):
-    from neopedal.ui import preset_view
-
-    opened = []
-    monkeypatch.setattr(
-        preset_view, "TextInputDialog", lambda *args, **kwargs: type("Dialog", (), {"open": lambda self: opened.append(1)})())
-    assert page.share_code_entered(share_code('{"speedometer": {"enable": true, "font_size": 15.5}}'))
-    assert opened and not warnings
 
 
 # Preset deletion
@@ -380,13 +346,13 @@ def test_plugin_badge_colors_follow_window_theme(ui_env):
                 assert text.name() == STATUS_COLORS[theme]["badge_text"].lower()
 
 
-def test_plugin_enabled_badge_is_palette_accent(ui_env, monkeypatch):
+def test_plugin_enabled_badge_is_palette_accent(ui_env, monkeypatch, app_ctx):
     from types import SimpleNamespace
 
     from neopedal.ui import plugin_manager
 
     monkeypatch.setattr(plugin_manager, "discover_plugins", lambda: ["plugin_on", "plugin_off"])
-    monkeypatch.setattr(plugin_manager, "wctrl", SimpleNamespace(names=["plugin_on", "plugin_off"]))
+    app_ctx(wctrl=SimpleNamespace(names=["plugin_on", "plugin_off"]))
     cfg.user.setting["plugin_on"] = {"enable": True}
     cfg.user.setting["plugin_off"] = {"enable": False}
     flush()

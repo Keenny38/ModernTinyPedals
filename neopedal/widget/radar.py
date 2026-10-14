@@ -21,7 +21,8 @@ Radar Widget
 """
 
 from itertools import islice
-from typing import Any, NamedTuple
+from math import isfinite
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
@@ -38,7 +39,11 @@ from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
 from ._painter import fill_rect
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import RadarConfig
 
 
 class IndicatorDimension(NamedTuple):
@@ -61,10 +66,15 @@ class DistanceRect(NamedTuple):
     side: float = 0
 
 
+def whole(value: float) -> int:
+    """Rounded to int, 0 if not finite"""
+    return round(value) if isfinite(value) else 0
+
+
 class RadarMixin:
     """Radar scale, ranges, auto hide & fade, collision course, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "RadarConfig"
 
     def setup_radar(self):
         """Radar scale & ranges, auto hide state"""
@@ -94,9 +104,46 @@ class RadarMixin:
 
         # Last data
         self.last_veh_data_version = None
+        self.last_radar_key: tuple | None = ()  # () = never drawn
         self.autohide_timer_start = 1.0
         self.show_radar = True
         self.always_show = True
+
+    def radar_changed(self, ratio: float) -> bool:
+        """New vehicle data changed what radar shows (see radar_key), ratio = device pixel ratio"""
+        veh_data_version = minfo.vehicles.dataSetVersion
+        if self.last_veh_data_version == veh_data_version:
+            return False
+        self.last_veh_data_version = veh_data_version
+        self.show_radar = self.is_radar_visible()
+        key = self.radar_key(ratio) if self.show_radar else None
+        if key == self.last_radar_key:
+            return False
+        self.last_radar_key = key
+        return True
+
+    def radar_key(self, ratio: float) -> tuple:
+        """What radar draws: fade, cars in range (position in half device pixels, heading in degrees, status
+        & collision course), so that no car in range or cars barely moving never repaint"""
+        visible = self.visible_range
+        step = self.global_scale * ratio * 2
+        orientation = self.wcfg["show_vehicle_orientation"]
+        collision = self.wcfg["show_collision_course"]
+        cars = []
+        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
+            if veh_info.isPlayer:
+                continue
+            pos_x = veh_info.relativeRotatedPositionX
+            pos_y = veh_info.relativeRotatedPositionY
+            if not (visible.behind > pos_y > -visible.ahead and -visible.side < pos_x < visible.side):
+                continue
+            cars.append((
+                round(pos_x * step), round(pos_y * step),
+                whole(calc.degrees(veh_info.relativeOrientationRadians)) if orientation else 0,
+                veh_info.positionOverall == 1, veh_info.inPit, veh_info.isYellow, veh_info.isLapped,
+                self.collision_level(veh_info) if collision else 0,
+            ))
+        return whole(self.radar_alpha() * 255), *cars
 
     def radar_alpha(self) -> float:
         """Radar opacity while fading with nearest car distance (1 = fully shown)"""
@@ -117,7 +164,7 @@ class RadarMixin:
         abs_intercept_x = abs(intercept_x)
         if abs_intercept_x > self.coll_range_nearby:
             return 0
-        player_speed = minfo.vehicles.dataSet[minfo.vehicles.playerIndex].speed
+        player_speed = player_vehicle().speed
         relative_speed = veh_info.speed - player_speed
         min_speed = max(self.coll_min_speed, self.coll_add_speed * veh_info.relativeStraightDistance)
         if relative_speed > min_speed or veh_info.isYellow:
@@ -213,6 +260,8 @@ class RadarMixin:
 class Realtime(RadarMixin, Overlay):
     """Draw widget"""
 
+    wcfg: "RadarConfig"
+
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
@@ -286,13 +335,8 @@ class Realtime(RadarMixin, Overlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        veh_data_version = minfo.vehicles.dataSetVersion
-        if self.last_veh_data_version != veh_data_version:
-            self.last_veh_data_version = veh_data_version
-            show_radar = self.is_radar_visible()
-            if show_radar or self.show_radar != show_radar:
-                self.show_radar = show_radar
-                self.update()
+        if self.radar_changed(self.devicePixelRatioF()):
+            self.update()
 
     # GUI update methods
     def paintEvent(self, event):
@@ -350,7 +394,7 @@ class Realtime(RadarMixin, Overlay):
             else:
                 pen.setStyle(Qt.PenStyle.SolidLine)
             mark_scale = self.wcfg["center_mark_radius"] * self.global_scale
-            pen.setWidth(self.wcfg["center_mark_width"])
+            pen.setWidthF(self.wcfg["center_mark_width"])
             pen.setColor(self.wcfg["center_mark_color"])
             painter.setPen(pen)
             painter.drawLine(center, center, center - mark_scale, center)
@@ -365,7 +409,7 @@ class Realtime(RadarMixin, Overlay):
                 pen.setStyle(Qt.PenStyle.SolidLine)
             mark_scale = self.wcfg["angle_mark_radius"] * self.global_scale
             mark_scale *= 0.7071  # radius correction
-            pen.setWidth(self.wcfg["angle_mark_width"])
+            pen.setWidthF(self.wcfg["angle_mark_width"])
             pen.setColor(self.wcfg["angle_mark_color"])
             painter.setPen(pen)
             painter.drawLine(center, center, center - mark_scale, center + mark_scale)
@@ -529,11 +573,11 @@ class Realtime(RadarMixin, Overlay):
             return self.brush_veh["laps_behind"]
         return self.brush_veh["same_lap"]
 
-    def set_pen_style(self, color: str, width: int):
+    def set_pen_style(self, color: str, width: float):
         """Set pen style"""
         if width > 0:
             pen = QPen()
-            pen.setWidth(width)
+            pen.setWidthF(width)
             pen.setColor(color)
         else:
             pen = QPen(Qt.PenStyle.NoPen)

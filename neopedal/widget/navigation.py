@@ -20,7 +20,7 @@
 Navigation Widget
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
@@ -31,11 +31,14 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import NavigationConfig
+
 
 class NavigationMixin:
     """Map around car, scale & view turning with car, for classic & modern widget"""
 
-    wcfg: Any
+    wcfg: "NavigationConfig"
 
     def setup_view(self, area_size: int, start_line_length: float | None = None,
                    sector_line_length: float | None = None):
@@ -141,6 +144,8 @@ class NavigationMixin:
 
 class Realtime(NavigationMixin, Overlay):
     """Draw widget"""
+
+    wcfg: "NavigationConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -258,7 +263,7 @@ class Realtime(NavigationMixin, Overlay):
 
             if self.wcfg["circle_outline_width"] > 0:
                 pen = QPen()
-                pen.setWidth(self.wcfg["circle_outline_width"])
+                pen.setWidthF(self.wcfg["circle_outline_width"])
                 pen.setColor(self.wcfg["circle_outline_color"])
                 painter.setPen(pen)
             else:
@@ -267,12 +272,12 @@ class Realtime(NavigationMixin, Overlay):
             brush = QBrush(Qt.BrushStyle.SolidPattern)
             brush.setColor(self.wcfg["background_color_circle"])
             painter.setBrush(brush)
-            painter.drawEllipse(
+            painter.drawEllipse(QRectF(
                 self.wcfg["circle_outline_width"],
                 self.wcfg["circle_outline_width"],
                 (self.area_center - self.wcfg["circle_outline_width"]) * 2,
-                (self.area_center - self.wcfg["circle_outline_width"]) * 2
-            )
+                (self.area_center - self.wcfg["circle_outline_width"]) * 2,
+            ))
 
     def draw_map_image(self, painter):
         """Draw map image"""
@@ -311,7 +316,10 @@ class Realtime(NavigationMixin, Overlay):
             draw_shape = painter.drawPolygon
 
         # Draw vehicle within view range
+        total = len(veh_info)
         for index in veh_draw_order:
+            if index >= total:  # car left since relative order made
+                continue
             data = veh_info[index]
             # Draw player vehicle
             if data.isPlayer:
@@ -375,11 +383,11 @@ class Realtime(NavigationMixin, Overlay):
             return self.brush_overall["laps_behind"]
         return self.brush_overall["same_lap"]
 
-    def set_pen_style(self, color: str, width: int, rounded: bool = False):
+    def set_pen_style(self, color: str, width: float, rounded: bool = False):
         """Set pen style"""
         if width > 0:
             pen = QPen()
-            pen.setWidth(width)
+            pen.setWidthF(width)
             pen.setColor(color)
             if rounded:
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)

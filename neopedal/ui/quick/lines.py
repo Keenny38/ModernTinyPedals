@@ -39,10 +39,10 @@ import weakref
 from array import array
 from bisect import bisect_left, bisect_right
 from collections.abc import Collection, Sequence
-from itertools import chain
+from itertools import chain, pairwise
 from typing import NamedTuple, cast
 
-from PySide6.QtCore import Property, Signal
+from PySide6.QtCore import Property, Signal, SignalInstance
 from PySide6.QtGui import QColor
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtQuick import (
@@ -242,6 +242,9 @@ class GpuShape(QQuickItem):
         node = QSGGeometryNode()
         geometry = QSGGeometry(COLORED_POINT2D if vertices.colored else POINT2D, vertices.vertex_count)
         geometry.setDrawingMode(vertices.mode)
+        # Vertices change only when store data changes (zoom & pan move the transform): kept in a GPU
+        # buffer, not uploaded again with every frame (arc of ArcItem below changes with playback: default kept)
+        geometry.setVertexDataPattern(QSGGeometry.DataPattern.StaticPattern)
         node.setGeometry(geometry)
         node.setFlag(QSGNode.Flag.OwnsGeometry, True)
         material = QSGVertexColorMaterial() if vertices.colored else QSGFlatColorMaterial()
@@ -249,6 +252,131 @@ class GpuShape(QQuickItem):
         node.setFlag(QSGNode.Flag.OwnsMaterial, True)
         self._colored = vertices.colored
         return node
+
+
+class ArcItem(QQuickItem):
+    """Arc around item center from top, clockwise for a positive sweep (degrees), round caps: scene graph geometry
+    instead of a Canvas painted on the GUI thread (steering wheel rotation of simple view)
+
+    QML: ArcItem { sweep: 90; radius: 40; thickness: 4; color: "red" }
+    """
+
+    sweepChanged = Signal()
+    radiusChanged = Signal()
+    thicknessChanged = Signal()
+    colorChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFlag(QQuickItem.Flag.ItemHasContents, True)
+        self._sweep = 0.0
+        self._radius = 0.0
+        self._thickness = 1.0
+        self._color = QColor("white")
+        self._uploaded: tuple = ()  # geometry state in scene graph
+        self.widthChanged.connect(self.update)
+        self.heightChanged.connect(self.update)
+
+    def _changed(self, name: str, value: float, signal: SignalInstance) -> bool:
+        if value == getattr(self, name):
+            return False
+        setattr(self, name, float(value))
+        signal.emit()
+        self.update()
+        return True
+
+    def _get_sweep(self) -> float:
+        return self._sweep
+
+    def _set_sweep(self, sweep: float):
+        self._changed("_sweep", sweep, self.sweepChanged)
+
+    def _get_radius(self) -> float:
+        return self._radius
+
+    def _set_radius(self, radius: float):
+        self._changed("_radius", radius, self.radiusChanged)
+
+    def _get_thickness(self) -> float:
+        return self._thickness
+
+    def _set_thickness(self, thickness: float):
+        self._changed("_thickness", thickness, self.thicknessChanged)
+
+    def _get_color(self) -> QColor:
+        return self._color
+
+    def _set_color(self, color: QColor):
+        color = QColor(color)
+        if color != self._color:
+            self._color = color
+            self.colorChanged.emit()
+            self.update()
+
+    sweep = Property(float, _get_sweep, _set_sweep, notify=sweepChanged)
+    radius = Property(float, _get_radius, _set_radius, notify=radiusChanged)
+    thickness = Property(float, _get_thickness, _set_thickness, notify=thicknessChanged)
+    color = Property(QColor, _get_color, _set_color, notify=colorChanged)
+
+    def updatePaintNode(self, old: QSGNode | None, _data) -> QSGNode | None:  # type: ignore[override]
+        state = (self._sweep, self._radius, self._thickness, self.width(), self.height())
+        if old is None:
+            node = QSGGeometryNode()
+            geometry = QSGGeometry(POINT2D, 0)
+            geometry.setDrawingMode(TRIANGLES)
+            node.setGeometry(geometry)
+            node.setFlag(QSGNode.Flag.OwnsGeometry, True)
+            node.setMaterial(QSGFlatColorMaterial())
+            node.setFlag(QSGNode.Flag.OwnsMaterial, True)
+            self._uploaded = ()
+        else:
+            node = cast(QSGGeometryNode, old)
+        material = cast(QSGFlatColorMaterial, node.material())
+        if material.color() != self._color:
+            material.setColor(self._color)
+            node.markDirty(QSGNode.DirtyStateBit.DirtyMaterial)
+        if state != self._uploaded:
+            data = arc_triangles(self.width() / 2, self.height() / 2, self._radius, self._sweep, self._thickness)
+            geometry = node.geometry()
+            count = len(data) // 2
+            if geometry.vertexCount() != count:
+                geometry.allocate(count)
+            if count:
+                ctypes.memmove(int(geometry.vertexData()), _address(data), count * 8)
+            node.markDirty(QSGNode.DirtyStateBit.DirtyGeometry)
+            self._uploaded = state
+        return node
+
+
+def arc_triangles(center_x: float, center_y: float, radius: float, sweep: float, thickness: float) -> array:
+    """Thick arc from top of circle (sweep degrees, clockwise if positive, at most 359.9) with round caps, as
+    triangles (2 floats per vertex), none under half a degree"""
+    data = array("f")
+    if abs(sweep) < 0.5 or radius <= 0 or thickness <= 0:
+        return data
+    sweep = max(min(sweep, 359.9), -359.9)
+    half = thickness / 2
+    outer, inner = radius + half, max(radius - half, 0.0)
+    start = -math.pi / 2
+    span = math.radians(sweep)
+    steps = max(math.ceil(abs(sweep) / 4), 2)
+    angles = [start + span * index / steps for index in range(steps + 1)]
+    cosines, sines = [math.cos(angle) for angle in angles], [math.sin(angle) for angle in angles]
+    for index in range(steps):
+        cos0, sin0, cos1, sin1 = cosines[index], sines[index], cosines[index + 1], sines[index + 1]
+        out0 = (center_x + cos0 * outer, center_y + sin0 * outer)
+        in0 = (center_x + cos0 * inner, center_y + sin0 * inner)
+        out1 = (center_x + cos1 * outer, center_y + sin1 * outer)
+        in1 = (center_x + cos1 * inner, center_y + sin1 * inner)
+        data.extend((*out0, *in0, *out1, *in0, *in1, *out1))
+    direction = 1.0 if sweep > 0 else -1.0
+    for angle, facing in ((angles[0], -direction), (angles[-1], direction)):  # half disc beyond each end
+        cap_x, cap_y = center_x + math.cos(angle) * radius, center_y + math.sin(angle) * radius
+        rim = [angle + facing * math.pi * index / 8 for index in range(9)]
+        for first, second in pairwise(rim):
+            data.extend((cap_x, cap_y, cap_x + math.cos(first) * half, cap_y + math.sin(first) * half,
+                         cap_x + math.cos(second) * half, cap_y + math.sin(second) * half))
+    return data
 
 
 def _address(data: array | bytearray) -> int:
@@ -260,6 +388,7 @@ def _address(data: array | bytearray) -> int:
 
 def register_line_types():
     qmlRegisterType(GpuShape, "NeoPedal", 1, 0, "GpuShape")  # type: ignore[call-overload]  # stub wants bytes, str required
+    qmlRegisterType(ArcItem, "NeoPedal", 1, 0, "ArcItem")  # type: ignore[call-overload]
 
 
 # Vertex builders
@@ -334,7 +463,22 @@ def band(xs: Sequence[float], ys: Sequence[float], half_width: float, closed: bo
 
 def band_part(xs: Sequence[float], ys: Sequence[float], line_normals: Sequence[tuple[float, float]],
               indexes: Sequence[int], half_width: float) -> Vertices:
-    """Thick line through some points of a line (simplified for scale), normals of whole line reused"""
+    """Thick line through some points of a line (simplified for scale), normals of whole line reused
+
+    Normals packed in two arrays (lap_map.PackedNormals: nx, ny) read directly, same vertices.
+    """
+    nxs = getattr(line_normals, "nx", None)
+    if nxs is not None:
+        nys = line_normals.ny  # type: ignore[attr-defined]  # PackedNormals
+        count = len(indexes)
+        if count < 2:
+            return Vertices(array("f"), 0, TRIANGLE_STRIP)
+        flat: list[float] = []
+        for index in indexes:
+            x, y = xs[index], ys[index]
+            across_x, across_y = nxs[index] * half_width, nys[index] * half_width
+            flat += (x + across_x, y + across_y, x - across_x, y - across_y)
+        return Vertices(array("f", flat), count * 2, TRIANGLE_STRIP)
     return band([xs[index] for index in indexes], [ys[index] for index in indexes], half_width,
                 line_normals=[line_normals[index] for index in indexes])
 

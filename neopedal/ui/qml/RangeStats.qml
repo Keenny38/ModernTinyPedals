@@ -75,7 +75,7 @@ Item {
                 spacing: theme.em * 0.5
                 Rectangle { implicitWidth: theme.em * 0.6; implicitHeight: implicitWidth; radius: implicitWidth / 2; color: modelData.color }
                 Text { text: modelData.label; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                Text { text: modelData.distance; color: theme.dimText; font.pointSize: theme.fontPoint * 0.8; font.features: { "tnum": 1 } }
+                Text { text: modelData.distance; color: theme.dimText; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
                 Text { text: modelData.time; color: theme.text; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
                 Text {
                     text: modelData.gap
@@ -91,7 +91,7 @@ Item {
             visible: root.hasRange && (root.stats.channels || []).length > 0
             text: i18n.tr("Min / max / mean")
             color: theme.dimText
-            font.pointSize: theme.fontPoint * 0.85
+            font.pointSize: theme.fontSmall
         }
 
         ListView {
@@ -105,14 +105,14 @@ Item {
             ScrollBar.vertical: ScrollBar {}
             delegate: Column {
                 width: ListView.view.width
-                Text { text: modelData.title; color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontPoint * 0.9 }
+                Text { text: modelData.title; color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontLabel }
                 Repeater {
                     model: modelData.cells
                     Text {
                         leftPadding: theme.em * 0.6
                         text: modelData.text
                         color: modelData.color
-                        font.pointSize: theme.fontPoint * 0.85
+                        font.pointSize: theme.fontSmall
                         font.features: { "tnum": 1 }
                     }
                 }

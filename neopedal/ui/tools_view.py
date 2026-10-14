@@ -37,84 +37,27 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr
+from ..template.page_registry import tool_pages, tool_sections
 from . import draw_focus_ring
 from ._common import UIScaler, find_dialog_host
 
 logger = logging.getLogger(__name__)
 
-# Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, "module.DialogClass"), ...))
-# Dialog modules are imported when first opened, to keep startup light
-TOOL_SECTIONS = (
-    ("Utilities", (
-        ("Race Calculator", "\ue8ef", "race_calculator.RaceCalculator"),  # calculator
-        ("Driver Stats Viewer", "\ue77b", "driver_stats_viewer.DriverStatsViewer"),  # contact
-        ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
-        ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
-        ("Game Replays", "\ue714", "game_replays.GameReplays"),  # video
-        ("Broadcast Director", "\ue9e9", "broadcast_director.BroadcastDirector"),  # sliders (mixing desk)
-        ("Race Results", "\ue7c1", "race_results_viewer.RaceResultsViewer"),  # flag
-        ("Stream Overlays", "\ue93e", "stream_overlay_view.StreamOverlaysView"),  # streaming
-    )),
-    ("Editors", (
-        ("Heatmap Editor", "\ue790", "heatmap_editor.HeatmapEditor"),  # color
-        ("Brake Editor", "\ue70f", "brake_editor.BrakeEditor"),  # edit
-        ("Tyre Compound Editor", "\ue70f", "tyre_compound_editor.TyreCompoundEditor"),  # edit
-        ("Vehicle Brand Editor", "\ue8ec", "vehicle_brand_editor.VehicleBrandEditor"),  # tag
-        ("Vehicle Class Editor", "\ue804", "vehicle_class_editor.VehicleClassEditor"),  # car
-        ("Track Info Editor", "\ue946", "track_info_editor.TrackInfoEditor"),  # info
-        ("Track Notes Editor", "\ue70b", "track_notes_editor.TrackNotesEditor"),  # quick note
-        ("Layout Editor", "\ue8a9", "layout_editor.LayoutEditor"),  # view all
-    )),
-    ("Management", (
-        ("Config", "\ue713", "app_settings.AppSettings"),  # settings
-        ("Preset Comparison", "\ue8ab", "preset_compare.PresetCompare"),  # switch
-        ("Plugin Manager", "\uea86", "plugin_manager.PluginManager"),  # puzzle
-        ("Widget Performance", "\uec4a", "perf_view.PerformanceView"),  # speed
-    )),
-    ("Advanced", (
-        ("Session Recorder", "\uec57", "replay_view.ReplayView"),  # replay
-    )),
-)
+# Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, "module.DialogClass"), ...)),
+# see template.page_registry.PAGES. Dialog modules are imported when first opened, to keep startup light
+TOOL_SECTIONS = tool_sections()
 
 
 # Former tools merged into another one: old path (saved open pages, navigation bar) -> new path
 RENAMED_TOOLS = {
     "fuel_calculator.FuelCalculator": "race_calculator.RaceCalculator",
     "tyre_strategy_planner.TyreStrategyPlanner": "race_calculator.RaceCalculator",
+    "game_replays.GameReplays": "race_results_viewer.RaceResultsViewer",  # replays list of results & replays
 }
+SHOW_REPLAYS = "game_replays.GameReplays"  # former path: replays list shown
 RENAMED_TOOL_KEYS = {old.split(".", 1)[0]: new.split(".", 1)[0] for old, new in RENAMED_TOOLS.items()}
 # Extra words finding a tool in command palette (former names, what it covers), both languages
-TOOL_KEYWORDS = {
-    "app_settings.AppSettings": (
-        "settings configuration options preferences application config.json overlay style theme notification "
-        "compatibility remote control web dashboard vr user path folder language startup update backup "
-        "parametres reglages preferences style theme notifications compatibilite controle a distance "
-        "tableau de bord dossiers langue demarrage mise a jour sauvegardes"
-    ),
-    "stream_overlay_view.StreamOverlaysView": (
-        "obs streamlabs xsplit vmix twitch youtube stream streaming browser source broadcast layout "
-        "diffusion direct source navigateur streamer"
-    ),
-    "race_results_viewer.RaceResultsViewer": (
-        "results classification standings finish position grid laps sectors incidents penalties session "
-        "resultats classement arrivee grille tours secteurs incidents penalites"
-    ),
-    "broadcast_director.BroadcastDirector": (
-        "lmu broadcast director cast casting camera cameras spectator stream commentator commentary battle "
-        "auto director tv production regie realisateur spectateur commentateur commentaires bagarre diffusion"
-    ),
-    "game_replays.GameReplays": (
-        "lmu replay incident contact crash watch rediffusion incidents contacts accrochage revoir"
-    ),
-    "race_calculator.RaceCalculator": (
-        "fuel calculator tyre tire strategy planner energy pit stop stint "
-        "carburant calculateur pneus strategie energie arret relais"
-    ),
-    "replay_view.ReplayView": (
-        "telemetry replay tpreplay record playback without game overlay test "
-        "rejeu telemetrie enregistrer lecture sans jeu"
-    ),
-}
+TOOL_KEYWORDS = {page.dialog: page.keywords for page in tool_pages() if page.keywords}
 
 
 def open_tool(dialog_path: str, parent):
@@ -123,6 +66,12 @@ def open_tool(dialog_path: str, parent):
     Returns:
         Dialog shown (already open one brought to front), None if unable to open.
     """
+    if dialog_path == SHOW_REPLAYS:
+        dialog = open_tool(RENAMED_TOOLS[dialog_path], parent)
+        show_replays = getattr(dialog, "show_replays", None)
+        if callable(show_replays):
+            show_replays()
+        return dialog
     dialog_path = RENAMED_TOOLS.get(dialog_path, dialog_path)
     module_name, class_name = dialog_path.rsplit(".", 1)
     host = find_dialog_host(parent)

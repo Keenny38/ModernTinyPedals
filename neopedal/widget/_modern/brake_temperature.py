@@ -25,6 +25,8 @@ braking under it.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,9 +36,14 @@ from ...userfile.heatmap import HEATMAP_DEFAULT_BRAKE, select_brake_heatmap_name
 from .base import DASH, ModernOverlay
 from .quad import QuadMixin, Section, Tile, heat_color, heatmap, reload_heatmaps
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BrakeTemperatureConfig
+
 
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: BrakeTemperatureConfig
 
     options = (
         "font_size", "show_degree_sign", "leading_zero", "enable_heatmap_auto_matching", "heatmap_name",

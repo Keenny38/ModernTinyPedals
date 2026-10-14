@@ -26,6 +26,8 @@ lap (out lap from pit lane or garage, in pit lane before start line).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
@@ -34,11 +36,16 @@ from ..speed_delta import REFERENCES, SpeedDeltas
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import SpeedDeltaConfig
+
 STEADY = 0.05  # speed difference (speed unit) shown in neutral color below this
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: SpeedDeltaConfig
 
     options = (
         "font_size", "layout", "decimal_places", "speed_delta_display_range", "speed_delta_smoothing_samples",

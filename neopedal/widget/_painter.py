@@ -431,9 +431,9 @@ class WheelGaugeBar(QWidget):
         input_color: str = "",
         fg_color: str = "",
         bg_color: str = "",
-        mark_width: int = 0,
+        mark_width: float = 0,
         mark_color: str = "",
-        maxrange_height: int = 0,
+        maxrange_height: float = 0,
         maxrange_color: str = "",
         right_side: bool = False,
         top_side: bool = True,
@@ -526,7 +526,7 @@ class PedalInputBar(QWidget):
         raw_size: tuple[int, int, int, int],
         filtered_size: tuple[int, int, int, int],
         max_size: tuple[int, int, int, int],
-        reading_size: tuple[int, int, int, int],
+        reading_size: tuple[float, float, int, int],
         fg_color: str = "",
         bg_color: str = "",
         input_color: str = "",
@@ -542,6 +542,7 @@ class PedalInputBar(QWidget):
         self.pedal_length = pedal_length
         self.pedal_extend = pedal_extend
         self.input_color = input_color
+        self.alert_color = ""  # flashing alert (TC, ABS, wheel lock & slip): drawn instead of input color
         self.bg_color = bg_color
         self.rect_pedal = QRectF(*pedal_size)
         self.rect_raw = QRectF(*raw_size)
@@ -589,10 +590,11 @@ class PedalInputBar(QWidget):
         """Draw"""
         painter = QPainter(self)
         fill_rect(painter, self.rect_pedal, self.bg_color)
-        fill_rect(painter, self.rect_raw, self.input_color)
-        fill_rect(painter, self.rect_filtered, self.input_color)
-        if self.is_maxed:
-            painter.fillRect(self.rect_max, self.max_color)
+        input_color = self.alert_color or self.input_color
+        fill_rect(painter, self.rect_raw, input_color)
+        fill_rect(painter, self.rect_filtered, input_color)
+        if self.is_maxed:  # force feedback clipping color, else bar color (alert while flashing)
+            painter.fillRect(self.rect_max, self.max_color if self.rect_max is self.rect_pedal else input_color)
         if self.show_reading:
             painter.setPen(self.pen)
             painter.drawText(self.rect_text, Qt.AlignmentFlag.AlignCenter, f"{self.input_reading:.0f}")
@@ -663,8 +665,8 @@ class FuelLevelBar(QWidget):
         parent,
         width: int,
         height: int,
-        start_mark_width: int,
-        refill_mark_width: int,
+        start_mark_width: float,
+        refill_mark_width: float,
         input_color: str = "",
         bg_color: str = "",
         start_mark_color: str = "",

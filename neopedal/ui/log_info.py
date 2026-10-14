@@ -38,6 +38,18 @@ from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog, tran
 from .toast import show_toast
 
 
+def log_snapshot(retries: int = 3) -> tuple[str, int]:
+    """Log text & log stream tell() of that text (both read with no write between), tell() -1 if
+    log kept being written (text read anyway)"""
+    text = ""
+    for _ in range(max(retries, 1)):
+        written = log_stream.tell()
+        text = log_stream.getvalue()
+        if log_stream.tell() == written:
+            return text, written
+    return text, -1
+
+
 @singleton_dialog("log", show_error=False)
 class LogInfo(BaseDialog):
     """Create log info dialog"""
@@ -49,7 +61,8 @@ class LogInfo(BaseDialog):
         self._update_timer = QBasicTimer()
         # Timer is not unregistered if widget is deleted by parent while Python object lives on
         self.destroyed.connect(self._update_timer.stop)
-        self.last_text = ""  # log shown, see timerEvent
+        self._shown_written = 0  # log stream tell() of text shown, see timerEvent
+        self._shown_size = 0  # characters shown
 
         # Text view
         self.log_view = QTextBrowser(self)
@@ -98,8 +111,8 @@ class LogInfo(BaseDialog):
         """Refresh log"""
         if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
             return
-        if self.last_text != log_stream.getvalue():
-            self.refresh_log()
+        if log_stream.tell() != self._shown_written:
+            self.append_log()
 
     def toggle_auto_refresh(self, checked: bool):
         """Toggle auto refresh"""
@@ -112,9 +125,31 @@ class LogInfo(BaseDialog):
 
     def refresh_log(self):
         """Refresh log"""
-        self.last_text = log_stream.getvalue()
-        self.log_view.setPlainText(self.last_text)
+        text, written = log_snapshot()
+        self.log_view.setPlainText(text)
         self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+        self._shown_written = written
+        self._shown_size = len(text)
+
+    def append_log(self):
+        """Auto refresh: only new log text added to view; whole log shown again if new text was already
+        dropped (log cleared) or view holds twice the log size limit (old lines dropped by log stream)"""
+        text, written = log_snapshot(retries=1)
+        if written < 0:  # written meanwhile: next tick
+            return
+        added = written - self._shown_written
+        if added <= 0:
+            return
+        limit = getattr(log_stream, "max_chars", 0)
+        if added > len(text) or (limit and self._shown_size + added > 2 * limit):
+            self.refresh_log()
+            return
+        cursor = QTextCursor(self.log_view.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text[-added:])
+        self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+        self._shown_written = written
+        self._shown_size += added
 
     def clear_log(self):
         """Clear log"""

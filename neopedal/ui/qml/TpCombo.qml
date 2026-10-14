@@ -6,23 +6,24 @@ ComboBox {
     id: box
     property string tip: ""
     property var dotColor: null  // function(text) giving a dot color, null for none
+    property bool compounds: false  // texts are tyre compounds: compound badge before each (as overlays)
 
     implicitHeight: Math.round(theme.em * 2.05)
     implicitWidth: theme.em * 9
     focusPolicy: Qt.TabFocus
-    opacity: enabled ? 1 : 0.5
+    opacity: enabled ? 1 : theme.disabledOpacity
     Accessible.name: tip !== "" ? tip : displayText
 
     ToolTip.visible: tip !== "" && hovered && !popup.visible
     ToolTip.text: tip
-    ToolTip.delay: 700
+    ToolTip.delay: theme.tipDelay
 
     background: Rectangle {
-        radius: theme.em * 0.4
+        radius: theme.radiusMd
         color: box.hovered ? theme.hover : theme.raised
         border.width: box.visualFocus ? 1.5 : 1
         border.color: box.popup.visible || box.visualFocus ? theme.accent : theme.border
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: theme.motionFast } }
     }
     contentItem: Row {
         leftPadding: theme.em * 0.6
@@ -35,11 +36,16 @@ ComboBox {
             color: box.dotColor ? box.dotColor(box.displayText) : "transparent"
             anchors.verticalCenter: parent.verticalCenter
         }
+        TpCompound {
+            visible: box.compounds && name !== ""
+            name: box.compounds ? box.displayText : ""
+            anchors.verticalCenter: parent.verticalCenter
+        }
         Text {
             text: box.displayText
             color: theme.text
             elide: Text.ElideRight
-            width: box.width - theme.em * 2.6 - (box.dotColor !== null ? theme.em : 0)
+            width: box.width - theme.em * 2.6 - (box.dotColor !== null ? theme.em : box.compounds ? theme.em * 1.5 : 0)
             anchors.verticalCenter: parent.verticalCenter
         }
     }
@@ -55,8 +61,8 @@ ComboBox {
         width: Math.max(box.width, theme.em * 9)
         padding: 4
         implicitHeight: Math.min(contentItem.implicitHeight + 8, theme.em * 22)
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 130 } }
-        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 90 } }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast } }
         contentItem: ListView {
             clip: true
             implicitHeight: contentHeight
@@ -65,7 +71,7 @@ ComboBox {
             ScrollBar.vertical: ScrollBar {}
         }
         background: Rectangle {
-            radius: theme.em * 0.6
+            radius: theme.radiusLg
             color: theme.raised
             border.width: 1
             border.color: theme.border
@@ -75,28 +81,36 @@ ComboBox {
         id: item
         required property var modelData
         required property int index
+        // Text of item: textRole of objects (model used as given, no mapped copy) or the item itself
+        readonly property string label: box.textRole !== "" && modelData !== null && typeof modelData === "object"
+                                        ? String(modelData[box.textRole]) : String(modelData)
         width: ListView.view ? ListView.view.width : box.width
         height: theme.em * 2.1
         highlighted: box.highlightedIndex === index
         contentItem: Row {
-            spacing: theme.em * 0.45
+            spacing: theme.em * 0.5
             Rectangle {
                 visible: box.dotColor !== null
                 width: Math.round(theme.em * 0.6)
                 height: width
                 radius: width / 2
-                color: box.dotColor ? box.dotColor(String(item.modelData)) : "transparent"
+                color: box.dotColor ? box.dotColor(item.label) : "transparent"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            TpCompound {
+                visible: box.compounds && name !== ""
+                name: box.compounds ? item.label : ""
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
-                text: String(item.modelData)
+                text: item.label
                 color: theme.text
                 font.weight: box.currentIndex === item.index ? Font.DemiBold : Font.Normal
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
         background: Rectangle {
-            radius: theme.em * 0.4
+            radius: theme.radiusMd
             color: item.highlighted ? theme.hover : "transparent"
         }
     }

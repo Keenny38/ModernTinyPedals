@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from neopedal.setting import cfg
 from neopedal.ui._common import BaseEditor
-from tests.test_driver_stats_viewer import settle
+from tests.test_driver_stats_viewer import opens_on_game_track, settle
 
 
 @pytest.fixture
@@ -157,6 +157,7 @@ def stats_viewer(dialogs, stats_file, monkeypatch):
 
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     api.read.session.track_name = lambda: "Spa"
+    opens_on_game_track(monkeypatch)
     viewer = DriverStatsViewer(None)
     yield viewer.backend
     viewer.close()
@@ -168,7 +169,7 @@ def load_stats():
         return json.load(file)
 
 
-def test_stats_viewer_shows_current_track(stats_viewer):
+def test_stats_viewer_shows_game_track(stats_viewer):
     assert stats_viewer.selected_stats_key == "Spa"
     assert stats_viewer.row_keys() == ["LMP2", "GT3"]  # sorted by personal best
     assert stats_viewer.cell("GT3", "pb").text == "2:18.500"

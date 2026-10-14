@@ -29,7 +29,7 @@ from ..setting import cfg
 from ..userfile.track_info import load_track_info, save_track_info
 from ..userfile.track_map import load_track_map_file, save_track_map_file
 from ..validator import file_last_modified, generator_init
-from ._base import MODULE_STOP, DataModule, data_stamp
+from ._base import MODULE_STOP, WAIT_STATE_CHANGE, DataModule, data_stamp
 
 
 class Realtime(DataModule):
@@ -77,9 +77,8 @@ class Realtime(DataModule):
                     gen_record_track_info.send(vehicle_resets)
 
                 else:
-                    if reset:
-                        reset = False
-                        update_interval = self.idle_interval
+                    reset = False
+                    update_interval = WAIT_STATE_CHANGE  # idle until activity changes
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_record_track_info)

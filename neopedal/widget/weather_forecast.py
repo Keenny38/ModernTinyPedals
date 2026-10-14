@@ -22,6 +22,8 @@ Weather forecast Widget
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
@@ -39,6 +41,9 @@ from ..process.weather import WeatherNode
 from ..userfile.custom_image import split_pixmap_image
 from ._base import Overlay
 from ._painter import ProgressBar
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import WeatherForecastConfig
 
 
 class ForecastMixin:
@@ -117,6 +122,8 @@ def forecast_time_text(minutes: float) -> str:
 
 class Realtime(ForecastMixin, Overlay):
     """Draw widget"""
+
+    wcfg: WeatherForecastConfig
 
     def __init__(self, config, widget_name):
         # Assign base setting

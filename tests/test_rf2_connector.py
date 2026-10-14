@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from neopedal.adapter import rf2_connector
+from neopedal.adapter import _sync, rf2_connector
 from neopedal.adapter.rf2_connector import INVALID_INDEX, RF2Info, SyncData, rF2data
 
 
@@ -55,6 +55,7 @@ def game(monkeypatch):
     """3 cars, player in scoring slot 2 (id 7) & telemetry slot 1, controllable clock"""
     clock = {"offset": 0.0}
     monkeypatch.setattr(rf2_connector, "monotonic", lambda: time.monotonic() + clock["offset"])
+    monkeypatch.setattr(_sync, "monotonic", lambda: time.monotonic() + clock["offset"])  # update thread
     info = RF2Info()
     dataset = MemoryDataSet()
     info._sync.dataset = dataset
@@ -216,7 +217,7 @@ def test_gave_up_after_errors_hides_overlays(game, monkeypatch):
     info, _, _, _ = game
     info._sync.paused = False
     info._sync.synced = True
-    monkeypatch.setattr(rf2_connector, "run_supervised", lambda *args: False)
+    monkeypatch.setattr(_sync, "run_supervised", lambda *args: False)
     info._sync._SyncData__update(threading.Event())
     assert info._sync.paused and not info._sync.synced and not info.isActive
 
@@ -226,7 +227,7 @@ def test_lmu_gave_up_after_errors_hides_overlays(monkeypatch):
 
     sync = lmu_connector.SyncData()
     sync.synced = True
-    monkeypatch.setattr(lmu_connector, "run_supervised", lambda *args: False)
+    monkeypatch.setattr(_sync, "run_supervised", lambda *args: False)
     sync._SyncData__update(threading.Event())
     assert sync.paused and not sync.synced
 

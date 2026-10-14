@@ -22,18 +22,34 @@ Main window pages built when first shown, released while window stays hidden
 Pages never visited cost no memory (widgets, their style sheet rules, page code) nor startup time.
 While main window stays hidden in tray or minimized (racing), built pages are released and the
 hidden window's graphics resources freed: everything is built again when shown.
+Qt Quick pages left hidden a while, window shown or not, are released too (see IdlePageRelease).
 """
 
 from __future__ import annotations
 
-import weakref
+import sys
+import time
 from collections.abc import Callable, Iterable
 
+import shiboken6
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Slot
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QStackedWidget, QVBoxLayout, QWidget
+
+from ..jobs import weak_callback
 
 RELEASE_DELAY_MS = 60_000  # window hidden or minimized this long: pages released
 DESTROY_DELAY_MS = 1_000  # released pages deleted meanwhile, then hidden window's graphics freed
+IDLE_RELEASE_MS = 10 * 60_000  # page left hidden this long (window shown or not): its Qt Quick page released
+IDLE_CHECK_MS = 60_000  # hidden pages checked this often while any is hidden
+
+
+def request_idle_collect():
+    """Garbage of released pages collected at next idle moment (frozen with the app, see loader), app
+    started only (loader never imported here)"""
+    loader = sys.modules.get(f"{__package__.rpartition('.')[0]}.loader")
+    request = getattr(loader, "request_idle_collect", None)
+    if callable(request):
+        request()
 
 
 def release_quick_views(widget: QWidget):
@@ -110,15 +126,6 @@ class LazyPage(QWidget):
             refresh()
 
 
-def _weak_callback(callback: Callable[[], object] | None) -> Callable[[], Callable[[], object] | None]:
-    """Bound method held weakly (no reference cycle with the view owning this object)"""
-    if callback is None:
-        return lambda: None
-    if hasattr(callback, "__self__"):
-        return weakref.WeakMethod(callback)  # type: ignore[arg-type]
-    return lambda: callback
-
-
 class PageRelease(QObject):
     """Frees memory while main window stays hidden (tray) or minimized
 
@@ -139,8 +146,9 @@ class PageRelease(QObject):
     ):
         super().__init__(parent)
         self._pages = tuple(pages)
-        self._release_others = _weak_callback(release_others)
-        self._shown = _weak_callback(shown)
+        # Bound methods held weakly (no reference cycle with the view owning this object)
+        self._release_others = weak_callback(release_others)
+        self._shown = weak_callback(shown)
         self._window = parent.window()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -192,8 +200,9 @@ class PageRelease(QObject):
         release_others = self._release_others()
         if release_others is not None:
             release_others()
-        for page in self._pages:
-            page.release()
+        released = [page.release() for page in self._pages]
+        if any(released):
+            request_idle_collect()
         self._destroy_timer.start()
 
     def destroy_window(self):
@@ -207,3 +216,80 @@ class PageRelease(QObject):
         if any(child.inherits("QQuickWidget") for child in window.findChildren(QWidget)):
             return  # Qt Quick page left open (tool page): keeps its graphics
         window.destroy()
+
+
+class IdlePageRelease(QObject):
+    """Frees Qt Quick pages left hidden a while, window shown or not (pages visited once, tools of navigation
+    rail kept open): least recently shown first, built again when shown
+
+    Each Qt Quick page holds its engine, scene graph & render target (tens of MB) while hidden. Page
+    stack is watched: page left is timed, page shown is not. Which page is released, and how, is
+    decided by release callback (live pages, unsaved changes... are kept).
+
+    Args:
+        stack: page stack watched.
+        release: called with page hidden for delay_ms: True if released, False if kept for now (tried
+            again later), None if kept until shown again.
+        delay_ms: hidden this long: page released.
+        check_ms: hidden pages checked this often (while any).
+        clock: seconds clock (tests).
+    """
+
+    def __init__(
+        self, stack: QStackedWidget, release: Callable[[QWidget], bool | None], delay_ms: int = IDLE_RELEASE_MS,
+        check_ms: int = IDLE_CHECK_MS, clock: Callable[[], float] = time.monotonic,
+    ):
+        super().__init__(stack)
+        self._stack = stack
+        self._release = weak_callback(release)  # bound method of view owning this object: no reference cycle
+        self._delay = delay_ms / 1000
+        self._clock = clock
+        self._hidden_since: dict[QWidget, float] = {}  # page left: time left
+        self._current: QWidget | None = stack.currentWidget()
+        self._timer = QTimer(self)
+        self._timer.setInterval(check_ms)
+        self._timer.timeout.connect(self.check)
+        stack.currentChanged.connect(self.page_changed)
+
+    def page_changed(self, index: int):
+        """Page left timed, page shown no longer"""
+        shown = self._stack.widget(index)
+        left = self._current
+        if left is not None and left is not shown and shiboken6.isValid(left):
+            self._hidden_since[left] = self._clock()
+        if shown is not None:
+            self._hidden_since.pop(shown, None)
+        self._current = shown
+        if self._hidden_since and not self._timer.isActive():
+            self._timer.start()
+
+    def hidden_pages(self) -> list[QWidget]:
+        """Pages hidden (still in stack), least recently shown first"""
+        stack = self._stack
+        for page in list(self._hidden_since):
+            if not shiboken6.isValid(page) or stack.indexOf(page) < 0:
+                del self._hidden_since[page]  # closed page
+        return sorted(self._hidden_since, key=self._hidden_since.__getitem__)
+
+    def check(self):
+        """Pages hidden for delay released, garbage collected once idle"""
+        pages = self.hidden_pages()
+        if not pages:
+            self._timer.stop()
+            return
+        release = self._release()
+        if release is None or PageRelease.dialog_running():  # page opening a message box never deleted under it
+            return
+        now = self._clock()
+        released = False
+        for page in pages:
+            if now - self._hidden_since[page] < self._delay or page is self._stack.currentWidget():
+                continue
+            result = release(page)
+            if result is not False:  # released, or kept until shown again
+                self._hidden_since.pop(page, None)
+            released = released or bool(result)
+        if released:
+            request_idle_collect()
+        if not self._hidden_since:
+            self._timer.stop()

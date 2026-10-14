@@ -45,7 +45,7 @@ TpPage {
             spacing: theme.em * 0.6
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.35
+                spacing: theme.em * 0.4
                 Repeater {
                     model: backend.groups
                     OverlayChip {
@@ -96,12 +96,12 @@ TpPage {
                 onCountChanged: if (count > 0 && (currentIndex < 0 || currentIndex >= count)) currentIndex = 0
                 onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
 
-                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 } }
+                add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast } }
                 displaced: count > 30 ? null : moved  // long lists: rows placed at once, not animated
                 Transition {
                     id: moved
-                    NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic }
-                    NumberAnimation { property: "opacity"; to: 1; duration: 180 }
+                    NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; to: 1; duration: theme.motionBase }
                 }
 
                 Keys.onReturnPressed: page.openCurrent()
@@ -157,7 +157,7 @@ TpPage {
                 horizontalAlignment: Text.AlignRight
                 text: i18n.tr("Enter opens the option, Space switches it on / off")
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.85
+                font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
         }

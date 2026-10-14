@@ -23,7 +23,11 @@ Notification
 from __future__ import annotations
 
 import logging
+import sys
 import threading
+import weakref
+from collections.abc import Callable
+from functools import partial
 from time import monotonic
 
 import shiboken6
@@ -41,19 +45,9 @@ from PySide6.QtWidgets import (
 
 from ..const_app import APP_NAME
 from ..i18n import current_language, tr, trm
+from ..jobs import Job, WorkerPool, get_courier, weak_callback
+from ..lazy_service import update_checker
 from ..setting import cfg
-from ..update import (
-    DownloadCancelled,
-    UnsignedInstallerError,
-    can_auto_update,
-    discard_installer,
-    download_installer,
-    is_portable_copy,
-    release_url,
-    run_installer,
-    skip_version,
-    update_checker,
-)
 from ._common import find_dialog_host
 
 logger = logging.getLogger(__name__)
@@ -67,6 +61,56 @@ def main_window() -> QWidget | None:
         if callable(getattr(widget, "quit_app", None)):
             return widget
     return None
+
+
+# Update module (http.client, urllib, zipfile...) imported once used: not at start, see lazy_service
+def can_auto_update() -> bool:
+    """See update.can_auto_update"""
+    from ..update import can_auto_update as found
+
+    return found()
+
+
+def is_portable_copy() -> bool:
+    """See update.is_portable_copy"""
+    from ..update import is_portable_copy as found
+
+    return found()
+
+
+def release_url() -> str:
+    """See update.release_url"""
+    from ..update import release_url as found
+
+    return found()
+
+
+def skip_version(version_tuple: tuple[int, int, int]):
+    """See update.skip_version"""
+    from ..update import skip_version as found
+
+    found(version_tuple)
+
+
+def discard_installer(path: str) -> None:
+    """See update.discard_installer"""
+    from ..update import discard_installer as found
+
+    found(path)
+
+
+def download_installer(asset, **kwargs) -> str:
+    """See update.download_installer"""
+    from ..update import download_installer as found
+
+    return found(asset, **kwargs)
+
+
+def run_installer(path: str, folder: str | None = None, repository: str | None = None) -> None:
+    """See update.run_installer"""
+    from ..update import run_installer as found
+
+    found(path, folder, repository)
 
 
 def install_update(window: QWidget | None, path: str, repository: str | None = None) -> bool:
@@ -90,6 +134,8 @@ def install_update(window: QWidget | None, path: str, repository: str | None = N
         if callable(cancel_quit):
             cancel_quit()
         discard_installer(path)  # broken signature never kept, unstartable one never left in temp folder
+        from ..update import UnsignedInstallerError
+
         if isinstance(error, UnsignedInstallerError):
             msg_text = tr("Installer of custom update repository is not signed, update was not installed.")
         elif isinstance(error, ValueError):
@@ -109,6 +155,31 @@ def format_megabytes(size: int) -> str:
     return QLocale(current_language()).toString(size / 1_000_000, "f", 1)
 
 
+def _download(asset, report: Callable[[int, int], None], cancel: threading.Event) -> tuple[str, str]:
+    """Installer downloaded (download thread): path & error message ("" if downloaded)"""
+    from ..update import DownloadCancelled
+
+    try:
+        return download_installer(asset, progress=report, cancelled=cancel), ""
+    except DownloadCancelled:
+        logger.info("UPDATES: download cancelled")
+        return "", DOWNLOAD_CANCELLED
+    except Exception as error:  # OSError, ValueError, or unexpected: never left busy
+        logger.error("UPDATES: download failed: %s", error)
+        return "", str(error)
+
+
+_download_workers: WorkerPool | None = None
+
+
+def _download_pool() -> WorkerPool:
+    """Worker thread of update downloads, created when first needed (UI thread)"""
+    global _download_workers
+    if _download_workers is None:
+        _download_workers = WorkerPool(1, "Update download")
+    return _download_workers
+
+
 def download_progress_text(received: int, total: int) -> str:
     """Downloaded part: percent & size, or size only if total is unknown"""
     if total > 0:
@@ -126,7 +197,6 @@ class UpdateInstaller(QObject):
 
     busy_changed = Signal(bool)
     progress = Signal(int, int)  # received, total bytes (0 if unknown), from download thread
-    downloaded = Signal(str, str)  # installer path, error message (from download thread)
     PROGRESS_INTERVAL = 0.1  # seconds between progress signals
 
     def __init__(self):
@@ -137,7 +207,9 @@ class UpdateInstaller(QObject):
         self._auto_install = False
         self._repository: str | None = None  # update repository of downloading installer
         self._cancel = threading.Event()
-        self.downloaded.connect(self.install_downloaded)
+        self._serial = 0
+        self._ref = weakref.ref(self)
+        get_courier()  # created on the UI thread (hands the download result over)
         self.progress.connect(self.store_progress)
 
     def download(self, auto_install: bool = False) -> bool:
@@ -154,25 +226,27 @@ class UpdateInstaller(QObject):
         self.busy_changed.emit(True)
         last_report = [0.0]
 
-        def report(received: int, total: int):
+        def report(received: int, total: int):  # download thread: progress signal of this app-lifetime object
             now = monotonic()
             if now - last_report[0] >= self.PROGRESS_INTERVAL or received >= total > 0:
                 last_report[0] = now
                 self.progress.emit(received, total)
 
-        def download():
-            try:
-                path, message = download_installer(asset, progress=report, cancelled=cancel), ""
-            except DownloadCancelled:
-                logger.info("UPDATES: download cancelled")
-                path, message = "", DOWNLOAD_CANCELLED
-            except Exception as error:  # OSError, ValueError, or unexpected: never left busy
-                logger.error("UPDATES: download failed: %s", error)
-                path, message = "", str(error)
-            self.downloaded.emit(path, message)
-
-        threading.Thread(target=download, daemon=True, name="Update download").start()
+        # Job of its own worker thread (a download of minutes never holds back page jobs), handed over on the UI
+        # thread by the jobs courier (deliver_job)
+        self._serial += 1
+        _download_pool().submit(Job(self._serial, None, "download", "Update", partial(_download, asset, report, cancel),
+                                    weak_callback(None), weak_callback(None), False, self._ref))
         return True
+
+    def deliver_job(self, job: Job):
+        """Download over (UI thread): installer run, or error shown"""
+        ok, value = job.outcome or (False, None)
+        job.release()
+        if not ok:  # unexpected error of the download thread: never left busy
+            logger.error("UPDATES: download failed: %s", value)
+        path, message = value if ok else ("", str(value))
+        self.install_downloaded(path, message)
 
     def cancel(self) -> bool:
         """Stop download (partial file removed), False if not downloading"""
@@ -185,10 +259,6 @@ class UpdateInstaller(QObject):
     def store_progress(self, received: int, total: int):
         """Progress kept for buttons & pages shown later"""
         self.received, self.total = received, total
-
-    def progress_text(self) -> str:
-        """Downloaded part of current download"""
-        return download_progress_text(self.received, self.total)
 
     @Slot(str, str)  # type: ignore[operator]
     def install_downloaded(self, path: str, error: str):
@@ -244,6 +314,9 @@ class NotifyBar(QWidget):
         self.carsetup = QPushButton(tr("Auto Backup Car Setup Enabled"))
         self.carsetup.setVisible(False)
 
+        self.director = QPushButton(tr("Broadcast Director On"))
+        self.director.setVisible(False)
+
         self.updates = UpdatesNotifyButton("")
         self.updates.setVisible(False)
 
@@ -253,6 +326,7 @@ class NotifyBar(QWidget):
         layout.addWidget(self.pacenotes)
         layout.addWidget(self.hotkey)
         layout.addWidget(self.carsetup)
+        layout.addWidget(self.director)
         layout.addWidget(self.updates)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -277,6 +351,13 @@ class NotifyBar(QWidget):
         self.set_notice(
             self.carsetup, "auto_backup_car_setup",
             notification["notify_auto_backup_car_setup"] and cfg.telemetry["enable_auto_backup_car_setup"])
+        self.refresh_director()
+
+    def refresh_director(self):
+        """Broadcast Director page open with the director on (it asks the game while hidden too), each second"""
+        module = sys.modules.get("neopedal.ui.quick.director_backend")  # imported only by the page
+        running = module is not None and module.director_status() == "on"
+        self.set_notice(self.director, "broadcast_director", cfg.notification["notify_broadcast_director"] and running)
 
     @staticmethod
     def set_notice(button: QPushButton, name: str, shown: bool):
@@ -377,6 +458,8 @@ class UpdatesNotifyButton(QPushButton):
 
     def restore(self):
         """Show result of last check again (button rebuilt on language change), unless dismissed"""
+        if not update_checker.imported:  # never checked (window built at start): nothing to show
+            return
         if update_checker.is_checking():
             self.checking(True)
         elif (update_checker.is_updates() and not update_checker.is_skipped()

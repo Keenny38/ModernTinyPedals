@@ -25,6 +25,8 @@ front / rear split bar.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
@@ -33,9 +35,14 @@ from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BrakeBiasConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: BrakeBiasConfig
 
     options = (
         "font_size", "layout", "show_brake_bias", "decimal_places_brake_bias", "show_front_and_rear",
@@ -102,4 +109,5 @@ class Realtime(StatsMixin, ModernOverlay):
                 if migration < 0:
                     migration = self.migration.send(bias) * 100
                 values.append(Value(f"{migration:.{self.dec_migration}f}F", theme.text_dim))
-        self.refresh(tuple(values))
+        state = tuple(values)
+        self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

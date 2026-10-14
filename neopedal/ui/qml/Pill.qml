@@ -10,7 +10,7 @@ Rectangle {
     property bool solid: false
     property string tip: ""
     // Text over solid fill: dark on light colors, white on dark ones
-    readonly property color fillInk: (0.299 * tint.r + 0.587 * tint.g + 0.114 * tint.b) > 0.62 ? "#111111" : "white"
+    readonly property color fillInk: theme.inkOn(tint)
     readonly property color ink: solid ? fillInk : theme.dark ? Qt.lighter(tint, 1.35) : Qt.darker(tint, 1.25)
 
     implicitHeight: Math.round(theme.em * 1.45)
@@ -37,7 +37,7 @@ Rectangle {
             text: pill.text
             visible: text !== ""
             color: pill.ink
-            font.pointSize: theme.fontPoint * 0.8
+            font.pointSize: theme.fontCaption
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
             anchors.verticalCenter: parent.verticalCenter
@@ -52,5 +52,5 @@ Rectangle {
     }
     ToolTip.visible: tip !== "" && tipArea.containsMouse
     ToolTip.text: tip
-    ToolTip.delay: 500
+    ToolTip.delay: theme.tipDelay
 }

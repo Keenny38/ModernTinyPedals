@@ -20,13 +20,20 @@
 Slip ratio Widget
 """
 
+from typing import TYPE_CHECKING
+
 from ..module_info import minfo
 from ._base import Overlay
 from ._painter import WheelGaugeBar
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SlipRatioConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SlipRatioConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

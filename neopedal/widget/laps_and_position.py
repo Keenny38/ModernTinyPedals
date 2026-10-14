@@ -20,15 +20,23 @@
 Laps and position Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import calculation as calc
 from ..api_control import api
 from ..formatter import format_points
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import LapsAndPositionConfig
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "LapsAndPositionConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -216,12 +224,13 @@ class Realtime(Overlay):
         # Track limits points
         if self.wcfg["show_track_limits_points"]:
             current_points = api.read.session.cut_points()
-            total_points = api.read.session.limits_points()  # every session: limit given by game, if any
+            # Limit in races only (no penalty in practice & qualifying)
+            total_points = api.read.session.limits_points() * api.read.session.in_race()
             self.update_cut_points(self.bar_cut_points, current_points, total_points)
 
         # Position change
         if self.wcfg["show_position_change"]:
-            veh_info = minfo.vehicles.dataSet[minfo.vehicles.playerIndex]
+            veh_info = player_vehicle()
             if self.wcfg["show_position_change_in_class"]:
                 pos_diff = veh_info.qualifyInClass - veh_info.positionInClass
             else:

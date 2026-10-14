@@ -25,12 +25,19 @@ asked by pedal, compare with pressure applied).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...api_control import api
 from .gauge_quad import GaugeQuad
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import BrakePressureConfig
 
 
 class Realtime(GaugeQuad):
     """Draw widget"""
+
+    wcfg: BrakePressureConfig
 
     options = (*GaugeQuad.common_options, "show_brake_input")
     label = "Brake pressure"

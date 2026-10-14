@@ -25,10 +25,7 @@ from typing import cast
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
-    QHeaderView,
     QMessageBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
 )
@@ -37,12 +34,12 @@ from ..api_control import api
 from ..const_file import ConfigType
 from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
+from ..template.setting_compounds import name_color
 from ..userfile.heatmap import HEATMAP_DEFAULT_TYRE, set_predefined_compound_symbol
 from ..validator import is_hex_color
 from ._common import (
     QVAL_COLOR,
     BaseEditor,
-    CompactButton,
     TableBatchReplace,
     UIScaler,
     column_texts,
@@ -67,21 +64,7 @@ class TyreCompoundEditor(BaseEditor):
         self.compounds_temp = copy_setting(cfg.user.compounds)
 
         # Set table
-        self.table_compounds = QTableWidget(self)
-        self.table_compounds.setColumnCount(len(HEADER_COMPOUNDS))
-        self.table_compounds.setHorizontalHeaderLabels([tr(name) for name in HEADER_COMPOUNDS])
-        self.table_compounds.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.table_compounds.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # Symbol column
-        self.table_compounds.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self.table_compounds.setColumnWidth(1, UIScaler.size(5))
-        # Color column
-        self.table_compounds.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table_compounds.setColumnWidth(2, UIScaler.size(7))
-        # Heatmap column
-        self.table_compounds.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table_compounds.setColumnWidth(3, UIScaler.size(12))
-
+        self.table_compounds = self.editor_table(HEADER_COMPOUNDS, {1: 5, 2: 7, 3: 12})  # symbol, color & heatmap
         self.table_compounds.cellChanged.connect(self.verify_input)
         self.refresh_table()
         self.enable_table_undo("compounds_temp", self.update_compounds_temp, self.refresh_table)
@@ -99,43 +82,10 @@ class TyreCompoundEditor(BaseEditor):
 
     def set_layout_button(self):
         """Set button layout"""
-        button_add = CompactButton(tr("Add"))
-        button_add.clicked.connect(self.add_compound)
-
-        button_sort = CompactButton(tr("Sort"))
-        button_sort.clicked.connect(self.sort_compound)
-
-        button_delete = CompactButton(tr("Delete"))
-        button_delete.clicked.connect(self.delete_compound)
-
-        button_replace = CompactButton(tr("Replace"))
-        button_replace.clicked.connect(self.open_replace_dialog)
-
-        button_reset = CompactButton(tr("Reset"))
-        button_reset.clicked.connect(self.reset_setting)
-
-        button_apply = CompactButton(tr("Apply"))
-        button_apply.clicked.connect(self.applying)
-
-        button_save = CompactButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(self.close)
-
-        # Set layout
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_add)
-        layout_button.addWidget(button_sort)
-        layout_button.addWidget(button_delete)
-        layout_button.addWidget(button_replace)
-        layout_button.addWidget(button_reset)
-        self.add_undo_buttons(layout_button)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_apply)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_close)
-        return layout_button
+        return self.editor_buttons(
+            (("Add", self.add_compound), ("Sort", self.sort_compound), ("Delete", self.delete_compound),
+             ("Replace", self.open_replace_dialog)),
+            self.reset_setting, self.applying)
 
     def refresh_table(self):
         """Refresh compounds list"""
@@ -189,6 +139,7 @@ class TyreCompoundEditor(BaseEditor):
                             row_index,
                             compound,
                             set_predefined_compound_symbol(compound),
+                            name_color(compound),
                         )
                         listed.add(compound)
                         row_index += 1

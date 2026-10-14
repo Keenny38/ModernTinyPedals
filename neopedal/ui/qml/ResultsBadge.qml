@@ -8,7 +8,7 @@ Rectangle {
                                 : code === "P" ? theme.accent : theme.dimText
     implicitWidth: Math.round(theme.em * 1.9)
     implicitHeight: implicitWidth
-    radius: theme.em * 0.4
+    radius: theme.radiusMd
     color: Qt.rgba(tone.r, tone.g, tone.b, 0.16)
     border.width: 1
     border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.45)

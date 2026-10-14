@@ -39,6 +39,9 @@ class Memory:
     incidents: tuple[Incident, ...] = ()
     events: tuple[Event, ...] = ()
     last_damage: float = 0.0  # damage the event log already reported
+    # Recorder clock incident times are on (see DataReader.recorder_now), continued by the new widget
+    pause_start: float | None = None
+    paused_total: float = 0.0
 
 
 MEMORY: dict[str, Memory] = {}
@@ -58,6 +61,21 @@ def keep_records(widget_name: str, recorder: Recorder, event_log: EventLog):
     kept.incidents = tuple(recorder.incidents)
     kept.events = tuple(event_log.events)
     kept.last_damage = event_log.last_damage
+
+
+def keep_clock(widget_name: str, pause_start: float | None, paused_total: float):
+    """Recorder clock of a started widget, kept each time it changes (game paused or resumed)"""
+    kept = memory(widget_name)
+    kept.pause_start = pause_start
+    kept.paused_total = paused_total
+
+
+def kept_clock(widget_name: str) -> tuple[float | None, float] | None:
+    """Recorder clock of the widget replaced (pause start, paused total), None if none"""
+    kept = MEMORY.get(widget_name)
+    if kept is None:
+        return None
+    return kept.pause_start, kept.paused_total
 
 
 def restore_records(widget_name: str, recorder: Recorder, event_log: EventLog):

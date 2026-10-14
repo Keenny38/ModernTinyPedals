@@ -14,6 +14,8 @@ Item {
 
     TpMenu {
         id: folderMenu
+        // focus put back where it was, but left on the window: list (Up / Down kept)
+        onClosed: if (!Window.activeFocusItem || Window.activeFocusItem === Window.contentItem) list.forceActiveFocus()
         Action {
             text: i18n.tr("Open Folder")
             enabled: backend.folderText !== ""
@@ -44,7 +46,7 @@ Item {
                 text: i18n.tr("Sessions")
                 color: theme.text
                 font.weight: Font.DemiBold
-                font.pointSize: theme.fontPoint * 1.1
+                font.pointSize: theme.fontSubtitle
             }
             Rectangle {
                 visible: backend.sessionCount > 0
@@ -58,13 +60,13 @@ Item {
                     text: backend.shownCount === backend.sessionCount ? backend.sessionCount
                           : backend.shownCount + " / " + backend.sessionCount
                     color: theme.dimText
-                    font.pointSize: theme.fontPoint * 0.85
+                    font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
                 }
             }
             BusyIndicator {
-                running: backend.busy
-                visible: running
+                running: backend.busy && pageState.active
+                visible: backend.busy
                 implicitWidth: theme.em * 1.4
                 implicitHeight: implicitWidth
             }
@@ -88,53 +90,16 @@ Item {
         }
 
         // Search
-        TextField {
+        TpSearchField {
             id: searchField
             Layout.fillWidth: true
-            implicitHeight: Math.round(theme.em * 2.3)
-            leftPadding: theme.em * 2
-            rightPadding: theme.em * 2
+            searchDelay: 200
             placeholderText: i18n.tr("Search: track, server, car...")
-            color: theme.text
-            placeholderTextColor: theme.dimText
-            onTextEdited: searchTimer.restart()
-            Keys.onEscapePressed: { text = ""; backend.setSearch(""); list.forceActiveFocus() }
-            Keys.onReturnPressed: { backend.setSearch(text); list.forceActiveFocus() }
-            Keys.onEnterPressed: { backend.setSearch(text); list.forceActiveFocus() }
-            Keys.onDownPressed: list.forceActiveFocus()
-            Timer { id: searchTimer; interval: 200; onTriggered: backend.setSearch(searchField.text) }
-            background: Rectangle {
-                radius: theme.em * 0.5
-                color: theme.base
-                border.width: 1
-                border.color: searchField.activeFocus ? theme.accent : theme.border
-                Behavior on border.color { ColorAnimation { duration: 120 } }
-            }
-            Icon {
-                anchors.left: parent.left
-                anchors.leftMargin: theme.em * 0.65
-                anchors.verticalCenter: parent.verticalCenter
-                glyph: ""  // search
-                size: theme.em * 0.85
-                color: theme.dimText
-            }
-            Text {
-                visible: searchField.text !== ""
-                anchors.right: parent.right
-                anchors.rightMargin: theme.em * 0.7
-                anchors.verticalCenter: parent.verticalCenter
-                text: "×"
-                color: clearArea.containsMouse ? theme.text : theme.dimText
-                font.weight: Font.Bold
-                MouseArea {
-                    id: clearArea
-                    anchors.fill: parent
-                    anchors.margins: -4
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: { searchField.text = ""; backend.setSearch("") }
-                }
-            }
+            onSearchChanged: function(text) { backend.setSearch(text) }
+            onExitField: list.forceActiveFocus()
+            Keys.onEscapePressed: { clearSearch(); list.forceActiveFocus() }
+            Keys.onReturnPressed: list.forceActiveFocus()
+            Keys.onEnterPressed: list.forceActiveFocus()
         }
 
         // Session kind, sessions without laps
@@ -171,8 +136,8 @@ Item {
             Keys.onUpPressed: root.moveSelection(-1)
             Keys.onDownPressed: root.moveSelection(1)
 
-            displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
-            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180 } }
+            displaced: Transition { NumberAnimation { properties: "y"; duration: theme.motionBase; easing.type: Easing.OutCubic } }
+            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionBase } }
 
             section.property: "day"
             section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
@@ -188,7 +153,7 @@ Item {
                     text: parent.section
                     color: theme.dimText
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.9
+                    font.pointSize: theme.fontLabel
                 }
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: theme.border; opacity: 0.6 }
             }
@@ -218,10 +183,9 @@ Item {
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 3.4)
-                radius: theme.em * 0.5
-                color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
-                     : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
+                radius: theme.radiusMd
+                color: theme.rowColor(rowArea.containsMouse, selected)
+                Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
 
                 MouseArea {
                     id: rowArea
@@ -289,7 +253,7 @@ Item {
                             text: [row.kindText, row.clock, row.cars + " " + (row.cars === 1 ? i18n.tr("car") : i18n.tr("cars")),
                                    row.online ? i18n.tr("Online") : ""].filter(function(part) { return part !== "" }).join(" · ")
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.86
+                            font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
                             elide: Text.ElideRight
                         }
@@ -306,7 +270,7 @@ Item {
                             color: row.resultTone === "gold" ? theme.gold : row.resultTone === "gain" ? theme.gain
                                  : row.resultTone === "loss" ? theme.loss : theme.text
                             font.weight: Font.Bold
-                            font.pointSize: theme.fontPoint * 1.1
+                            font.pointSize: theme.fontSubtitle
                             font.features: { "tnum": 1 }
                         }
                         Text {
@@ -314,7 +278,7 @@ Item {
                             Layout.maximumWidth: theme.em * 8
                             text: row.detailText
                             color: theme.dimText
-                            font.pointSize: theme.fontPoint * 0.8
+                            font.pointSize: theme.fontCaption
                             elide: Text.ElideRight
                         }
                     }

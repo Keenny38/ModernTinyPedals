@@ -33,47 +33,18 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
 from ..const_file import ConfigType
 from ..i18n import tr
 from ..setting import cfg
+from ..template.page_registry import main_pages, tool_pages
 from ..template.setting_global import GLOBAL_DEFAULT
 from ._common import BaseEditor, FocusRingButton, UIScaler
 from .ordered_picker import OrderedPicker, PickerEntry, icon_font_family
 from .tools_view import RENAMED_TOOL_KEYS, TOOL_SECTIONS
 
-# Pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
-NAV_PAGES = (
-    ("home", "Home", "", "A"),  # home
-    ("widget", "Overlays", "", "W"),  # all apps grid
-    ("module", "Module", "", "M"),  # diagnostic
-    ("preset", "Preset", "", "P"),  # library
-    ("spectate", "Spectate", "", "S"),  # view
-    ("pacenotes", "Pacenotes", "", "N"),  # quick note
-    ("hotkey", "Hotkey", "", "H"),  # keyboard
-    ("tools", "Tools", "", "T"),  # developer tools
-)
+# Pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter), see template.page_registry
+NAV_PAGES = tuple((page.name, page.label, page.glyph, page.letter) for page in main_pages())
 PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
 
 # Short rail label of tools (rail buttons are narrow), full name in tooltip
-TOOL_SHORT_LABELS = {
-    "race_calculator": "Race",
-    "driver_stats_viewer": "Stats",
-    "track_map_viewer": "Map",
-    "lap_viewer": "Telemetry",
-    "replay_view": "Recorder",
-    "game_replays": "Replays",
-    "broadcast_director": "Broadcast",
-    "race_results_viewer": "Results",
-    "stream_overlay_view": "Stream",
-    "heatmap_editor": "Heatmap",
-    "brake_editor": "Brakes",
-    "tyre_compound_editor": "Compounds",
-    "vehicle_brand_editor": "Brands",
-    "vehicle_class_editor": "Classes",
-    "track_info_editor": "Tracks",
-    "track_notes_editor": "Notes",
-    "layout_editor": "Layout",
-    "preset_compare": "Compare",
-    "plugin_manager": "Plugins",
-    "perf_view": "Performance",
-}
+TOOL_SHORT_LABELS = {page.name: page.short_label for page in tool_pages() if page.short_label}
 
 
 class RailEntry(NamedTuple):

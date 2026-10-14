@@ -22,13 +22,20 @@ Fuel Widget, modern design
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ... import units
 from ...module_info import minfo
 from .consumption import COMMON_OPTIONS, ConsumptionPanel, Names
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import FuelConfig
+
 
 class Realtime(ConsumptionPanel):
     """Draw widget"""
+
+    wcfg: FuelConfig
 
     names = Names(
         title="Fuel",

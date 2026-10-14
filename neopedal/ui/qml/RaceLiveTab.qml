@@ -7,25 +7,10 @@ import QtQuick.Layouts
 // and tyres the pit menu offers. Values followed are also filled in by Load Live & Follow Live.
 Item {
     id: tab
-    readonly property var live: backend.liveData
-    readonly property var rows: live.rows || []
-    readonly property var groups: live.groups || []
-    readonly property var race: live.race || []
-    readonly property var tyres: live.tyres || ({})
+    // Parts notified apart: race time changes at each refresh, rows kept in place (title row before each group)
+    readonly property var race: backend.liveRace
+    readonly property var tyres: backend.liveTyres
     readonly property bool narrow: width < theme.em * 58  // side cards below, source column hidden
-    // Rows with a title row before each group
-    readonly property var items: {
-        const list = []
-        for (const group of tab.groups) {
-            const members = tab.rows.filter(row => row.group === group.key)
-            if (members.length === 0)
-                continue
-            list.push({ header: true, title: group.title })
-            for (const row of members)
-                list.push(row)
-        }
-        return list
-    }
 
     GridLayout {
         anchors.fill: parent
@@ -43,7 +28,7 @@ Item {
             tip: i18n.tr("Values of the car, the session and the LMU garage screens (pit stop times, tyres, team): followed values are filled in by Load Live, Follow Live and Fill In All")
             actions: [
                 TpButton {
-                    enabled: !tab.live.busy
+                    enabled: !backend.liveBusy
                     flat: true
                     glyph: ""  // refresh
                     text: tab.narrow ? "" : i18n.tr("Refresh")
@@ -53,36 +38,33 @@ Item {
                 },
                 TpButton {
                     accent: true
-                    enabled: (tab.live.differing || 0) > 0
+                    enabled: backend.liveDiffering > 0
                     glyph: ""  // check
-                    text: i18n.tr("Fill In All") + ((tab.live.differing || 0) > 0 ? " (" + tab.live.differing + ")" : "")
+                    text: i18n.tr("Fill In All") + (backend.liveDiffering > 0 ? " (" + backend.liveDiffering + ")" : "")
                     tip: i18n.tr("Every followed value the game gives goes to the calculator")
                     onClicked: backend.applyAllLive()
                 }
             ]
             Text {
                 Layout.fillWidth: true
-                text: tab.live.status || ""
+                text: backend.liveDataStatus
                 color: theme.dimText
-                font.pointSize: theme.fontPoint * 0.88
+                font.pointSize: theme.fontSmall
                 wrapMode: Text.Wrap
             }
             RowLayout {  // header
                 Layout.fillWidth: true
                 spacing: theme.em * 0.4
                 Repeater {
-                    model: [
-                        { text: i18n.tr("Data"), width: list.titleWidth },
-                        { text: i18n.tr("Game"), width: list.valueWidth },
-                        { text: i18n.tr("Calculator"), width: list.valueWidth },
-                    ]
+                    model: [i18n.tr("Data"), i18n.tr("Game"), i18n.tr("Calculator")]  // widths read by index: kept on resize
                     Text {
                         required property var modelData
-                        Layout.preferredWidth: modelData.width
-                        text: modelData.text
+                        required property int index
+                        Layout.preferredWidth: index === 0 ? list.titleWidth : list.valueWidth
+                        text: modelData
                         color: theme.dimText
                         font.weight: Font.DemiBold
-                        font.pointSize: theme.fontPoint * 0.88
+                        font.pointSize: theme.fontSmall
                         elide: Text.ElideRight
                     }
                 }
@@ -92,7 +74,7 @@ Item {
                     text: i18n.tr("Source")
                     color: theme.dimText
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.88
+                    font.pointSize: theme.fontSmall
                     elide: Text.ElideRight
                 }
                 Item { Layout.fillWidth: tab.narrow; implicitWidth: 1 }
@@ -101,12 +83,12 @@ Item {
                     text: i18n.tr("Follow")
                     color: theme.dimText
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontPoint * 0.88
+                    font.pointSize: theme.fontSmall
                     elide: Text.ElideRight
                     HoverHandler { id: followHover }
                     ToolTip.visible: followHover.hovered
                     ToolTip.text: i18n.tr("Filled in by Load Live, Follow Live and Fill In All")
-                    ToolTip.delay: 500
+                    ToolTip.delay: theme.tipDelay
                 }
             }
             ListView {
@@ -119,14 +101,22 @@ Item {
                 Layout.minimumHeight: theme.em * 8
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                model: tab.items
+                model: backend.liveRows
+                reuseItems: true
                 ScrollBar.vertical: ScrollBar {}
                 delegate: Item {
                     id: liveRow
-                    required property var modelData
-                    required property int index
-                    readonly property bool header: modelData.header === true
-                    readonly property bool differs: !header && modelData.differs === true
+                    required property string key
+                    required property bool header
+                    required property string title
+                    required property string game
+                    required property string calc
+                    required property string source
+                    required property string tip
+                    required property bool known
+                    required property bool auto
+                    required property bool followed
+                    required property bool differs
                     width: list.width
                     height: Math.round(theme.em * (header ? 1.9 : 1.85))
 
@@ -135,36 +125,36 @@ Item {
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: theme.em * 0.2
-                        text: liveRow.modelData.title || ""
+                        text: liveRow.title
                         color: theme.accent
                         font.weight: Font.DemiBold
-                        font.pointSize: theme.fontPoint * 0.9
+                        font.pointSize: theme.fontLabel
                     }
                     Rectangle {
                         visible: !liveRow.header
                         anchors.fill: parent
-                        radius: theme.em * 0.3
-                        opacity: liveRow.modelData.known ? 1 : 0.55
-                        color: liveRow.differs && liveRow.modelData.followed
+                        radius: theme.radiusSm
+                        opacity: liveRow.known ? 1 : 0.55
+                        color: liveRow.differs && liveRow.followed
                                ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.16 : 0.1)
                                : rowHover.hovered ? theme.hover : "transparent"
                         HoverHandler { id: rowHover }
-                        ToolTip.visible: rowHover.hovered && (liveRow.modelData.tip || "") !== ""
-                        ToolTip.text: liveRow.modelData.tip || ""
-                        ToolTip.delay: 500
+                        ToolTip.visible: rowHover.hovered && liveRow.tip !== ""
+                        ToolTip.text: liveRow.tip
+                        ToolTip.delay: theme.tipDelay
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: theme.em * 0.3
                             spacing: theme.em * 0.4
                             Text {
                                 Layout.preferredWidth: list.titleWidth - theme.em * 0.3
-                                text: liveRow.modelData.title || ""
+                                text: liveRow.title
                                 color: theme.text
                                 elide: Text.ElideRight
                             }
                             Text {
                                 Layout.preferredWidth: list.valueWidth
-                                text: liveRow.modelData.game || ""
+                                text: liveRow.game
                                 color: liveRow.differs ? theme.accent : theme.text
                                 font.weight: liveRow.differs ? Font.DemiBold : Font.Normal
                                 font.features: { "tnum": 1 }
@@ -172,7 +162,7 @@ Item {
                             }
                             Text {
                                 Layout.preferredWidth: list.valueWidth
-                                text: liveRow.modelData.calc || ""
+                                text: liveRow.calc
                                 color: theme.dimText
                                 font.features: { "tnum": 1 }
                                 elide: Text.ElideRight
@@ -180,9 +170,9 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 visible: !tab.narrow
-                                text: liveRow.modelData.source || ""
+                                text: liveRow.source
                                 color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
+                                font.pointSize: theme.fontSmall
                                 elide: Text.ElideRight
                             }
                             Item { Layout.fillWidth: tab.narrow; implicitWidth: 1 }
@@ -192,12 +182,12 @@ Item {
                                 RaceSwitch {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: theme.em * 2.6
-                                    enabled: liveRow.modelData.auto === true
-                                    on: liveRow.modelData.followed === true
-                                    tip: liveRow.modelData.auto ? i18n.tr("Filled in by Load Live, Follow Live and Fill In All")
+                                    enabled: liveRow.auto
+                                    on: liveRow.followed
+                                    tip: liveRow.auto ? i18n.tr("Filled in by Load Live, Follow Live and Fill In All")
                                                                 : i18n.tr("Rough estimate: fill it in by hand")
-                                    onSwitched: function(on) { backend.setLiveFollowed(liveRow.modelData.key, on) }
-                                    Accessible.name: liveRow.modelData.title || ""
+                                    onSwitched: function(on) { backend.setLiveFollowed(liveRow.key, on) }
+                                    Accessible.name: liveRow.title
                                 }
                                 TpButton {
                                     anchors.verticalCenter: parent.verticalCenter
@@ -205,9 +195,9 @@ Item {
                                     flat: true
                                     enabled: liveRow.differs
                                     glyph: ""  // arrow: to the calculator
-                                    tip: i18n.tr("Fill In") + ": " + (liveRow.modelData.game || "")
-                                    onClicked: backend.applyLiveValue(liveRow.modelData.key)
-                                    Accessible.name: i18n.tr("Fill In") + " " + (liveRow.modelData.title || "")
+                                    tip: i18n.tr("Fill In") + ": " + liveRow.game
+                                    onClicked: backend.applyLiveValue(liveRow.key)
+                                    Accessible.name: i18n.tr("Fill In") + " " + liveRow.title
                                 }
                             }
                         }
@@ -283,12 +273,20 @@ Item {
                         color: theme.text
                         wrapMode: Text.Wrap
                     }
-                    Text {
+                    Flow {  // new compounds: badge (as overlays) & name each
                         Layout.fillWidth: true
                         visible: (tab.tyres.newCompounds || []).length > 0
-                        text: i18n.tr("New Tyres") + ": " + (tab.tyres.newCompounds || []).join(", ")
-                        color: theme.text
-                        wrapMode: Text.Wrap
+                        spacing: theme.em * 0.5
+                        Text { text: i18n.tr("New Tyres") + ":"; color: theme.text }
+                        Repeater {
+                            model: tab.tyres.newCompounds || []
+                            Row {
+                                required property string modelData
+                                spacing: theme.em * 0.3
+                                TpCompound { name: parent.modelData; anchors.verticalCenter: parent.verticalCenter }
+                                Text { text: parent.modelData; color: theme.text; anchors.verticalCenter: parent.verticalCenter }
+                            }
+                        }
                     }
                     TpButton {
                         visible: (tab.tyres.used || 0) > 0
@@ -298,15 +296,16 @@ Item {
                         onClicked: backend.addGameTyres()
                     }
                     Repeater {
-                        model: tab.tyres.wheels || []
+                        model: (tab.tyres.wheels || []).length  // count: rows kept when tyres change
                         RowLayout {
                             id: wheelRow
-                            required property var modelData
+                            required property int index
+                            readonly property var wheel: (tab.tyres.wheels || [])[index] || ({ wheel: "", tyres: [] })
                             Layout.fillWidth: true
                             spacing: theme.em * 0.4
                             Text {
                                 Layout.preferredWidth: theme.em * 7.5
-                                text: wheelRow.modelData.wheel
+                                text: wheelRow.wheel.wheel
                                 elide: Text.ElideRight
                                 color: theme.dimText
                                 font.weight: Font.DemiBold
@@ -315,33 +314,44 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: theme.em * 0.3
                                 Text {
-                                    visible: wheelRow.modelData.tyres.length === 0
+                                    visible: wheelRow.wheel.tyres.length === 0
                                     text: i18n.tr("No used tyre")
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.88
+                                    font.pointSize: theme.fontSmall
                                 }
                                 Repeater {
-                                    model: wheelRow.modelData.tyres
+                                    model: wheelRow.wheel.tyres.length
                                     Rectangle {
-                                        required property var modelData
-                                        implicitWidth: chipText.implicitWidth + theme.em * 0.9
+                                        required property int index
+                                        id: usedChip
+                                        readonly property var chip: wheelRow.wheel.tyres[index] || ({ text: "", color: "transparent", tip: "", compound: "" })
+                                        implicitWidth: chipRow.implicitWidth + theme.em * 0.9
                                         implicitHeight: Math.round(theme.em * 1.5)
                                         radius: height / 2
                                         color: Qt.rgba(0, 0, 0, 0)
                                         border.width: 1
-                                        border.color: modelData.color
-                                        Text {
-                                            id: chipText
+                                        border.color: chip.color
+                                        Row {  // compound badge (as overlays), name & tread in tread color
+                                            id: chipRow
                                             anchors.centerIn: parent
-                                            text: parent.modelData.text
-                                            color: parent.modelData.color
-                                            font.pointSize: theme.fontPoint * 0.85
-                                            font.features: { "tnum": 1 }
+                                            spacing: theme.em * 0.3
+                                            TpCompound {
+                                                name: usedChip.chip.compound || ""
+                                                width: Math.round(theme.em * 0.9)
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
+                                            Text {
+                                                text: usedChip.chip.text
+                                                color: usedChip.chip.color
+                                                font.pointSize: theme.fontSmall
+                                                font.features: { "tnum": 1 }
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
                                         }
                                         HoverHandler { id: chipHover }
                                         ToolTip.visible: chipHover.hovered
-                                        ToolTip.text: modelData.tip
-                                        ToolTip.delay: 400
+                                        ToolTip.text: chip.tip
+                                        ToolTip.delay: theme.tipDelay
                                     }
                                 }
                             }

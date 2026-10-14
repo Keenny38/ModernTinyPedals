@@ -22,7 +22,7 @@ Garage setting function
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from types import MappingProxyType
 
 # Note: CompoundSetting value can desync, so ignored from output
@@ -234,16 +234,16 @@ RF2_CARSETUP_REFERENCE_KEY = (
 )
 
 
-def lmu_car_setup_json_to_svm(source: dict, reference: Mapping):
+def lmu_car_setup_json_to_svm(source: dict, reference: Mapping) -> Iterator[str]:
     """Parse car setup JSON to SVM (LMU format)"""
     from ..api_control import api
 
     if not isinstance(source, dict):
-        return ""
+        return ""  # type: ignore[return-value]  # generator ends, value unused
 
     class_name = api.read.vehicle.class_name()
     if not class_name:
-        return ""
+        return ""  # type: ignore[return-value]  # generator ends, value unused
 
     yield f'VehicleClassSetting="{class_name}"'
     yield "UpgradeSetting=(0,0,0,0)"

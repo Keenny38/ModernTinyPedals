@@ -99,7 +99,7 @@ def test_backend_ideal_lap_ignores_invalid_lap(viewer, laps):  # noqa: F811
     backend = viewer.backend
     check_only(viewer, [laps[1], laps[2], laps[3]])  # lap 4 invalid
     assert [lap.clean for lap in backend.data.laps] == [True, True, False]
-    ideal = backend._ideal
+    ideal = backend.cornerTable.ideal
     assert ideal is not None and 2 not in ideal.best
     assert backend.legend[2]["clean"] is False
     backend.setIdealDelta(True)
@@ -154,9 +154,9 @@ def test_coaching_tips_causes():
 def test_coaching_in_corner_table(viewer, laps):  # noqa: F811
     backend = viewer.backend
     check_only(viewer, [laps[1], laps[2]])  # lap 3 slower in corners
-    assert backend.coaching and backend.coachingLap
-    tip = backend.coaching[0]
-    assert tip["loss"].startswith("+") and tip["causes"] and 0 <= tip["index"] < len(backend.cornerRanges)
+    assert backend.cornerTable.coaching and backend.cornerTable.coachingLap
+    tip = backend.cornerTable.coaching[0]
+    assert tip["loss"].startswith("+") and tip["causes"] and 0 <= tip["index"] < len(backend.cornerTable.ranges)
 
 
 # --- Trash & undo, bulk actions, session menu
@@ -211,12 +211,12 @@ def test_lap_as_delta_best(viewer, laps, monkeypatch):  # noqa: F811
     from neopedal.userfile.delta_best import load_delta_best_file
 
     backend = viewer.backend
-    backend.exportDeltaBest(laps[2])
+    backend.exports.exportDeltaBest(laps[2])
     backend.wait_jobs()  # lap read, then delta best written in background
     track = os.path.basename(os.path.dirname(laps[2]))
     data, best = load_delta_best_file(cfg.path.delta_best, track, ((), 0.0))
     assert best == pytest.approx(72.0) and len(data) > 100 and data[0] == (0.0, 0.0)
-    backend.exportDeltaBest(laps[1])
+    backend.exports.exportDeltaBest(laps[1])
     backend.wait_jobs()
     assert load_delta_best_file(cfg.path.delta_best, track, ((), 0.0))[1] == pytest.approx(70.0)
     assert os.path.exists(os.path.join(cfg.path.delta_best, f"{track}.csv.bak"))  # former file kept
@@ -243,13 +243,14 @@ def test_scatter_and_histogram(viewer):  # noqa: F811
 
 # --- Session long run
 def test_session_trend():
-    from neopedal.ui.quick.lap_backend import LapViewerBackend, least_squares, time_weights
+    from neopedal.ui.quick.lap_backend import least_squares, time_weights
+    from neopedal.ui.quick.lap_session import SessionTab
 
     assert least_squares([(0, 1.0), (1, 2.0), (2, 3.0)]) == pytest.approx((1.0, 1.0))
     assert time_weights([0.0, 1.0, 3.0]) == pytest.approx([0.5, 1.5, 1.0])
     times = [90.0, 90.1, 90.2, 99.0, 90.4, 90.5]  # lap 4: traffic
     rows = [{"valid": True, "time": value} for value in times]
-    trend = LapViewerBackend.session_trend(rows, [])
+    trend = SessionTab.session_trend(rows, [])
     assert rows[3]["outlier"] and not rows[0]["outlier"]
     assert trend["left"] == 1 and trend["slope"] == pytest.approx(0.1, abs=0.01)
     assert trend["pace"] == pytest.approx(sum(times[:3] + times[4:]) / 5)
@@ -472,7 +473,7 @@ def test_lap_results_kept_and_map_scale_in_background(viewer, laps):  # noqa: F8
     dots = VertexStore.get(g_key)
     backend.rebuild_chart()
     assert VertexStore.get(g_key) is dots  # G dots not built again
-    backend.setHysteresis(backend.hysteresis + 2)
+    backend.cornerTable.setHysteresis(backend.cornerTable.hysteresis + 2)
     assert backend.resampled(lap) is sampled  # columns not resampled again for new corners
     backend.setMapView(0, 0, 1.0)
     backend.wait_jobs()
@@ -486,12 +487,12 @@ def test_exports_in_background(viewer, laps, tmp_path):  # noqa: F811
     backend = viewer.backend
     folder = tmp_path / "motec"
     folder.mkdir()
-    assert backend.export_many(laps[1:3], str(folder)) == 0  # background
+    assert backend.exports.export_many(laps[1:3], str(folder)) == 0  # background
     assert backend.is_loading()
     backend.wait_jobs()
     assert len(os.listdir(folder)) == 2 and not backend.is_loading()
     target = tmp_path / "laps.csv"
-    assert backend.write_csv(str(target), ".", background=True)
+    assert backend.exports.write_csv(str(target), ".", background=True)
     backend.wait_jobs()
     rows = target.read_text(encoding="utf-8-sig").splitlines()
     assert len(rows) > 100 and rows[1].startswith("0,")
@@ -551,9 +552,9 @@ def test_export_failure_reported(viewer, laps, tmp_path):  # noqa: F811
     assert export_lap_job(backend.folder, laps[1], str(out / "lap.ld")) == ""
     assert os.listdir(out) == ["lap.ld"]  # temporary file renamed
     missing = tmp_path / "missing"
-    assert backend.export_many(laps[1:3], str(missing), background=False) == 0
+    assert backend.exports.export_many(laps[1:3], str(missing), background=False) == 0
     assert "2 failed: " in backend.status and "Exported <b>0</b>" in backend.status
-    assert backend.export_many(laps[1:3], str(missing)) == 0  # background
+    assert backend.exports.export_many(laps[1:3], str(missing)) == 0  # background
     backend.wait_jobs()
     assert "2 failed: " in backend.status and not backend.is_loading()
     assert write_lap_csv(str(missing / "laps.csv"), ["a"], [0.0], [[1.0]]) != ""
@@ -568,11 +569,13 @@ def test_closing_viewer_lets_exports_finish(viewer, laps, tmp_path, monkeypatch)
     calls: list[tuple] = []
     monkeypatch.setattr(lap_backend, "kill_worker", lambda: calls.append(("kill",)))
     monkeypatch.setattr(lap_backend, "stop_worker", lambda kill=False, finish=False: calls.append(("stop", finish)))
-    backend._exports = 1
+    backend.exports._exports = 1
     backend.release()
     assert calls == [("stop", True)]  # export finishes in worker process
-    backend._exports = 0
     backend.release()
+    assert calls == [("stop", True)]  # released once (PageBackend.release)
+    backend.exports._exports = 0
+    backend.release_resources()
     assert calls[-1] == ("kill",)  # nothing to finish: running job dropped
 
 

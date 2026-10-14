@@ -50,9 +50,11 @@ CACHE_NAME = "lap_reference.csv"
 SHEET_CLASSES = ("LMH", "LMP2wec", "LMP2elms", "LMP3", "LMGT3", "GTE")
 MAX_SIZE = 2 * 1024 * 1024
 
-# Level of each ladder step: ~100%, 101%, 102%, 103%, 104%, 105%, 106%, 107% (and slower)
+# Level of each ladder step: ~100%, 101%, 102%, 103%, 104%, 105%, 106%, 107% (and slower), as the sheet
+# header (merged cells): Good over 102 & 103%, Midpack over 104 & 105%. A step value is the slowest lap time
+# of its step (step + 0.5%: 101% column is 101.5% of class reference).
 LEVELS = ("Alien", "Competitive", "Good", "Midpack", "Tail-ender", "Offline")
-LADDER_LEVEL = (0, 1, 2, 3, 3, 4, 4, 5)
+LADDER_LEVEL = (0, 1, 2, 2, 3, 3, 4, 5)
 LEVEL_COLORS = ("#C060FF", "#4C8DFF", "#3FB950", "#D4A72C", "#F0883E", "#8B949E")
 
 # Columns of sheet rows: key, track, patch, class best, ladder x8, fastest car, its lap time, best/avg,
@@ -96,8 +98,8 @@ TRACK_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]
     ("Paul Ricard (3A)", ("ricard",), ("3a",), ()),
     ("Paul Ricard", ("ricard",), (), ()),
     ("Portimao", ("portimao", "algarve"), (), ()),
-    ("Qatar (short)", ("qatar", "lusail"), ("short",), ()),
-    ("Qatar", ("qatar", "lusail"), (), ()),
+    ("Qatar (short)", ("qatar", "lusail", "losail"), ("short",), ()),
+    ("Qatar", ("qatar", "lusail", "losail"), (), ()),  # LMU: Losail International, Lusail Short
     ("Road Atlanta", ("road atlanta",), (), ()),
     ("Silverstone (National)", ("silverstone",), ("national",), ("international",)),
     ("Silverstone (International)", ("silverstone",), ("international",), ()),
@@ -134,6 +136,8 @@ class LapReference:
         """Level index (LEVELS) of a lap time on the race pace ladder, -1 if unknown"""
         if laptime <= 0 or not self.ladder or not all(self.ladder):
             return -1
+        # Compared as shown (milliseconds): 1:45.170 (game float 105.17047) within "≤ 1:45.170" of sheet 1:45.17
+        laptime = round(laptime, 3)
         for step, limit in enumerate(self.ladder):
             if laptime <= limit:
                 return LADDER_LEVEL[step]
@@ -209,7 +213,7 @@ def parse_lap_references(text: str) -> LapReferenceTable:
     return table
 
 
-def _parse_rows(text: str, table: LapReferenceTable):
+def _parse_rows(text: str, table: LapReferenceTable) -> None:
     for row in csv.reader(io.StringIO(text)):
         if not table.updated:
             for cell in row:
@@ -313,7 +317,7 @@ def cache_time(filepath: str) -> float:
         return 0.0
 
 
-def save_cache(filepath: str, text: str):
+def save_cache(filepath: str, text: str) -> None:
     """Keep sheet CSV text for offline use"""
     from . import atomic_write
 

@@ -27,6 +27,8 @@ message (unless in overlay edit mode, or before first update of a picture of Ove
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
@@ -35,6 +37,9 @@ from .._race_aids import HiddenPreview
 from ..race_notifications import FADE_STEPS, GAIN, INFO, PREVIEW_TITLE, TITLES, NotificationsMixin
 from .base import LEFT, ModernOverlay
 from .draw import panel, rounded, triangle
+
+if TYPE_CHECKING:
+    from ...template.widget_config_types import RaceNotificationsConfig
 
 BADGE_ALPHA = 48  # icon badge background (kind color)
 TIME_BAR_ALPHA = 150
@@ -103,6 +108,8 @@ def draw_icon(painter: QPainter, rect: QRectF, icon: str, kind: int, color: QCol
 
 class Realtime(HiddenPreview, NotificationsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: RaceNotificationsConfig
 
     options = (
         "font_size", "layout", "display_duration", "number_of_notifications", "show_position_change",

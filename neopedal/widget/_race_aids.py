@@ -28,7 +28,7 @@ tyre temperature trend): parts shared by classic & modern design
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from math import isfinite
 from typing import Any
@@ -44,7 +44,7 @@ LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
 
-def option_colors(wcfg: dict, *keys: str) -> dict[str, QColor]:
+def option_colors(wcfg: Mapping[str, Any], *keys: str) -> dict[str, QColor]:
     """Color options as QColor, created once (classic layout)"""
     return {key: QColor(wcfg[key]) for key in keys}
 

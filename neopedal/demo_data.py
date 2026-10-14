@@ -49,7 +49,9 @@ from . import api_connector
 from .const_common import MAX_SECONDS
 from .demo_state import demo_drawing
 from .module_info import ConsumptionDataSet, ModuleInfo, StintDataSet, VehicleDataSet
+from .penalty_info import NO_PENALTY, Penalty
 from .process.weather import WeatherNode
+from .template.widget.registry import DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE, demo_names
 
 KELVIN = 273.15
 
@@ -94,14 +96,15 @@ CAR_DISTANCE = {
     PLAYER - 2: LAP_DISTANCE + 160, PLAYER + 2: LAP_DISTANCE - 210,
 }
 
-HISTORY_WIDGETS = ("friction_circle", "trailing")  # draw recent inputs: fed a corner before drawn
+HISTORY_WIDGETS = demo_names(DEMO_HISTORY)  # draw recent inputs: fed a corner before drawn
 HISTORY_FRAMES = 150
-LAP_WIDGETS = ("delta_graph",)  # draw delta over the lap: fed last lap and current lap so far
+LAP_WIDGETS = demo_names(DEMO_LAP)  # draw delta over the lap: fed last lap and current lap so far
 LAP_FRAMES = 60  # per lap
 DELTA_SOURCES = ("deltaBest", "deltaSession", "deltaStint", "deltaLast")
 UPDATES = 3  # updates before a picture, so smoothed values settle
-# Widgets drawing a sample of every item before their first update (nothing to show on this data)
-SAMPLE_WIDGETS = frozenset(("chat", "flag", "race_notifications", "spotter"))
+# Widgets drawing a sample of every item before their first update (nothing to show on this data),
+# feeds of widgets declared in template.widget.registry.OVERLAYS
+SAMPLE_WIDGETS = frozenset(demo_names(DEMO_SAMPLE))
 
 
 def car_distance(index: int) -> float:
@@ -364,6 +367,38 @@ def vehicles_info(read, size: int, plr_index: int) -> tuple[list, list, list, li
     return relative_ahead, relative_behind, classes, draw_order
 
 
+SECTOR_SHARES = (0.33, 0.35, 0.32)  # demo lap split into sectors
+
+
+def set_demo_sectors(data, index: int, best: float):
+    """Sector times of demo car: last lap, sectors of lap being driven, personal bests"""
+    sectors = data.sectors
+    sectors.best = [best * share - (index % 3) * 0.02 for share in SECTOR_SHARES]
+    if index == PLAYER:  # player holds best S1 of class (purple in track map & driver lists)
+        sectors.best[0] -= 1.0
+    # Last lap: some sectors are personal bests (green, purple when best of session), others slower (yellow)
+    sectors.last = tuple(sectors.best[number] if (index + number) % 3 == 0 else data.lastLapTime * share
+                         for number, share in enumerate(SECTOR_SHARES))
+    sectors.sector = (index + 1) % 3
+    first = sectors.best[0] if index % 2 else sectors.best[0] + 0.15  # S1 being driven: personal best or slower
+    sectors.current = (first if sectors.sector >= 1 else 0.0, sectors.best[1] + 0.2 if sectors.sector == 2 else 0.0)
+    sectors.laps = PLAYER_LAPS
+
+
+def demo_class_best_sectors(cars) -> None:
+    """Best sectors & best lap of each class told to its cars"""
+    best: dict[str, list[float]] = {}
+    for data in cars:
+        found = best.setdefault(data.vehicleClass, [0.0, 0.0, 0.0, 0.0])
+        for number, value in enumerate((*data.sectors.best, data.bestLapTime)):
+            if value and (not found[number] or value < found[number]):
+                found[number] = value
+    for data in cars:
+        found = best[data.vehicleClass]
+        data.classBestSectors = (found[0], found[1], found[2])
+        data.classBestLap = found[3]
+
+
 def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
     """Vehicles and relative module outputs: full field, consistent with scoring data
 
@@ -430,11 +465,13 @@ def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
         data.isValidLap = True
         data.inPit = 0
         data.isClassFastestLastLap = index in (0, 7, 12)
-        data.numPitStops = 2 if index % 3 else 3
+        data.numPitStops = -1 if index == 9 else 2 if index % 3 else 3  # car 10: stop & go to serve
+        data.penalty = Penalty(1, "Stop/Go", 10) if index == 9 else NO_PENALTY
         data.pitRequested = index == 16
         data.tireCompoundName = (f"{vclass} - Medium",) * 4 if index % 4 else (f"{vclass} - Soft",) * 4
         data.vehicleIntegrity = 1.0 if index not in (5, 17) else 0.86
         data.incidents = (index * 3) % 7
+        data.trackLimitsPoints = (0.0, 0.5, 0.0, 1.75, 4.5)[index % 5]
         data.energyRemaining = 0.32 + (index * 13 % 50) / 100
         data.currentStintLaps = 11 + index % 6
         data.estimatedStintLaps = 26 + index % 5
@@ -448,6 +485,7 @@ def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
         data.lapTimeHistory.best = best
         data.lapTimeHistory.last = data.lastLapTime
         data.lapTimeHistory.average = best + 0.42
+        set_demo_sectors(data, index, best)
         world_x, world_y, _, heading = track_position(distance)
         data.worldPositionX = world_x
         data.worldPositionY = world_y
@@ -458,6 +496,7 @@ def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
         data.relativeRotatedPositionX = dx * math.cos(rot) + dy * math.sin(rot)
         data.relativeRotatedPositionY = dx * math.sin(rot) - dy * math.cos(rot)
         data.relativeStraightDistance = math.hypot(dx, dy)
+    demo_class_best_sectors(vehicles.dataSet[:len(FIELD)])
     # Radar: a car just ahead on the left, one close behind on the right
     vehicles.dataSet[PLAYER - 1].relativeRotatedPositionX = -2.4
     vehicles.dataSet[PLAYER - 1].relativeRotatedPositionY = -7.5
@@ -628,11 +667,12 @@ def set_modules(minfo: ModuleInfo):
     stint.lapTimeDelta = 0.312
     stint.lapTimeConsistency = 0.987
     stint.tyreCompound = "MMMM"
+    stint.tyreCompoundNames = ("Medium",) * 4
     history.stintDataSet = deque(
         (
-            StintDataSet(14, 14 * 85.2, 41.2, 54.3, 6.1, 0.312, 0.987, "MMMM"),
-            StintDataSet(29, 29 * 85.4, 85.1, 99.2, 12.8, 0.398, 0.981, "MMMM"),
-            StintDataSet(28, 28 * 85.6, 82.0, 98.6, 13.4, 0.441, 0.979, "SSSS"),
+            StintDataSet(14, 14 * 85.2, 41.2, 54.3, 6.1, 0.312, 0.987, "MMMM", ("Medium",) * 4),
+            StintDataSet(29, 29 * 85.4, 85.1, 99.2, 12.8, 0.398, 0.981, "MMMM", ("Medium",) * 4),
+            StintDataSet(28, 28 * 85.6, 82.0, 98.6, 13.4, 0.441, 0.979, "SSSS", ("Soft",) * 4),
         ),
         100,
     )

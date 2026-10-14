@@ -25,26 +25,120 @@ QML files are in ui/qml, Python items (GPU drawn lines) registered as "NeoPedal"
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import sys
 import weakref
+from collections.abc import Mapping
 
 from PySide6.QtCore import Property, QEvent, QObject, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QPalette, QSurfaceFormat
+from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication, QPalette, QSurfaceFormat
 from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlIncubationController
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
 
 from ...i18n import tr, trm
+from ...regex_pattern import COMMON_TYRE_COMPOUNDS
+from ...template.setting_compounds import COMPOUND_COLORS, COMPOUND_SYMBOLS, compound_letter
+from ...template.setting_status_colors import STATUS_COLORS
 from .. import UIScaler
 
 logger = logging.getLogger(__name__)
 
 QML_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "qml")
-MSAA_SAMPLES = 4  # smooth chart lines
-QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "QString": "string"}  # Theme property types
+QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "int": "int", "QString": "string"}  # Theme property types
 _registered = False
+
+# Design tokens of QML pages (theme.fontSmall, theme.radiusMd...): pages use these, not their own numbers
+# (tests/test_qml_design_tokens.py keeps the scale). Font sizes: factor of base point size.
+FONT_SCALE = {
+    "fontMicro": 0.62,  # chart ticks, tiny chips
+    "fontTiny": 0.7,
+    "fontCaption": 0.78,  # captions, column headers
+    "fontSmall": 0.85,  # secondary text, details
+    "fontLabel": 0.9,
+    "fontSubtitle": 1.1,  # card & section titles
+    "fontHeading": 1.25,  # dialog & panel titles
+    "fontLarge": 1.4,
+    "fontTitle": 1.5,  # page titles, key figures
+    "fontDisplay": 1.75,
+}
+# Corner radius: factor of em
+RADIUS_SCALE = {"radiusXs": 0.2, "radiusSm": 0.3, "radiusMd": 0.45, "radiusLg": 0.6, "radiusXl": 0.75}
+# Page width breakpoints: factor of em (pages with content-tuned widths keep their own, commented)
+BREAKPOINTS = {"bpCompact": 40, "bpNarrow": 56, "bpWide": 70}
+# Animation durations (ms), 0 when Windows animations are off
+MOTION = {"motionFast": 120, "motionBase": 180, "motionSlow": 250}
+INK_DARK = "#111111"  # text on light fills
+
+
+def compound_key(name: str) -> str:
+    """COMPOUND_COLORS key of a compound name ("Soft", "Q-Soft", "Medium #2", "Hyper - Soft") or game
+    letter ("S")"""
+    key = name.split("#")[0].split(" - ")[-1].strip().lower()
+    key = key.removeprefix("q-")
+    return COMPOUND_SYMBOLS.get(key, key)
+
+
+def ink_on(color: QColor) -> QColor:
+    """Readable text color on a color fill: dark on light colors, white on dark ones"""
+    luma = 0.299 * color.redF() + 0.587 * color.greenF() + 0.114 * color.blueF()
+    return QColor(INK_DARK if luma > 0.6 else "white")
+
+
+def contrast_ratio(first: QColor, second: QColor) -> float:
+    """WCAG contrast ratio of two colors"""
+    def luminance(color: QColor) -> float:
+        channels = [
+            value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+            for value in (color.redF(), color.greenF(), color.blueF())
+        ]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+    high, low = sorted((luminance(first), luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def fill_for_white_text(color: QColor, minimum: float = 4.5) -> QColor:
+    """Color darkened until white text on it reaches the contrast ratio (same hue)"""
+    white = QColor("white")
+    fill = QColor(color)
+    for _ in range(40):
+        if contrast_ratio(fill, white) >= minimum:
+            break
+        fill = fill.darker(104)
+    return fill
+
+
+def system_animations() -> bool:
+    """Windows "Animation effects" setting (Accessibility > Visual effects), on elsewhere"""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    enabled = wintypes.BOOL(True)
+    spi_getclientareaanimation = 0x1042
+    if not ctypes.windll.user32.SystemParametersInfoW(spi_getclientareaanimation, 0, ctypes.byref(enabled), 0):
+        return True  # older Windows: no such setting
+    return bool(enabled.value)
+
+
+_ANIMATIONS: list[bool] = []  # system setting, read once by the first Theme
+
+
+def _font_token(name: str) -> Property:
+    return Property(float, lambda self: UIScaler.FONT_POINT * FONT_SCALE[name], constant=True, doc=f"Font point size {name}")
+
+
+def _size_token(scale: Mapping[str, float], name: str) -> Property:
+    return Property(float, lambda self: UIScaler.FONT_PIXEL_SCALED * scale[name], constant=True, doc=f"Pixel size {name}")
+
+
+def _motion_token(name: str) -> Property:
+    return Property(int, lambda self: MOTION[name] if _ANIMATIONS[0] else 0, constant=True, doc=f"Duration (ms) {name}")
 
 
 def register_types():
@@ -69,6 +163,8 @@ class Theme(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        if not _ANIMATIONS:
+            _ANIMATIONS.append(system_animations())
         app = QApplication.instance()
         if isinstance(app, QGuiApplication):
             app.paletteChanged.connect(self.changed)
@@ -103,7 +199,13 @@ class Theme(QObject):
 
     @Property(QColor, notify=changed)
     def accent(self) -> QColor:
+        """Accent for text, lines & tints"""
         return self._color(QPalette.ColorRole.Highlight)
+
+    @Property(QColor, notify=changed)
+    def accentFill(self) -> QColor:
+        """Accent filling a control under white text (darker when needed: 4.5:1 contrast)"""
+        return fill_for_white_text(self._color(QPalette.ColorRole.Highlight))
 
     @Property(QColor, notify=changed)
     def border(self) -> QColor:
@@ -124,24 +226,95 @@ class Theme(QObject):
     @Property(QColor, notify=changed)
     def gold(self) -> QColor:
         """Fastest lap star"""
-        return self._status("#FACC15", "#B45309")
+        return self._status(*STATUS_COLORS["gold"])
 
     @Property(QColor, notify=changed)
     def purple(self) -> QColor:
         """Best sector, theoretical best"""
-        return self._status("#C084FC", "#7E22CE")
+        return self._status(*STATUS_COLORS["purple"])
 
     @Property(QColor, notify=changed)
     def warning(self) -> QColor:
-        return self._status("#FB923C", "#C2410C")
+        return self._status(*STATUS_COLORS["warning"])
 
     @Property(QColor, notify=changed)
     def gain(self) -> QColor:
-        return self._status("#4ADE80", "#15803D")
+        return self._status(*STATUS_COLORS["gain"])
 
     @Property(QColor, notify=changed)
     def loss(self) -> QColor:
-        return self._status("#F87171", "#B91C1C")
+        return self._status(*STATUS_COLORS["loss"])
+
+    @Property(QColor, notify=changed)
+    def lossFill(self) -> QColor:
+        """Loss / error color filling a badge under white text (4.5:1 contrast)"""
+        return fill_for_white_text(self._status(*STATUS_COLORS["loss"]))
+
+    @Property(QColor, notify=changed)
+    def silver(self) -> QColor:
+        """Second place"""
+        return self._status("#C3CAD4", "#64748B")
+
+    @Property(QColor, notify=changed)
+    def bronze(self) -> QColor:
+        """Third place"""
+        return self._status("#D99A62", "#9A5B2C")
+
+    @Property(QColor, notify=changed)
+    def live(self) -> QColor:
+        """Live game data"""
+        return self._status("#3DDC84", "#15803D")
+
+    # Data series colors, same meaning on every page (charts, tiles, strips)
+    @Property(QColor, notify=changed)
+    def seriesFuel(self) -> QColor:
+        return self._status("#4C9AFF", "#2563EB")
+
+    @Property(QColor, notify=changed)
+    def seriesEnergy(self) -> QColor:
+        return self._status("#F5A623", "#C2410C")
+
+    @Property(QColor, notify=changed)
+    def seriesTyre(self) -> QColor:
+        return self._status("#F5B342", "#A16207")
+
+    @Property(QColor, notify=changed)
+    def seriesWear(self) -> QColor:
+        return self._status("#F59E0B", "#B45309")
+
+    @Property(QColor, notify=changed)
+    def seriesStint(self) -> QColor:
+        return self._status("#7ED321", "#4D7C0F")
+
+    @Property(QColor, notify=changed)
+    def seriesRefill(self) -> QColor:
+        return self._status("#50E3C2", "#0F766E")
+
+    @Slot(str, result=QColor)
+    def compound(self, name: str) -> QColor:
+        """Tyre compound color by name or letter, dim text if unknown (theme copy has the same in JavaScript)"""
+        pair = COMPOUND_COLORS.get(compound_key(name))
+        if pair is None:
+            return self._color(QPalette.ColorRole.PlaceholderText)
+        return QColor(pair[0] if self.dark else pair[1])
+
+    @Slot(str, result=str)
+    def compoundLetter(self, name: str) -> str:
+        """Badge letter of a compound name (theme copy has the same in JavaScript)"""
+        return compound_letter(name)
+
+    @Slot(QColor, result=QColor)
+    def inkOn(self, color: QColor) -> QColor:
+        return ink_on(color)
+
+    @Slot(bool, bool, result=QColor)
+    def rowColor(self, hovered: bool, selected: bool) -> QColor:
+        """List row background: selected (accent tint), hovered, else transparent"""
+        if selected:
+            color = QColor(self._color(QPalette.ColorRole.Highlight))
+            color.setAlphaF(0.24 if hovered else 0.18)
+            return color
+        return self._color(QPalette.ColorRole.Midlight) if hovered else QColor(0, 0, 0, 0)
 
     @Property(float, constant=True)
     def em(self) -> float:
@@ -155,7 +328,7 @@ class Theme(QObject):
     @Property(str, constant=True)
     def decimalPoint(self) -> str:
         """Decimal separator of app language (comma in French): numbers formatted in QML pages"""
-        from ..lap_viewer import decimal_point
+        from ...i18n import decimal_point
 
         return decimal_point()
 
@@ -165,6 +338,78 @@ class Theme(QObject):
         from ..app import icon_font_family
 
         return icon_font_family()
+
+    @Property(str, constant=True)
+    def monoFont(self) -> str:
+        """Fixed width font: hotkeys, formulas (Consolas on Windows, system fixed font elsewhere)"""
+        if "Consolas" in QFontDatabase.families():
+            return "Consolas"
+        return QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+
+    @Property(bool, constant=True)
+    def animate(self) -> bool:
+        """Animations on (Windows animation effects setting): looping animations run only then"""
+        return _ANIMATIONS[0]
+
+    # Design tokens (constant)
+    fontMicro = _font_token("fontMicro")
+    fontTiny = _font_token("fontTiny")
+    fontCaption = _font_token("fontCaption")
+    fontSmall = _font_token("fontSmall")
+    fontLabel = _font_token("fontLabel")
+    fontSubtitle = _font_token("fontSubtitle")
+    fontHeading = _font_token("fontHeading")
+    fontLarge = _font_token("fontLarge")
+    fontTitle = _font_token("fontTitle")
+    fontDisplay = _font_token("fontDisplay")
+    radiusXs = _size_token(RADIUS_SCALE, "radiusXs")
+    radiusSm = _size_token(RADIUS_SCALE, "radiusSm")
+    radiusMd = _size_token(RADIUS_SCALE, "radiusMd")
+    radiusLg = _size_token(RADIUS_SCALE, "radiusLg")
+    radiusXl = _size_token(RADIUS_SCALE, "radiusXl")
+    bpCompact = _size_token(BREAKPOINTS, "bpCompact")
+    bpNarrow = _size_token(BREAKPOINTS, "bpNarrow")
+    bpWide = _size_token(BREAKPOINTS, "bpWide")
+    motionFast = _motion_token("motionFast")
+    motionBase = _motion_token("motionBase")
+    motionSlow = _motion_token("motionSlow")
+    tipDelay = Property(int, lambda self: 500, constant=True, doc="Tooltip delay (ms)")
+    disabledOpacity = Property(float, lambda self: 0.45, constant=True, doc="Opacity of disabled controls")
+    tintSubtle = Property(float, lambda self: 0.1, constant=True, doc="Alpha of a light color tint (hover)")
+    tintSelected = Property(float, lambda self: 0.18, constant=True, doc="Alpha of a selected / checked tint")
+
+
+# Theme slots in JavaScript (same results as Theme.compound / compoundLetter / inkOn / rowColor, no Python
+# call per binding)
+_THEME_FUNCTIONS_QML = """    readonly property var compoundColors: (%s)
+    readonly property var compoundLetters: (%s)
+    readonly property var compoundPatterns: (%s)
+    function compound(name) {
+        var key = String(name === undefined || name === null ? "" : name).split("#")[0].split(" - ").pop().trim().toLowerCase()
+        if (key.indexOf("q-") === 0)
+            key = key.slice(2)
+        var pair = compoundColors[compoundLetters[key] || key]
+        return pair ? (dark ? pair[0] : pair[1]) : dimText
+    }
+    function compoundLetter(name) {
+        var tyre = String(name === undefined || name === null ? "" : name).split("#")[0].split(" - ").pop().trim()
+        if (tyre.length <= 1)
+            return tyre.toUpperCase()
+        for (var i = 0; i < compoundPatterns.length; ++i)
+            if (new RegExp(compoundPatterns[i][0], "i").test(tyre))
+                return compoundPatterns[i][1]
+        return tyre.charAt(0).toUpperCase()
+    }
+    function rowColor(hovered, selected) {
+        return selected ? Qt.rgba(accent.r, accent.g, accent.b, hovered ? tintSelected + 0.06 : tintSelected)
+             : hovered ? hover : "transparent"
+    }
+    function inkOn(color) {
+        var c = typeof color === "string" && color !== "" ? Qt.color(color) : color
+        if (!c || c.r === undefined)
+            return "white"
+        return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 0.6 ? "%s" : "white"
+    }"""
 
 
 def theme_copy(engine: QQmlEngine, theme: Theme) -> QObject:
@@ -182,6 +427,8 @@ def theme_copy(engine: QQmlEngine, theme: Theme) -> QObject:
             logger.error("QML: theme property %s type %s not copied", prop.name(), prop.typeName())
             return theme
         lines.append(f"    readonly property {kind} {prop.name()}: source.{prop.name()}")
+    lines.append(_THEME_FUNCTIONS_QML % (json.dumps(dict(COMPOUND_COLORS)), json.dumps(dict(COMPOUND_SYMBOLS)),
+                                         json.dumps(COMMON_TYRE_COMPOUNDS), INK_DARK))
     lines.append("}")
     component = QQmlComponent(engine)
     component.setData("\n".join(lines).encode(), QUrl("theme_copy.qml"))
@@ -385,12 +632,13 @@ def create_quick_view(
     parent: QWidget,
     qml_name: str,
     context: dict[str, QObject],
-    samples: int = MSAA_SAMPLES,
+    samples: int = 0,
 ) -> QQuickWidget:
     """QML page from ui/qml file in a widget, context objects available by name in QML
 
     Args:
-        samples: multisample antialiasing, 0 for pages without chart lines (less GPU memory).
+        samples: window multisample antialiasing, 0: none. Chart & map lines are drawn in a multisampled
+            layer while the page is shown instead (window MSAA keeps its GPU memory while hidden).
     """
     register_types()
     view = QQuickWidget(parent)

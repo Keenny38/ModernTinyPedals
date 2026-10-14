@@ -23,7 +23,7 @@ Qt Quick page (ui/qml/BroadcastDirector.qml), state & game requests in quick/dir
 race events & shots in process/director.py. Everything goes through the game Rest API (see game_rest).
 """
 
-from PySide6.QtCore import QSize, QUrl
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QVBoxLayout
 
 from ..i18n import tr
@@ -32,6 +32,8 @@ from ._common import BaseDialog, UIScaler
 
 class BroadcastDirector(BaseDialog):
     """Broadcast director of the session or replay open in game (LMU)"""
+
+    KEEP_WHEN_HIDDEN = True  # auto mode keeps choosing cameras while streaming, window hidden
 
     def __init__(self, parent):
         from .quick import create_quick_view
@@ -52,6 +54,10 @@ class BroadcastDirector(BaseDialog):
         """Three columns & toolbar never cut (QML pages do not scroll)"""
         return QSize(UIScaler.size(72), UIScaler.size(38))
 
+    def keep_when_hidden(self) -> bool:
+        """Director off: freed while hidden like any page"""
+        return self.backend._enabled
+
     def showEvent(self, event):
         """Game asked at once, then about every second until the page closes"""
         super().showEvent(event)
@@ -62,7 +68,5 @@ class BroadcastDirector(BaseDialog):
         super().hideEvent(event)
 
     def closeEvent(self, event):
-        # QML bindings never read a released backend (see qml page pitfalls: view goes first)
-        self.view.setSource(QUrl())
-        self.backend.release()
+        self.release_page()
         super().closeEvent(event)

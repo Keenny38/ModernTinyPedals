@@ -20,6 +20,9 @@
 Steering meter Widget
 """
 
+from math import isfinite
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QPixmap
 
@@ -28,9 +31,14 @@ from ..api_control import api
 from ._base import Overlay
 from ._painter import fill_rect
 
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SteeringMeterConfig
+
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SteeringMeterConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -81,13 +89,13 @@ class Realtime(Overlay):
 
         # Last data
         self.raw_steering = 0.0
-        self.rot_range = 0
+        self.rot_range: float = 0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Steering wheel rotation
         if self.wcfg["manual_steering_range"] > 0:
-            temp_rot_range = self.wcfg["manual_steering_range"]
+            temp_rot_range: float = self.wcfg["manual_steering_range"]
         else:
             temp_rot_range = api.read.inputs.steering_range_physical()
 
@@ -105,7 +113,15 @@ class Realtime(Overlay):
 
         # Steering
         temp_raw_steering = api.read.inputs.steering_raw()
-        if self.raw_steering != temp_raw_steering:
+        # Repaint only on visible change: bar edge in device pixels, reading text & side
+        angle = temp_raw_steering * self.rot_range * 0.5
+        edge = (self.bar_edge + self.steer_position(temp_raw_steering, self.bar_width * 2)) * self.devicePixelRatioF()
+        visible = (
+            round(edge) if isfinite(edge) else edge,
+            f"{abs(angle):.0f}" if self.wcfg["show_steering_angle"] else "",
+            angle > 0,
+        )
+        if self.changed("steering", visible):
             self.raw_steering = temp_raw_steering
             self.update()
 

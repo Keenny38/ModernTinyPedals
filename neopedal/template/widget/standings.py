@@ -683,7 +683,7 @@ WIDGET_STANDINGS = {
         "font_color_pit_request": "#000000",
         "background_color_pit_request": "#22AA00",
         "show_energy_remaining": True,
-        "decimal_places_energy_remaining": 0,
+        "decimal_places_energy_remaining": 1,
         "font_color_energy_remaining_unavailable": "#AAAAAA",
         "font_color_energy_remaining_high": "#88FF00",
         "font_color_energy_remaining_low": "#FFAA00",
@@ -750,6 +750,8 @@ WIDGET_STANDINGS = {
         "display_order_energy_remaining": 21,
         "display_order_lift_and_coast_time": 22,
         "display_order_pit_status": 23,
+        "display_order_track_limits": 25,
+        "display_order_energy_per_lap": 26,
     },
     "traffic": {
         "enable": False,

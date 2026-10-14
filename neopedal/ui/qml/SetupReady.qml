@@ -22,9 +22,9 @@ SetupStep {
                     required property int index
                     Layout.fillWidth: true
                     implicitHeight: Math.max(Math.round(theme.em * 2.8), content.implicitHeight + theme.em * 0.9)
-                    radius: theme.em * 0.5
+                    radius: theme.radiusMd
                     color: rowArea.containsMouse ? theme.hover : "transparent"
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { ColorAnimation { duration: theme.motionFast } }
 
                     Rectangle {  // separator
                         visible: row.index > 0

@@ -22,11 +22,15 @@ System performance Widget
 
 import os
 from time import monotonic
+from typing import TYPE_CHECKING
 
 import psutil
 
 from .. import calculation as calc
 from ._base import Overlay
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import SystemPerformanceConfig
 
 MEMORY_READ_INTERVAL = 5.0  # seconds, app memory (unique set size) is slow to read (about 1 ms)
 
@@ -60,6 +64,8 @@ def app_cpu_percent(process: psutil.Process, cpu_count: int) -> float:
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "SystemPerformanceConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting

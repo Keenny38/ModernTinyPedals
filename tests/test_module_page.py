@@ -156,7 +156,7 @@ def reference_scan(name: str) -> tuple[set[str], set[str]]:
                 consts.append(instruction.argval)
             elif instruction.opname == "IMPORT_NAME" and len(consts) >= 2 and isinstance(consts[-2], int):
                 imports |= module_backend.resolve_import(name, is_package, instruction.argval, consts[-2], consts[-1])
-            if instruction.opname != "CACHE":
+            if instruction.opname not in ("CACHE", "EXTENDED_ARG"):  # prefix of next instruction (index > 255)
                 previous = instruction
         stack.extend(const for const in current.co_consts if isinstance(const, CodeType))
     _reference[name] = fields, imports
@@ -209,7 +209,8 @@ def test_dependencies_found_without_importing():
     assert "fuel" in dependencies.overlays["module_fuel"]
     assert {"relative", "standings"} <= set(dependencies.overlays["module_relative"])
     assert "relative" in dependencies.overlays["module_vehicles"]
-    assert dependencies.overlays["module_sectors"] == ("sectors", "track_map")  # track map: sector colors
+    assert dependencies.overlays["module_sectors"] == ("sectors",)
+    assert "track_map" in dependencies.overlays["module_vehicles"]  # track map: sector colors of player's car data
     assert dependencies.overlays["module_recorder"] == ()  # telemetry for the viewer, no overlay
     assert "module_delta" in dependencies.needs["module_stint"]
     assert "module_stint" in dependencies.modules["module_delta"]

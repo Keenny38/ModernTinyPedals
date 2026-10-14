@@ -11,10 +11,14 @@ Open it with the `Broadcast` entry of the navigation bar, `Tools` > `Broadcast D
 The page has three columns.
 
 - **Cars** (left): every car by place, with class place, number, team, interval to the car ahead in its class (`+0.8`, `+2 Laps`: measured from track position, so it stays right for cars laps behind the leader, where the game gives no time), places gained or lost in the class since the start, and marks for battles, contacts and pit lane. Car logos and pictures of the game are shown. Click a car to open its sheet, double-click (or the camera button) to put it on air. `Left` / `Right`: previous / next car. Type a number or a driver name in the search field and press `Enter` to put that car on air.
-- **Camera desk** (middle): the car **on air**, why it was chosen (story of the director, operator cut, chosen in the game) and for how long, and every camera of the game in one click (`Driving`, `Onboard`, `Trackside` groups), with arrows for the previous / next angle. Replay controls come up while a replay is open (back and forward 10 s, play / pause, slow).
+- **Camera desk** (middle): the car **on air**, why it was chosen (story of the director, operator cut, chosen in the game) and for how long, and every camera of the game in one click (`Driving`, `Onboard`, `Trackside` groups), with arrows for the previous / next angle. The eye button of `Game HUD` shows or hides the game UI as in the replay tab of [Results & Replays](Race-Results.md): `Show / Hide Game UI` hides or shows everything for clean pictures (top bar, standings, replay bar and HUD), as a middle click in the game does (game on this computer only), `Show HUD` / `Hide HUD`, or the HUD parts one at a time (chat, MFD, car HUD, timing, track map), checked as the game shows them. Replay controls come up while a replay is open (back and forward 10 s, play / pause, slow).
 - **Commentator screen** (right): race events with their time, battles with gap, trend (change per lap) and duration, class leaders and best laps, pit stops with time in the pit lane and stint length, and the **sheet** of the selected car.
 
 The header shows the session state (`LIVE` or `REPLAY`) and the weather: full course yellow, air and track temperatures, rain and wet track. Click the weather for the **weather forecast** of the session.
+
+The **switch** at the top left turns the director on or off (on by default, kept for next time). While the page is open, even hidden behind another page, the director asks the game about every second. Turned off, it asks the game nothing, cuts no camera, leaves an instant replay for the live session, turns `Automatic` back to `Assisted`, turns spectate mode off (overlays back on your car, whether the `Spectate` page or `Overlays follow the car on air` turned it on) and empties the broadcast graphics. Director hotkeys then act as with the page closed. Events, battles and notes of the session are kept; turn it back on with the switch, the `Turn On Broadcast Director` button, the `director_toggle` hotkey or the command palette (`Ctrl+K`, `Broadcast Director (On)`). Graphics and director settings can still be changed while off. Turned off and hidden behind another page for 10 minutes, the page is closed to free memory, like any page, and opens again from the navigation bar (turned on, it stays open to follow the session).
+
+While the page is open, its `Broadcast` entry of the navigation bar has a dot (green: on, grey: off) and the `Broadcast Director On` notice shows at the bottom of the main window while on (click it to show the page; `Config` > `Notification` to hide it). Hidden behind another page with nothing needing fresh answers (assisted or manual mode, no graphics source showing, overlays not following the car on air, events log off), the director asks the game every 5 seconds instead of every second, and every second again as soon as the page shows, a graphics source connects or automatic mode starts.
 
 ## Director
 
@@ -47,7 +51,7 @@ How the automatic director cuts:
 - **Pit radar**: while the car on air is in the pit lane, the cars near it show with their distance, `Alongside` in red.
 - **Tyres** of every car (front and rear), with the game on this computer.
 - **Sheet** of the selected car: intervals ahead and behind, laps, current stint, best and last lap, pit stops, contacts, penalties, tyres, energy used per lap over 3 and 5 laps and the laps left, and your **note** on the driver (kept between sessions).
-- **Driver history** in the sheet: races, class wins and podiums, best finish on this track, last races, and the races with the cars ahead and behind, from the game results files (see [Race Results](Race-Results.md)).
+- **Driver history** in the sheet: races, class wins and podiums, best finish on this track, last races, and the races with the cars ahead and behind, from the game results files (see [Results & Replays](Race-Results.md)).
 - **Lap history** of any car (right-click it, or `Laps` in its sheet): every lap seen with its sectors colored, pit laps, energy used and class place.
 
 ### Timing table
@@ -74,7 +78,7 @@ TV graphics made for the director, as one **browser source (1920 x 1080)** for O
 
 `Graphics` tab, each graphic on or off:
 
-- **Standings tower**: overall, each class in turn, or the class of the car on air; gaps to the car ahead or to the leader, lap times shown a few seconds as each car completes a lap (purple for the fastest of its class), tyres, penalties, fastest lap tag, pit stops, classes apart in overall. Rows move on overtakes.
+- **Standings tower**: overall, each class in turn, or the class of the car on air; gaps to the car ahead or to the leader, lap times shown a few seconds as each car completes a lap (purple for the fastest of its class), tyres, penalties, fastest lap tag, pit stops, classes apart in overall. Rows move on overtakes. `Cars shown` sets its height (3 to 70 cars): with more cars, it slides up page after page every 10 seconds (carousel, a thin bar on the right tells which part of the field is shown), every page of a class before the next one with `Each class in turn`.
 - **Driver card** on each cut, with the car picture if you want, and the Driver Rank and Safety Rank (`DR S2`, `SR P3`) of drivers whose ranks the game menu knows: you and your team members.
 - **Battle card** while a battle is on air, and **battle train**: up to 6 cars of a class following each other, kept 10 s after the train breaks up.
 - **Banners**: fastest lap, penalties, flags, lead changes, heavy contacts. The most important first, the same news never twice in 30 seconds, 4 waiting at most.
@@ -115,6 +119,7 @@ These commands can be bound on the `Hotkey` page and run from the [remote contro
 
 | Command | Effect |
 |---|---|
+| `director_toggle` | Director on or off (same as the switch of the page) |
 | `director_next_car`, `director_previous_car` | Next / previous car on air. With the page closed, they move the game camera to the next / previous car. |
 | `director_auto` | Automatic mode on or off |
 | `director_take_best` | Cut to the best story now |

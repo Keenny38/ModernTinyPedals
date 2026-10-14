@@ -34,7 +34,7 @@ from ..userfile.heatmap import (
     set_predefined_brake_name,
 )
 from ..validator import generator_init
-from ._base import DataModule, data_stamp
+from ._base import WAIT_STATE_CHANGE, DataModule, data_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,8 @@ class Realtime(DataModule):
                 gen_wheel_angle.send(vehicle_resets)
 
             else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
+                reset = False
+                update_interval = WAIT_STATE_CHANGE  # idle until activity changes
 
 
 def wheel_ground_speed(wheel_speed: float, vehicle_speed: float) -> float:

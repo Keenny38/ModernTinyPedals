@@ -34,7 +34,7 @@ from ..api_control import api
 from ..calculation import asym_max
 from ..const_common import MAX_SECONDS, MAX_VEHICLES
 from ..module_info import minfo
-from ._base import DataModule
+from ._base import WAIT_STATE_CHANGE, DataModule
 
 REF_PLACES = tuple(range(1, MAX_VEHICLES + 1))
 TEMP_RELATIVE_AHEAD = [(0.0, -1)] * MAX_VEHICLES
@@ -54,7 +54,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update
         reset = False
         update_interval = self.idle_interval
 
@@ -69,9 +69,11 @@ class Realtime(DataModule):
         while not _event_wait(update_interval):
             if not realtime_state.paused:
 
+                # Full rate only while overlays are shown (their only consumer), else idle interval
+                update_interval = self.active_interval if realtime_state.shown else self.idle_interval
+
                 if not reset:
                     reset = True
-                    update_interval = self.active_interval
                     # New session or reload: relative delta of vehicles from scratch
                     reset_relative_delta(
                         slot_ids, output.relativeDeltaAhead, output.relativeDeltaBehind)
@@ -116,11 +118,17 @@ class Realtime(DataModule):
                 # Base info
                 plr_place = read.vehicle.place()
 
+                # Scoring data of this sample already read by vehicles module (most updates), else read here
+                snapshot = minfo.vehicles.scoringSnapshot
+                if snapshot is not None and (snapshot.scoringTime != stamp[1] or len(snapshot.rows) != veh_total):
+                    snapshot = None
+
                 # Get vehicles info
                 (relative_ahead, relative_behind, classes_list, draw_order_list, is_multi_class,
                  ) = get_vehicles_info(
                     veh_total, plr_index, show_in_garage, update_relative_delta,
-                    output.relativeDeltaAhead, output.relativeDeltaBehind, slot_ids)
+                    output.relativeDeltaAhead, output.relativeDeltaBehind, slot_ids,
+                    None if snapshot is None else snapshot.rows)
 
                 # Update vehicle class position info
                 plr_class_name, plr_class_place = update_position_in_class(classes_list, plr_index)
@@ -148,7 +156,7 @@ class Realtime(DataModule):
             else:
                 if reset:
                     reset = False
-                    update_interval = self.idle_interval
+                    update_interval = WAIT_STATE_CHANGE  # game paused: idle until activity changes
                     create_reference_place.cache_clear()
 
 
@@ -166,11 +174,14 @@ def reset_relative_delta(
 def get_vehicles_info(
     veh_total: int, plr_index: int, show_in_garage: bool, update_relative_delta: bool,
     relative_delta_ahead: tuple, relative_delta_behind: tuple, slot_ids: list[int] | None = None,
+    scoring_rows: tuple | None = None,
 ):
     """Get vehicles info: relative time gap, classes, places, laptime
 
     Args:
         slot_ids: vehicle slot id per index of relative delta data, reset on other vehicle in index.
+        scoring_rows: scoring data of every car of this scoring sample read by vehicles module
+            (ScoringSnapshot.rows, same values), None: read from game.
     """
     laptime_est = api.read.timing.estimated_laptime()
     plr_time = api.read.timing.estimated_time_into()
@@ -181,13 +192,18 @@ def get_vehicles_info(
     pitter_index = 0
     draw_order = TEMP_DRAW_ORDER[:veh_total]
 
+    rows = scoring_rows
     for index in range(veh_total):
-        in_garage = api.read.vehicle.in_garage(index)
-        in_pitlane = api.read.vehicle.in_pits(index) or in_garage
+        if rows is None:
+            in_garage = api.read.vehicle.in_garage(index)
+            in_pitlane = api.read.vehicle.in_pits(index) or in_garage
+        else:
+            in_garage, in_pitlane, opt_time, class_name, place_overall, laptime_best, laptime_last = rows[index]
 
         # Update relative time gap list
         if index != plr_index and laptime_est and (show_in_garage or not in_garage):
-            opt_time = api.read.timing.estimated_time_into(index)
+            if rows is None:
+                opt_time = api.read.timing.estimated_time_into(index)
             diff_time = opt_time - plr_time
             diff_time_ahead = diff_time_behind = diff_time - diff_time // laptime_est * laptime_est
             if diff_time_ahead < 0:
@@ -217,10 +233,11 @@ def get_vehicles_info(
                 relative_delta_behind[index].update(-diff_time_behind)
 
         # Update classes list
-        class_name = api.read.vehicle.class_name(index)
-        place_overall = api.read.vehicle.place(index)
-        laptime_best = api.read.timing.best_laptime(index)
-        laptime_last = api.read.timing.last_laptime(index)
+        if rows is None:
+            class_name = api.read.vehicle.class_name(index)
+            place_overall = api.read.vehicle.place(index)
+            laptime_best = api.read.timing.best_laptime(index)
+            laptime_last = api.read.timing.last_laptime(index)
 
         if laptime_last > 0 and not in_pitlane:
             laptime_personal_last = laptime_last

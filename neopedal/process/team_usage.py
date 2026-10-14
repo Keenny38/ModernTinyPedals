@@ -32,6 +32,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
+from operator import attrgetter
 from typing import Any, NamedTuple
 
 
@@ -85,24 +86,26 @@ def parse_usage(data: Any) -> list[UsageLap]:
     laps: list[UsageLap] = []
     if not isinstance(data, dict):
         return laps
+    isfinite = math.isfinite
+    make = UsageLap._make
+    append = laps.append
     for driver, entries in data.items():
         if not isinstance(entries, list):
             continue
+        name = str(driver)
         for entry in entries:
             try:
-                tyres = [_finite(tread) for tread in entry.get("tyres") or ()]
-                laps.append(UsageLap(
-                    driver=str(driver),
-                    stint=int(entry["stint"]),
-                    lap=int(entry["lap"]),
-                    fuel=_finite(entry.get("fuel") or 0.0),
-                    energy=_finite(entry.get("ve") or 0.0),
-                    tread=sum(tyres) / len(tyres) if tyres else 0.0,
-                    pit=bool(entry.get("pit")),
-                ))
-            except (AttributeError, KeyError, OverflowError, TypeError, ValueError):  # json: 1e999 is inf
+                get = entry.get
+                tyres = get("tyres") or ()
+                tread = sum(map(float, tyres)) / len(tyres) if tyres else 0.0
+                fuel = float(get("fuel") or 0.0)
+                energy = float(get("ve") or 0.0)
+                if not (isfinite(tread) and isfinite(fuel) and isfinite(energy)):  # json: 1e999 is inf
+                    continue
+                append(make((name, int(entry["stint"]), int(entry["lap"]), fuel, energy, tread, bool(get("pit")))))
+            except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
                 continue
-    laps.sort(key=lambda usage: usage.lap)
+    laps.sort(key=attrgetter("lap"))
     return laps
 
 
@@ -128,17 +131,23 @@ def stint_usage(laps: Sequence[UsageLap]) -> list[StintUsage]:
         stints.setdefault((lap.driver, lap.stint), []).append(lap)
     result = []
     for (driver, stint), stint_laps in stints.items():
-        measured = [(last, lap) for last, lap in pairwise(stint_laps) if lap_measured(last, lap)]
-        count = len(measured)
+        count = 0
+        fuel = energy = wear = 0.0
+        for last, lap in pairwise(stint_laps):  # one pass, no list of pairs (thousands of laps late in a 24 h race)
+            if lap_measured(last, lap):
+                count += 1
+                fuel += last.fuel - lap.fuel
+                energy += last.energy - lap.energy
+                wear += last.tread - lap.tread
         result.append(StintUsage(
             driver=driver,
             stint=stint,
             first_lap=stint_laps[0].lap,
             last_lap=stint_laps[-1].lap,
             laps=count,
-            fuel=sum(last.fuel - lap.fuel for last, lap in measured) / count if count else 0.0,
-            energy=sum(last.energy - lap.energy for last, lap in measured) / count if count else 0.0,
-            wear=sum(last.tread - lap.tread for last, lap in measured) / count if count else 0.0,
+            fuel=fuel / count if count else 0.0,
+            energy=energy / count if count else 0.0,
+            wear=wear / count if count else 0.0,
         ))
     result.sort(key=lambda usage: usage.first_lap)
     return result

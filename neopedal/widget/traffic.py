@@ -20,16 +20,24 @@
 Traffic Widget
 """
 
+from typing import TYPE_CHECKING
+
 from .. import units
 from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_PLACEHOLDER
 from ..formatter import random_color_class, shorten_driver_name
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
+
+if TYPE_CHECKING:
+    from ..template.widget_config_types import TrafficConfig
 
 
 class Realtime(Overlay):
     """Draw widget"""
+
+    wcfg: "TrafficConfig"
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -139,7 +147,6 @@ class Realtime(Overlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         veh_data = minfo.vehicles.dataSet
-        player_index = minfo.vehicles.playerIndex
         player_laptime = api.read.timing.estimated_laptime()
 
         ahead_overtake_laps = MAX_SECONDS
@@ -216,7 +223,7 @@ class Realtime(Overlay):
                 self.update_class(self.bar_classes[2], veh_info.vehicleClass, veh_info.driverName)
 
         if self.wcfg["show_estimated_laps"]:
-            plr_lap_progress = 1 - veh_data[player_index].currentLapProgress
+            plr_lap_progress = 1 - player_vehicle().currentLapProgress
             opt_lap_progress = 1 - veh_data[ahead_overtake_index].currentLapProgress
             if self.show_slower_ahead:
                 self.update_laps(self.bar_laps[0], ahead_overtake_laps, opt_lap_progress)

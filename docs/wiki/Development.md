@@ -69,7 +69,7 @@ pytest --cov=neopedal
 | `neopedal/api_connector.py`, `api_control.py` | Game API selection |
 | `neopedal/module/` | Data modules (`module_delta.py`, `module_fuel.py`, `module_recorder.py`, `module_stats.py`...) |
 | `neopedal/process/` | Game data processing; LMU REST data in `game_info.py` and `team_usage.py` |
-| `neopedal/widget/` | Overlays: classic layout `<name>.py`, modern design `_modern/<name>.py`, Black box `_black_box/`, base class `_base.py` |
+| `neopedal/widget/` | Overlays: classic layout `<name>.py`, modern design `_modern/<name>.py`, Dashboard HUD (`black_box`) `_black_box/`, base class `_base.py` |
 | `neopedal/template/` | Default settings; overlay defaults per category in `template/widget/<category>.py` |
 | `neopedal/ui/` | Qt Widgets pages and dialogs; QML pages in `ui/qml`, their Python backends in `ui/quick` |
 | `neopedal/userfile/` | File formats and data: presets, laps, MoTeC, track corners and geometry, lap geometry jobs |
@@ -82,19 +82,30 @@ pytest --cov=neopedal
 
 ### Overlays and the modern design
 
-- Every overlay has a modern design in `neopedal/widget/_modern/<name>.py` (the Black box and Pace Notes restyle their classic drawing), registered in `neopedal/template/widget/modern.py` (`MODERN_DESIGN_OPTIONS`) with the options it reads: only these are shown in the Overlay Options page. That page (`neopedal/ui/overlay_options.py`, `ui/quick/overlay_options_backend.py`, `qml/OverlayOptions.qml`) cuts the options of each overlay into sections from their order in the template (`ui/quick/overlay_sections.py`: an item section starts at its `show_*` / `enable_*` option and takes the options naming that item), so keep the options of an item together after its on/off option; an overlay with many options can declare its own sections in `WIDGET_OPTION_UI` (see `black_box_ui.OptionUI`). Shared components (value tiles, tables, gauges, wheels, car colors of maps and radar in `cars.py`, restyling of classic drawing) are in the same folder. A modern design reads game data like the classic widget through a mixin of the classic module (`RadarMixin`, `TrackMapMixin`, `TrailingMixin`...), so both layouts show the same values. The Barlow font is in `fonts`.
+- Every overlay has a modern design in `neopedal/widget/_modern/<name>.py` (the Dashboard HUD and Pace Notes restyle their classic drawing), registered in `neopedal/template/widget/modern.py` (`MODERN_DESIGN_OPTIONS`) with the options it reads: only these are shown in the Overlay Options page. That page (`neopedal/ui/overlay_options.py`, `ui/quick/overlay_options_backend.py`, `qml/OverlayOptions.qml`) cuts the options of each overlay into sections from their order in the template (`ui/quick/overlay_sections.py`: an item section starts at its `show_*` / `enable_*` option and takes the options naming that item), so keep the options of an item together after its on/off option; an overlay with many options can declare its own sections in `WIDGET_OPTION_UI` (see `black_box_ui.OptionUI`). Shared components (value tiles, tables, gauges, wheels, car colors of maps and radar in `cars.py`, restyling of classic drawing) are in the same folder. A modern design reads game data like the classic widget through a mixin of the classic module (`RadarMixin`, `TrackMapMixin`, `TrailingMixin`...), so both layouts show the same values. The Barlow font is in `fonts`.
 - A changed overlay keeps both its modern design and its classic layout.
-- A new overlay needs its default options in `neopedal/template/widget/<category>.py` and an entry in `WIDGET_DISPLAY_ORDER` (`neopedal/template/widget/__init__.py`): startup fails if it is missing. Its category in the `Overlays` page comes from name prefixes in `neopedal/ui/quick/overlay_backend.py` (`WIDGET_CATEGORIES`).
+- Every built-in overlay is declared once in `neopedal/template/widget/registry.py` (`OVERLAYS`, one `overlay(name, category, ...)` line in display order: Overlays page category, modern design, preview feed, config dialog extras). Display order, default settings, keyboard shortcuts, modern designs, `WIDGET_OPTION_UI` and the Overlays page categories are derived from it; startup fails if an overlay has default options but no line there. Options read only by the modern design go in `MODERN_ONLY_OPTIONS` (`modern.py`).
 - Every new option has a default value in `neopedal/template/`, a label and a help text. Renaming or removing an option needs a migration in `neopedal/setting_preupdate.py`, so existing presets still load.
 - The settings format version (`SETTING_VERSION` in `neopedal/version.py`) is independent of the app version (2.x numbering), so presets load without needless migration.
+
+### Adding an overlay / a tool page
+
+A new overlay touches 7 files (10 before the registry): `neopedal/widget/<name>.py` (classic layout), `neopedal/widget/_modern/<name>.py` (modern design), its default options in `neopedal/template/widget/<category>.py`, one line in `neopedal/template/widget/registry.py`, then option docs in `docs/customization.md` (`python tools/gen_option_help.py` writes `option_help.json`) and French labels and help in `neopedal/i18n/data/fr_options.json` and `fr_option_help.json`. Also run `python tools/gen_widget_config_types.py` (a test checks the generated settings types). `modern.py` only when the modern design reads options of its own.
+
+A new tool page touches 2 files (5 before): its dialog module in `neopedal/ui/` and one `PageSpec` in `neopedal/template/page_registry.py` (label, short rail label, icon glyph, `"module.DialogClass"` path, Tools section, default rail position, command palette words, on / off status function). The Tools page, menu, command palette, navigation rail, home quick access and default rail are derived from it; dialog modules are still imported only when first opened. Add the French label in `neopedal/i18n/fr.py`.
 
 ### Qt Quick pages
 
 - The Lap Telemetry Viewer, Track Map Viewer, Driver Stats Viewer, Race Calculator and the Overlays page are QML pages in `neopedal/ui/qml`, with their state in `neopedal/ui/quick` (pure Python, testable without a display). New tool pages should preferably be Qt Quick, with logic in Python.
-- Race Calculator: `race_backend.py` (QObject: inputs, actions, one property per part of the results, emitted only when that part changes), `race_model.py` (saved inputs & their ranges, texts, share code), `race_results.py` (results as plain values for QML), `race_tyres.py` (tyre plan model), `race_picture.py` (plan picture). The hosting page `ui/race_calculator.py` gives the dialogs, toasts and undo history, and builds the QML view when first shown.
+- Race Calculator: `race_backend.py` (QObject: inputs, actions, one property per part of the results, emitted only when that part changes), `race_model.py` (saved inputs & their ranges, texts), `race_results.py` (results as plain values for QML), `race_tyres.py` (tyre plan model), `race_picture.py` (plan picture). The hosting page `ui/race_calculator.py` gives the dialogs, toasts and undo history, and builds the QML view when first shown.
 - Curves and maps are sent once to the graphics card (`GpuShape`); zooming only changes a matrix.
 - The executable bundles only the QML modules listed in `neopedal/ui/quick/qml_modules.py`. A QML module newly imported by a page must be added there (a test loads every page with only these modules).
 - Official corner numbers are in `neopedal/userfile/track_corners.py`, the LMU official track layouts in `neopedal/userfile/track_geometry.py`.
+- A large page backend is split into parts: child QObjects exposed as constant properties (QML `backend.timing.timingRows`), holding the page weakly. The Broadcast Director page (`director_backend.py`) has `game` (state requests), `camera` (camera, HUD, playback, commands), `graphics` (broadcast graphics), `timing` (timing table) and `log` (events log); the page keeps the session state, the cuts, its jobs, its settings file and releases its parts.
+
+### App context
+
+`neopedal/context.py` gathers the app-wide objects (`api`, `cfg`, `minfo`, `mctrl`, `wctrl`, `octrl`). New code takes them from a context instead of module globals: widgets (`widget/_base.py`), data modules (`module/_base.py`) and page backends (`PageBackend`) have `self.ctx` (default `app_context()`, the real globals; a `ctx=` argument overrides it). Code reading game data many times a frame may keep its module globals or bind context values to locals once. Tests swap app objects with the `app_ctx` fixture (`app_ctx(mctrl=fake)`): every module's copy of the global and the default context are replaced and put back after the test, instead of patching one module's copy by hand.
 
 ### Lap viewer worker process
 
@@ -208,7 +219,7 @@ Without both sections, `tools/release.py` and the workflow refuse to publish. Th
 When a commit changes how an overlay looks, add a before / after image in `docs/changes` before committing. The left side renders the last commit, the right side your working tree, on the same simulated race as the README preview. Write the title in English:
 
 ```bash
-python tools/make_change_visual.py black_box --title "Black box: engine map"
+python tools/make_change_visual.py black_box --title "Dashboard HUD: engine map"
 ```
 
 `--set black_box.show_motor_map=true` shows an option that is off by default, `--slug` sets the file name, `--base` chooses the "before" revision. The release notes show added images in a **Visuals** section, unless the changelog section already embeds them (the app does not show images).

@@ -25,6 +25,8 @@ Longitudinal & lateral g force (direction arrows), downforce ratio, front & rear
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QPainter
 
 from ... import units
@@ -33,9 +35,14 @@ from ...validator import infnan_to_zero as rmnan
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import ForceConfig
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: ForceConfig
 
     options = (
         "font_size", "layout", "show_longitudinal_g_force", "show_lateral_g_force", "show_downforce_ratio",

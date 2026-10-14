@@ -25,6 +25,8 @@ break), debugging distances. Sections stacked (or side by side), hidden while au
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
@@ -33,16 +35,22 @@ from ..track_notes import TrackNotesMixin
 from .base import CENTER, LEFT, RIGHT, ModernOverlay, display_order_options
 from .draw import accent_edge, panel
 
+if TYPE_CHECKING:
+    from ...template.widget_config_types import TrackNotesConfig
+
 SECTIONS = (  # key, font role, color token
     ("track_notes", "strong", "text"),
     ("comments", "small", "text_dim"),
     ("debugging", "small", "text_muted"),
 )
+
 ALIGN = {"left": LEFT, "right": RIGHT}  # else center
 
 
 class Realtime(TrackNotesMixin, ModernOverlay):
     """Draw widget"""
+
+    wcfg: TrackNotesConfig
 
     options = (
         "font_size", "layout", "show_background", "enable_auto_hide_if_not_available", "maximum_display_duration",

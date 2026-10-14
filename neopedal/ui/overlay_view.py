@@ -40,7 +40,9 @@ class OverlayView(QWidget):
     def __init__(self, parent, module_control: ModuleControl = wctrl):
         super().__init__(parent)
         self.module_control = module_control
-        self.backend = OverlayBackend(self, module_control, self.open_config, self.confirm, self.show_log)
+        self.backend = OverlayBackend(
+            self, module_control, self.open_config, self.confirm, self.show_log,
+            self.export_settings, self.import_settings)
         self.view: QQuickWidget | None = None  # see ensure_view
         self._creating = False
         self._layout = QVBoxLayout(self)
@@ -92,6 +94,18 @@ class OverlayView(QWidget):
             defaultButton=QMessageBox.StandardButton.No,
         )
         return answer == QMessageBox.StandardButton.Yes
+
+    def export_settings(self, names: list[str]):
+        """Settings of picked overlays saved as package file (saved values)"""
+        from .overlay_share import export_overlay_settings
+
+        export_overlay_settings(self, names)
+
+    def import_settings(self):
+        """Overlay settings package imported as pending edits of Overlay Options page"""
+        from .overlay_share import import_overlay_settings
+
+        import_overlay_settings(self)
 
     def show_log(self):
         from .log_info import LogInfo

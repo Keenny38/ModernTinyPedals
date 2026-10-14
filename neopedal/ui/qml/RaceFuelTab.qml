@@ -15,39 +15,40 @@ Item {
     readonly property bool showHistory: store.header.showHistory
     readonly property bool sideHistory: width >= theme.em * 74
     readonly property real inputsWidth: theme.em * 21
-    readonly property color tyreColor: "#F5B342"
+    readonly property color tyreColor: theme.seriesTyre
 
     function fmt(value, decimals) {
-        return Number(value).toFixed(decimals)
+        return Number(value).toFixed(decimals).replace(".", theme.decimalPoint)
     }
 
     component Note: Text {
         Layout.fillWidth: true
         visible: text !== ""
         color: theme.dimText
-        font.pointSize: theme.fontPoint * 0.9
+        font.pointSize: theme.fontLabel
         textFormat: Text.StyledText
         wrapMode: Text.Wrap
     }
     component ValueRow: RowLayout {
+        id: valueRow
         property string label: ""
         property string value: "-"
         property string tip: ""
         property bool warning: false
         Layout.fillWidth: true
         Text {
-            text: parent.label
+            text: valueRow.label
             color: theme.text
             elide: Text.ElideRight
             Layout.fillWidth: true
-            HoverHandler { id: valueHover; enabled: parent.tip !== "" }
+            HoverHandler { id: valueHover; enabled: valueRow.tip !== "" }
             ToolTip.visible: valueHover.hovered
-            ToolTip.text: parent.tip
-            ToolTip.delay: 500
+            ToolTip.text: valueRow.tip
+            ToolTip.delay: theme.tipDelay
         }
         Text {
-            text: parent.value
-            color: parent.warning ? theme.loss : theme.text
+            text: valueRow.value
+            color: valueRow.warning ? theme.loss : theme.text
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
         }
@@ -106,7 +107,7 @@ Item {
                                 horizontalAlignment: TextInput.AlignRight
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: theme.text
-                                selectionColor: theme.accent
+                                selectionColor: theme.accentFill
                                 selectedTextColor: "white"
                                 selectByMouse: true
                                 font.features: { "tnum": 1 }
@@ -115,9 +116,9 @@ Item {
                                 Accessible.name: i18n.tr("Lap Time")
                                 ToolTip.visible: hovered && !activeFocus
                                 ToolTip.text: i18n.tr("Minutes:seconds.milliseconds, Up / Down: 0.1 s (Shift: 1 s)")
-                                ToolTip.delay: 700
+                                ToolTip.delay: theme.tipDelay
                                 background: Rectangle {
-                                    radius: theme.em * 0.4
+                                    radius: theme.radiusMd
                                     color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
                                     border.width: lapTime.activeFocus ? 1.5 : 1
                                     border.color: lapTime.activeFocus ? theme.accent : theme.border
@@ -185,15 +186,15 @@ Item {
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: theme.text
                                 selectByMouse: true
-                                selectionColor: theme.accent
+                                selectionColor: theme.accentFill
                                 selectedTextColor: "white"
-                                opacity: enabled ? 1 : 0.5
+                                opacity: enabled ? 1 : theme.disabledOpacity
                                 Accessible.name: i18n.tr("Start Time")
                                 ToolTip.visible: hovered && !activeFocus
                                 ToolTip.text: i18n.tr("Time of day of the race start")
-                                ToolTip.delay: 700
+                                ToolTip.delay: theme.tipDelay
                                 background: Rectangle {
-                                    radius: theme.em * 0.4
+                                    radius: theme.radiusMd
                                     color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
                                     border.width: startTime.activeFocus ? 1.5 : 1
                                     border.color: startTime.activeFocus ? theme.accent : theme.border
@@ -298,13 +299,13 @@ Item {
                                     required property var modelData
                                     text: modelData.text
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
+                                    font.pointSize: theme.fontSmall
                                     Layout.fillWidth: true
                                     horizontalAlignment: Text.AlignHCenter
                                     HoverHandler { id: driverHeadHover; enabled: parent.modelData.tip !== "" }
                                     ToolTip.visible: driverHeadHover.hovered
                                     ToolTip.text: modelData.tip
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: theme.tipDelay
                                 }
                             }
                             Repeater {
@@ -453,7 +454,7 @@ Item {
                             Rectangle {  // fuel unit of the plan (team using another unit)
                                 height: Math.round(theme.em * 1.6)
                                 width: unitLabel.implicitWidth + theme.em * 0.9
-                                radius: theme.em * 0.35
+                                radius: theme.radiusSm
                                 color: "transparent"
                                 border.width: 1
                                 border.color: theme.accent
@@ -468,7 +469,7 @@ Item {
                                 HoverHandler { id: unitHover }
                                 ToolTip.visible: unitHover.hovered
                                 ToolTip.text: i18n.tr("Fuel unit of the plan (Units setting)")
-                                ToolTip.delay: 500
+                                ToolTip.delay: theme.tipDelay
                             },
                             TpButton {
                                 id: exportButton
@@ -493,15 +494,7 @@ Item {
                             visible: planCard.plan.ready === true
                             columns: planCard.plan.columns || []
                             rows: planCard.plan.rows || []
-                            hidden: {
-                                var keys = planCard.plan.hidden || []
-                                var columns = planCard.plan.columns || []
-                                var list = []
-                                for (var index = 0; index < columns.length; index++)
-                                    if (keys.indexOf(columns[index].key) >= 0)
-                                        list.push(index)
-                                return list
-                            }
+                            hiddenKeys: planCard.plan.hidden || []  // columns shown again only when they change
                             colorColumn: 6
                             cellColor: tab.tyreColor
                         }
@@ -573,7 +566,7 @@ Item {
                                     HoverHandler { id: detailHover; enabled: parent.column === 0 }
                                     ToolTip.visible: detailHover.hovered
                                     ToolTip.text: row.tip
-                                    ToolTip.delay: 500
+                                    ToolTip.delay: theme.tipDelay
                                 }
                             }
                         }

@@ -1,5 +1,5 @@
 """Race calculator: fuel strategy & tyre plan linked in one page, former tools redirected, live race,
-race plan files, share code, plan of car & track, QML page"""
+race plan files, plan of car & track, QML page"""
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -16,7 +16,6 @@ class Host:
         self.toasts: list[str] = []
         self.open_path = ""
         self.save_path = ""
-        self.text = ("", False)
         self.asked: list[str] = []
 
 
@@ -31,7 +30,7 @@ def host(monkeypatch):
     monkeypatch.setattr(race_calculator.RaceCalculator, "confirm", lambda self, text: found.asked.append(text) or True)
     monkeypatch.setattr(race_calculator.RaceCalculator, "open_file", lambda self, *args: found.open_path)
     monkeypatch.setattr(race_calculator.RaceCalculator, "save_file", lambda self, *args: found.save_path)
-    monkeypatch.setattr(race_calculator.RaceCalculator, "ask_text", lambda self, *args: found.text)
+
     monkeypatch.setattr(race_backend, "SCENARIO_DELAY_MS", 0)  # scenarios at once, not after a pause
     return found
 
@@ -217,7 +216,8 @@ def test_former_tools_open_race_calculator(ui_env):
     from neopedal.ui.nav_rail import parse_rail_items
     from neopedal.ui.tools_view import RENAMED_TOOLS
 
-    assert set(RENAMED_TOOLS.values()) == {"race_calculator.RaceCalculator"}
+    assert RENAMED_TOOLS["fuel_calculator.FuelCalculator"] == RENAMED_TOOLS["tyre_strategy_planner.TyreStrategyPlanner"] == (
+        "race_calculator.RaceCalculator")
     assert parse_rail_items("tyre_strategy_planner") == ["race_calculator"]
 
 
@@ -411,6 +411,60 @@ def test_live_race_plans_rest_of_race(page, monkeypatch):
     assert backend.strategy.first_lap == 0 and [stop.lap for stop in backend.strategy.stops] == [15, 30]
 
 
+def test_game_data_switched_off_and_on(page, host, monkeypatch):
+    """Off: page empty, nothing read from the game, whole race planned, game actions refused, no undo;
+    hotkey & palette toggle it"""
+    from PySide6.QtCore import QMetaObject, QObject
+
+    from neopedal.hotkey import command
+    from neopedal.ui import command_palette
+    from neopedal.ui.quick import race_backend
+
+    backend = page.backend
+    set_race(backend, laps=40)
+    live_race(monkeypatch, laps_done=20, fuel=9.0, stops=1)
+    backend.setLiveRace(True)
+    backend.setTab(3)
+    assert backend.strategy.first_lap == 20 and race_backend.race_status() == "on"
+    view = page.ensure_view()
+    switch = view.rootObject().findChild(QObject, "gameDataSwitch")
+    QMetaObject.invokeMethod(switch, "click")  # off
+    assert not backend.game_data and not backend.header["gameData"] and race_backend.race_status() == "off"
+    assert cfg.user.config["fuel_calculator"]["enable_game_data"] is False
+    assert backend.strategy.first_lap == 0 and backend.liveStatus == ""  # whole race planned
+    assert not backend._live_timer.isActive() and not backend._garage_timer.isActive()
+    reads = []
+    monkeypatch.setattr(race_backend, "read_live", lambda *args: reads.append(1))
+    backend.refresh_live()
+    backend.refresh_race_state()
+    backend.setTab(2)
+    assert not reads and not backend._team_timer.isActive() and not backend.team_request.busy
+    backend.loadLive()
+    backend.refreshTeam()
+    backend.tyreAllocationFromGame()
+    assert host.toasts[-3:] == ["Race Calculator is off"] * 3 and not backend.tyre_request.busy
+    off_card = view.rootObject().findChild(QObject, "calculatorOff")
+    off_button = off_card.findChild(QObject, "emptyStateAction")
+    content = view.rootObject().findChild(QObject, "calculatorContent")
+    assert off_card.property("visible") and off_button is not None and not content.property("visible")
+    laps = backend.values["input_race_laps"]
+    backend.setInput("input_race_laps", 41)
+    backend.setInput("input_race_laps", laps)  # change made on, undone while off: nothing
+    page.undo()
+    assert backend.values["input_race_laps"] == laps
+    QMetaObject.invokeMethod(off_button, "click")  # on again
+    assert backend.game_data and content.property("visible") and not off_card.property("visible")
+    command_palette.toggle_race_game_data()  # off
+    command.hotkey_race_calculator_toggle()  # on
+    assert backend.game_data and backend._live_timer.isActive()
+    command_palette.toggle_race_game_data()
+    assert not backend.game_data
+    assert "race_calculator_toggle" in dict(command.COMMANDS_GENERAL)
+    assert not view.errors()
+    page.close()
+    assert race_backend.race_status() == ""
+
+
 def test_plan_of_car_and_track_opened_again(page, host, monkeypatch):
     from neopedal.ui import race_calculator
 
@@ -552,26 +606,6 @@ def test_live_race_status_shown(page, monkeypatch):
     monkeypatch.setattr(api.read.vehicle, "in_pits", lambda *args, **kwargs: True, raising=False)
     backend.refresh_race_state()
     assert "in the pits" in backend.liveStatus
-
-
-def test_share_code_round_trip(page, host):
-    from PySide6.QtGui import QGuiApplication
-
-    backend = page.backend
-    set_race(backend, laps=40)
-    backend.copyShareCode()
-    code = QGuiApplication.clipboard().text()
-    assert code.startswith("TPRP1:") and "\n" not in code and host.toasts
-    backend.setInput("input_race_laps", 25)
-    host.text = (code[:30] + "\n" + code[30:], True)  # wrapped by a chat
-    backend.pasteShareCode()
-    assert backend.values["input_race_laps"] == 40
-    host.text = ("nope", True)
-    backend.pasteShareCode()
-    assert host.warnings and backend.values["input_race_laps"] == 40
-    host.text = ("", False)  # cancelled
-    backend.pasteShareCode()
-    assert len(host.warnings) == 1
 
 
 def test_plan_against_race_and_rivals(page, monkeypatch):

@@ -39,19 +39,26 @@ import math
 import os
 import threading
 import time
+import weakref
 from collections.abc import Callable
-from typing import Any
+from contextlib import suppress
+from typing import Any, NamedTuple
 
-from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QObject, QTime, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QDate, QDateTime, QObject, Qt, QTime, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QInputDialog
+from shiboken6 import isValid
 
-from ...formatter import random_color_class
-from ...i18n import current_language, tr, trm
+from ... import game_rest
+from ...adapter.restapi_connector import AppendedListDecoder
+from ...formatter import class_alias, class_color
+from ...game_rest import GameConnection, GameRequest
+from ...i18n import tr, trm
 from ...process.game_info import (
     IMMOVABLE,
     CarInfo,
     Contact,
+    ContactsParser,
     GameReplay,
     Incident,
     Standing,
@@ -68,16 +75,18 @@ from ...process.game_info import (
     replay_title,
     standings_time,
 )
-from ...setting import cfg
-from ...userfile import atomic_write
+from ...process.results_text import gap_seconds_text, laps_behind_text
+from ...template.setting_status_colors import SAME_TIME
 from ...userfile.track_geometry import parse_points
-from .. import game_rest
 from .._common import BaseDialog
-from ..game_rest import GameConnection, GameRequest
-from . import replay_files
+from . import page_settings, replay_files
+from .director_shared import status_text  # same status & colors as Broadcast Director
+from .formatting import clock_minutes, clock_seconds, date_text, day_text
+from .game_camera import CAMERA_GROUPS, CAMERAS, Command, camera_commands, camera_group, camera_key, click_game_ui
 from .game_pictures import LogoCache, notifier
 from .lines import VertexStore, band
 from .models import DictListModel
+from .page_backend import PageBackend
 from .track_path import TrackPath
 
 REPLAYS_RESOURCE = "/rest/watch/replays"
@@ -105,6 +114,8 @@ SECONDS_BEFORE = 5  # replay starts this long before incident (default)
 TOP_DRIVERS = 10  # drivers with most incidents shown as filter chips
 LAP_SEARCH_STEPS = 8  # replay moves to find a lap start
 REPLAY_WAIT = 3.0  # seconds: live session going to its replay
+ACTION_WAIT = 90.0  # seconds: replay asked by race results (event, lap) given this long to open in game
+ACTION_SETTLE = 3.0  # seconds: replay open command accepted, game loading it (state of former replay meanwhile)
 SETTINGS_FILE = "game_replays.json"
 ROAD_WIDTH, PIT_WIDTH = 14.0, 6.0  # map line widths (meters), at least a few pixels
 CTRL, SHIFT = 0x04000000, 0x02000000  # Qt.KeyboardModifier values of QML mouse events
@@ -131,31 +142,6 @@ PLAYBACK = (
 )
 PLAYBACK_COMMANDS = tuple(command for command, _ in PLAYBACK)
 PAUSE, PLAY = "VCRCOMMAND_STOP", "VCRCOMMAND_PLAY"
-# Camera groups of game camera controller: setCamera steps through angles of a group (direction -1 or 1)
-CAMERA_GROUPS = ("Driving", "Onboard", "Trackside")
-CAMERA_FOCUS = "/rest/watch/focus/{kind}/{group}/false"  # camera type & trackside group of game
-NEXT_DRIVING = ("POST", SET_CAMERA_RESOURCE, json.dumps({"cameraGroup": "Driving", "direction": 1}))
-# Cameras of game camera menu ("Change camera", same order): key (camera name told by game, TRACKSIDE<group>),
-# label, group, game camera type & trackside group (seen live 2026-10-05: 1 cockpit, 2 nose, 3 swingman,
-# 4 trackside group, 7 to 13 onboard 0 to 6), bonnet camera: next after cockpit in driving cameras
-CAMERAS = (
-    ("COCKPIT", "Cockpit", "Driving", 1, 0),
-    ("SWINGMAN", "Swingman", "Driving", 3, 0),
-    ("NOSECAM", "Nose Camera", "Driving", 2, 0),
-    ("TVCOCKPIT", "Bonnet Camera", "Driving", 1, 0),
-    ("ONBOARD00", "Roof Camera", "Onboard", 7, 0),
-    ("ONBOARD01", "Cockpit", "Onboard", 8, 0),
-    ("ONBOARD02", "Dash Camera", "Onboard", 9, 0),
-    ("ONBOARD03", "Mirror", "Onboard", 10, 0),
-    ("ONBOARD04", "Front Bumper", "Onboard", 11, 0),
-    ("ONBOARD05", "Rear Bumper", "Onboard", 12, 0),
-    ("ONBOARD06", "Rear Roof Camera", "Onboard", 13, 0),
-    ("TRACKSIDE0", "Cycle All", "Trackside", 4, 0),
-    ("TRACKSIDE1", "Group %1", "Trackside", 4, 1),
-    ("TRACKSIDE2", "Group %1", "Trackside", 4, 2),
-    ("TRACKSIDE3", "Group %1", "Trackside", 4, 3),
-    ("TRACKSIDE4", "Group %1", "Trackside", 4, 4),
-)
 HUD_LABELS = {"chat": "Chat", "mfd": "MFD", "speedo": "Car HUD", "timing": "Timing", "trackMap": "Track Map"}
 SESSIONS = {"PRACTICE": "Practice", "QUALIFY": "Qualify", "WARMUP": "Warmup", "RACE": "Race"}
 SESSION_FILTERS = ("", "PRACTICE", "QUALIFY", "RACE")  # filter index: session type ("" all)
@@ -166,8 +152,6 @@ EVENT_TYPES = {
 SORTS = ("date", "size", "track")
 INCIDENT_FILTERS = ("all", "cars", "walls")
 PANELS = ("incidents", "standings", "map")
-# Command to game: (method, resource), (method, resource, json body), or work on a game connection
-Command = tuple[str, str] | tuple[str, str, str] | Callable[[GameConnection], bool]
 
 
 def clock_text(seconds: float) -> str:
@@ -196,32 +180,6 @@ def file_size(path: str) -> int:
         return 0
 
 
-def day_text(timestamp: float, today: QDate) -> str:
-    """Day of a replay: Today, Yesterday, or long date in app language ("Samedi 3 octobre 2026")"""
-    if timestamp <= 0:
-        return tr("Unknown Date")
-    date = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
-    if date == today:
-        return tr("Today")
-    if date == today.addDays(-1):
-        return tr("Yesterday")
-    text = QLocale(current_language()).toString(date, QLocale.FormatType.LongFormat)
-    return text[:1].upper() + text[1:]
-
-
-def date_text(timestamp: float) -> str:
-    """Short date & time in app language format, "" if none"""
-    if timestamp <= 0:
-        return ""
-    date = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
-    return f"{QLocale(current_language()).toString(date, QLocale.FormatType.ShortFormat)} {clock_minutes(timestamp)}"
-
-
-def clock_minutes(timestamp: float) -> str:
-    """Time of day as hh:mm"""
-    return time.strftime("%H:%M", time.localtime(timestamp))
-
-
 def session_text(session: str) -> str:
     """Session type of game (PRACTICE...) in app language"""
     return tr(SESSIONS.get(session.upper(), session.title()))
@@ -244,12 +202,6 @@ def car_text(car: CarInfo | None) -> str:
     return " · ".join(part for part in (f"#{car.number}" if car.number else "", car.car_class) if part)
 
 
-def class_color(car_class: str) -> str:
-    """Color of vehicle class (vehicle class editor), made from name if not set"""
-    style = cfg.user.classes.get(car_class)
-    return str(style["color"]) if style else random_color_class(car_class)
-
-
 def lap_text(seconds: float) -> str:
     """Lap time m:ss.sss, "-" if none"""
     from ... import calculation as calc
@@ -260,18 +212,16 @@ def lap_text(seconds: float) -> str:
 def gap_text(car: Standing, race: bool = True, leader_best: float = 0.0) -> str:
     """Gap to leader, as the game shows it: race: "+12.345" or "+2 laps"; practice & qualifying: best lap
     behind best lap of leader ("-" without lap time); "" for leader"""
-    from ..lap_viewer import localized
-
     if not race:
         if car.best <= 0:
             return "-"
         gap = car.best - leader_best
-        return f"+{localized(f'{gap:.3f}')}" if leader_best > 0 and gap > 0.0005 else ""
+        return gap_seconds_text(gap) if leader_best > 0 and gap > SAME_TIME else ""
     if car.position == 1:
         return ""
     if car.laps_behind > 0:
-        return f"+{car.laps_behind} {tr('Lap') if car.laps_behind == 1 else tr('Laps')}"
-    return f"+{localized(f'{car.gap:.3f}')}" if car.gap > 0 else ""
+        return laps_behind_text(car.laps_behind)
+    return gap_seconds_text(car.gap) if car.gap > 0 else ""
 
 
 def energy_text(car: Standing) -> tuple[str, float]:
@@ -280,49 +230,48 @@ def energy_text(car: Standing) -> tuple[str, float]:
     return (f"{round(level * 100)}%", level) if level >= 0 else ("", -1.0)
 
 
-def status_text(car: Standing) -> tuple[str, str]:
-    """Status of car (garage, pit lane, finished, retired, disqualified) & its tone, ("", "") on track"""
-    if car.finish == "FSTAT_DQ":
-        return tr("Disqualified"), "loss"
-    if car.finish == "FSTAT_DNF":
-        return tr("Retired"), "loss"
-    if car.finish == "FSTAT_FINISHED":
-        return tr("Finished"), "gain"
-    if car.garage:
-        return tr("Garage"), "dim"
-    if car.in_pit:
-        return tr("In Pits"), "warning"
-    return "", ""
-
-
-def camera_group(group: str) -> str:
-    """Camera group of setCamera from group reported by game ("TracksideCycle" -> "Trackside")"""
-    lowered = group.lower()
-    return next((name for name in CAMERA_GROUPS if lowered.startswith(name.lower())), group)
-
-
 def lap_seconds(car: Standing) -> float:
     """Lap time of car to estimate lap starts: last, else best, else estimated by game, 0 if none"""
     return next((value for value in (car.last, car.best, car.estimated) if value > 0), 0.0)
 
 
 # Page settings (user config folder), kept between sessions
-def settings_path() -> str:
-    return os.path.join(cfg.path.config, SETTINGS_FILE)
-
-
 def load_page_settings() -> dict[str, Any]:
-    try:
-        with open(settings_path(), encoding="utf-8") as file:
-            data = json.load(file)
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """Page settings (changes of an open page written first)"""
+    return page_settings.load_settings(SETTINGS_FILE)
 
 
-def save_page_settings(data: dict[str, Any]):
-    with atomic_write(settings_path()) as file:
-        json.dump(data, file, indent=1, ensure_ascii=False)
+class _CopyProgress(QObject):
+    """Copy progress handed from the copy thread to its page on the UI thread (page held weakly: a page closed
+    during a copy is never touched by the copy thread)"""
+
+    progressed = Signal(object, float)
+
+    def __init__(self):
+        super().__init__()
+        self.progressed.connect(self.hand_over, Qt.ConnectionType.QueuedConnection)
+
+    @Slot(object, float)
+    def hand_over(self, page: weakref.ReferenceType, progress: float):
+        backend = page()
+        if backend is not None and isValid(backend):
+            backend.set_copy_progress(progress)
+
+
+_copy_progress: _CopyProgress | None = None
+
+
+def copy_reporter(backend: GameReplaysBackend) -> Callable[[float], None]:
+    """Progress callback of a copy thread (made on the UI thread)"""
+    global _copy_progress
+    if _copy_progress is None or not isValid(_copy_progress):
+        _copy_progress = _CopyProgress()
+    courier, page = _copy_progress, weakref.ref(backend)
+
+    def progress(value: float):
+        with suppress(RuntimeError):  # app closing: courier deleted, progress dropped
+            courier.progressed.emit(page, value)
+    return progress
 
 
 # Background work (game connection)
@@ -332,7 +281,8 @@ def fetch_replays(connection: GameConnection) -> dict[str, Any]:
 
 
 def ask_state(connection: GameConnection, previous: tuple[Contact, ...], known_drivers: frozenset[str],
-              want_standings: bool, map_track: str | None) -> dict[str, Any]:
+              want_standings: bool, map_track: str | None, decode_incidents: Callable[[str], Any] | None = None,
+              contacts_of: Callable[[Any, tuple], tuple[Contact, ...]] = parse_contacts) -> dict[str, Any]:
     """Game state (in background): replay open, incidents, session (track, length), camera & HUD;
     car followed while a replay is open; standings if wanted, while a replay is open (replay time),
     or when contacts changed (slot of a driver can differ in another session or replay) or name drivers
@@ -344,7 +294,7 @@ def ask_state(connection: GameConnection, previous: tuple[Contact, ...], known_d
     info = connection.get(SESSION_RESOURCE)
     state: dict[str, Any] = {
         "active": active is True, "running": True,
-        "contacts": parse_contacts(connection.get(INCIDENTS_RESOURCE), ()),
+        "contacts": contacts_of(connection.get(INCIDENTS_RESOURCE, decode_incidents), ()),
         "camera": parse_camera(connection.get(CAMERA_RESOURCE)),
         "hud": parse_hud(connection.get(HUD_RESOURCE)),
         "end": parse_session_end(info), "time": parse_session_time(info),
@@ -369,6 +319,17 @@ def send_commands(batch: tuple[Command, ...]) -> bool:
             if not (command(connection) if callable(command) else connection.send(*command)):
                 return False
     return True
+
+
+class ReplayAction(NamedTuple):
+    """Where a replay asked from race results goes once open in game: session time (event, lap start), else lap
+    looked for, camera on the car of drivers (all drivers of a team car: game names the one driving)"""
+
+    replay: str  # replay name
+    time: float = -1.0  # session time (seconds), -1 if none
+    drivers: tuple[str, ...] = ()  # camera on car of these drivers (empty: camera kept)
+    lap: int = 0  # lap of car, looked for if time unknown (0 if none)
+    lead: float = -1.0  # seconds before time (-1: seconds before of page settings)
 
 
 def play_replay(name: str) -> Command:
@@ -425,7 +386,7 @@ def go_to_lap(slot: int, lap: int, seconds_before: int) -> Command:
     return run
 
 
-class GameReplaysBackend(QObject):
+class GameReplaysBackend(PageBackend):
     """Game Replays page state (QML context property "backend")"""
 
     statusChanged = Signal()
@@ -448,17 +409,27 @@ class GameReplaysBackend(QObject):
     mapChanged = Signal()
     mapLiveChanged = Signal()
     revisionChanged = Signal()
-    copyProgressed = Signal(float)  # emitted by copy thread
 
     def __init__(self, parent: BaseDialog):
-        super().__init__(parent)
+        super().__init__(parent, "Game replays")
         self._window = parent
         self.prefix = f"game_replays_{id(self)}|"
         settings = load_page_settings()
+        self.page_file = page_settings.PageSettings(SETTINGS_FILE, page_settings.SAVE_DELAY_MS, self)
         self.replays: list[GameReplay] = []
         self.replays_time = 0.0  # monotonic time of replays list answer, 0 if never
         self.replays_answered = False
         self.pending_watch = ""  # replay to open once game lists it (race results page)
+        self.pending_action: ReplayAction | None = None  # replay to open with what it does once game lists it
+        self.action: ReplayAction | None = None  # done once replay opened by page is open in game
+        self.action_deadline = 0.0  # monotonic time action is given up
+        self.action_generation = 0  # state answers asked before replay was opened ignored for action
+        self.state_generation = 0
+        self.action_after = 0.0  # monotonic time from which action may be done (replay loaded by game)
+        self.play_command: Command | None = None  # replay open command of action, until game answered it
+        self.sending: tuple[Command, ...] = ()  # batch of commands being sent
+        self.playing = ""  # replay opened from page (game tells no name): open again only if another one
+        self.results_links: dict[str, str] = {}  # replay name: results file of its session (race results page)
         self.folder = ""  # replay folder of game, kept when game closes
         self.temp: list[str] = []  # temporary files of game in replay folder
         self.protected: set[str] = {str(name) for name in settings.get("protected", []) if isinstance(name, str)}
@@ -467,6 +438,9 @@ class GameReplaysBackend(QObject):
         self.last_session = False  # incidents & standings of a session left (game in menus)
         self.incidents: tuple[Incident, ...] = ()
         self.contacts: tuple[Contact, ...] = ()
+        # Incidents (growing list): only entries added since last answer decoded & parsed
+        self._decode_incidents = AppendedListDecoder()
+        self._contacts_of = ContactsParser()
         self.cars: dict[str, CarInfo] = {}  # by driver name, slots of replay or session open in game
         self.standings: list[Standing] = []
         self.class_list: list[dict] = []
@@ -522,12 +496,12 @@ class GameReplaysBackend(QObject):
         self._shown = False
         self._replays_model = DictListModel(
             ("key", "track", "code", "session", "sessionLabel", "event", "eventType", "section", "date",
-             "size", "tip", "checked", "isProtected", "trackLogo"), self)
+             "size", "tip", "checked", "isProtected", "trackLogo", "hasResults"), self)
         self._incidents_model = DictListModel(
             ("key", "time", "timeText", "driver", "other", "wall", "mine", "count", "driverCar", "otherCar",
              "focused"), self)
         self._standings_model = DictListModel(
-            ("key", "position", "classPosition", "number", "driver", "vehicle", "carClass", "classColor", "laps",
+            ("key", "position", "classPosition", "number", "driver", "vehicle", "carClass", "classColor", "classAlias", "laps",
              "best", "last", "gap", "pits", "status", "statusTone", "penalties", "onCamera", "player", "fastest",
              "incidents", "energy", "energyLevel", "brandLogo"), self)
         self._map_model = DictListModel(
@@ -547,7 +521,6 @@ class GameReplaysBackend(QObject):
         self.request_command = GameRequest(self, (), self.command_done, self.command_failed)
         self.request_copy = GameRequest(self, (), self.copy_done, self.copy_failed)
         self.command_queue: list[tuple[Command, ...]] = []  # commands waiting for the one sent
-        self.copyProgressed.connect(self.set_copy_progress)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.refresh_state)
@@ -570,9 +543,10 @@ class GameReplaysBackend(QObject):
         self._timer.stop()
         self.update_live_timer()
 
-    def release(self):
+    def release_resources(self):
         self.page_hidden()
         self.copy_cancel.set()
+        self.page_file.flush()
         VertexStore.remove_prefix(self.prefix)
 
     def notify(self, text: str, error: bool = False):
@@ -582,11 +556,15 @@ class GameReplaysBackend(QObject):
         self.noticeChanged.emit()
 
     def save_settings(self):
-        save_page_settings({
+        """Settings written once changes pause (number arrows held: one write)"""
+        self.page_file.save(self.page_settings())
+
+    def page_settings(self) -> dict[str, Any]:
+        return {
             "seconds_before": self.seconds_before, "panel": self.panel, "sort": self.sort,
             "session_filter": self.session_filter, "incident_filter": self.incident_filter,
             "protected": sorted(self.protected),
-        })
+        }
 
     def schedule_midnight(self):
         now = QDateTime.currentDateTime()
@@ -620,8 +598,11 @@ class GameReplaysBackend(QObject):
         panel = PANELS[self.panel]
         want_standings = panel in ("standings", "map")
         map_track = (self.map_track or "") if panel == "map" else None
-        self.request_state.start(lambda: self.connected(
-            lambda connection: ask_state(connection, previous, known, want_standings, map_track)))
+        decode, contacts_of = self._decode_incidents, self._contacts_of
+        generation = self.state_generation
+        self.request_state.start(lambda: {**self.connected(
+            lambda connection: ask_state(connection, previous, known, want_standings, map_track, decode, contacts_of)),
+            "generation": generation})
 
     def schedule_state(self):
         """Next state request, sooner while a replay is open, later while game does not answer"""
@@ -656,6 +637,9 @@ class GameReplaysBackend(QObject):
         self.watch_pending()
 
     def received_state(self, state: dict):
+        if state.get("generation", self.state_generation) < self.state_generation:  # asked before a replay opened
+            self.schedule_state()
+            return
         active = state["active"]
         if active is None:  # session left: its incidents & standings kept until next one
             self.set_state(MENU if state["running"] else OFFLINE)
@@ -665,6 +649,7 @@ class GameReplaysBackend(QObject):
                 self.last_session = True
                 self.statusChanged.emit()
             self.update_replay_time(-1.0)
+            self.check_action(state)
             self.schedule_state()
             return
         self.set_state(REPLAY if active else SESSION)
@@ -707,6 +692,7 @@ class GameReplaysBackend(QObject):
             self.live_time = live_time
             self.time_received = time.time()
             self.replayTimeChanged.emit()
+        self.check_action(state)
         self.schedule_state()
 
     def set_state(self, state: str):
@@ -722,6 +708,7 @@ class GameReplaysBackend(QObject):
         if state != REPLAY:
             self.last_command = ""
             self.rewatching = False
+            self.playing = ""
             self.playbackChanged.emit()
         if previous in (SESSION, REPLAY) and state == MENU:  # session ended: game saved its replay
             QTimer.singleShot(SESSION_END_DELAY_MS, self.ask_replays)
@@ -729,7 +716,7 @@ class GameReplaysBackend(QObject):
         self.statusChanged.emit()
 
     def mark_updated(self):
-        updated = trm("Updated from game at {}").replace("{}", time.strftime("%H:%M:%S"), 1)
+        updated = trm("Updated from game at {}").replace("{}", clock_seconds(), 1)
         if updated != self.updated:
             self.updated = updated
             self.updatedChanged.emit()
@@ -750,6 +737,15 @@ class GameReplaysBackend(QObject):
         self.replayTimeChanged.emit()
 
     def command_done(self, accepted: bool):
+        if self.play_command is not None and self.play_command in self.sending:  # replay of action opening
+            self.play_command = None
+            if accepted:
+                self.state_generation += 1  # standings of replay open before never used for action
+                self.action_generation = self.state_generation
+                self.action_after = time.monotonic() + ACTION_SETTLE
+            else:
+                self.action = None
+        self.sending = ()
         if not accepted:
             self.notify(tr("Game did not accept the command"), True)
         if self.command_queue:
@@ -769,6 +765,7 @@ class GameReplaysBackend(QObject):
         if self.request_command.busy or not self.command_queue:
             return
         batch = self.command_queue.pop(0)
+        self.sending = batch
         self.request_command.start(lambda: send_commands(batch))
 
     # Status
@@ -936,28 +933,44 @@ class GameReplaysBackend(QObject):
     @Slot(str)
     def watchReplay(self, key: str):
         """Replay opened in game, after confirmation (warning in a live session)"""
+        self.watch(key)
+
+    def watch(self, key: str, action: ReplayAction | None = None):
+        """Replay opened in game after confirmation, then action done once it is open (already open from page:
+        action done at once, no confirmation)"""
         replay = self.replay_of(key)
         if replay is None:
             return
         if key not in self.checked:
             self.selectReplay(key)
+        if action is not None and self.state == REPLAY and self.playing == replay.name:
+            self.action, self.action_deadline = action, time.monotonic() + ACTION_WAIT
+            self.action_generation, self.action_after = self.state_generation, 0.0
+            self.check_action(None)
+            return
         message = f"Open replay <b>{replay.name}</b> in the game?"
         if self.state == SESSION:
             message = f"You are in a session: opening a replay may leave it.<br><br>{message}"
         if self._window.confirm_operation("Watch in Game", message):
-            self.send(play_replay(replay.name))
+            self.playing = replay.name
+            command = play_replay(replay.name)
+            self.action, self.action_deadline = action, time.monotonic() + ACTION_WAIT
+            self.action_generation = self.state_generation + 1  # state asked once game accepted the replay
+            self.play_command = command if action is not None else None
+            self.send(command)
 
-    def watch_named(self, name: str):
-        """Replay of name opened in game (race results page): at once if game lists it, else once it answers"""
+    def watch_named(self, name: str, action: ReplayAction | None = None):
+        """Replay of name opened in game (race results): at once if game lists it, else once it answers"""
         if self.replays_answered and self.replay_of(name) is not None:
-            self.watchReplay(name)
+            self.watch(name, action)
             return
-        self.pending_watch = name
+        self.pending_watch, self.pending_action = name, action
         self.ask_replays()
 
     def watch_pending(self):
-        """Replay asked by race results page opened once replays list answered, else told why not"""
+        """Replay asked by race results opened once replays list answered, else told why not"""
         name, self.pending_watch = self.pending_watch, ""
+        action, self.pending_action = self.pending_action, None
         if not name:
             return
         if not self.replays_answered:
@@ -965,7 +978,52 @@ class GameReplaysBackend(QObject):
         elif self.replay_of(name) is None:
             self.notify(trm(f"Replay not found in game: {name}"), True)
         else:
-            self.watchReplay(name)
+            self.watch(name, action)
+
+    def check_action(self, state: dict | None):
+        """Action of replay opened from race results done once replay is open with its cars (state answer asked
+        after it was opened), given up after ACTION_WAIT"""
+        action = self.action
+        if action is None:
+            return
+        if time.monotonic() > self.action_deadline:
+            self.action = None
+            self.notify(trm(f"Replay did not open in time: {action.replay}"), True)
+            return
+        if state is not None and state.get("generation", self.state_generation) < self.action_generation:
+            return
+        if self.play_command is not None or time.monotonic() < self.action_after:  # replay still opening
+            return
+        if self.state != REPLAY or not self.cars or self.replay_time < 0:
+            return
+        self.action = None
+        car = next((self.cars[name] for name in action.drivers if name in self.cars), None)
+        lead = self.seconds_before if action.lead < 0 else action.lead
+        if action.time < 0 and action.lap > 0:  # lap start unknown: looked for in replay
+            if car is None:
+                self.notify(trm(f"Driver not found in replay: {action.drivers[0] if action.drivers else ''}"), True)
+                return
+            self.send(go_to_lap(car.slot, action.lap, int(lead)))
+            return
+        commands: list[Command] = []
+        if car is not None:
+            commands.append(("PUT", f"/rest/watch/focus/{car.slot}"))
+        if action.time >= 0:
+            commands.append(("PUT", f"/rest/watch/replaytime/{max(int(action.time - lead), 0)}"))
+        if commands:
+            self.send(*commands)
+
+    def set_results_links(self, links: dict[str, str]):
+        """Results file of each replay (replay name: path), from race results files"""
+        if links != self.results_links:
+            self.results_links = links
+            if self.replays:
+                self.update_replays()
+
+    @Slot(str, result=str)
+    def resultsOf(self, key: str) -> str:
+        """Results file of replay's session, "" if none"""
+        return self.results_links.get(key, "")
 
     @Slot()
     def openFolder(self):
@@ -1038,6 +1096,7 @@ class GameReplaysBackend(QObject):
                 "checked": replay.name in self.checked,
                 "isProtected": replay.name in self.protected,
                 "trackLogo": self.logos.track(track, replay.track),
+                "hasResults": replay.name in self.results_links,
             })
         self._replays_model.sync(rows)
         shown = self.shown_keys()
@@ -1126,7 +1185,7 @@ class GameReplaysBackend(QObject):
             return
         self.copy_progress, self.copy_kind = 0.0, kind
         self.copy_cancel = cancelled = threading.Event()
-        progress = self.copyProgressed.emit
+        progress = copy_reporter(self)
         self.request_copy.start(lambda: replay_files.copy_replays(sources, folder, progress, cancelled))
         self.filesChanged.emit()
         self.copyProgressChanged.emit()
@@ -1340,14 +1399,7 @@ class GameReplaysBackend(QObject):
         return self.camera_key()
 
     def camera_key(self) -> str:
-        if self.state not in (SESSION, REPLAY):
-            return ""
-        group, name = self.camera
-        if group.lower() == "tracksidecycle":
-            return "TRACKSIDE0"
-        if camera_group(group) == "Trackside":
-            return self.trackside_choice if self.trackside_choice != "TRACKSIDE0" else ""
-        return name if any(key == name for key, *_ in CAMERAS) else ""
+        return camera_key(*self.camera, self.trackside_choice) if self.state in (SESSION, REPLAY) else ""
 
     @Property(str, notify=cameraChanged)
     def cameraLabel(self) -> str:
@@ -1371,11 +1423,8 @@ class GameReplaysBackend(QObject):
         entry = next((entry for entry in CAMERAS if entry[0] == key), None)
         if entry is None or self.state not in (SESSION, REPLAY):
             return
-        commands: list[Command] = [("PUT", CAMERA_FOCUS.format(kind=entry[3], group=entry[4]))]
-        if key == "TVCOCKPIT":
-            commands.append(NEXT_DRIVING)
         self.trackside_choice = key if entry[2] == "Trackside" else ""
-        self.send(*commands)
+        self.send(*camera_commands(key))
 
     @Property(list, notify=hudChanged)
     def hudComponents(self) -> list[dict]:
@@ -1452,15 +1501,11 @@ class GameReplaysBackend(QObject):
     def toggleGameUi(self):
         """Whole game UI (top bar, standings, replay bar & HUD) shown or hidden, as a middle click in game does
         (no Rest API command for its web panels): middle click posted to game window"""
-        from . import game_window
-
         if self.state not in (SESSION, REPLAY):
             return
-        window = game_window.find_game_window()
-        if not window[0]:
+        if not click_game_ui():
             self.notify(tr("Game window not found: LMU must be running on this computer."), True)
             return
-        threading.Thread(target=game_window.middle_click, args=(window,), daemon=True, name="Game click").start()
         if self._shown:  # game shows or hides its HUD parts too: asked again once done
             QTimer.singleShot(700, self.refresh_state)
 
@@ -1906,7 +1951,7 @@ class GameReplaysBackend(QObject):
                 "driver": car.driver,
                 "vehicle": car.team or car.vehicle,
                 "carClass": car.car_class,
-                "classColor": class_color(car.car_class),
+                "classColor": class_color(car.car_class), "classAlias": class_alias(car.car_class),
                 "laps": car.laps,
                 "best": lap_text(car.best),
                 "last": lap_text(car.last),

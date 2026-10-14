@@ -1,24 +1,33 @@
-"""Modern track map: road of each sector colored by player's last time in it, cars close to player ringed"""
+"""Modern track map: road of each sector colored by player's most recent time in it (as game live timing & driver
+lists), cars close to player ringed"""
 
 from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
 
-from neopedal.const_common import MAX_SECONDS
 
+def player(last, best, class_best, data=None):
+    """Player car (data: car to set, else a stand-in): sectors of last lap (S1 being driven), personal bests, best
+    sectors of class"""
+    from neopedal.module_info import LapSectors
 
-def sectors(last, best, delta_pb):
-    return SimpleNamespace(sectorPrev=last, sectorBestTB=best, deltaSectorBestPB=delta_pb)
+    sectors = LapSectors()
+    sectors.last, sectors.best, sectors.sector = tuple(last), list(best), 0
+    if data is None:
+        return SimpleNamespace(sectors=sectors, classBestSectors=tuple(class_best))
+    data.sectors, data.classBestSectors = sectors, tuple(class_best)
+    return data
 
 
 def test_sector_performance_colors():
     from neopedal.widget._modern.track_map import sector_performance
 
-    data = sectors(last=[30.0, 41.2, MAX_SECONDS], best=[30.0, 40.9, 28.0], delta_pb=[-0.2, -0.1, 0.0])
-    assert sector_performance(data) == ("best", "positive", None)  # best, faster than best lap sector, no time
-    data = sectors(last=[30.3, 41.5, 28.6], best=[30.0, 40.9, 28.0], delta_pb=[0.3, 0.2, 0.0])
-    assert sector_performance(data) == ("warning", "warning", "warning")  # slower
+    data = player(last=[30.0, 41.2, 0.0], best=[30.0, 41.2, 28.0], class_best=[30.0, 40.9, 28.0])
+    assert sector_performance(data) == ("best", "positive", None)  # best of class, personal best, no time
+    data = player(last=[30.3, 41.5, 28.6], best=[30.0, 40.9, 28.0], class_best=[29.8, 40.5, 27.6])
+    assert sector_performance(data) == ("caution", "caution", "caution")  # slower: yellow (as app pages & stream graphics)
+    assert sector_performance(None) == ()
 
 
 def test_nearby_vehicles_within_threshold(monkeypatch):
@@ -53,10 +62,12 @@ def track_map(ui_env, bundled_fonts):
 def test_sector_colors_drawn_once_player_completes_sector(track_map, monkeypatch):
     from PySide6.QtCore import QTimerEvent
 
-    from neopedal.module_info import minfo
+    from neopedal.module_info import VehicleDataSet, minfo
 
-    data = sectors(last=[30.0, MAX_SECONDS, MAX_SECONDS], best=[30.0, 41.0, 28.0], delta_pb=[-0.1, 0.0, 0.0])
-    monkeypatch.setattr(minfo.sectors, "sessionBest", data)
+    data = player(last=[30.0, 0.0, 0.0], best=[30.0, 41.0, 28.0], class_best=[30.0, 40.0, 27.0],
+                  data=VehicleDataSet())
+    monkeypatch.setattr(minfo.vehicles, "dataSet", (data,))
+    monkeypatch.setattr(minfo.vehicles, "playerIndex", 0)
     widget = track_map(show_sector_performance=True)
     redraws = []
     monkeypatch.setattr(widget, "update_map", lambda data: None)  # track itself unchanged
@@ -65,9 +76,9 @@ def test_sector_colors_drawn_once_player_completes_sector(track_map, monkeypatch
     assert widget.sector_colors == ("best", None, None) and redraws == [1]
     widget.timerEvent(QTimerEvent(0))
     assert redraws == [1]  # same sector times: static layer kept
-    data.sectorPrev = [30.0, 41.5, MAX_SECONDS]
+    data.sectors.last = (30.0, 41.5, 0.0)
     widget.timerEvent(QTimerEvent(0))
-    assert widget.sector_colors == ("best", "warning", None) and redraws == [1, 1]
+    assert widget.sector_colors == ("best", "caution", None) and redraws == [1, 1]
     off = track_map(show_sector_performance=False)
     off.timerEvent(QTimerEvent(0))
     assert off.sector_colors == ()
@@ -101,4 +112,4 @@ def test_preview_draws_sector_colors(ui_env, bundled_fonts):
 
     shown = sum(1 for y in range(0, image.height(), 2) for x in range(0, image.width(), 2)
                 if purple(image.pixelColor(x, y)))
-    assert shown > 0  # session best sector of simulated race
+    assert shown > 0  # best sector of class of simulated race

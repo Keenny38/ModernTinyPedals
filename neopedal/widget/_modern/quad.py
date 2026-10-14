@@ -271,9 +271,3 @@ class QuadMixin:
                 part = QRectF(box.left() + index * (half + gap), box.top(), half, size)
                 rounded(painter, part, self.radius(0.2), color)
                 self.draw_text(painter, part, symbol, role, readable_on(color), CENTER, elide=False)
-
-
-def wheel_values(values, fmt) -> tuple:
-    """Format 4 wheel values"""
-    return tuple(fmt(value) for value in values)
-

@@ -16,24 +16,24 @@ TextField {
     verticalAlignment: TextInput.AlignVCenter
     color: theme.text
     placeholderTextColor: theme.dimText
-    selectionColor: theme.accent
+    selectionColor: theme.accentFill
     selectedTextColor: "white"
     selectByMouse: true
-    opacity: enabled ? 1 : 0.5
+    opacity: enabled ? 1 : theme.disabledOpacity
     Accessible.name: tip !== "" ? tip : placeholderText
 
     ToolTip.visible: tip !== "" && hovered && !activeFocus
     ToolTip.text: tip
-    ToolTip.delay: 700
+    ToolTip.delay: theme.tipDelay
 
     background: Rectangle {
-        radius: theme.em * 0.4
+        radius: theme.radiusMd
         color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
         border.width: field.activeFocus || field.invalid ? 1.5 : 1
         border.color: field.invalid ? theme.loss
                     : field.activeFocus ? theme.accent
                     : field.hovered ? Qt.lighter(theme.border, 1.2) : theme.border
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
     }
 
     Keys.onEscapePressed: function(event) {
