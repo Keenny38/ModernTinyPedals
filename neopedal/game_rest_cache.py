@@ -157,7 +157,8 @@ class GameRestCache:
         with self._lock:
             entry = self._routes.get((address, route))
             answer = entry.answer if entry is not None else None
-        if answer is not None and self._clock() - answer.time <= max_age:
+        # max_age 0: never kept, even with a coarse clock (Windows: 15.6 ms steps, age often 0)
+        if answer is not None and max_age > 0 and self._clock() - answer.time <= max_age:
             return answer
         return None
 
@@ -181,7 +182,7 @@ class GameRestCache:
         while True:
             with self._lock:
                 answer = entry.answer
-                if answer is not None and self._clock() - answer.time <= max_age:
+                if answer is not None and max_age > 0 and self._clock() - answer.time <= max_age:  # 0: ask
                     return answer
                 pending = entry.pending
                 if pending is None:

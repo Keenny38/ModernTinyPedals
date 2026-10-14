@@ -320,7 +320,10 @@ def test_popup_contents_made_when_opened_and_timing_cells_light(director_page, m
         assert driver_cells() == before  # cells of other columns kept
         assert cells_of("penalties")[0].property("text") == "1"
         timing.setProperty("visible", False)
-        process_events(0.3)
+        for _ in range(30):  # close animation & deferred delete: slow CI machines need more than 0.3 s
+            process_events(0.1)
+            if root.findChild(QObject, "timingList") is None:
+                break
         assert root.findChild(QObject, "timingList") is None  # big table freed once closed
         backend.timing.setTimingOpen(False)
         # Car sheet & pit radar bound on their own, settings & lap history made when opened: no warning

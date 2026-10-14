@@ -150,10 +150,13 @@ def test_trailing_bar_readings_and_maximum_indicator(widgets, inputs, modern, in
     assert shown.height() > plain.height()  # room for readings & indicator
     assert shown.width() >= plain.width()  # columns fit readings
     full_at_top = not inverted
+    # Classic: reading rect moved by font vertical offset (glyphs placed as other classic overlays), larger on Linux
+    offset = 0 if modern else abs(shown.get_font_metrics(shown.bar_font).voffset)
     for track, cap, reading in zip(shown.bar_tracks, shown.max_rects, shown.reading_rects):
         assert cap.height() == 6
         assert (cap.bottom() <= track.top()) if full_at_top else (cap.top() >= track.bottom())
-        assert (reading.top() >= track.bottom() - 1) if full_at_top else (reading.bottom() <= track.top() + 1)
+        assert ((reading.top() >= track.bottom() - 1 - offset) if full_at_top
+                else (reading.bottom() <= track.top() + 1 + offset))
         assert cap.top() >= 0 and cap.bottom() <= shown.height()
         assert reading.top() >= -2 and reading.bottom() <= shown.height() + 2  # classic: font vertical offset
     inputs(inputs__throttle=1.0, inputs__throttle_raw=1.0)

@@ -725,6 +725,6 @@ def test_value_bubbles_without_positioners(viewer, laps):  # noqa: F811
                       key=lambda row: row.y())
         assert [row.y() for row in rows] == pytest.approx([index * row_height for index in range(len(rows))])
         assert column.height() == pytest.approx(len(rows) * row_height)
-        assert column.width() == pytest.approx(max((row.width() for row in rows), default=0))
+        assert column.width() == pytest.approx(max((row.width() for row in rows), default=0), abs=1)  # rounded on Linux
         shown += len(rows)
     assert shown >= 2  # a value of each lap at least

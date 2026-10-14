@@ -33,6 +33,7 @@ class Game:
     """Readings of a fake game, changed by tests"""
 
     def __init__(self):
+        self.popup_clock = [1000.0]  # setting pop-up clock, moved on by tests between changes
         self.values = {
             "tyre": dict(surface_temperature_avg=(80.0, 81.0, 95.0, 70.0),
                          inner_temperature_avg=(80.0, 81.0, 95.0, 70.0), carcass_temperature=(75.0,) * 4,
@@ -56,10 +57,13 @@ class Game:
     def install(self, monkeypatch):
         from neopedal.api_control import api
         from neopedal.module_info import minfo
-        from neopedal.widget._black_box import center, panels, reader, regions, wheels
+        from neopedal.widget._black_box import center, panels, popup, reader, regions, wheels
+        from neopedal.widget._modern import damage
 
-        for module in (wheels, center, panels, reader, regions):
+        # Animation clocks frozen: a slow machine must not see pulses or flashes move between steps
+        for module in (wheels, center, panels, reader, regions, damage):
             monkeypatch.setattr(module, "monotonic", lambda: 1000.0)
+        monkeypatch.setattr(popup, "monotonic", lambda: self.popup_clock[0])
         for group, readers in self.values.items():
             target = getattr(api.read, group)
             for name in readers:
@@ -177,6 +181,7 @@ def test_partial_repaint_matches_full_repaint(ui_env, bundled_fonts, monkeypatch
         assert screen_matches_full(widget)
         partial = 0
         for name, change in changes(game):
+            game.popup_clock[0] += 10.0  # setting pop-up of the previous change gone, as between real changes
             change()
             regions.clear()
             widget.timerEvent(None)

@@ -405,21 +405,24 @@ class RankWatcher:
         previous = self._located
         # Results folders & Steam users read again only now & then once file found, every minute while missing
         found = previous is not None and bool(previous.path) and self._mtime >= 0
+        relocated = False  # located in this check (flag, not clock: a coarse clock gives the same time twice)
         if self._located is None or now - self._located_time >= (LOCATE_FOUND_SECONDS if found else LOCATE_SECONDS):
             try:
                 self._located = self._locate()
             except Exception:  # any locate error: nothing found this time
                 self._located = Located("", "", ())
             self._located_time = now
+            relocated = True
         located = self._located
         try:
             active = self._active_account()
         except Exception:  # unknown: account located kept
             active = ""
-        if active and active != located.steam_id and self._located_time != now:  # Steam account switched
+        if active and active != located.steam_id and not relocated:  # Steam account switched
             with contextlib.suppress(Exception):  # any locate error: account found before kept
                 located = self._located = self._locate()
             self._located_time = now
+            relocated = True
             self._mtime = -2.0  # ranks of account in use read again
         try:
             mtime = os.path.getmtime(located.path) if located.path else -1.0
@@ -427,7 +430,7 @@ class RankWatcher:
             mtime = -1.0
         if mtime == self._mtime:
             return
-        if self._mtime >= 0 and self._located_time != now:  # file written again: game account may have changed
+        if self._mtime >= 0 and not relocated:  # file written again: game account may have changed
             with contextlib.suppress(Exception):  # any locate error: account found before kept
                 located = self._located = self._locate()
             self._located_time = now
