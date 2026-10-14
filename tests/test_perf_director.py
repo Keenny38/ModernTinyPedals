@@ -6,7 +6,7 @@ import json
 import threading
 import time
 
-from PySide6.QtCore import QCoreApplication, QObject, qInstallMessageHandler
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, qInstallMessageHandler
 from PySide6.QtQuick import QQuickItem
 from shiboken6 import getCppPointer
 
@@ -319,9 +319,11 @@ def test_popup_contents_made_when_opened_and_timing_cells_light(director_page, m
         process_events(0.1)
         assert driver_cells() == before  # cells of other columns kept
         assert cells_of("penalties")[0].property("text") == "1"
+        timing.setProperty("exit", None)  # closes at once: an offscreen window may never run the fade out
         timing.setProperty("visible", False)
-        for _ in range(30):  # close animation & deferred delete: slow CI machines need more than 0.3 s
+        for _ in range(30):  # close & deferred delete (not run by processEvents outside an event loop)
             process_events(0.1)
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
             if root.findChild(QObject, "timingList") is None:
                 break
         assert root.findChild(QObject, "timingList") is None  # big table freed once closed
