@@ -764,13 +764,24 @@ class SteamVRCheck:
         return not self._thread.is_alive()
 
 
+PLACEMENT_LIMIT = 100.0  # meters: largest width, distance & offsets the OpenXR layer draws (shared_frame.cpp)
+
+
+def placement_meters(value: float, default: float, minimum: float = -PLACEMENT_LIMIT) -> float:
+    """Placement value within what the OpenXR layer draws (else every frame refused, nothing shown)"""
+    number = float(value)
+    if not math.isfinite(number):
+        number = default
+    return min(max(number, minimum), PLACEMENT_LIMIT)
+
+
 def placement_from(setting: dict) -> vr_shared.Placement:
     """Overlay placement from "vr_overlay" setting"""
     return vr_shared.Placement(
-        max(float(setting["overlay_width_meters"]), 0.05),
-        float(setting["distance_meters"]),
-        float(setting["vertical_offset_meters"]),
-        float(setting["horizontal_offset_meters"]),
+        placement_meters(setting["overlay_width_meters"], 0.8, 0.05),
+        placement_meters(setting["distance_meters"], 1.0),
+        placement_meters(setting["vertical_offset_meters"], -0.2),
+        placement_meters(setting["horizontal_offset_meters"], 0.0),
         bool(setting["enable_attach_to_headset"]),
     )
 

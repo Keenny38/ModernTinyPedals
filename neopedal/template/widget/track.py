@@ -636,6 +636,7 @@ WIDGET_TRACK = {
         "show_low_fuel_for_race_only": False,
         "low_fuel_volume_threshold": 20,
         "low_fuel_lap_threshold": 2,
+        "low_energy_percentage_threshold": 100,
         "low_fuel_text": "LF",
         "low_energy_text": "LE",
         "font_color_low_fuel": "#000000",

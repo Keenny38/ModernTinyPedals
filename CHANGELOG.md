@@ -3,6 +3,48 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.25.0 (unreleased)
+
+Safer options everywhere: every number has limits you can see, presets are repaired as they load, and the Overlay Options page shows race situations and both designs.
+
+### New
+
+#### Overlay Options
+
+- **Race situations in the preview**: `Racing`, `Yellow & Blue Flags`, `In Pits`, `Damage` and `Rain` show flags, pit timer, limiter, damage or wet weather without driving.
+- **Test on Screen**: the overlays on screen show the chosen situation for 10 seconds (saved values), to set their colors and thresholds.
+- **Other Design**: the same values drawn by the other design (modern or classic), with the number of options of each design.
+- **Used only** filter: hides the options doing nothing with the current values (greyed out).
+- **Allowed values** in the tooltip of every number (`Allowed: 0 - 4000`).
+- Options used by several parts (a Dashboard HUD label shown by its chip and by the setting pop-up) are greyed out only while every part is off: `Used only with one of: ...`.
+
+#### New Tyre Overview overlay
+
+- **Every tyre reading in one card per tyre** (off by default, `Tyres & Wheels` category), placed as on the car seen from above (modern design: car body in the middle, each tyre drawn at its corner): inner / center / outer surface temperatures on the tyre in heatmap colors, compound badge or alert (detached wheel, puncture, flat spot) with the tyre highlighted, carcass & inner layer temperatures, pressure in blue below and red above the target range with its place on a target scale (same ranges as the Dashboard HUD, per compound too), tread gauge, wear per lap and laps left. Every part has its own on/off option, the car body and tyre drawing too.
+
+![Tyre Overview overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-16-tyre-overview.png)
+
+#### Presets and options
+
+- **Check Preset** (Presets page menu): lists the unknown, invalid and out of range options of a preset, and repairs it.
+- **Standings**: `show_class_column_with_class_header` keeps the class column with the class headers (off by default).
+- **Flag**: `low_energy_percentage_threshold`, low energy alert at a percent of energy left (100 by default: laps threshold only, as before).
+
+### Improvements
+
+- **Every number option has limits**: a value out of range in a preset file, an imported preset or a package is brought within them as the preset loads (written in the log), instead of drawing an overlay of tens of thousands of pixels.
+- **An overlay too big is cut** to 8192 pixels with a message, instead of freezing the computer.
+- **Import Overlay Settings**: each option left out or corrected is listed with the reason, and numbers out of limits are brought within instead of skipped.
+- **Import Settings**: tried again at the next start (up to 3 times) when files are in use (other instance closing, antivirus).
+- **Broadcast Director**: closing the page no longer waits for the events log to be written.
+
+### Fixes
+
+- **Standings, Relative and Rivals**: column order and columns on or off follow the page every time; the classic design no longer lists the orders of modern only columns (gap trend, track limits, energy per lap).
+- **Overlay Options**: `Undo` and `Redo` while a field is being edited show the restored value; options greyed out wrongly, or not greyed out, on many overlays.
+- **French translation reviewed in full**: the app speaks to you with « vous » everywhere, one word for vehicle classes (« catégorie »), about 200 labels, help texts and messages corrected (agreements, power/weight ratio, missing words), and texts still in English translated (Flag, Engine, Force, System Performance overlays, error messages).
+- **Overlays**, found by reviewing every option: radar fade radius, brake average temperature and Speedometer top speed reset with the session, Dashboard HUD impact cone after a restart, overlay brought back on screen staying there, low fuel or energy alert with an unknown consumption, global scale no longer turning on options set to 0, `100%` no longer cut, lap times like `1:60.0`, Sectors after a reset, Trailing time scale, Heading decimals, Tyre Pressure average, Track Notes timers, Steering Meter marks, and many more.
+
 ## 0.24.0 (2026-10-14)
 
 Your Driver Rank and Safety Rank everywhere, Standings like a timing tower, the Black box renamed **Dashboard HUD** with a setting pop-up, Results & Replays in one page, one look per meaning in every overlay and page, and a lighter app.

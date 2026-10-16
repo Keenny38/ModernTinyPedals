@@ -71,6 +71,8 @@ class Realtime(Overlay):
         self.delta_display_range = calc.decimal_strip(self.wcfg["delta_display_range"], self.decimals)
         self.max_padding = 4 + self.decimals
         self.delta_width = font_m.width * self.max_padding + padx * 2
+        # Delta bar at least as wide as delta text (0 or negative length: widget of no width)
+        self.dbar_length = max(self.dbar_length, int(self.delta_width * 0.5 + 0.5))
         delta_height = font_m.capital + pady * 2
 
         if self.wcfg["layout"] == 0:

@@ -81,8 +81,12 @@ def race_time_text(seconds: float) -> str:
 def gap_seconds_text(seconds: float, decimals: int = 3) -> str:
     """Gap "+2.345" (decimal separator of app language), "+1:02.345" over a minute: gaps of every page &
     stream graphic"""
+    decimals = max(decimals, 0)
+    seconds = round(seconds, decimals) + 0.0  # rounded first: 59.97 with 1 decimal is "+1:00.0", never "+60.0"
     if seconds >= 60:
-        return f"+{calc.sec2laptime_full(seconds)}"
+        minutes, rest = divmod(seconds, 60)
+        width = 3 + decimals if decimals else 2
+        return f"+{minutes:.0f}:{rest:0{width}.{decimals}f}"
     return f"+{localized(f'{seconds:.{decimals}f}')}"
 
 

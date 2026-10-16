@@ -36,7 +36,8 @@ from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
 from .log_handler import BoundedLogStream, install_exception_hooks, set_logging_level
 from .setting import cfg
-from .userfile.settings_import import log_import_report
+from .userfile import settings_import_folders
+from .userfile.settings_import import apply_pending_import, log_import_report, read_request, record_message
 
 logger = logging.getLogger(__package__)
 UI_FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans")  # app UI, not overlays
@@ -106,6 +107,19 @@ def single_instance_check(is_single_instance: bool):
     set_app_icon(root)
     QMessageBox.warning(None, f"{APP_NAME} v{VERSION}", warning_text)
     sys.exit()
+
+
+def apply_settings_import():
+    """Settings import asked last run, applied once this is the only running instance, before settings
+    are loaded (a running instance would save its settings over imported ones, or hold its files)"""
+    config_folder, data_folder = settings_import_folders()
+    if not read_request(config_folder.rstrip("/\\")):
+        return
+    if not realtime_state.singleton and is_pid_exist():  # multiple instances allowed: another one running
+        record_message(logging.WARNING, "IMPORT: another NeoPedal is running, settings imported on next start")
+        return
+    if apply_pending_import(config_folder, data_folder) and realtime_state.singleton:
+        save_pid_file()  # PID file of this instance set aside with previous settings
 
 
 def get_version():
@@ -241,6 +255,7 @@ def check_safe_mode(flag: bool):
 def start_app(cli_args):
     """Init main window"""
     single_instance_check(bool(cli_args.single_instance))
+    apply_settings_import()
     unset_environment()
     set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
     install_exception_hooks(logger)

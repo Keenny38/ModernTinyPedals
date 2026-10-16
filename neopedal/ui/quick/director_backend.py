@@ -318,12 +318,16 @@ class DirectorBackend(PageBackend):
         self.is_open = False
         self._game.stop()
         self._instant_timer.stop()
-        self._camera.stop()
-        self._log.flush()
+        self._camera.stop()  # events log lines still written in background: page never waits (see WRITER)
         self._history_asked = False
         driver_history.clear()  # race history of every driver (up to MAX_FILES files) read again once opened
         if _active is not None and _active() is self:
             _active = None
+            from ...stream_director import director_feed, live_feed
+
+            # No more updates: broadcast graphics emptied (as director off), never left frozen on air
+            director_feed.clear()
+            live_feed.clear()
 
     def refresh_models(self):
         """Every list & card of the page made again from the last answer (lists of hidden tabs once shown)"""

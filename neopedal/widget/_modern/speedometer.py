@@ -72,6 +72,11 @@ class Realtime(StatsMixin, ModernOverlay):
         self.speed_fast = -1.0
         self.min_timer = self.max_timer = 0.0
 
+    def post_update(self):
+        """Speeds restart from next reading (new session, track or vehicle)"""
+        self.speed_min = self.speed_max = 0.0
+        self.speed_fast = -1.0
+
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
 

@@ -23,6 +23,7 @@ writer thread, no file write on the UI thread), events exported to a CSV file
 
 from __future__ import annotations
 
+import atexit
 import csv
 import logging
 import os
@@ -45,17 +46,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def safe_cell(value: Any) -> Any:
+    """CSV cell never read as a formula by a spreadsheet (driver names, texts from the game): text starting
+    like a formula gets a leading quote, numbers & signed values ("+1.2", "-3 laps") kept as they are"""
+    if not isinstance(value, str) or not value:
+        return value
+    first, second = value[0], value[1:2]
+    if first in "=@\t\r" or (first in "+-" and not (second.isdigit() or second in ". ")):
+        return f"'{value}"
+    return value
+
+
+def safe_row(row: tuple) -> tuple:
+    return tuple(safe_cell(value) for value in row)
+
+
 def write_log_rows(path: str, rows: list[tuple]):
     """Lines added to an events log file, header first in a new file (writer thread)"""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         new = not os.path.exists(path)
-        with open(path, "a", encoding="utf-8-sig" if new else "utf-8", newline="") as file:
+        # Text not encodable (lone surrogate in a name from the game) replaced, never a lost line
+        with open(path, "a", encoding="utf-8-sig" if new else "utf-8", errors="replace", newline="") as file:
             writer = csv.writer(file)
             if new:
                 writer.writerow(("Time", "Session time", "Kind", "Event", "Detail", "Class", "Cars"))
-            writer.writerows(rows)
-    except OSError as error:
+            writer.writerows(safe_row(row) for row in rows)
+    except (OSError, ValueError, csv.Error) as error:
         logger.warning("Broadcast director: events log not written: %s", error)
 
 
@@ -83,12 +100,21 @@ class LogWriter:
                     self._lock.notify_all()
                     return
                 path, rows = self._queue.popleft()
-            write_log_rows(path, rows)
+            try:
+                write_log_rows(path, rows)
+            except Exception:  # thread kept writing: never left busy (later lines lost, flush waiting)
+                logger.exception("Broadcast director: events log lines not written")
 
     def flush(self, timeout: float = LOG_FLUSH_SECONDS) -> bool:
         """Lines given so far written (page closing, log read), False if still writing after timeout"""
         with self._lock:
             return self._lock.wait_for(lambda: not self._busy, timeout)
+
+
+# One writer for every page instance (lines of a closed page & of the page opened again never mixed in a file):
+# a closing page never waits for it, lines written in background, waited once when the app exits
+WRITER = LogWriter()
+atexit.register(WRITER.flush)
 
 
 
@@ -100,13 +126,13 @@ class EventsLog(DirectorPart):
     def __init__(self, page: DirectorBackend, settings: dict[str, Any]):
         super().__init__(page)
         self.log_events = settings.get("log_events") is True  # events written to a file as they happen
-        self.writer = LogWriter()
+        self.writer = WRITER
 
     def page_settings(self) -> dict[str, Any]:
         return {"log_events": self.log_events}
 
     def flush(self):
-        """Lines given so far written (page closing, app quitting)"""
+        """Lines given so far written (app quitting)"""
         self.writer.flush()
 
     def log_file(self) -> str:
@@ -166,15 +192,15 @@ class EventsLog(DirectorPart):
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8-sig", newline="") as file:
+            with open(path, "w", encoding="utf-8-sig", errors="replace", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(("Session time", "Kind", "Event", "Detail", "Class", "Cars"))
                 for event in page.events:
                     title, detail = page.event_texts(event)
                     cars = " / ".join(car_label(page.by_slot.get(slot)) for slot in event.slots)
-                    writer.writerow((clock_text(event.time), tr(KIND_TEXTS[event.kind]), title, detail,
-                                     event.car_class, cars))
-        except OSError as error:
+                    writer.writerow(safe_row((clock_text(event.time), tr(KIND_TEXTS[event.kind]), title, detail,
+                                              event.car_class, cars)))
+        except (OSError, csv.Error) as error:
             page.notify(f"{tr('Events not saved')}: {error}", True)
             return
         page.notify(tr("Events saved"))

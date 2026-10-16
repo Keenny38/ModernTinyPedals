@@ -16,7 +16,8 @@ def test_pid_file_of_running_app(ui_env):
     assert main.is_pid_exist()  # this process, same creation time
 
 
-@pytest.mark.parametrize("content", ["", "not a pid", "999999999,0,NeoPedal", f"{os.getpid()},12345.0,NeoPedal"])
+@pytest.mark.parametrize("content", ["", "not a pid", "999999999,0,NeoPedal", f"{os.getpid()},12345.0,NeoPedal"],
+                         ids=["empty", "not_a_pid", "gone", "reused_pid"])  # ids without pid: same in every worker
 def test_pid_file_stale_or_invalid(ui_env, content):
     from neopedal.const_file import LogFile
 

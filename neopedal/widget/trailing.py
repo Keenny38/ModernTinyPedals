@@ -61,15 +61,14 @@ class TrailingMixin(PedalAlertMixin):
     def setup_trailing(self):
         """Shown plots, plot step per update (pixels), update interval of time scale"""
         time_scale = max(self.wcfg["time_scale"], 0.01)
-        if time_scale == 1:
-            time_factor = self.wcfg["update_interval"] / 20
-        else:
-            time_factor = 1
-            self._update_interval = max(
-                self.wcfg["update_interval"] / time_scale,
-                self.cfg.application["minimum_update_interval"],
-            )
-        self.display_scale = max(int(time_factor * self.wcfg["display_scale"]), 1)
+        self._update_interval = max(
+            round(self.wcfg["update_interval"] / time_scale),
+            self.cfg.application["minimum_update_interval"],
+            1,
+        )
+        # Plot speed: display scale pixels per 20 ms at time scale 1, multiplied by time scale, whatever the
+        # (minimum) update interval used
+        self.display_scale = max(round(self.wcfg["display_scale"] * time_scale * self._update_interval / 20), 1)
         self.max_slip_angle = max(self.wcfg["maximum_slip_angle_difference"], 1) * 2
         self.max_paused_frames = max(self.wcfg["maximum_paused_frames"], 0)
         self.plot_names = tuple(name for name in PLOT_NAMES if self.wcfg[f"show_{name}"])

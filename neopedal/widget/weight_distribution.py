@@ -53,7 +53,7 @@ class Realtime(Overlay):
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.percent_sign_text = "%" if self.wcfg["show_percentage_sign"] else ""
-        self.decimals = max(int(self.wcfg["decimal_places"]), 1)
+        self.decimals = max(int(self.wcfg["decimal_places"]), 0)  # 0 allowed, as modern design
 
         if self.wcfg["layout"] == 0:
             prefix_just = max(
@@ -149,4 +149,4 @@ class Realtime(Overlay):
     def format_dist(self, angle, prefix):
         """Format distribution ratio"""
         ratio = f"{angle:.{self.decimals + 1}f}"
-        return f"{prefix}{ratio:.{self.decimals + 3}}{self.percent_sign_text}"
+        return f"{prefix}{ratio:.{self.decimals + 3}}".rstrip(".") + self.percent_sign_text  # 0 decimal: "52"

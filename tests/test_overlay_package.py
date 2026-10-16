@@ -109,6 +109,10 @@ def test_unknown_overlay_and_options_ignored(tmp_path):
     assert read.overlays == {"relative": {"font_size": 18}}
     assert read.unknown == ["future_overlay"]
     assert read.skipped == 6
+    assert "relative: future_option (unknown option)" in read.left_out
+    assert "relative: font_color (wrong type)" in read.left_out
+    assert "relative: enable (kept on each computer)" in read.left_out
+    assert "relative: position_x (invalid position)" in read.left_out
 
 
 def test_damaged_or_oversized_packages_refused(tmp_path):
@@ -334,12 +338,17 @@ def test_import_unticked_overlay_left_alone(share, page, monkeypatch, tmp_path):
 
 def test_import_invalid_value_skipped(share, page, monkeypatch, tmp_path):
     path = write_zip(tmp_path / "bad.zip", manifest(), {
-        "overlays/relative.json": {"font_color_same_lap": "not a color", "font_weight": "Huge", "font_size": 22}})
+        "overlays/relative.json": {"font_color_same_lap": "not a color", "font_weight": "Huge", "font_size": 22,
+                                   "bar_gap": 99999}})
     monkeypatch.setattr(share, "pick_dialog", FakeDialog(share.test_record))
     assert share.import_overlay_file(None, path, page)
     assert page.backend.value("relative", "font_size") == 22
+    assert page.backend.value("relative", "bar_gap") == 2000  # out of limits: brought within
     assert page.backend.errorCount == 0
-    assert "2 invalid value(s) skipped" in page.host.notices[-1]
+    notice = page.host.notices[-1]
+    assert "3 value(s) skipped or corrected:" in notice
+    assert "relative: bar_gap 99999 -&gt; 2000 (limit)" in notice
+    assert "relative: font_weight (invalid value, skipped: not a choice)" in notice
 
 
 def test_import_refused_on_locked_preset(share, page, monkeypatch, tmp_path):

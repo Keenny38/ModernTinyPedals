@@ -182,10 +182,13 @@ class Realtime(Overlay):
                 else:
                     data = 0
                 text = f"{data:+.0%}"
+                shown = round(data * 100)
             else:
                 text = f"{data:+.2f}"
+                shown = round(data, 2)
             target.text = text
-            target.bg = self.bar_style_delta_rate[data > 0]
+            # Neutral color when shown as 0 (index 2), else loss or gain
+            target.bg = self.bar_style_delta_rate[2 if shown == 0 else data > 0]
             target.update()
 
     def update_lock_time_f(self, target, data):

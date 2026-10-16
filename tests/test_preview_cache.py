@@ -30,9 +30,9 @@ def draws(ui_env, bundled_fonts, monkeypatch):
     calls = []
     real = widget_preview.render_widget
 
-    def render(config, name, setting, scale=1.0):
+    def render(config, name, setting, scale=1.0, scenario=""):
         calls.append((name, scale))
-        return real(config, name, setting, scale)
+        return real(config, name, setting, scale, scenario)
 
     monkeypatch.setattr(widget_preview, "render_widget", render)
     yield calls
@@ -158,3 +158,11 @@ def test_store_shares_pictures_and_compares_cheaply(monkeypatch):
     assert store.put("k", shared) == url and not compared  # same shared picture: no pixel compare
     monkeypatch.setattr(preview_provider, "COMPARE_LIMIT", 10)
     assert store.put("k", solid("#123456")) != url and not compared  # big picture: new serial, never compared
+
+
+def test_race_situation_drawn_apart(draws):
+    """Picture of a race situation (Overlay Options preview) never taken for the racing one"""
+    racing = widget_preview.render_image(cfg, "flag", cfg.user.setting["flag"])
+    pits = widget_preview.render_image(cfg, "flag", cfg.user.setting["flag"], scenario="pits")
+    assert widget_preview.render_image(cfg, "flag", cfg.user.setting["flag"]) is racing
+    assert pits is not racing and len(draws) == 2

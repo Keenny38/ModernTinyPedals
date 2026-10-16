@@ -62,12 +62,16 @@ class Realtime(QuadMixin, ModernOverlay):
         self.show_compound = wcfg["show_tyre_compound"]
         self.show_deviation = wcfg["show_pressure_deviation"]
         self.averages = [0.0] * 4
-        interval = max(wcfg["update_interval"], 0.01)
+        interval = max(self._update_interval, 0.01)  # timer interval (minimum update interval applied)
         samples = int(min(max(wcfg["average_sampling_duration"], 1), 600) / (interval * 0.001))
         self.ema_pressure = calc.ema_filter(samples)
         section = Section(widget_name, "", "888.8", sub=self.show_deviation)
         center = self.unit * 1.2 if self.show_compound else 0.0
         self.set_size(*self.build_quads([section], center_width=center, show_labels=False))
+
+    def post_update(self):
+        """Average pressures restart from next reading (new session, other tyres)"""
+        self.averages = [0.0] * 4
 
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)
@@ -95,7 +99,8 @@ class Realtime(QuadMixin, ModernOverlay):
             sub = ""
             if self.show_deviation:
                 sub = f"±{self.number(peak - self.averages[index])}"
-                self.averages[index] = self.ema_pressure(self.averages[index], pressures[index])
+                average = self.averages[index]  # first reading: average starts from it, not from 0
+                self.averages[index] = self.ema_pressure(average, pressures[index]) if average > 0 else pressures[index]
             tiles.append(Tile((self.number(pressures[index]),), colors=(theme.orange if hot else theme.lap_behind,),
                               sub=sub))
         self.refresh((tuple(tiles), self.compounds.badges))

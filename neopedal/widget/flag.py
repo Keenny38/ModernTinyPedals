@@ -20,7 +20,8 @@
 Flag Widget
 """
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from .. import calculation as calc
 from .. import units
@@ -37,6 +38,16 @@ if TYPE_CHECKING:
 # for lead lap cars, 4 pits open, 5 last lap, 6 resume, 7 race halt (red flag)
 FCY_PHASES = {1: "", 2: "", 3: " LDR", 4: " PIT", 5: " END", 6: " GO", 7: " RED"}
 
+
+
+def is_low_amount(wcfg: Mapping[str, Any], energy: bool, amount: float, laps: float, consumption: float) -> bool:
+    """Low fuel or energy: few laps left (consumption known), fuel volume (liter) at most volume threshold,
+    energy (percent) at most percentage threshold"""
+    if consumption <= 0 or laps > wcfg["low_fuel_lap_threshold"]:
+        return False
+    if energy:
+        return amount <= wcfg["low_energy_percentage_threshold"]
+    return amount <= wcfg["low_fuel_volume_threshold"]
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -639,8 +650,8 @@ class Realtime(Overlay):
             amount_curr = minfo.fuel.amountCurrent
             est_laps = minfo.fuel.estimatedLaps
 
-        if (amount_curr > self.wcfg["low_fuel_volume_threshold"] or
-            est_laps > self.wcfg["low_fuel_lap_threshold"]):
+        if not is_low_amount(self.wcfg, show_energy, amount_curr, est_laps,
+                             (minfo.energy if show_energy else minfo.fuel).estimatedValidConsumption):
             return ""  # not low fuel
 
         if not show_energy:

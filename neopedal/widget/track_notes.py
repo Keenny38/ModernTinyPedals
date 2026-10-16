@@ -68,14 +68,15 @@ class TrackNotesMixin:
                 self.notes_hidden = False
             else:
                 etime = api.read.timing.elapsed()
-                if self.last_notes_index != notes_index:
-                    self.last_notes_index = notes_index
+                note_key = (in_pits, notes_index)  # pit & track notes indexes counted apart
+                if self.last_notes_index != note_key:
+                    self.last_notes_index = note_key
                     self.last_etime = etime
                 if self.last_etime > etime:
                     self.last_etime = etime
                 self.notes_hidden = etime - self.last_etime > self.wcfg["maximum_display_duration"]
-        elif self.wcfg["enable_auto_hide_if_not_available"]:
-            self.notes_hidden = True
+        else:  # no note: hidden only if auto hide (never kept hidden from a note shown before)
+            self.notes_hidden = self.wcfg["enable_auto_hide_if_not_available"]
         return notes_current, notes_next, in_pits
 
     def note_text(self, notes_current: Mapping, in_pits: bool) -> str:

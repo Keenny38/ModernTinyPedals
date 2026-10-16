@@ -315,7 +315,7 @@ class Realtime(Overlay):
             target.state = available
             # Hide if electric motor unavailable
             target.setHidden(not available)
-        charge = state + data  # add state to finalize last change
+        charge = (state, data)  # motor state change redraws too (color), even with an equal sum
         if target.last != charge:
             target.last = charge
             if state == 3:

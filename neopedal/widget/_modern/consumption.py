@@ -173,7 +173,8 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         wcfg = self.wcfg
         theme = self.theme
         source = self.source
-        low = source.estimatedLaps <= wcfg[self.names.low_threshold]
+        # No consumption estimate yet (0 laps): not a low amount
+        low = source.estimatedValidConsumption > 0 and source.estimatedLaps <= wcfg[self.names.low_threshold]
         if self.warn_flash is not None and source.estimatedValidConsumption:
             low = self.warn_flash.send(low)
         data = consumption_data(source, self.convert, wcfg[self.names.absolute])

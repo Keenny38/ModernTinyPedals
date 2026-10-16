@@ -42,7 +42,7 @@ class Realtime(HistoryTable):
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
-        self.stint_slot = max(self.wcfg["stint_history_count"], 1)
+        self.stint_slot = min(max(self.wcfg["stint_history_count"], 1), 100)  # same limit as modern design
         self.set_history_layout(self.stint_slot)
 
         # Laps

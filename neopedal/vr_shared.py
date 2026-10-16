@@ -677,6 +677,19 @@ def layer_install_root() -> str | None:
     return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), LAYER_INSTALL_FOLDER)
 
 
+def layer_digest(folder: str) -> str:
+    """SHA-256 of the layer DLL & manifest of folder
+
+    Raises:
+        OSError: file missing or unreadable.
+    """
+    digest = hashlib.sha256()
+    for name in (LAYER_DLL, LAYER_MANIFEST):
+        with open(os.path.join(folder, name), "rb") as file:
+            digest.update(file.read())
+    return digest.hexdigest()
+
+
 def install_layer(manifest: str, root: str) -> str:
     """Copy layer files to their own subfolder of root, named after their content, returns its manifest
 
@@ -686,17 +699,16 @@ def install_layer(manifest: str, root: str) -> str:
     no game uses them (see remove_old_layers).
     """
     source = os.path.dirname(os.path.abspath(manifest))
-    digest = hashlib.sha256()
-    for name in (LAYER_DLL, LAYER_MANIFEST):
-        with open(os.path.join(source, name), "rb") as file:
-            digest.update(file.read())
-    folder = os.path.join(root, digest.hexdigest()[:16])
+    digest = layer_digest(source)
+    folder = os.path.join(root, digest[:16])
     installed = os.path.join(folder, LAYER_MANIFEST)
-    if os.path.isfile(installed) and os.path.isfile(os.path.join(folder, LAYER_DLL)):
+    # Existing copy reused only with the same content: a folder of a shared root (ProgramData) could be
+    # written by another user, its DLL would be loaded by every OpenXR game
+    if os.path.isfile(installed) and os.path.isfile(os.path.join(folder, LAYER_DLL)) and layer_digest(folder) == digest:
         return installed
     os.makedirs(root, exist_ok=True)
     if os.path.isdir(folder):
-        shutil.rmtree(folder)  # incomplete copy (raises if its DLL is loaded: registered from bundle)
+        shutil.rmtree(folder)  # incomplete or altered copy (raises if its DLL is loaded: registered from bundle)
     temp = tempfile.mkdtemp(prefix=".tmp-", dir=root)
     try:
         for name in (LAYER_DLL, LAYER_MANIFEST):

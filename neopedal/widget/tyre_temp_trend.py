@@ -152,7 +152,7 @@ class TyreTrendMixin:
         if self.show_optimal:  # 0 = unknown
             optimal = tuple(round(value, 1) if finite(value) and 0 < value < 1000 else 0.0
                             for value in api.read.tyre.optimal_temperature()[:4])
-        key = (self.trend.version, optimal, id(self.compounds.heat[0]), id(self.compounds.heat[2]))
+        key = (self.trend.version, optimal, tuple(map(id, self.compounds.heat)))  # heatmap of each tyre
         if key != self.chart_key:
             self.chart_key = key
             self.charts = self.build_charts(chart_rects, optimal)

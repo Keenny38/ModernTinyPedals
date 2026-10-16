@@ -127,7 +127,7 @@ class Realtime(Overlay):
                 target=layout_btavg,
                 column=self.wcfg["display_order_average"],
             )
-            update_interval = max(self.wcfg["update_interval"], 0.01)
+            update_interval = max(self._update_interval, 0.01)  # timer interval (minimum update interval applied)
             average_samples = int(min(max(self.wcfg["average_sampling_duration"], 1), 600) / (update_interval * 0.001))
             self.calc_ema_btemp = calc.ema_filter(average_samples)
 
@@ -136,6 +136,14 @@ class Realtime(Overlay):
         self.last_vehicle_name = None
         self.last_lap_etime = 0.0
         self.off_brake_timer = 0.0
+
+    def post_update(self):
+        """Average restarts from next braking (new session, other vehicle)"""
+        if self.wcfg["show_average"]:
+            for bar_btavg in self.bars_btavg:
+                bar_btavg.last = 0
+                bar_btavg.text = TEXT_NA
+                bar_btavg.update()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -171,7 +179,10 @@ class Realtime(Overlay):
                 # Update if braked in the past 1 second
                 if lap_etime - self.off_brake_timer <= self.off_brake_duration:
                     for brake_idx, bar_btavg in enumerate(self.bars_btavg):
-                        btavg = self.calc_ema_btemp(bar_btavg.last, btemp[brake_idx])
+                        if bar_btavg.last > 0:
+                            btavg = self.calc_ema_btemp(bar_btavg.last, btemp[brake_idx])
+                        else:  # first reading: average starts from it, not from 0
+                            btavg = btemp[brake_idx]
                         self.update_btavg(bar_btavg, btavg)
 
     # GUI update methods

@@ -239,26 +239,28 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_laps(self, target, data):
-        """Lap number"""
-        if target.last != data:
-            target.last = data
-            lap_num = api.read.lap.number()
-            lap_max = api.read.lap.maximum()
+        """Lap number, predicted lap total (changes while lap progress does not: pit stop of a timed race)"""
+        lap_num = api.read.lap.number()
+        lap_max = api.read.lap.maximum()
 
-            if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-                text_lap_total = f"{lap_max:.2f}"
-            else:
-                session_time = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
-                lap_total = lap_num + calc.end_timer_laps_remain(data, minfo.delta.lapTimePace, session_time)
-                text_lap_total = f"~{lap_total:.2f}"
+        if api.read.session.finish_type(minfo.vehicles.finishAsLap):
+            text_lap_total = f"{lap_max:.2f}"
+        else:
+            session_time = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
+            lap_total = lap_num + calc.end_timer_laps_remain(data, minfo.delta.lapTimePace, session_time)
+            text_lap_total = f"~{lap_total:.2f}"
 
-            text_laps_done = f"{lap_num + data:.2f}"
-            if self.wcfg["show_predicted_extra_laps"]:
-                text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}({minfo.vehicles.finishLapOffset:+.0f})"
-            else:
-                text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}"
-            target.text = f"{self.prefix_laps}{text_laps:>{self.just_laps}.{self.just_laps}}"
-            target.bg = self.bar_style_laps[lap_num - lap_max >= -1]
+        text_laps_done = f"{lap_num + data:.2f}"
+        if self.wcfg["show_predicted_extra_laps"]:
+            text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}({minfo.vehicles.finishLapOffset:+.0f})"
+        else:
+            text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}"
+        text = f"{self.prefix_laps}{text_laps:>{self.just_laps}.{self.just_laps}}"
+        is_last_laps = lap_num - lap_max >= -1
+        if target.last != (text, is_last_laps):
+            target.last = (text, is_last_laps)
+            target.text = text
+            target.bg = self.bar_style_laps[is_last_laps]
             target.update()
 
     def update_position_overall(self, target, place, total):

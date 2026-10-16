@@ -59,8 +59,6 @@ class Realtime(DataModule):
         update_interval = self.idle_interval
 
         output = minfo.relative
-        setting_relative = self.cfg.user.setting["relative"]
-        setting_standings = self.cfg.user.setting["standings"]
         last_version_update = None
         slot_ids = [-1] * MAX_VEHICLES  # vehicle slot id per index, of relative delta data
         last_stamp: tuple = ()  # scoring data stamp of last update
@@ -82,6 +80,9 @@ class Realtime(DataModule):
                 # Check setting
                 if last_version_update != self.cfg.version_update:
                     last_version_update = self.cfg.version_update
+                    # Read again at every setting change: preset loaded or options applied may hand new dicts
+                    setting_relative = self.cfg.user.setting["relative"]
+                    setting_standings = self.cfg.user.setting["standings"]
                     show_in_garage = setting_relative["show_vehicle_in_garage"]
                     is_exclusive_mode = setting_standings["enable_single_class_exclusive_mode"]
                     is_split_mode = setting_standings["enable_multi_class_split_mode"]

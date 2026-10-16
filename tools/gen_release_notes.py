@@ -18,6 +18,7 @@ Usage (from project root):
     python tools/gen_release_notes.py v2.51.0      notes of v2.51.0 (commits up to HEAD if tag is new)
     python tools/gen_release_notes.py --check-changelog 2.51.0      exit code 1 if no changelog section
     python tools/gen_release_notes.py --check-changelog 2.51.0 --changelog CHANGELOG.fr.md
+    python tools/gen_release_notes.py --draft-changelog 2.52.0      draft section of commits since last release
 """
 
 from __future__ import annotations
@@ -186,6 +187,32 @@ def pin_image_urls(text: str, sha: str) -> str:
     return text.replace(f"{RAW_URL}/master/", f"{RAW_URL}/{sha}/") if sha else text
 
 
+# Changelog sections of commit kinds (CHANGELOG.md headings, in changelog order)
+DRAFT_HEADINGS = {"added": "New", "changed": "Improvements", "fixed": "Fixes"}
+
+
+def draft_changelog(version: str, date: str = "") -> str:
+    """Draft changelog section of version from commits since last release tag (titles grouped by kind,
+    images added under docs/changes): to be rewritten for users, then added to both changelogs"""
+    import datetime
+
+    tags = [name for name, _ in release_tags()]
+    revision_range = f"{tags[0]}..HEAD" if tags else "HEAD"
+    items = commits(revision_range)
+    lines = [f"## {version.removeprefix('v')} ({date or datetime.date.today().isoformat()})", ""]
+    for kind, heading in DRAFT_HEADINGS.items():  # changelog order
+        group = [commit for commit in items if kind_of(commit.title) == kind]
+        if group:
+            lines += [f"### {heading}", ""]
+            lines += [f"- {commit.title}" for commit in reversed(group)]  # oldest first, as written
+            lines.append("")
+    for visual in reversed(visuals(revision_range)):
+        lines += [f"![{visual.title or visual.path}]({RAW_URL}/master/{visual.path})", ""]
+    if not items:
+        lines += ["No changes.", ""]
+    return "\n".join(lines)
+
+
 def release_notes(tag: str) -> str:
     """Notes of one release: commits since previous tag (tag may not exist yet: use HEAD)"""
     tags = [name for name, _ in release_tags()]
@@ -212,7 +239,13 @@ def main() -> int:
                         help="exit code 1 if changelog has no section for VERSION (for example 2.51.0)")
     parser.add_argument("--changelog", default=CHANGELOG, metavar="FILE",
                         help=f"changelog checked by --check-changelog (default {CHANGELOG})")
+    parser.add_argument("--draft-changelog", metavar="VERSION",
+                        help="print a draft changelog section of VERSION from commits since last release")
     args = parser.parse_args()
+    if args.draft_changelog:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        sys.stdout.write(draft_changelog(args.draft_changelog))
+        return 0
     if args.check_changelog:
         return 0 if changelog_section(args.check_changelog.removeprefix("v"), args.changelog) else 1
     if not args.tag:

@@ -2397,7 +2397,7 @@ Set warning threshold for total amount brake wear of last lap in percentage. Def
 Set warning threshold for estimated brake lifespan in laps. Default is `5` laps.
 
     warning_threshold_minutes
-Set warning threshold for estimated brake lifespan in minutes. Default is `5` laps.
+Set warning threshold for estimated brake lifespan in minutes. Default is `6` minutes.
 
 [**`Back to Top`**](#)
 
@@ -2882,10 +2882,13 @@ Show low fuel (or low virtual energy if available) indicator when below certain 
 Only show low fuel indicator during race session.
 
     low_fuel_volume_threshold
-Set fuel volume threshold (in Liter) to show low fuel indicator when total amount of remaining fuel is equal or less than this value. This setting is used to limit low fuel warning when racing on lengthy tracks, where fuel tank may only hold for a lap or two. Default is `20` Liter.
+Set fuel volume threshold (in Liter) to show low fuel indicator when total amount of remaining fuel is equal or less than this value. This setting is used to limit low fuel warning when racing on lengthy tracks, where fuel tank may only hold for a lap or two. Not used for low energy indicator (energy in percent), see `low_energy_percentage_threshold`. Default is `20` Liter.
 
     low_fuel_lap_threshold
 Set amount lap threshold to show low fuel indicator when total completable laps of remaining fuel is equal or less than this value. Default is `2` laps before running out of fuel.
+
+    low_energy_percentage_threshold
+Set virtual energy threshold (in percent) to show low energy indicator when remaining energy is equal or less than this value, along with `low_fuel_lap_threshold`. Same use as `low_fuel_volume_threshold` on lengthy tracks. Default is `100`: laps threshold only.
 
     low_fuel_text, low_energy_text
 Set custom text for low fuel or energy.
@@ -4734,6 +4737,9 @@ Show a row of column labels above the vehicles (modern design): Pos, Class, Driv
     show_class_header
 Show class name above the vehicles of each class (modern design), in multi-class split mode or single-class exclusive mode, instead of class column next to each driver. Position column then shows position in class. Enabled by default.
 
+    show_class_column_with_class_header
+Keep class column next to each driver while class names are shown above their vehicles (`show_class_header`, modern design), for class colors on every row. Disabled by default: class headers replace class column.
+
     minimum_top_vehicles
 Set minimum amount top place vehicles to display: top of player's class in split mode, top of all vehicles otherwise. This value has higher priority over `maximum_vehicles_per_split_player`, `maximum_vehicles_exclusive_mode` and `maximum_vehicles_combined_mode`, not over `maximum_vehicles_per_split_others`. Default is `3`, which always shows top 3 vehicles if present.
 
@@ -5699,6 +5705,108 @@ Show warning indication when load (in Newtons) is below the threshold.
 [**`Back to Top`**](#)
 
 
+## Tyre overview
+**This widget displays every tyre reading in one card per tyre, placed as on the car (front left, front right, rear left, rear right): compound & alert, surface temperatures, carcass & inner layer temperatures, pressure, tread left, wear per lap and laps left. Every part can be turned on or off.**
+
+    show_car_body
+Show car body between the cards, with axles from tyre to tyre (modern design).
+
+    show_wheel_label
+Show wheel name (FL, FR, RL, RR) in each card.
+
+    show_tyre_compound
+Show tyre compound badge in the corner of each card, colored as in the Tyre compound editor.
+
+    show_tyre_alerts
+Show tyre alerts in place of the compound badge, most important first: detached wheel, puncture, flat spot.
+
+    flat_spot_threshold
+Set tread lost by locking (percent) from which a flat spot is shown. Default is `1.0`. Set `0` to never show flat spots.
+
+    show_alert_highlight
+Highlight a tyre with an alert: red edge around its card, tinted tyre with a warning mark (modern design).
+
+    show_tyre_graphic
+Show tyre drawn from above with its surface temperatures on it (modern design). Set `false` to show surface temperatures in a row of the readings.
+
+    show_tread_grooves
+Show tread grooves across the drawn tyre (modern design).
+
+    show_surface_temperature
+Show tyre surface temperature, colored by tyre heatmap.
+
+    show_inner_center_outer
+Show surface temperature of inner, center & outer part of each tyre. Set `false` to show one average temperature.
+
+    show_carcass_temperature
+Show tyre carcass temperature, colored by tyre heatmap.
+
+    show_inner_layer_temperature
+Show tyre inner layer temperature, colored by tyre heatmap.
+
+    show_layer_labels
+Show carcass & inner layer labels next to their temperatures (modern design).
+
+    show_degree_sign
+Show degree sign after temperatures.
+
+    enable_heatmap_auto_matching
+Enable heatmap auto matching: heatmap of each tyre compound, as set in the Tyre compound editor. Disabled, `heatmap_name` is used.
+
+    heatmap_name
+Set heatmap preset name of tyre temperatures (used while `enable_heatmap_auto_matching` is disabled). Default is `tyre_default`.
+
+    enable_heatmap_from_optimal_temperature
+Color temperatures around the optimal temperature given by the game for each compound (Le Mans Ultimate), instead of the heatmap. Disabled by default.
+
+    show_pressure
+Show tyre pressure, in unit of Units setting.
+
+    show_pressure_unit
+Show pressure unit after pressure.
+
+    enable_tyre_pressure_target
+Color pressure in blue below target range and in red above it. Enabled by default.
+
+    show_pressure_target_range
+Show pressure on a scale around target range: target range in green, marker at current pressure (modern design).
+
+    tyre_pressure_target_minimum, tyre_pressure_target_maximum
+Set pressure target range, entered in kPa, psi or bar (unit found from value). Default is `160` to `190` kPa.
+
+    tyre_pressure_target_rear_minimum, tyre_pressure_target_rear_maximum
+Set pressure target range of rear tyres, `0` for same range as front tyres. Default is `0`.
+
+    tyre_target_by_compound
+Set pressure target range per compound, as Dashboard HUD: `S=160-190; M=165-195; M:R=170-200` (`:R` for rear tyres). Compounds not listed use the ranges above.
+
+    show_tread_gauge
+Show tread left as a gauge along the tyre, orange then red when getting close to `warning_threshold_remaining` (modern design).
+
+    show_wear
+Show tread left (percent), red at or below `warning_threshold_remaining`.
+
+    show_wear_per_lap
+Show tread worn per lap (percent), from valid laps (at least one valid lap is required).
+
+    show_lifespan_laps
+Show estimated laps left on current tread, red at or below `warning_threshold_laps`. `99+` while wear is still too small to count.
+
+    warning_threshold_remaining
+Set warning threshold for tread left in percentage. Default is `30` percent.
+
+    warning_threshold_laps
+Set warning threshold for estimated laps left. Default is `5` laps.
+
+    font_color_value, background_color_value
+Set text & background color of readings (classic design).
+
+    font_color_warning
+Set text color of alerts and readings past warning thresholds (classic design).
+
+[**`Back to Top`**](#)
+
+
 ## Tyre pressure
 **This widget displays tyre pressure info.**
 
@@ -5833,7 +5941,7 @@ Set warning threshold for total amount tyre wear of last lap in percentage. Defa
 Set warning threshold for estimated tyre lifespan in laps. Default is `5` laps.
 
     warning_threshold_minutes
-Set warning threshold for estimated tyre lifespan in minutes. Default is `5` laps.
+Set warning threshold for estimated tyre lifespan in minutes. Default is `6` minutes.
 
 [**`Back to Top`**](#)
 

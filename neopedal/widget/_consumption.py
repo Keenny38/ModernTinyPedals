@@ -186,7 +186,8 @@ class ConsumptionBars(Overlay):
     def update_consumption(self, source: Any, convert: Callable[[float], float]):
         """Update cells & level bar from fuel or energy module output"""
         shown = self.shown
-        is_low = source.estimatedLaps <= self.low_threshold
+        # No consumption estimate yet (0 laps): not a low amount
+        is_low = source.estimatedValidConsumption > 0 and source.estimatedLaps <= self.low_threshold
         if shown.flash and source.estimatedValidConsumption:
             is_low = self.warn_flash.send(is_low)
             padding = LOW_PADDING if is_low else 0

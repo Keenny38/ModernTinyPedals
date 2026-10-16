@@ -27,7 +27,7 @@ OLD_DISPLAY_ORDER = (
     "steering_meter", "steering_wheel", "stint_history", "stint_timer", "suspension_force", "suspension_position",
     "suspension_travel", "system_performance", "telemetry_compare", "timing", "track_clock", "track_map",
     "track_notes", "traffic", "trailing", "tyre_carcass", "tyre_deflection", "tyre_inner_layer", "tyre_load",
-    "tyre_pressure", "tyre_temp_trend", "tyre_temperature", "tyre_wear", "virtual_energy", "weather",
+    "tyre_overview", "tyre_pressure", "tyre_temp_trend", "tyre_temperature", "tyre_wear", "virtual_energy", "weather",
     "weather_forecast", "weight_distribution", "wheel_camber", "black_box", "wheel_toe",
 )
 OLD_CATEGORY_PREFIXES = (

@@ -32,7 +32,7 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ... import units
-from ..speed_delta import REFERENCES, SpeedDeltas
+from ..speed_delta import REFERENCES, SpeedDeltas, display_range
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
@@ -60,7 +60,7 @@ class Realtime(StatsMixin, ModernOverlay):
         wcfg = self.wcfg
         theme = self.theme
         self.decimals = max(int(wcfg["decimal_places"]), 0)
-        self.display_range = calc.decimal_strip(wcfg["speed_delta_display_range"], self.decimals)
+        self.display_range = display_range(wcfg["speed_delta_display_range"], self.decimals)
         self.speeds = SpeedDeltas(units.set_unit_speed(self.cfg.units["speed_unit"]),
                                   wcfg["speed_delta_smoothing_samples"])
         self.symbol = units.set_symbol_speed(self.cfg.units["speed_unit"]) if wcfg["show_speed_unit"] else ""

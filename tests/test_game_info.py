@@ -895,7 +895,7 @@ def test_game_replays_french_messages():
         assert i18n.trm("Unable to delete (replay open in game?): a.Vcr").startswith("Impossible de supprimer")
         assert i18n.trm("Unable to rename: name already used") == "Impossible de renommer : nom déjà utilisé"
         assert i18n.trm("You are in a session: opening a replay may leave it.<br><br>Open replay <b>X</b> in the game?") == (
-            "Vous êtes en session : ouvrir un rejeu peut la quitter.<br><br>Ouvrir le rejeu <b>X</b> dans le jeu ?")
+            "Vous êtes en session : ouvrir un rejeu peut vous la faire quitter.<br><br>Ouvrir le rejeu <b>X</b> dans le jeu ?")
         assert i18n.trm("Lap of Keenny Hess:") == "Tour de Keenny Hess :"
         assert i18n.tr("Trackside") == "Bord de piste" and i18n.tr("In Pits") == "Aux stands"
     finally:

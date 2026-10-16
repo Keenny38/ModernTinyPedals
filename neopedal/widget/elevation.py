@@ -174,7 +174,7 @@ class Realtime(Overlay):
     def create_elevation_path(self, raw_coords=None):
         """Create elevation path"""
         map_path = QPainterPath()
-        if raw_coords:
+        if raw_coords and len(raw_coords) >= 3:  # start, end & 2nd nodes read below (corrupt map: temp map)
             self.map_scaled, self.map_range, self.map_scale = calc.scale_elevation(
                 raw_coords,
                 self.display_width,

@@ -45,7 +45,6 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
-        "column_pitstop_count": False,
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -63,6 +62,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_lift_and_coast_time": False,
         "column_time_gap": True,
         "column_gap_trend": True,
+        "display_order_gap_trend": 23,  # column of modern design only (default order in template)
     },
     "standings": {
         "column_position": True,
@@ -73,7 +73,6 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
-        "column_pitstop_count": True,
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -90,6 +89,8 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "show_energy_per_lap_average": False,
         "column_incidents": False,
         "column_track_limits": False,
+        "display_order_track_limits": 25,  # columns of modern design only (default orders in template)
+        "display_order_energy_per_lap": 26,
         "column_stint_laps": False,
         "column_speed_trap": False,
         "column_lift_and_coast_time": False,
@@ -97,6 +98,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_time_gap": True,
         "show_lap_difference": True,
         "show_class_header": True,
+        "show_class_column_with_class_header": False,
         "show_column_headers": True,
     },
     "rivals": {
@@ -108,7 +110,6 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
-        "column_pitstop_count": True,
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -148,6 +149,15 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "tyre_inner_layer": {"enable_heatmap_from_optimal_temperature": False},
     "tyre_carcass": {"enable_heatmap_from_optimal_temperature": False},
     "ride_height": {"show_axle_ride_height": True},
+    "tyre_overview": {  # in template at their place in options page
+        "show_car_body": True,
+        "show_alert_highlight": True,
+        "show_tyre_graphic": True,
+        "show_tread_grooves": True,
+        "show_layer_labels": True,
+        "show_pressure_target_range": True,
+        "show_tread_gauge": True,
+    },
 })
 
 

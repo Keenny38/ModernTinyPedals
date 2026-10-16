@@ -390,8 +390,8 @@ def scale_overrides(wcfg: Mapping[str, Any], scale: float, widget_name: str = ""
     for key, value in wcfg.items():
         if not is_scaled_option(widget_name, key, value):
             continue
-        if isinstance(value, int):
-            overrides[key] = max(round(value * scale), 1)
+        if isinstance(value, int):  # 0 (part hidden, maximum_indicator_height) kept, never turned on
+            overrides[key] = max(round(value * scale), 1) if value > 0 else value
         else:
             overrides[key] = value * scale
     return overrides

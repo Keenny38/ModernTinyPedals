@@ -387,3 +387,55 @@ def section_dependencies(sections: Sequence[Section]) -> dict[str, str]:
     """Option: on/off option leading its section (options used only while it is on)"""
     return {key: section.toggle for section in sections if section.toggle for key in section.keys
             if key != section.toggle}
+
+
+def fix_sections(sections: Sequence[Section], toggles: Mapping[str, str], dependencies: Mapping[str, str]
+                 ) -> list[Section]:
+    """Automatic sections fixed (see template.widget.option_rules): section led by the right on/off option,
+    options moved to the section of the on/off option they are used with (or out of an item section if
+    used with none)
+
+    Args:
+        sections: automatic sections.
+        toggles: section toggle -> on/off option leading that section instead.
+        dependencies: option -> on/off option it is used with ("" if none).
+    """
+    moved_toggles = {right for wrong, right in toggles.items() if any(s.toggle == wrong for s in sections)}
+    result: list[Section] = []
+    for section in sections:
+        keys = [key for key in section.keys if key not in moved_toggles]
+        if section.toggle in toggles and section.toggle in section.keys:
+            right = toggles[section.toggle]
+            result.append(Section(ITEM_PREFIX + right, (right, *keys), right, _toggle_item(right)))
+        elif keys:
+            result.append(section._replace(keys=tuple(keys)))
+    for key, control in dependencies.items():
+        index = next((index for index, section in enumerate(result) if key in section.keys), -1)
+        if index < 0:
+            continue
+        section = result[index]
+        if control:
+            target = next((i for i, other in enumerate(result) if other.toggle == control), -1)
+            holder = next((i for i, other in enumerate(result) if control in other.keys), -1)
+            if target < 0 and holder >= 0 and result[holder].toggle != control and (
+                    control in dependencies or result[holder].key in (SECTION_SHOWN, SECTION_OPTIONS)):
+                # On/off option moved out of its section (used with none): leads a section of its own, after it
+                result[holder] = result[holder]._replace(keys=tuple(k for k in result[holder].keys if k != control))
+                target = index + 1
+                result.insert(target, Section(ITEM_PREFIX + control, (control,), control, _toggle_item(control)))
+                section = result[index]
+        elif section.toggle and section.toggle != key:  # used with no on/off option: out of item section
+            target = next((i for i, other in enumerate(result) if other.key == SECTION_OPTIONS), -1)
+            if target < 0:
+                fixed = sum(1 for other in result if other.key in (SECTION_GENERAL, SECTION_LAYOUT, SECTION_FONT))
+                result.insert(fixed, Section(SECTION_OPTIONS, (), "", FIXED_TITLES[SECTION_OPTIONS]))
+                target = fixed
+                index = index + 1 if index >= fixed else index
+                section = result[index]
+        else:
+            continue
+        if target < 0 or target == index or key == section.toggle:
+            continue
+        result[index] = section._replace(keys=tuple(k for k in section.keys if k != key))
+        result[target] = result[target]._replace(keys=(*result[target].keys, key))
+    return [section for section in result if section.keys]

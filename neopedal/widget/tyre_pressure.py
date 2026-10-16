@@ -133,13 +133,18 @@ class Realtime(Overlay):
                 inner.addWidget(self.bars_pdiff[idx], base_row, 2 * (idx % 2))
 
             self.tpavg = list(WHEELS_ZERO)
-            update_interval = max(self.wcfg["update_interval"], 0.01)
+            update_interval = max(self._update_interval, 0.01)  # timer interval (minimum update interval applied)
             average_samples = int(min(max(self.wcfg["average_sampling_duration"], 1), 600) / (update_interval * 0.001))
             self.calc_ema_tpres = calc.ema_filter(average_samples)
 
         # Last data
         self.last_in_pits = -1
         self.last_compounds: tuple[str, ...] = ("", "", "", "")
+
+    def post_update(self):
+        """Average pressures restart from next reading (new session, other tyres)"""
+        if self.wcfg["show_pressure_deviation"]:
+            self.tpavg = list(WHEELS_ZERO)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -168,7 +173,8 @@ class Realtime(Overlay):
             peak_pres = max(self.tpavg)
             for tyre_idx, bar_pdiff in enumerate(self.bars_pdiff):
                 self.update_pdiff(bar_pdiff, peak_pres - self.tpavg[tyre_idx])
-                self.tpavg[tyre_idx] = self.calc_ema_tpres(self.tpavg[tyre_idx], tpres[tyre_idx])
+                average = self.tpavg[tyre_idx]  # first reading: average starts from it, not from 0
+                self.tpavg[tyre_idx] = self.calc_ema_tpres(average, tpres[tyre_idx]) if average > 0 else tpres[tyre_idx]
 
     # GUI update methods
     def update_tpres(self, target, data, is_hot):

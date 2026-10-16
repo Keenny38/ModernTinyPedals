@@ -403,7 +403,7 @@ class Realtime(
         self.speed_label = {"KPH": "km/h", "MPH": "mph"}.get(speed_unit, "m/s")
         self.unit_fuel = units.set_unit_fuel(fuel_unit)
         self.fuel_label = "gal" if fuel_unit == "Gallon" else "L"
-        self.pres_decimals = 0 if pres_unit == "kPa" else 1
+        self.pres_decimals = {"kPa": 0, "bar": 2}.get(pres_unit, 1)  # about 1 kPa in each unit (bar: 0.01)
         self.sign_text = "°" if wcfg["show_degree_sign"] else ""
         self.tyre_temp_source = wcfg["tyre_temperature_source"]
         self.heatmap_tyre = 4 * [self.load_tyre_heatmap(wcfg["heatmap_name_tyre"])]
@@ -538,6 +538,8 @@ class Realtime(
         self.damage_suspension: tuple = (0.0,) * 4
         self.impact_time: float | None = None
         self.recorder_impact_time: float | None = None  # last game impact time seen by incident recorder
+        self.impact_rebase = False  # new session: next impact time change is a new impact (see check_new_session)
+        self.recorder_impact_rebase = False
         self.impact_position: tuple = (0.0, 0.0)
         self.impact_visible = False  # last impact cone shown
         self.abs_active = False

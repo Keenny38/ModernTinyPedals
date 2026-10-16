@@ -40,7 +40,7 @@ import logging
 from time import monotonic
 from typing import Any, NamedTuple
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QRect, QTimer
 
 from .. import app_signal, overlay_signal, realtime_state
 from ..const_file import ConfigType
@@ -199,6 +199,7 @@ class EditMode(QObject):
             from ._edit_toolbar import EditToolbar
 
             self.toolbar = EditToolbar(self)
+        self.toolbar.apply_style()  # overlay theme or font changed since last shown
         self.toolbar.refresh()
         self.toolbar.show_on_screen()
 
@@ -225,9 +226,13 @@ class EditMode(QObject):
         if name and name == self.selected:
             self.select("")
 
-    def placement_changed(self, name: str):
-        """Overlay moved: toolbar shows new position"""
-        if name == self.selected:
+    def placement_changed(self, name: str, geometry: QRect | None = None):
+        """Overlay moved: toolbar shows new position (geometry while dragged: position text only)"""
+        if name != self.selected:
+            return
+        if geometry is not None and self.toolbar is not None and self.toolbar.isVisible():
+            self.toolbar.show_geometry(geometry)
+        else:
             self.refresh_toolbar()
 
     # History

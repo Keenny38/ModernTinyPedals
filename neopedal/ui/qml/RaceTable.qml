@@ -91,8 +91,14 @@ Item {
     implicitHeight: rowHeight * (rows.length + 1)
     implicitWidth: theme.em * 20
 
-    FontMetrics { id: metrics; onFontChanged: table.fontChanged() }
-    FontMetrics { id: boldMetrics; font.weight: Font.DemiBold; onFontChanged: table.fontChanged() }
+    // Measured as drawn: tabular digits (else a changed digit changes the width, columns resized at each input)
+    FontMetrics { id: metrics; font.features: { "tnum": 1 }; onFontChanged: table.fontChanged() }
+    FontMetrics {
+        id: boldMetrics
+        font.weight: Font.DemiBold
+        font.features: { "tnum": 1 }
+        onFontChanged: table.fontChanged()
+    }
 
     Column {
         width: table.width

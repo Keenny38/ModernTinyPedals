@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 
 LAP_EXTS = (".csv.gz", ".csv")
 INFO_PREFIX = "# "
+# Lap file read at most (corrupt or crafted file of a shared folder never fills memory): info line &
+# sample line length (characters), samples (recorder keeps 90 000 at most, imported laps more)
+MAX_INFO_LENGTH = 1_000_000
+MAX_LINE_LENGTH = 100_000
+MAX_FILE_ROWS = 1_000_000
 IMPORT_FOLDER = ".imported"  # laps imported from other files (MoTeC), not a track folder
 VIEWER_SETTING = ".lap_viewer.json"  # lap viewer settings (see ui.lap_viewer), lap selection of each track
 _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
@@ -256,7 +261,7 @@ def read_lap_info(path: str) -> dict:
     """Lap info (first line) only, empty if none"""
     try:
         with open_lap_file(path) as file:
-            return parse_info(file.readline())
+            return parse_info(file.readline(MAX_INFO_LENGTH))
     except (OSError, EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError):  # corrupt .gz: zlib.error
         return {}
 
@@ -276,15 +281,20 @@ def load_lap(path: str) -> LapData:
     """Load lap CSV file, raises OSError or ValueError if invalid"""
     try:
         with open_lap_file(path) as file:
-            first = file.readline()
+            first = file.readline(MAX_INFO_LENGTH)
             info = parse_info(first)
-            lines = file if info else _chain(first, file)
+            lines = bounded_lines(file) if info else _chain(first, bounded_lines(file))
             reader = csv.reader(lines)
             header = next(reader, None)
             if not header or "distance" not in header:
                 raise ValueError("not a NeoPedal telemetry file")
             width = len(header)
-            rows = [row for row in reader if len(row) == width]
+            rows: list[list[str]] = []
+            for row in reader:
+                if len(row) == width:
+                    if len(rows) >= MAX_FILE_ROWS:
+                        raise ValueError(f"more than {MAX_FILE_ROWS} samples")
+                    rows.append(row)
     except (EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError, csv.Error) as error:
         raise ValueError(f"unreadable file: {error}") from error
     columns = dict(zip(header, parse_columns(rows, width)))
@@ -408,6 +418,17 @@ def median_sector_bounds(laps: Sequence[LapData]) -> list[float]:
     middle = len(bounds) // 2
     return [sorted(values)[middle] if len(bounds) % 2 else sum(sorted(values)[middle - 1:middle + 1]) / 2
             for values in zip(*bounds)]
+
+
+def bounded_lines(file: IO[str]) -> Iterator[str]:
+    """Lines of file, ValueError on a line longer than MAX_LINE_LENGTH (never read whole into memory)"""
+    while True:
+        line = file.readline(MAX_LINE_LENGTH + 1)
+        if not line:
+            return
+        if len(line) > MAX_LINE_LENGTH:
+            raise ValueError("line too long")
+        yield line
 
 
 def _chain(first: str, rest: Iterable[str]) -> Iterator[str]:

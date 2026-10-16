@@ -233,6 +233,8 @@ class DataReader:
     last_vehicle_name: str | None
     impact_time: float | None
     recorder_impact_time: float | None
+    impact_rebase: bool
+    recorder_impact_rebase: bool
     impact_direction: str
     pause_start: float | None
     last_session_elapsed: float
@@ -662,17 +664,21 @@ class DataReader:
         if not self.wcfg["show_damage_panel_impact_cone"]:
             return
         impact_time = tick_read(self, "impact_time", api.read.vehicle.impact_time)
-        if self.impact_time is None or not is_new_impact(impact_time, self.impact_time):
-            if self.impact_time is not None and impact_time < self.impact_time:
-                self.impact_visible = False  # new session: impact of old one no longer shown
-            self.impact_time = impact_time  # before widget started, or new session: not shown
-        elif impact_time != self.impact_time:
-            self.impact_time = impact_time
+        last_time = self.impact_time
+        if last_time is not None and self.impact_rebase and impact_time != last_time:
+            self.impact_rebase = False  # first change since new session: new impact unless reset to 0
+            new_impact = is_new_impact(impact_time, 0.0)
+        else:
+            new_impact = last_time is not None and is_new_impact(impact_time, last_time)
+        if new_impact:
             self.impact_position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
             self.impact_visible = True
-        if self.impact_visible and (
-            api.read.timing.elapsed() - self.impact_time > self.wcfg["damage_panel_impact_cone_duration"]
-        ):
+        elif last_time is not None and impact_time < last_time:
+            self.impact_visible = False  # new session: impact of old one no longer shown
+        self.impact_time = impact_time  # before widget started, or new session: not shown
+        # Impact time may be kept on a new session while elapsed restarts: negative age = old impact
+        impact_age = api.read.timing.elapsed() - impact_time
+        if self.impact_visible and not 0 <= impact_age <= self.wcfg["damage_panel_impact_cone_duration"]:
             self.impact_visible = False
 
     def recorder_now(self) -> float:
@@ -713,7 +719,12 @@ class DataReader:
         slip = "lock" if ("lock" in warnings or "locked" in warnings) else "spin" if "spin" in warnings else ""
         last_time = recorder.samples[-1].time if recorder.samples else None
         impact_time = tick_read(self, "impact_time", api.read.vehicle.impact_time)
-        impact = self.recorder_impact_time is not None and is_new_impact(impact_time, self.recorder_impact_time)
+        last_impact = self.recorder_impact_time
+        if last_impact is not None and self.recorder_impact_rebase and impact_time != last_impact:
+            self.recorder_impact_rebase = False  # first change since new session: new impact unless reset to 0
+            impact = is_new_impact(impact_time, 0.0)
+        else:
+            impact = last_impact is not None and is_new_impact(impact_time, last_impact)
         self.recorder_impact_time = impact_time  # impact before widget started: not an incident
         if impact:  # same direction as the damage panel cone
             position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
@@ -840,6 +851,10 @@ class DataReader:
             for pressure_range in self.pressure_ranges:
                 pressure_range.reset()
             self.stats_lap = None
+            # Game impact time may be kept from the old session (or reset to 0): its next change is
+            # compared to 0, an impact older than the last one seen is still a new impact
+            self.impact_visible = False
+            self.impact_rebase = self.recorder_impact_rebase = True
         self.last_session_elapsed = elapsed if math.isfinite(elapsed) else 0.0
 
     def update_lap_stats(self):

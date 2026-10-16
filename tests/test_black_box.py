@@ -1617,6 +1617,27 @@ def test_impact_cone_hidden_on_new_session(widget, monkeypatch):
     assert not widget.impact_visible
 
 
+def test_impact_kept_on_new_session_hidden_then_next_impact_shown(widget, monkeypatch):
+    """Game impact time kept from the old session while elapsed restarts: old cone hidden, next impact
+    (older time stamp than the kept one) still a new impact for the cone & the recorder"""
+    from neopedal.api_control import api
+
+    widget.timerEvent(None)
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 99.0)
+    widget.timerEvent(None)
+    assert widget.impact_visible
+    # New session: elapsed times start again, impact time of old session kept
+    monkeypatch.setattr(api.read.session, "elapsed", lambda: 1.0)
+    monkeypatch.setattr(api.read.timing, "elapsed", lambda: 1.0)
+    widget.timerEvent(None)
+    assert not widget.impact_visible
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 2.0)  # first impact of new session
+    monkeypatch.setattr(api.read.timing, "elapsed", lambda: 2.5)
+    monkeypatch.setattr(api.read.session, "elapsed", lambda: 2.5)
+    widget.timerEvent(None)
+    assert widget.impact_visible
+
+
 def test_battery_percentage_follows_fill_level(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter

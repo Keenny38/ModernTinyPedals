@@ -81,7 +81,8 @@ class PreviewSetting:
         """Never save preview setting"""
 
 
-def render_widget(config: Setting, widget_name: str, widget_setting: dict, scale: float = 1.0) -> QPixmap:
+def render_widget(config: Setting, widget_name: str, widget_setting: dict, scale: float = 1.0,
+                  scenario: str = "") -> QPixmap:
     """Render widget with edited setting to pixmap, on simulated race data
 
     Args:
@@ -89,8 +90,9 @@ def render_widget(config: Setting, widget_name: str, widget_setting: dict, scale
         widget_name: widget name.
         widget_setting: widget options drawn.
         scale: size multiplier (zoom), applied as global overlay scale (limited to its range).
+        scenario: race situation of simulated session (demo_data.SCENARIOS), "" racing.
     """
-    return _with_preview_widget(config, widget_name, widget_setting, scale, lambda widget: widget.grab())
+    return _with_preview_widget(config, widget_name, widget_setting, scale, lambda widget: widget.grab(), scenario)
 
 
 def widget_part_rects(config: Setting, widget_name: str, widget_setting: dict,
@@ -109,7 +111,8 @@ def widget_part_rects(config: Setting, widget_name: str, widget_setting: dict,
         OverlayStyle.corner_scale, OverlayStyle.depth_effects = shared
 
 
-def _with_preview_widget(config: Setting, widget_name: str, widget_setting: dict, scale: float, use):
+def _with_preview_widget(config: Setting, widget_name: str, widget_setting: dict, scale: float, use,
+                         scenario: str = ""):
     """use(widget) with widget built on simulated race data, deleted after"""
     from ..demo_data import SAMPLE_WIDGETS, demo_globals, demo_session, update_widget
     from ..widget._modern import modern_module, uses_modern_design
@@ -119,7 +122,7 @@ def _with_preview_widget(config: Setting, widget_name: str, widget_setting: dict
         module = modern_module(widget_name)  # classic widget code not loaded
     else:
         module = import_module(f"neopedal.widget.{widget_name}")
-    session = demo_session(config.user.setting["standings"])
+    session = demo_session(config.user.setting["standings"], scenario)
     with demo_globals(session) as patch_loaded:
         widget = module.Realtime(preview_config, widget_name)
         try:
@@ -127,7 +130,7 @@ def _with_preview_widget(config: Setting, widget_name: str, widget_setting: dict
             show_sample = getattr(widget, "show_sample", None)
             if show_sample is not None:  # driver lists: sample race made with edited list options
                 show_sample()
-            elif widget_name not in SAMPLE_WIDGETS:
+            elif widget_name not in SAMPLE_WIDGETS or scenario:  # race situation: items shown then, not samples
                 update_widget(widget, widget_name, session)
             widget.adjustSize()
             return use(widget)
@@ -253,6 +256,7 @@ def pixel_ratio() -> float:
 
 def preview_key(
     config: Setting, widget_name: str, widget_setting: Mapping, scale: float = 1.0, max_size: QSize | None = None,
+    scenario: str = "",
 ) -> tuple:
     """Inputs of a picture: same key, same picture (see render_image)"""
     from ..i18n import current_language
@@ -268,6 +272,7 @@ def preview_key(
         current_language(),
         repr(pixel_ratio()),
         repr(images.version),  # game logos fetched
+        scenario,  # race situation of simulated session
     ))
     size = None if max_size is None else (max_size.width(), max_size.height())
     return widget_name, float(scale), size, digest(text)
@@ -320,10 +325,11 @@ CACHE = PictureCache()
 
 def render_image(
     config: Setting, widget_name: str, widget_setting: Mapping, scale: float = 1.0, max_size: QSize | None = None,
+    scenario: str = "",
 ) -> QImage | None:
     """Widget picture (render_widget) scaled down to fit max_size (logical pixels) if set, None if empty; picture
     of same inputs reused (any page, any max size). Errors raised (not kept)."""
-    key = preview_key(config, widget_name, widget_setting, scale)
+    key = preview_key(config, widget_name, widget_setting, scale, scenario=scenario)
     fitted_key = None if max_size is None else (*key[:2], (max_size.width(), max_size.height()), key[3])
     if fitted_key is not None:
         found, image = CACHE.get(fitted_key)
@@ -331,7 +337,7 @@ def render_image(
             return image
     found, image = CACHE.get(key)
     if not found:
-        image = _draw(config, widget_name, widget_setting, scale)
+        image = _draw(config, widget_name, widget_setting, scale, scenario)
         CACHE.put(key, image)
     if image is None or fitted_key is None:
         return image
@@ -341,12 +347,13 @@ def render_image(
     return fitted
 
 
-def _draw(config: Setting, widget_name: str, widget_setting: Mapping, scale: float) -> QImage | None:
+def _draw(config: Setting, widget_name: str, widget_setting: Mapping, scale: float,
+          scenario: str = "") -> QImage | None:
     from ..widget._painter import OverlayStyle
 
     shared = OverlayStyle.corner_scale, OverlayStyle.depth_effects  # set by widget: running overlays keep theirs
     try:
-        pixmap = render_widget(config, widget_name, dict(widget_setting), scale)
+        pixmap = render_widget(config, widget_name, dict(widget_setting), scale, scenario)
     finally:
         OverlayStyle.corner_scale, OverlayStyle.depth_effects = shared
     return None if pixmap.isNull() else pixmap.toImage()

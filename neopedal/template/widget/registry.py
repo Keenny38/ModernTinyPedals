@@ -205,6 +205,7 @@ OVERLAYS: tuple[OverlaySpec, ...] = (
     overlay("tyre_deflection", TYRES),
     overlay("tyre_inner_layer", TYRES),
     overlay("tyre_load", TYRES),
+    overlay("tyre_overview", TYRES),
     overlay("tyre_pressure", TYRES),
     overlay("tyre_temp_trend", TYRES),
     overlay("tyre_temperature", TYRES),

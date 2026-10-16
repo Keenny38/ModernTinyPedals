@@ -362,6 +362,7 @@ TpPage {
             onTriggered: backend.toggleLock(page.menuKey)
         }
         Action { text: i18n.tr("Backup Preset"); onTriggered: backend.backup(page.menuKey) }
+        Action { text: i18n.tr("Check Preset"); onTriggered: backend.checkPreset(page.menuKey) }
         MenuSeparator {}
         Action { text: i18n.tr("Export Package..."); onTriggered: backend.exportPackage(page.menuKey) }
         Action {

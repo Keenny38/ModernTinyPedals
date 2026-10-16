@@ -55,7 +55,7 @@ class Realtime(Overlay):
 
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
-        digits = max(int(self.wcfg["odometer_maximum_digits"]), 1)
+        digits = min(max(int(self.wcfg["odometer_maximum_digits"]), 1), 12)  # same limit as modern design
         self.odm_range: float
         if self.cfg.units["odometer_unit"] == "Meter":
             self.odm_digits = digits + 0.0

@@ -127,11 +127,15 @@ class OverlayOptions(BaseDialog):
         """Ctrl+S: Apply, page kept open"""
         return self.apply_edits
 
-    def apply_edits(self) -> bool:
-        """Field being edited committed first (Ctrl+S keeps focus in it), then Apply"""
+    def commit_edits(self):
+        """Value typed in the field being edited sent to backend (focus kept in it: shortcut, quit)"""
         root = self.view.rootObject() if self.view is not None else None
         if root is not None:
             QMetaObject.invokeMethod(root, "commitEdits")
+
+    def apply_edits(self) -> bool:
+        """Field being edited committed first (Ctrl+S keeps focus in it), then Apply"""
+        self.commit_edits()
         return self.backend.apply()
 
     def showEvent(self, event):
@@ -183,13 +187,14 @@ class OverlayOptions(BaseDialog):
         reload_in_language(self.view)
 
     def closeEvent(self, event):
+        self.commit_edits()  # value typed but not entered (app quit keeps focus in field): asked to save too
         if self.is_modified():
             confirm = QMessageBox.question(
                 self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
                 buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
                 | QMessageBox.StandardButton.Cancel)
             if confirm == QMessageBox.StandardButton.Cancel or (
-                    confirm == QMessageBox.StandardButton.Save and not self.backend.apply()):
+                    confirm == QMessageBox.StandardButton.Save and not self.apply_edits()):
                 event.ignore()
                 return
         event.accept()

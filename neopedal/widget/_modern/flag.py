@@ -39,7 +39,7 @@ from ...const_common import MAX_SECONDS
 from ...i18n import tr_overlay as tr
 from ...module_info import minfo
 from .._data import run_laps
-from ..flag import BlueFlagTimer, GreenFlagTimer, PitTimer, TrafficTimer
+from ..flag import BlueFlagTimer, GreenFlagTimer, PitTimer, TrafficTimer, is_low_amount
 from .base import CENTER, DASH, ModernOverlay, display_order_options
 from .draw import readable_on, rounded
 
@@ -99,6 +99,7 @@ class Realtime(ModernOverlay):
     options = (
         "font_size", "layout", "show_pit_timer", "pit_time_highlight_duration", "pit_in_text", "pit_out_text",
         "show_low_fuel", "show_low_fuel_for_race_only", "low_fuel_volume_threshold", "low_fuel_lap_threshold",
+        "low_energy_percentage_threshold",
         "low_fuel_text", "low_energy_text", "show_speed_limiter", "show_current_speed_while_limiter_on",
         "decimal_places_speed", "speed_limiter_text", "show_yellow_flag", "show_yellow_flag_for_race_only",
         "yellow_flag_maximum_range_ahead", "yellow_flag_maximum_range_behind", "yellow_flag_text", "show_blue_flag",
@@ -255,7 +256,7 @@ class Realtime(ModernOverlay):
         energy = minfo.energy.available and minfo.energy.estimatedLaps < minfo.fuel.estimatedLaps
         source = minfo.energy if energy else minfo.fuel
         amount = source.amountCurrent
-        if amount > wcfg["low_fuel_volume_threshold"] or source.estimatedLaps > wcfg["low_fuel_lap_threshold"]:
+        if not is_low_amount(wcfg, energy, amount, source.estimatedLaps, source.estimatedValidConsumption):
             return None
         if energy:
             return Chip(self.captions["energy"], f"{amount:.1f}%", "orange")

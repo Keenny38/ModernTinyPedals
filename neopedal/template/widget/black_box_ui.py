@@ -281,19 +281,17 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
         "wheel_lock_threshold", "wheel_locked_threshold", "wheel_spin_threshold", "slip_warning_minimum_speed",
         "warning_outline_width", "wheel_lock_color", "wheel_spin_color",
     ),
-    "show_tyre_temperature": (
-        "tyre_temperature_warning_threshold", "font_color_tyre_temperature_warning",
+    "show_tyre_temperature": (  # warning color also used by surface overheat strip & bottoming: no control
+        "tyre_temperature_warning_threshold",
         "tyre_temperature_cold_threshold", "font_color_tyre_temperature_cold",
         "font_color_tyre_temperature_warming", "show_tyre_temperature_trend",
     ),
     "show_tyre_temperature_trend": ("tyre_heat_trend_threshold",),
-    "show_tyre_pressure": (
-        "enable_tyre_pressure_target", "tyre_pressure_low_color", "tyre_pressure_high_color",
-        "tyre_pressure_warning_background_color", "show_tyre_pressure_trend",
-    ),
-    "enable_tyre_pressure_target": (
+    "show_tyre_pressure": ("enable_tyre_pressure_target", "show_tyre_pressure_trend"),
+    "enable_tyre_pressure_target": (  # pressure colors: outside target only
         "tyre_pressure_target_minimum", "tyre_pressure_target_maximum",
         "tyre_pressure_target_rear_minimum", "tyre_pressure_target_rear_maximum",
+        "tyre_pressure_low_color", "tyre_pressure_high_color", "tyre_pressure_warning_background_color",
     ),
     "show_tyre_pressure_trend": ("tyre_pressure_trend_threshold",),
     "show_tyre_wear": ("tyre_wear_warning_threshold", "tyre_wear_warning_color", "font_color_tyre_wear_warning"),
@@ -309,16 +307,16 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_brake_temperature_trend": ("brake_trend_duration", "brake_heat_trend_threshold"),
     "show_ride_height_minimum": ("ride_height_bottoming_threshold",),
     "show_brake_heat_balance": ("text_brake_heat",),
-    "show_motor_map": ("text_motor_map", "motor_map_color"),
+    "show_motor_map": ("motor_map_color",),  # label also used by setting change pop-up
     "show_headlights_indicator": ("headlights_active_color", "status_icons_side", "status_icon_scale"),
-    "show_wipers_indicator": ("wipers_active_color", "text_wipers_auto", "text_wipers_slow", "text_wipers_fast"),
+    "show_wipers_indicator": ("wipers_active_color",),  # wipers labels also used by setting change pop-up
     "show_track_limits_points": ("track_limits_warning_color", "track_limits_penalty_color"),
     "show_gap_ahead_behind": ("text_gap",),
     "show_lift_and_coast": ("lift_and_coast_color", "text_lift_and_coast"),
-    "show_engine_status": (
-        "stalling_rpm_threshold", "engine_oil_warning_temperature", "engine_water_warning_temperature",
+    "show_engine_status": (  # oil & water warning temperatures & labels also used by engine overheat events
+        "stalling_rpm_threshold",
         "engine_running_color", "engine_warning_color", "engine_off_color", "engine_ignition_color",
-        "font_scale_engine", "text_oil", "text_water", "text_engine_off", "text_ignition",
+        "font_scale_engine", "text_engine_off", "text_ignition",
     ),
     "show_tyre_wear_end_stint": ("tyre_wear_forecast_laps",),
     "show_tyre_load": ("tyre_load_display",),
@@ -335,20 +333,20 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
         "number_of_rpm_leds", "rpm_led_start_ratio", "rpm_led_low_color", "rpm_led_mid_color",
         "rpm_led_high_color", "rpm_led_shift_color",
     ),
-    "show_gear": (
-        "show_gear_speed_cluster", "font_scale_gear", "font_color_gear", "enable_gear_rpm_color",
-        "enable_shift_flash",
+    "show_gear": ("show_gear_speed_cluster", "font_scale_gear", "font_color_gear", "enable_gear_rpm_color"),
+    "enable_gear_rpm_color": (  # shift flash: of gear RPM color
+        "gear_color_low", "gear_color_mid", "gear_color_shift", "gear_mid_rpm_ratio", "enable_shift_flash",
     ),
-    "enable_gear_rpm_color": ("gear_color_low", "gear_color_mid", "gear_color_shift", "gear_mid_rpm_ratio"),
     "show_speed": ("font_scale_speed", "text_speed"),
-    "show_abs_indicator": ("abs_active_color", "text_abs"),
-    "show_tc_indicator": ("tc_active_color", "text_tc"),
-    "show_brake_bias": ("text_brake_bias", "brake_bias_color"),
-    "show_brake_migration": ("text_brake_migration", "enable_brake_bias_migration_merge"),
+    # Labels of ABS, TC, brake bias & migration, limiter also used by setting change pop-up: no control
+    "show_abs_indicator": ("abs_active_color",),
+    "show_tc_indicator": ("tc_active_color",),
+    "show_brake_bias": ("brake_bias_color",),
+    "show_brake_migration": ("enable_brake_bias_migration_merge",),
     "show_wheel_locking": ("text_locking",),
     "show_delta_best": ("deltabest_source", "delta_gain_color", "delta_loss_color", "text_delta"),
     "show_laptime": ("text_laptime",),
-    "show_pit_limiter_indicator": ("pit_active_color", "limiter_active_color", "text_pit", "text_limiter"),
+    "show_pit_limiter_indicator": ("pit_active_color", "limiter_active_color", "text_pit"),
     "show_rpm": ("font_scale_rpm", "rpm_bar_color", "rpm_redline_color", "text_rpm"),
     "show_pedal_bars": ("pedal_input_source", "show_clutch_bar", "throttle_color", "brake_color"),
     "show_setting_change_popup": (
@@ -379,7 +377,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
         "damage_panel_position", "damage_panel_scale", "damage_panel_body_color", "damage_panel_body_color_light",
         "damage_panel_body_color_heavy", "damage_panel_body_color_detached", "damage_panel_suspension_color",
         "damage_panel_suspension_color_light", "damage_panel_suspension_color_medium",
-        "damage_panel_suspension_color_heavy", "damage_panel_suspension_color_totaled",
+        "damage_panel_suspension_color_heavy",  # totaled color also used by coilover damage of suspension view
         "damage_panel_suspension_light_threshold", "damage_panel_suspension_medium_threshold",
         "damage_panel_suspension_heavy_threshold", "damage_panel_suspension_totaled_threshold",
         "damage_panel_wheel_color_detached", "damage_panel_puncture_color", "show_damage_panel_impact_cone",
@@ -388,7 +386,8 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_damage_panel_impact_cone": (
         "damage_panel_impact_cone_angle", "damage_panel_impact_cone_duration", "damage_panel_impact_cone_color",
     ),
-    "show_damage_panel_integrity": ("show_damage_panel_aero_integrity", "text_integrity_body", "text_integrity_aero"),
+    "show_damage_panel_integrity": ("show_damage_panel_aero_integrity", "text_integrity_body"),
+    "show_damage_panel_aero_integrity": ("text_integrity_aero",),
     "show_incident_recorder": (
         "recorder_duration", "incident_deceleration_threshold", "incident_display_duration",
         "enable_incident_file_export", "incident_export_format", "trace_height_scale", "trace_speed_color",
@@ -402,7 +401,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     ),
     "show_flag_events": ("text_yellow_flag", "text_blue_flag"),
     "show_pit_events": ("text_pit_in", "text_pit_out"),
-    "show_penalty_events": ("text_penalty", "text_track_limits"),
+    "show_penalty_events": ("text_penalty",),  # track limits label also used by track limits points
     "show_engine_overheat_events": ("text_overheat",),
     "show_contact_events": ("text_contact", "text_wall"),
     "enable_incident_file_export": ("incident_export_format",),
@@ -439,6 +438,9 @@ class OptionUI(NamedTuple):
     # Part of overlay picture (see black box regions): option shown when clicked in the page preview
     part_options: Mapping[str, str] = {}
     modern_only: bool = False  # declared sections for modern design only (classic: automatic sections)
+    # Options doing nothing with these values (dimmed with a note): option -> ("on", control) used only while
+    # control is on, or ("off", control) not used while control is on
+    inactive: Callable[[Mapping], Mapping[str, tuple[str, str]]] | None = None
 
 
 ORDER_LIST = "display_order_*"  # layout option standing for the display order list

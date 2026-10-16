@@ -97,8 +97,9 @@ def test_graphics_sent_at_most_every_delay_while_a_setting_changes(director_page
     assert len(published) == 3 and published[-1]["graphics"]["hidden"]
     backend.graphics.setGraphic("towerRows", 4)
     backend.graphics.setGraphic("towerRows", 5)
-    backend.release()  # page closing: last change sent
-    assert published[-1]["graphics"]["towerRows"] == 5
+    backend.release()  # page closing: last change sent, then graphics emptied (no more updates)
+    assert [state for state in published if state][-1]["graphics"]["towerRows"] == 5
+    assert published[-1] == {}
 
 
 def test_best_sectors_made_once_per_answer(director_page, monkeypatch):  # noqa: F811
@@ -149,6 +150,32 @@ def test_events_log_written_in_order_by_writer_thread(director_page, monkeypatch
     assert lines[0].startswith("Time,Session time")
     assert [line.split(",")[1] for line in lines[1:]] == ["0:01:40", "0:01:41", "0:01:42"]
     assert threads and all(name == "Director events log" for name in threads)
+
+
+def test_page_closed_without_waiting_for_events_log(director_page, monkeypatch):  # noqa: F811
+    """Closing page never waits for log lines being written (was: up to 5 s); written after, waited at exit"""
+    from neopedal.ui.quick import director_log as dlog
+
+    page, backend = director_page, director_page.backend
+    gate = threading.Event()
+    written = []
+    real = dlog.write_log_rows
+
+    def slow(path, rows):
+        gate.wait(5)
+        real(path, rows)
+        written.append(path)
+
+    monkeypatch.setattr(dlog, "write_log_rows", slow)
+    backend.log.setLogEvents(True)
+    poll(page, race_answers(100.0, car(1, 1), car(2, 2, distance=600.0)))
+    backend.add_events([dr.Event("fastest|9", dr.FASTEST, 100.0, (1,), ("Driver 1",), "GT3", 1, 88.0)])
+    assert backend.log.writer is dlog.WRITER  # one writer: lines of pages opened again never mixed
+    start = time.perf_counter()
+    backend.release_resources()
+    assert time.perf_counter() - start < 1.0 and not written
+    gate.set()
+    assert dlog.WRITER.flush(5.0) and written
 
 
 def test_results_files_read_by_page_jobs(director_page, monkeypatch):  # noqa: F811

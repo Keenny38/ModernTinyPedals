@@ -297,10 +297,12 @@ Item {
                                 Accessible.name: orderItem.modelData.label
                                 Accessible.checked: orderItem.modelData.checked
                             }
-                            Text {
+                            Text {  // column on but not shown: why, after its name
                                 Layout.fillWidth: true
-                                text: orderItem.modelData.label
-                                color: orderItem.modelData.checked ? theme.text : theme.dimText
+                                text: orderItem.modelData.note
+                                      ? orderItem.modelData.label + "  ·  " + orderItem.modelData.note
+                                      : orderItem.modelData.label
+                                color: orderItem.modelData.checked && !orderItem.modelData.note ? theme.text : theme.dimText
                                 elide: Text.ElideRight
                             }
                             TpButton {
@@ -507,6 +509,7 @@ Item {
                 minimum: row.model.minimum
                 maximum: row.model.maximum
                 tip: row.label
+                range: row.model.rangeText || ""
                 onEdited: function(value) { backend.setNumber(row.model.key, value) }
             }
         }

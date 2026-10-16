@@ -295,7 +295,8 @@ class Realtime(Overlay):
             else:
                 text = f"{temp:.1f}"
             target.text = text
-            target.fg = self.bar_style_rate[data > 0]
+            # Neutral color when shown as 0 (index 2), else loss or gain
+            target.fg = self.bar_style_rate[2 if float(text) == 0 else data > 0]
             target.update()
 
     def update_net(self, target, data, last):

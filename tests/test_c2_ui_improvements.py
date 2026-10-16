@@ -254,7 +254,7 @@ def test_option_limits_table():
     assert limit_error("opacity", 1.5) == "Between 0 and 1"
     assert limit_error("opacity", 0.5) == ""
     assert limit_error("font_size", 12.5) == "Whole number required"
-    assert limit_error("bar_gap", -1) == "Minimum 0"
+    assert limit_error("bar_gap", -1) == "Between 0 and 2000"  # gaps limited: no overlay of huge size
     assert limit_error("unknown_option", -1e9) == ""
 
 
@@ -975,3 +975,35 @@ def test_release_notes_page_kept_by_language_change_still_installs(window, updat
         window.last_language = language
         window.retranslate()  # back to English for other tests
         flush_deleted()
+
+
+def test_size_and_count_options_limited():
+    """Every option sizing an overlay or a count of drawn items has a minimum & a maximum: a large typed value
+    never makes an overlay of tens of thousands of pixels (memory, crash)"""
+    import re
+
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
+    from neopedal.template.setting_module import MODULE_DEFAULT
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.ui.option_limits import option_limit
+
+    sized = re.compile(r"(_|^)(width|height|length|size|radius|scale|padding|samples|offset(_[xy])?)$"
+                       r"|(?<!time)_gap$|^(display|area|inner|rotation_line)_margin$"  # time gaps, force margins: no size
+                       r"|^font_size|padding|^number_of_|_history_count$")
+    unlimited = sorted({
+        key for options in (*WIDGET_DEFAULT.values(), *MODULE_DEFAULT.values(), *GLOBAL_DEFAULT.values())
+        if isinstance(options, dict)
+        for key, value in options.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and sized.search(key)
+        and not key.startswith("display_order_")
+        and (option_limit(key).minimum is None or option_limit(key).maximum is None)
+    })
+    assert not unlimited, unlimited
+
+
+def test_number_range_shown():
+    from neopedal.ui.quick.overlay_options_backend import range_text
+
+    assert range_text(0, 4000) == "Allowed: 0 - 4000"
+    assert range_text(-1e9, 1e9) == ""
+    assert range_text(1, 1e9) == "Minimum 1"

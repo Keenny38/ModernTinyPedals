@@ -49,7 +49,7 @@ from ..api_control import api
 from ..const_app import VERSION
 from ..module_info import minfo
 from ..replay import replay
-from ..userfile import flush_to_disk, temp_file_name, write_text_file
+from ..userfile import flush_to_disk, replace_retry, temp_file_name, write_text_file
 from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
@@ -671,7 +671,7 @@ def write_gzip_file(filename: str, text: str) -> bool:
             with gzip.GzipFile(fileobj=file, mode="wb", compresslevel=6) as gzip_file:
                 gzip_file.write(text.encode("utf-8"))
             flush_to_disk(file)
-        os.replace(temp_filename, filename)
+        replace_retry(temp_filename, filename)  # new file opened a moment by antivirus or sync (Windows)
         return True
     except OSError as error:
         logger.error("RECORDER: failed saving %s: %s", filename, error)

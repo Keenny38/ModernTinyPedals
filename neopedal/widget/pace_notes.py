@@ -146,8 +146,9 @@ class Realtime(Overlay):
                 self.update_auto_hide(False)
             else:
                 etime = api.read.timing.elapsed()
-                if self.last_notes_index != notes_index:
-                    self.last_notes_index = notes_index
+                note_key = (in_pits, notes_index)  # pit & track notes indexes counted apart
+                if self.last_notes_index != note_key:
+                    self.last_notes_index = note_key
                     self.last_etime = etime
                 if self.last_etime > etime:
                     self.last_etime = etime
@@ -156,6 +157,8 @@ class Realtime(Overlay):
         elif self.wcfg["enable_auto_hide_if_not_available"]:
             self.update_auto_hide(True)
             return
+        else:  # no note, no auto hide: never kept hidden from a note shown before
+            self.update_auto_hide(False)
 
         if self.wcfg["show_pace_notes"]:
             if in_pits:

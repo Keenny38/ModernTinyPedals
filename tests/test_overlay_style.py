@@ -191,6 +191,8 @@ def test_overlay_scale_overrides():
     scaled = scale_overrides(wcfg, 1.5)
     assert scaled == {"font_size": 22, "bar_height": 15}  # character counts & intervals untouched
     assert scale_overrides({"font_size": 15}, 10)["font_size"] == 45  # clamped to 3x
+    assert scale_overrides({"maximum_indicator_height": 0, "bar_height": 1}, 0.5) == {
+        "maximum_indicator_height": 0, "bar_height": 1}  # hidden part kept hidden, shown part kept shown
 
 
 def test_overlay_scale_applied_to_widget(ui_env):

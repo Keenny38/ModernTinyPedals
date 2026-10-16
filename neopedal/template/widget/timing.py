@@ -42,7 +42,6 @@ WIDGET_TIMING = {
         "deltabest_source": "Best",
         "show_game_deltabest_if_available": False,
         "swap_style": False,
-        "font_color_deltabest": "#000000",
         "background_color_deltabest": "#222222",
         "background_color_time_gain": "#44FF00",
         "background_color_time_loss": "#FF4400",

@@ -1542,7 +1542,7 @@ class StatusButtonBar(QStatusBar):
         dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
         # Moon & sun glyphs without a color emoji form, so they stay monochrome like the text
         glyph = "\u263e " if dark else "\u263c "
-        self.button_style.setText(glyph + trm(f"UI: {cfg.application['window_color_theme']}"))
+        self.button_style.setText(glyph + trm(f"UI: {tr(cfg.application['window_color_theme'])}"))
 
         if cfg.application["enable_high_dpi_scaling"]:
             text_dpi = "Auto"

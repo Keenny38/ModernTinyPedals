@@ -3,6 +3,48 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.25.0 (unreleased)
+
+Des options plus sûres partout : chaque nombre a des limites visibles, les presets sont réparés au chargement, et la page Options des overlays montre des situations de course et les deux designs.
+
+### Nouveautés
+
+#### Options des overlays
+
+- **Situations de course dans l'aperçu** : `En course`, `Drapeaux jaune & bleu`, `Au stand`, `Dégâts` et `Pluie` montrent les drapeaux, le chrono des stands, le limiteur, les dégâts ou la pluie sans rouler.
+- **Tester à l'écran** : les overlays à l'écran montrent la situation choisie pendant 10 secondes (valeurs enregistrées), pour régler leurs couleurs et leurs seuils.
+- **Autre design** : les mêmes valeurs dessinées par l'autre design (moderne ou classique), avec le nombre d'options de chaque design.
+- Filtre **Utilisées seulement** : masque les options sans effet avec les valeurs actuelles (grisées).
+- **Valeurs autorisées** dans l'infobulle de chaque nombre (`Autorisé : 0 - 4000`).
+- Les options utilisées par plusieurs parties (une étiquette du Compteur ATH affichée par sa puce et par le pop-up de réglage) ne sont grisées que si toutes ces parties sont désactivées : `Utilisé seulement avec l'un de : ...`.
+
+#### Nouvel overlay Pneus (vue d'ensemble)
+
+- **Toutes les mesures des pneus, une carte par pneu** (désactivé par défaut, catégorie `Pneus et roues`), placées comme sur la voiture vue de dessus (design moderne : voiture au centre, chaque pneu dessiné à son coin) : températures de surface intérieur / milieu / extérieur sur le pneu, colorées selon la heatmap, badge de gomme ou alerte (roue détachée, crevaison, méplat) avec le pneu mis en évidence, températures de la carcasse et de la couche intérieure, pression en bleu sous la plage cible et en rouge au-dessus avec sa place sur une échelle cible (mêmes plages que le Compteur ATH, par gomme aussi), jauge de gomme, usure par tour et tours restants. Chaque partie a sa propre option d'activation, la voiture et le pneu dessiné aussi.
+
+![Overlay Pneus (vue d'ensemble)](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-16-tyre-overview.png)
+
+#### Presets et options
+
+- **Vérifier le preset** (menu de la page Presets) : liste les options inconnues, invalides ou hors limites d'un preset, et le répare.
+- **Classement** : `show_class_column_with_class_header` garde la colonne Classe avec les en-têtes de classe (désactivé par défaut).
+- **Drapeau** : `low_energy_percentage_threshold`, alerte d'énergie faible à un pourcentage d'énergie restante (100 par défaut : seuil en tours seulement, comme avant).
+
+### Améliorations
+
+- **Chaque option numérique a des limites** : une valeur hors limites dans un fichier de preset, un preset importé ou un paquet est ramenée dans ses limites au chargement du preset (écrit dans le journal), au lieu de dessiner un overlay de dizaines de milliers de pixels.
+- **Un overlay trop grand est coupé** à 8192 pixels avec un message, au lieu de figer l'ordinateur.
+- **Importer des réglages d'overlays** : chaque option ignorée ou corrigée est listée avec la raison, et les nombres hors limites sont ramenés dans leurs limites au lieu d'être ignorés.
+- **Importer des réglages** : nouvel essai au démarrage suivant (jusqu'à 3 fois) quand des fichiers sont utilisés (autre instance en train de se fermer, antivirus).
+- **Régie de course** : fermer la page n'attend plus l'écriture du journal des événements.
+
+### Corrections
+
+- **Classement, Relatif et Rivaux** : l'ordre des colonnes et les colonnes activées suivent la page à chaque fois ; le design classique ne liste plus l'ordre des colonnes propres au design moderne (tendance d'écart, limites de piste, énergie par tour).
+- **Options des overlays** : `Annuler` et `Rétablir` pendant l'édition d'un champ affichent la valeur rétablie ; options grisées à tort, ou pas grisées, sur de nombreux overlays.
+- **Traduction française relue en entier** : vouvoiement partout, un seul mot pour les classes de véhicules (« catégorie »), environ 200 libellés, aides et messages corrigés (accords, rapport puissance/poids, mots manquants), et les textes encore en anglais traduits (overlays Drapeau, Moteur, Force, Performances système, messages d'erreur).
+- **Overlays**, trouvés en vérifiant chaque option : rayon de disparition du radar, température moyenne des freins et vitesse maxi du Compteur de vitesse remises à zéro avec la session, cône d'impact du Compteur ATH après un redémarrage, overlay ramené à l'écran qui y reste, alerte de carburant ou d'énergie faible avec une consommation inconnue, échelle globale qui ne rallume plus les options à 0, `100%` qui n'est plus coupé, temps au tour comme `1:60.0`, Secteurs après un reset, échelle de temps de l'Historique, décimales du Cap, moyenne de Pression des pneus, minuteurs des Notes de piste, graduations de la Jauge de direction, et bien d'autres.
+
 ## 0.24.0 (2026-10-14)
 
 Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timing, la Black box renommée **Compteur ATH** avec un pop-up de réglage, les résultats et les rejeux sur une seule page, un même aspect pour chaque information dans tous les overlays et toutes les pages, et une app plus légère.

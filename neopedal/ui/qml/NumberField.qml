@@ -13,6 +13,7 @@ TextField {
     property real maximum: 9999
     property string suffix: ""
     property string tip: ""
+    property string range: ""  // allowed values, shown in tooltip under tip
     signal edited(real value)  // value typed or stepped, in range
 
     // Decimal separator of app language (commit() reads both comma & point)
@@ -77,7 +78,7 @@ TextField {
     Accessible.name: tip
 
     ToolTip.visible: tip !== "" && hovered && !activeFocus
-    ToolTip.text: tip
+    ToolTip.text: range !== "" ? tip + "\n" + range : tip
     ToolTip.delay: theme.tipDelay
 
     background: Rectangle {

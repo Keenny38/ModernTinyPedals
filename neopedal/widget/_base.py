@@ -23,6 +23,7 @@ Overlay base window, events.
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from functools import wraps
 from math import ceil, inf
 from time import monotonic
@@ -40,6 +41,7 @@ from ..i18n.options import module_label
 from ..perf_monitor import timed_event
 from ..regex_pattern import CHOICE_COMMON, FONT_WEIGHT_MAP
 from ..setting import Setting
+from ..setting_validator import normalize_display_orders
 from ._common import FontMetrics, MousePosition
 from ._edit_frame import EditFrame, scale_widget_setting
 from ._edit_mode import apply_values, edit_mode, forget_overlay, step_text, sync_edit_mode
@@ -56,6 +58,9 @@ logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
 FADE_MS = 250
 MAX_TIMER_ERRORS = 50  # consecutive update errors before overlay update stopped
+# Largest overlay side (px): a bigger window (option values far too big, ex. huge font or bar size) may fail
+# to show or freeze the system (window picture uploaded at every repaint, GPU texture size limit)
+MAX_OVERLAY_SIDE = 8192
 ARROW_KEYS = {
     Qt.Key.Key_Left: (-1, 0),
     Qt.Key.Key_Right: (1, 0),
@@ -192,12 +197,16 @@ class Base(QWidget):
         self._edit_frame = EditFrame(self, module_label(self.widget_name), self.__resize_by_handle)
         self.__set_window_flags()  # 2
         self.__toggle_timer(not realtime_state.shown)
+        self.__limit_size()
         self.__keep_on_screen()
         sync_edit_mode()
 
     def stop(self):
         """Stop and close widget"""
         widget_name = self.widget_name
+        if self._drag_start is not None:  # stopped while dragged (reload, hotkey): no release event comes
+            mousepos.reset()
+            end_layout_guide()
         forget_overlay(widget_name)
         self._fade.stop()
         self.__toggle_timer(True)
@@ -272,6 +281,26 @@ class Base(QWidget):
             else:
                 edit_mode().store_layout_soon()
 
+    def __limit_size(self):
+        """Overlay bigger than MAX_OVERLAY_SIDE (option values far too big) cut to it, user told once"""
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()  # size from layout (set at show otherwise)
+        width, height = natural = self.size().expandedTo(self.minimumSize()).toTuple()
+        limited = limited_size(width, height)
+        if limited is None:
+            return
+        if layout is not None:  # layout would keep its minimum size
+            layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.setMinimumSize(min(self.minimumWidth(), limited[0]), min(self.minimumHeight(), limited[1]))
+        self.setMaximumSize(*limited)
+        self.resize(*limited)
+        logger.warning("OVERLAY: %s too big (%dx%d), cut to %dx%d", self.widget_name, *natural, *limited)
+        app_signal.error.emit(
+            f"{module_label(self.widget_name)} is too big ({natural[0]} x {natural[1]}), cut to "
+            f"{limited[0]} x {limited[1]}: lower its size options or scale."
+        )
+
     def __keep_on_screen(self):
         """Overlay outside of every screen (monitor gone, preset made on another computer)
         brought back on nearest screen, position not saved (back in place once screen is back)"""
@@ -328,6 +357,7 @@ class Base(QWidget):
     def apply_placement(self):
         """Position, opacity or visibility options changed (undo, context menu): applied at once"""
         self.move(self.wcfg["position_x"], self.wcfg["position_y"])
+        self.__keep_on_screen()  # saved position outside of screens: kept on nearest screen as at start
         self.__refresh_visibility(animate=False)
 
     @Slot(bool)  # type: ignore[operator]
@@ -427,13 +457,19 @@ class Base(QWidget):
         overlay_signal.editing.connect(self.__set_editing)
 
     def __break_signal(self):
-        """Disconnect overlay lock and hide signal"""
-        overlay_signal.locked.disconnect(self.__toggle_lock)
-        overlay_signal.hidden.disconnect(self.__set_hidden)
-        overlay_signal.context.disconnect(self.__context_changed)
-        overlay_signal.paused.disconnect(self.__toggle_timer)
-        overlay_signal.iconify.disconnect(self.__toggle_vr_compat)
-        overlay_signal.editing.disconnect(self.__set_editing)
+        """Disconnect overlay lock and hide signal (none connected if start failed before: never raises)"""
+        if not self.overlay_started:  # start not reached (subclass start failed first): nothing connected
+            return
+        for signal, slot in (
+            (overlay_signal.locked, self.__toggle_lock),
+            (overlay_signal.hidden, self.__set_hidden),
+            (overlay_signal.context, self.__context_changed),
+            (overlay_signal.paused, self.__toggle_timer),
+            (overlay_signal.iconify, self.__toggle_vr_compat),
+            (overlay_signal.editing, self.__set_editing),
+        ):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect(slot)
 
     def mouseMoveEvent(self, event):
         """Update widget position"""
@@ -448,7 +484,7 @@ class Base(QWidget):
                 else:
                     grid_size = self.cfg.application["grid_move_size"] if self.cfg.overlay["enable_grid_move"] else 0
                     guide.begin(self, grid_size)
-            edit_mode().placement_changed(self.widget_name)
+            edit_mode().placement_changed(self.widget_name, self.geometry())
 
     def mousePressEvent(self, event):
         """Set offset position & press state, select widget"""
@@ -1094,16 +1130,17 @@ def guarded_timer_event(func):
     return wrapper
 
 
+def limited_size(width: int, height: int, limit: int = MAX_OVERLAY_SIDE) -> tuple[int, int] | None:
+    """Overlay size cut to limit on each side, None if within limit"""
+    if width <= limit and height <= limit:
+        return None
+    return min(width, limit), min(height, limit)
+
+
 def validate_option(config: dict) -> dict:
-    """Post validation for options"""
-    # Check column/row index order, correct any overlapping indexes
-    column_set = []
-    for key in config:
-        if key.startswith("display_order"):
-            while config[key] in column_set:
-                config[key] += 1
-            column_set.append(config[key])
-    return config
+    """Post validation for options: display orders made unique & not negative, order kept (done at preset
+    load too, see setting_validator; here for previews & settings changed since)"""
+    return normalize_display_orders(config)
 
 
 def exec_menu(menu: QMenu, pos: QPoint):

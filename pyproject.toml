@@ -17,6 +17,7 @@ dev = [
     "pytest>=8",
     "pytest-cov>=6",
     "pytest-timeout>=2",
+    "pytest-xdist>=3",
     "pre-commit>=3",
     "ruff>=0.6",
     "mypy>=1.10",
@@ -80,8 +81,30 @@ follow_imports = "silent"
 
 [[tool.mypy.overrides]]
 # Widget settings are typed per widget (template.widget_config_types): option keys built at runtime
-# (f"show_{key}") can't be checked, read as Any; literal keys are still checked
-module = ["neopedal.widget.*"]
+# (f"show_{key}") can't be checked in these modules yet, read as Any; literal keys are still checked.
+# Every other module is checked: a module made to pass is taken off this list (new modules never on it)
+module = [
+    "neopedal.widget._black_box.base", "neopedal.widget._black_box.center", "neopedal.widget._black_box.status",
+    "neopedal.widget._black_box.suspension", "neopedal.widget._modern.acceleration",
+    "neopedal.widget._modern.black_box", "neopedal.widget._modern.brake_performance",
+    "neopedal.widget._modern.brake_wear", "neopedal.widget._modern.consumption", "neopedal.widget._modern.cruise",
+    "neopedal.widget._modern.damage", "neopedal.widget._modern.damage_stats",
+    "neopedal.widget._modern.deltabest_extended", "neopedal.widget._modern.differential",
+    "neopedal.widget._modern.driver_rank", "neopedal.widget._modern.electric_motor",
+    "neopedal.widget._modern.engine", "neopedal.widget._modern.engine_temperature", "neopedal.widget._modern.force",
+    "neopedal.widget._modern.gear", "neopedal.widget._modern.heading", "neopedal.widget._modern.instrument",
+    "neopedal.widget._modern.onboard_setting", "neopedal.widget._modern.pit_stop_estimate",
+    "neopedal.widget._modern.relative_finish_order", "neopedal.widget._modern.ride_height",
+    "neopedal.widget._modern.speed_delta", "neopedal.widget._modern.speedometer",
+    "neopedal.widget._modern.steering_angle", "neopedal.widget._modern.suspension_travel",
+    "neopedal.widget._modern.timing", "neopedal.widget._modern.track_notes", "neopedal.widget._modern.trailing",
+    "neopedal.widget._modern.weather", "neopedal.widget._modern.weight_distribution", "neopedal.widget._pedal_alert",
+    "neopedal.widget.acceleration", "neopedal.widget.brake_wear", "neopedal.widget.driver_rank",
+    "neopedal.widget.friction_circle", "neopedal.widget.pedal", "neopedal.widget.pit_lane_helper",
+    "neopedal.widget.race_plan", "neopedal.widget.radar", "neopedal.widget.relative_finish_order",
+    "neopedal.widget.speed_delta", "neopedal.widget.track_map", "neopedal.widget.trailing",
+    "neopedal.widget.tyre_wear",
+]
 disable_error_code = ["literal-required"]
 
 [[tool.mypy.overrides]]

@@ -175,7 +175,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Midday": "Midi",
     "Midnight": "Minuit",
     "RATE": "TAUX",
-    "BIAS": "BIAIS",
+    "BIAS": "RÉPART.",
     "LAST": "DERN.",
     "LIMIT": "LIMITEUR",
     "LDR": "1ER",
@@ -251,4 +251,15 @@ OVERLAY_LABELS = MappingProxyType({
     "Start": "Départ",
     "Traffic": "Trafic",
     "Yellow": "Jaune",
+    # Found untranslated by the French check
+    "Aero": "Aéro",
+    "Go": "Partez",
+    "Lat. G": "G lat.",
+    "Long. G": "G long.",
+    "Max RPM": "RPM max",
+    # Tyre overview
+    "Carc.": "Carc.",
+    "Detached": "Détachée",
+    "Inner": "Int.",
+    "Puncture": "Crevaison",
 })

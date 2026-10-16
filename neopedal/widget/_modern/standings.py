@@ -54,7 +54,7 @@ class Realtime(DriverTable):
         *DRIVER_OPTIONS,
         "show_column_headers",
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
-        "show_class_header", "class_order",
+        "show_class_header", "show_class_column_with_class_header", "class_order",
         "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
         "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
         "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
@@ -90,8 +90,10 @@ class Realtime(DriverTable):
             max_vehicles = wcfg["maximum_vehicles_combined_mode"]
         self.max_rows = min(max(int(max_vehicles), 5), 126)
         # Cars grouped by class (split or exclusive mode): class name above each group instead of class column
+        # (also with it if chosen)
         self.class_headers = bool(wcfg["show_class_header"]) and (
             split or wcfg["enable_single_class_exclusive_mode"])
+        self.class_column_hidden = self.class_headers and not wcfg["show_class_column_with_class_header"]
         self.setup_table()
         self.set_size(self.table.width, self.table.height(1))
 

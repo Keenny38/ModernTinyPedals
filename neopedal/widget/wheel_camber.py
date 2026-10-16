@@ -80,7 +80,7 @@ class Realtime(Overlay):
             gap_hori=self.wcfg["horizontal_gap"],
             gap_vert=self.wcfg["vertical_gap"],
         )
-        self.decimals_camber = max(self.wcfg["decimal_places_camber"], 1)
+        self.decimals_camber = max(self.wcfg["decimal_places_camber"], 0)  # 0 allowed, as modern design
         self.bar_style_camber = (
             self.wcfg["font_color_camber"],
             self.wcfg["font_color_positive_camber"],
@@ -107,7 +107,7 @@ class Realtime(Overlay):
 
         # Camber difference
         if self.wcfg["show_camber_difference"]:
-            self.decimals_cdiff = max(self.wcfg["decimal_places_camber_difference"], 1)
+            self.decimals_cdiff = max(self.wcfg["decimal_places_camber_difference"], 0)
             self.bars_cdiff = self.set_rawtext(
                 text=TEXT_NA,
                 width=font_m.width * (3 + self.decimals_cdiff) + bar_padx,

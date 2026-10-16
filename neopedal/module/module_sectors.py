@@ -162,6 +162,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             # Load data (laps not saved, file not accessible: discarded, file kept)
             output_session.reset()
             output_alltime.reset()
+            last_sector_idx = -1  # sector index of reset outputs (-1) set again from current sector
             last_lap_stime = -1.0
             is_bad_lap = last_lap_bad = False
             s3_lap_stime = -1.0

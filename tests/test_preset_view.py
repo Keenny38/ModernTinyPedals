@@ -362,3 +362,34 @@ def test_qml_page_translated(page):
         assert "Charger automatiquement le preset principal" in texts and "Auto Load Primary Preset" not in texts
     finally:
         i18n.set_language("English")
+
+
+def test_check_preset_lists_and_repairs(page, monkeypatch):
+    from neopedal.ui import preset_view
+
+    toasts, questions = [], []
+    monkeypatch.setattr(preset_view, "show_toast", lambda parent, text, *args, **kwargs: toasts.append(text))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(
+        lambda *args, **kwargs: questions.append(args[2]) or QMessageBox.StandardButton.Yes))
+    page.backend.checkPreset("practice.json")
+    assert toasts == ["No problem found"] and not questions
+    write_preset("race.json", {"speedometer": {"enable": True, "font_size": 99999, "removed_option": 1}})
+    page.backend.checkPreset("race.json")
+    assert "font_size 99999 -> 200" in questions[0] and "removed_option" in questions[0]
+    assert toasts[-1] == "Preset repaired"
+    with open(f"{cfg.path.settings}race.json", encoding="utf-8") as file:
+        repaired = json.load(file)["speedometer"]
+    assert repaired["font_size"] == 200 and "removed_option" not in repaired
+    page.backend.checkPreset("race.json")
+    assert toasts[-1] == "No problem found"
+
+
+def test_locked_preset_checked_not_repaired(page, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
+    write_preset("race.json", {"speedometer": {"font_size": -5}})
+    cfg.user.filelock["race.json"] = {"version": "1.0"}
+    page.backend.checkPreset("race.json")
+    assert "locked preset, not changed" in warnings[0]
+    with open(f"{cfg.path.settings}race.json", encoding="utf-8") as file:
+        assert json.load(file)["speedometer"]["font_size"] == -5

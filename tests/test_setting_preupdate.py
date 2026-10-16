@@ -183,3 +183,12 @@ def test_newer_and_misc_updates():
     preupdate_user_setting((2, 39, 5), preset)
     assert preset["track_map"]["pitout_duration_increment"] == 5
     assert preset["black_box"]["alert_pulse_frequency"] == 0 and preset["black_box"]["show_energy_gauge"] is True
+
+
+def test_options_read_by_no_overlay_removed_in_2_51_1():
+    from neopedal.setting_preupdate import preupdate_user_setting
+
+    user = {"deltabest": {"font_color_deltabest": "#000000", "decimal_places": 3},
+            "standings": {"column_pitstop_count": True, "column_pit_status": True}}
+    preupdate_user_setting((2, 51, 0), user)
+    assert user == {"deltabest": {"decimal_places": 3}, "standings": {"column_pit_status": True}}

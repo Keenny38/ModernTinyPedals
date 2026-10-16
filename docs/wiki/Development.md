@@ -52,6 +52,7 @@ pytest --cov=neopedal
 
 - CI fails when total coverage drops under `fail_under` in `pyproject.toml` (88 % at the time of writing; current coverage is about 91 %). There are more than 2,300 tests.
 - Tests run headless in CI with `QT_QPA_PLATFORM=offscreen`, and a hung test fails after 300 seconds (`--timeout=300`).
+- `pytest -n auto` (pytest-xdist) spreads the tests over every CPU, about 3 times faster; CI does it on Linux. A test opening a server uses a port of its own per worker (`PYTEST_XDIST_WORKER`).
 - `pytest -m benchmark` runs the widget render benchmark (separate CI step); `pytest -m manual` runs tests that need a running game.
 - `python tools/check.py` runs every check of CI in one command: ruff, mypy for Windows **and** Linux, tests with coverage (`--quick`: without tests). It also warns when a changelog lacks the section of the next version, and lints changed workflows when `actionlint` / `zizmor` are installed. `python tools/check.py --install-hook` runs it before each push to `master` (a failed check refuses the push, pushes to other branches are not checked).
 - CI always installs the latest `ruff` and `mypy`. If a check fails in CI but passes locally, update them: `pip install -U ruff mypy`.
@@ -211,6 +212,8 @@ Before publishing, run `git fetch --tags` (to start from the real last release) 
 
 - [`CHANGELOG.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md), in English: the start of the GitHub release notes, and the notes the app shows in English;
 - [`CHANGELOG.fr.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.fr.md), in French: the notes the app shows in French (fetched at the release tag for an available update, bundled file for the installed version).
+
+`python tools/gen_release_notes.py --draft-changelog X.Y.Z` prints a draft of the section from the commits since the last release (titles under `New`, `Improvements` and `Fixes`, images added in `docs/changes`), to rewrite for users.
 
 Without both sections, `tools/release.py` and the workflow refuse to publish. The `##` to `####` headings inside a section become the cards of the app's What's New page.
 

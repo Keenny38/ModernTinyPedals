@@ -314,8 +314,9 @@ def test_import_rename_failure_cleans_copy(tmp_path, monkeypatch):
     (tmp_path / "NeoPedal.before-import-20250101-000000").mkdir()
     (tmp_path / "NeoPedal.before-import-20250601-000000").mkdir()
     aside = si.replace_folder(str(source), str(target), "20260101-000000")
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "NeoPedal", "NeoPedal.before-import-20260101-000000", "Other"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [  # earlier backups kept (never deleted)
+        "NeoPedal", "NeoPedal.before-import-20250101-000000", "NeoPedal.before-import-20250601-000000",
+        "NeoPedal.before-import-20260101-000000", "Other"]
     assert os.path.basename(aside) == "NeoPedal.before-import-20260101-000000"
     assert not (target / ".lap_cache").exists()  # cache rebuilt from laps
     assert (target / "config.json").read_text(encoding="utf-8") == "{}"

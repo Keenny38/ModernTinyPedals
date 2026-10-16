@@ -80,7 +80,7 @@ class Realtime(Overlay):
             gap_hori=self.wcfg["horizontal_gap"],
             gap_vert=self.wcfg["vertical_gap"],
         )
-        self.decimals_toe = max(self.wcfg["decimal_places_toe_angle"], 1)
+        self.decimals_toe = max(self.wcfg["decimal_places_toe_angle"], 0)  # 0 allowed, as modern design
         self.bars_toe = self.set_rawtext(
             text=TEXT_NA,
             width=font_m.width * (3 + self.decimals_toe) + bar_padx,
@@ -107,7 +107,7 @@ class Realtime(Overlay):
                 self.wcfg["font_color_total_toe_angle_negative"],
                 self.wcfg["font_color_total_toe_angle_positive"],
             )
-            self.decimals_total = max(self.wcfg["decimal_places_total_toe_angle"], 1)
+            self.decimals_total = max(self.wcfg["decimal_places_total_toe_angle"], 0)
             self.bars_total = self.set_rawtext(
                 text=TEXT_NA,
                 width=font_m.width * (2 + self.decimals_total) + bar_padx,
@@ -147,13 +147,13 @@ class Realtime(Overlay):
         """Toe angle data"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.{self.decimals_toe + 1}f}"[:3 + self.decimals_toe]
+            target.text = f"{data:+.{self.decimals_toe + 1}f}"[:3 + self.decimals_toe].rstrip(".")
             target.update()
 
     def update_total(self, target, data):
         """Total toe angle data"""
         if target.last != data:
             target.last = data
-            target.text = f"{abs(data):.{self.decimals_total + 1}f}"[:2 + self.decimals_total]
+            target.text = f"{abs(data):.{self.decimals_total + 1}f}"[:2 + self.decimals_total].rstrip(".")
             target.fg = self.bar_style_total[data > 0]
             target.update()

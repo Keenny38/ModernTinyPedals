@@ -103,6 +103,19 @@ The **Driver Rank** overlay (off by default, `Timing` category, Le Mans Ultimate
 
 ![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
 
+## Tyre Overview
+
+The **Tyre Overview** overlay (off by default, `Tyres & Wheels` category) shows every tyre reading in **one card per tyre**, placed as on the car (front left, front right, rear left, rear right). The modern design draws the car seen from above, its body in the middle and each tyre at its corner:
+
+- **Compound** badge, replaced by an **alert** when needed (card and tyre highlighted): detached wheel, puncture, flat spot (`flat_spot_threshold`: tread lost by locking).
+- **Surface temperatures** inner / center / outer (or one average) on the tyre in heatmap colors, **carcass** and **inner layer** temperatures.
+- **Pressure**, blue below the target range and red above it: same ranges as the Dashboard HUD (`tyre_pressure_target_minimum` / `_maximum`, own rear range, or per compound with `tyre_target_by_compound`), entered in kPa, psi or bar; the modern design shows its place on a scale around the target range.
+- **Tread left** as a gauge along the tyre and in percent, **wear per lap** and **laps left** on this tread, red at the warning thresholds.
+
+Each part has its own on/off option (car body, wheel name, tyre drawing and its grooves, alert highlight, pressure unit and target scale, tread gauge…); the cards get smaller. Tyre drawing off, surface temperatures move to a row of the readings. Try it without driving with the race situations of the preview (`Damage`) and `Test on Screen` on the Overlay Options page.
+
+![Tyre Overview overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-16-tyre-overview.png)
+
 ## Relative, Standings and Track Map
 
 - **Relative: `Gap Trend` column** (modern design, `column_gap_trend`, on by default): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
@@ -164,6 +177,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Tyre Deflection | Tyre vertical deflection |
 | Tyre Inner Layer | Tyre inner layer temperature |
 | Tyre Load | Tyre load and ratio |
+| Tyre Overview | Every tyre reading in one card per tyre: compound & alerts, temperatures, pressure, wear (see below) |
 | Tyre Pressure | Tyre pressure |
 | Tyre Temp Trend | Tyre surface temperature over time (race aid) |
 | Tyre Temperature | Tyre surface temperature; optional heatmap centered on the LMU optimal temperature |

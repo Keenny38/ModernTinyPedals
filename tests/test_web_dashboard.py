@@ -3,6 +3,7 @@
 import http.client
 import http.cookiejar
 import json
+import os
 import ssl
 import time
 import urllib.error
@@ -22,7 +23,8 @@ from neopedal.web_dashboard import (
     generate_access_code,
 )
 
-PORT = 18338
+# Own port per test process (pytest-xdist workers "gw0", "gw1"... run at once)
+PORT = 18338 + 10 * int(os.environ.get("PYTEST_XDIST_WORKER", "gw0")[2:] or 0)
 
 
 @pytest.fixture

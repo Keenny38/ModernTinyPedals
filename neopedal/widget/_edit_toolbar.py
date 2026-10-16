@@ -95,6 +95,11 @@ class ToolItem:
         self.tip = ""
 
 
+def geometry_text(geometry: QRect) -> str:
+    """Position & size of overlay: "X 10   Y 20   .   200 x 80" (middle dot & multiplication sign)"""
+    return f"X {geometry.x()}   Y {geometry.y()}   \u00B7   {geometry.width()} \u00D7 {geometry.height()}"
+
+
 class EditToolbar(QWidget):
     """Floating edit mode toolbar"""
 
@@ -115,7 +120,16 @@ class EditToolbar(QWidget):
         self.title = ""
         self.detail = ""
         self.icon_family = icon_font_family()
+        self.style_key: tuple = ()
+        self.apply_style()
+
+    def apply_style(self):
+        """Theme & fonts of overlay style (built again when style changed since toolbar was made)"""
         style = cfg.user.config["overlay_style"]
+        key = tuple(sorted((name, repr(value)) for name, value in style.items()))
+        if key == self.style_key:
+            return
+        self.style_key = key
         self.theme = build_theme(style, surface_alpha=242)
         family = style.get("modern_design_font_name") or FontFile.DESIGN_FAMILY
         self.font_label = self.make_font(family, 14, QFont.Weight.DemiBold)
@@ -123,6 +137,7 @@ class EditToolbar(QWidget):
         self.font_detail = self.make_font(family, 12, QFont.Weight.Medium)
         self.font_icon = self.make_font(self.icon_family, 16, QFont.Weight.Normal)
         self.relayout()
+        self.update()
 
     @staticmethod
     def make_font(family: str, size: int, weight: QFont.Weight) -> QFont:
@@ -197,15 +212,22 @@ class EditToolbar(QWidget):
                 item.enabled = redo is not None
         selected = overlays.get(self.controller.selected)
         if selected is not None:
-            geometry = selected.geometry()
             self.title = module_label(self.controller.selected)
-            self.detail = (f"X {geometry.x()}   Y {geometry.y()}   \u00B7   "
-                           f"{geometry.width()} \u00D7 {geometry.height()}")
+            self.detail = geometry_text(selected.geometry())
         else:
             count = len(overlays)
             self.title = tr("Edit Overlays")
             self.detail = f"{count} overlay{'s' if count != 1 else ''}"
         self.update()
+
+    def show_geometry(self, geometry: QRect):
+        """Selected overlay dragged: only its position text drawn again (no full refresh per mouse move)"""
+        detail = geometry_text(geometry)
+        if detail != self.detail:
+            self.detail = detail
+            for item in self.items:
+                if item.kind == TITLE:
+                    self.update(item.rect)
 
     # Placement
     def show_on_screen(self):

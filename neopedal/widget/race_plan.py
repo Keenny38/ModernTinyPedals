@@ -29,6 +29,7 @@ done, fuel, energy & tyres of now, stops done (see race_live).
 """
 
 import json
+import logging
 import os
 from dataclasses import fields
 from math import isfinite
@@ -54,6 +55,8 @@ from ..race_live import read_race_state as read_live
 from ..setting import cfg
 from ..userfile.tyre_strategy import load_tyre_strategy_file, plan_tyre_changes
 from ._base import Overlay
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import RacePlanConfig
@@ -106,7 +109,11 @@ def load_plan_input(filename: str) -> tuple[StrategyInput, list[int]] | None:
             kwargs[item.name] = value
         changes = [int(count) for count in data.get("tyre_changes", [])]
         return StrategyInput(**kwargs), changes
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:  # read once per file change
+        logger.warning("RACE PLAN: %s not read (%s: %s), plan made from race calculator inputs",
+                       filename, type(error).__name__, error)
         return None
 
 

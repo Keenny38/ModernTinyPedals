@@ -85,8 +85,7 @@ class TrackMapMixin:
         sectors_index = minfo.mapping.sectors
         if raw_coords and isinstance(sectors_index, tuple):
             dist = calc.distance(raw_coords[0], raw_coords[-1])
-            angle = max(int(self.wcfg["display_orientation"]), 0)
-            angle = angle - angle // 360 * 360
+            angle = int(self.wcfg["display_orientation"]) % 360  # -90 is 270
             self.map_orient = calc.radians(angle)
             (self.map_scaled, self.map_range, self.map_scale, self.map_offset
              ) = calc.scale_map(raw_coords, self.area_size, self.area_margin, angle)

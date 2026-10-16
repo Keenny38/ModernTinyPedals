@@ -90,7 +90,7 @@ class RadarMixin:
         self.straight_range = self.radar_radius * 1.5
         self.visible_range = self.set_range_dimension("vehicle_maximum_visible_distance")
         self.radar_hide_range = self.set_range_dimension("auto_hide_minimum_distance")
-        self.radar_fade_factor = self.set_radar_fade_factor(self.radar_radius)
+        self.radar_fade_in, self.radar_fade_out = self.set_radar_fade_range(self.radar_radius)
 
         # Overlap indicator
         self.indicator_dimension = self.calc_indicator_dimension(self.veh_width, self.veh_length)
@@ -149,7 +149,7 @@ class RadarMixin:
         """Radar opacity while fading with nearest car distance (1 = fully shown)"""
         if not self.wcfg["enable_radar_fade"] or self.always_show:
             return 1.0
-        alpha = self.radar_fade_factor * (self.radar_radius - minfo.vehicles.nearestLine)
+        alpha = (self.radar_fade_out - minfo.vehicles.nearestLine) / (self.radar_fade_out - self.radar_fade_in)
         return min(max(alpha, 0.0), 1.0)
 
     def collision_level(self, veh_info) -> int:
@@ -247,14 +247,12 @@ class RadarMixin:
             min_side = self.wcfg[f"{prefix}_side"]
         return DistanceRect(min_ahead, min_behind, min_side)
 
-    def set_radar_fade_factor(self, radar_radius):
-        """Set radar fade factor"""
+    def set_radar_fade_range(self, radar_radius) -> tuple[float, float]:
+        """Nearest car distance (meters) radar fully shown below (fade in) & fully hidden from (fade out)"""
         range_fade_out = min(max(self.wcfg["radar_fade_out_radius"], 0.5), 1)
         range_fade_in = min(max(self.wcfg["radar_fade_in_radius"], 0.1),
                             range_fade_out - 0.01)  # make sure not exceed fade out range
-        range_diff = range_fade_out - range_fade_in
-        range_scale = range_fade_out / range_diff
-        return range_scale / radar_radius
+        return range_fade_in * radar_radius, range_fade_out * radar_radius
 
 
 class Realtime(RadarMixin, Overlay):

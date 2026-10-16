@@ -69,6 +69,7 @@ class OverlayPackage(NamedTuple):
     screen: tuple[int, int, int, int]  # screen positions were placed on (x, y, width, height)
     unknown: list[str]  # overlays not available in this version
     skipped: int  # options left out (unknown or wrong type)
+    left_out: tuple[str, ...] = ()  # "overlay: option (reason)" of each option left out (English)
 
 
 def is_private(key: str) -> bool:
@@ -279,7 +280,7 @@ def read_overlay_package(zip_filename: str, defaults: Mapping[str, Mapping[str, 
                 raise ValueError(f"unable to read {info.filename} (not overlay options)")
             overlays[name] = data
     overlays = updated_options(overlays, manifest.get("setting_version"))
-    skipped = 0
+    left_out: list[str] = []
     valid: dict[str, dict] = {}
     for name, options in overlays.items():
         default = defaults.get(name)
@@ -288,11 +289,11 @@ def read_overlay_package(zip_filename: str, defaults: Mapping[str, Mapping[str, 
             continue
         kept = {}
         for key, value in options.items():
-            if (isinstance(key, str) and key in default and is_shared(key) and same_type(value, default[key])
-                    and (key not in POSITION_KEYS or _number(value))):
-                kept[key] = value
+            reason = left_out_reason(key, value, default)
+            if reason:
+                left_out.append(f"{name}: {key} ({reason})")
             else:
-                skipped += 1
+                kept[key] = value
         valid[name] = kept
     app_version = manifest.get("app_version")
     return OverlayPackage(
@@ -300,8 +301,22 @@ def read_overlay_package(zip_filename: str, defaults: Mapping[str, Mapping[str, 
         app_version if isinstance(app_version, str) else "",
         manifest_screen(manifest),
         sorted(unknown),
-        skipped,
+        len(left_out),
+        tuple(left_out),
     )
+
+
+def left_out_reason(key: Any, value: Any, default: Mapping[str, Any]) -> str:
+    """Why option of package is left out (English), "" if kept"""
+    if not isinstance(key, str) or key not in default:
+        return "unknown option"
+    if not is_shared(key):
+        return "kept on each computer"
+    if not same_type(value, default[key]):
+        return "wrong type"
+    if key in POSITION_KEYS and not _number(value):
+        return "invalid position"
+    return ""
 
 
 def scale_position(

@@ -602,6 +602,10 @@ def test_install_layer_outside_bundle(tmp_path, monkeypatch):
     os.remove(os.path.join(os.path.dirname(newer), vr_shared.LAYER_DLL))
     assert vr_shared.install_layer(bundle, str(root)) == newer
     assert os.path.isfile(os.path.join(os.path.dirname(newer), vr_shared.LAYER_DLL))
+    # Altered copy (DLL planted in a shared folder by another user): never registered, written again
+    (tmp_path / os.path.dirname(newer) / vr_shared.LAYER_DLL).write_bytes(b"MZ planted")
+    assert vr_shared.install_layer(bundle, str(root)) == newer
+    assert (tmp_path / os.path.dirname(newer) / vr_shared.LAYER_DLL).read_bytes() == b"MZ v2"
 
 
 def test_remove_old_layers_keeps_copy_in_use(tmp_path, monkeypatch):

@@ -26,6 +26,8 @@ then options of each column (dimmed while the column is hidden).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .black_box_ui import ORDER_LIST, OptionUI
 
 # Columns of modern design, in design order (shown left to right while no display order was changed)
@@ -129,21 +131,53 @@ def driver_list_ui(columns: tuple[str, ...], rows: tuple[tuple[str, tuple[str, .
     )
 
 
+def class_column_inactive(values: Mapping, class_headers: bool = False) -> dict[str, tuple[str, str]]:
+    """Class column replaced by class headers (standings, unless kept with them), class style shown only in
+    class column"""
+    if class_headers and not values.get("show_class_column_with_class_header", False):
+        return {"column_class": ("off", "show_class_header"),
+                "show_class_style_for_position_in_class": ("off", "show_class_header")}
+    if not values.get("column_class", True):
+        return {"show_class_style_for_position_in_class": ("on", "column_class")}
+    return {}
+
+
+def standings_inactive(values: Mapping) -> dict[str, tuple[str, str]]:
+    """Options doing nothing in the class mode chosen (exclusive mode first, then split mode, else combined)"""
+    exclusive = bool(values.get("enable_single_class_exclusive_mode", False))
+    split = bool(values.get("enable_multi_class_split_mode", False))
+    inactive: dict[str, tuple[str, str]] = {}
+    if exclusive:
+        for key in ("enable_multi_class_split_mode", "class_order", "maximum_vehicles_split_mode",
+                    "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
+                    "maximum_vehicles_combined_mode"):
+            inactive[key] = ("off", "enable_single_class_exclusive_mode")
+    elif split:
+        inactive["maximum_vehicles_combined_mode"] = ("off", "enable_multi_class_split_mode")
+    else:  # cars of every class in one list: no class group
+        for key in ("show_class_header", "show_class_column_with_class_header", "show_time_gap_from_same_class",
+                    "show_time_interval_from_same_class"):
+            inactive[key] = ("on", "enable_multi_class_split_mode")
+    class_headers = bool(values.get("show_class_header", False)) and (split or exclusive)
+    return {**inactive, **class_column_inactive(values, class_headers)}
+
+
 RELATIVE_UI = driver_list_ui(RELATIVE_COLUMNS, (
     ("Rows", ("additional_players_front", "additional_players_behind", "show_vehicle_in_garage", *ROW_OPTIONS)),
 ))
 STANDINGS_UI = driver_list_ui(STANDINGS_COLUMNS, (
     ("Rows", ("show_column_headers", *ROW_OPTIONS)),
     ("Classes & Number of Cars", (
-        "enable_multi_class_split_mode", "show_class_header", "class_order", "maximum_vehicles_split_mode", "maximum_vehicles_per_split_player",
+        "enable_multi_class_split_mode", "show_class_header", "show_class_column_with_class_header", "class_order", "maximum_vehicles_split_mode", "maximum_vehicles_per_split_player",
         "maximum_vehicles_per_split_others", "enable_single_class_exclusive_mode", "maximum_vehicles_exclusive_mode",
         "maximum_vehicles_combined_mode", "minimum_top_vehicles",
     )),
 ))
 # Car counts used in their multi class mode only
-STANDINGS_UI = STANDINGS_UI._replace(dependencies={
+STANDINGS_UI = STANDINGS_UI._replace(inactive=standings_inactive, dependencies={
     **STANDINGS_UI.dependencies,
     "maximum_vehicles_split_mode": "enable_multi_class_split_mode",
+    "show_class_column_with_class_header": "show_class_header",
     "class_order": "enable_multi_class_split_mode",
     "maximum_vehicles_per_split_player": "enable_multi_class_split_mode",
     "maximum_vehicles_per_split_others": "enable_multi_class_split_mode",
@@ -151,4 +185,5 @@ STANDINGS_UI = STANDINGS_UI._replace(dependencies={
 })
 RIVALS_UI = driver_list_ui(RIVALS_COLUMNS, (
     ("Rows", ROW_OPTIONS),
-))
+))._replace(inactive=class_column_inactive)
+RELATIVE_UI = RELATIVE_UI._replace(inactive=class_column_inactive)

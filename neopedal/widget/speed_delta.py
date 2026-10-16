@@ -46,6 +46,12 @@ REFERENCES = (
 )
 
 
+def display_range(value: float, decimals: int) -> float:
+    """Shown speed delta range (+-): positive, at least the smallest shown step (0 or negative range would
+    show every delta as 0 or as the range)"""
+    return calc.decimal_strip(max(abs(value), 10 ** -decimals), decimals)
+
+
 class SpeedDeltas:
     """Speed difference to each reference lap in speed unit (+ faster), smoothed (exponential moving average of
     samples updates, 1: none), None if not shown (smoothing starts again once shown)"""
@@ -91,7 +97,7 @@ class Realtime(Overlay):
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.decimals = max(int(self.wcfg["decimal_places"]), 0)
-        self.display_range = calc.decimal_strip(self.wcfg["speed_delta_display_range"], self.decimals)
+        self.display_range = display_range(self.wcfg["speed_delta_display_range"], self.decimals)
         self.speeds = SpeedDeltas(units.set_unit_speed(self.cfg.units["speed_unit"]),
                                   self.wcfg["speed_delta_smoothing_samples"])
         symbol = units.set_symbol_speed(self.cfg.units["speed_unit"])

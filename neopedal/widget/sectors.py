@@ -147,6 +147,8 @@ class Realtime(Overlay):
             data = minfo.sectors.allTimeBest
         else:
             data = minfo.sectors.sessionBest
+        if data.sectorIndex < 0:  # sector data reset, sector not known yet
+            return
 
         # Triggered when sector changed
         if self.last_sector_idx != data.sectorIndex:

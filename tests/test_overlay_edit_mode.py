@@ -446,3 +446,68 @@ def test_overlays_never_hide_base_methods():
         for match in assignment.finditer(path.read_text(encoding="utf-8"))
     ]
     assert not found
+
+
+def test_layout_guide_ends_when_dragged_overlay_stops(editing):
+    """Overlay stopped while dragged (reload, hotkey): no mouse release, guide not left on screen"""
+    from neopedal.setting import cfg
+    from neopedal.widget import _layout_guide
+
+    start, overlays, _saved = editing
+    cfg.application["show_layout_guides"] = True
+    widget = start()
+    QCoreApplication.sendEvent(widget, QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(305, 305), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, NONE))
+    QCoreApplication.sendEvent(widget, QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(5, 5), QPointF(405, 405), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, CTRL))
+    assert _layout_guide._guide is not None
+    overlays.pop("speedometer").stop()
+    assert _layout_guide._guide is None
+
+
+def test_toolbar_follows_style_and_drag_updates_position_only(editing, monkeypatch):
+    from neopedal.setting import cfg
+
+    start, _overlays, _saved = editing
+    widget = start()
+    controller = _edit_mode.edit_mode()
+    controller.select("speedometer")
+    controller.show_toolbar()
+    toolbar = controller.toolbar
+    first_theme = toolbar.theme
+    cfg.user.config["overlay_style"]["overlay_theme"] = (
+        "Modern Light" if cfg.user.config["overlay_style"].get("overlay_theme") != "Modern Light" else "Modern Dark")
+    controller.show_toolbar()  # edit mode entered again: style of now
+    assert toolbar.theme is not first_theme
+    refreshed = []
+    monkeypatch.setattr(toolbar, "refresh", lambda: refreshed.append(True))
+    widget.move(320, 340)
+    controller.placement_changed("speedometer", widget.geometry())  # while dragged
+    assert not refreshed and toolbar.detail.startswith("X 320   Y 340")
+
+
+def test_overlay_size_limited():
+    assert _base.limited_size(800, 600) is None
+    assert _base.limited_size(20000, 600) == (_base.MAX_OVERLAY_SIDE, 600)
+    assert _base.limited_size(10, 99999, limit=100) == (10, 100)
+
+
+def test_too_big_overlay_cut_and_user_told(editing, monkeypatch):
+    from neopedal import app_signal
+
+    start, _overlays, _saved = editing
+    errors = []
+    app_signal.error.connect(errors.append)
+    try:
+        natural = start("speedometer").size()
+        _overlays.pop("speedometer").stop()
+        monkeypatch.setattr(_base, "MAX_OVERLAY_SIDE", 20)
+        monkeypatch.setattr(_base.limited_size, "__defaults__", (20,))
+        widget = start("speedometer")
+    finally:
+        app_signal.error.disconnect(errors.append)
+    assert natural.width() > 20
+    assert widget.width() <= 20 and widget.height() <= 20
+    assert len(errors) == 1 and "is too big" in errors[0]

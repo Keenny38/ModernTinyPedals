@@ -184,9 +184,10 @@ class Realtime(PedalAlertMixin, Overlay):
 
     # GUI update methods
     def update_pedal(self, target, data, raw):
-        """Pedal update"""
-        if target.last != data:
-            target.last = data
+        """Pedal update (data: raw + filtered)"""
+        state = (raw, data)  # both kept: an equal sum of other raw & filtered values is a change too
+        if target.last != state:
+            target.last = state
             target.update_input(raw, data - raw)
 
     def update_ffb(self, target, data):

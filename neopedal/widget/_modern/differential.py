@@ -75,7 +75,7 @@ class Realtime(StatsMixin, ModernOverlay):
             key: DiffLockingTimer(wcfg["power_locking_reset_cooldown" if power else "coast_locking_reset_cooldown"])
             for key, _, power, _ in ITEMS
         }
-        self.locking = {key: 0.0 for key, _, _, _ in ITEMS}
+        self.locking = {key: 1.0 for key, _, _, _ in ITEMS}  # fully locked until read, as timers & classic design
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
 

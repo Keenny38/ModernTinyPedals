@@ -3,6 +3,7 @@
 pytest>=8
 pytest-cov>=6
 pytest-timeout>=2
+pytest-xdist>=3
 ruff>=0.6
 mypy>=1.10
 pre-commit>=3

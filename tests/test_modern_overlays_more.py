@@ -25,7 +25,7 @@ FIELD_ATTRIBUTES = {
     ),
     minfo.relative: ("standings", "drawOrder"),
     minfo.mapping: ("elevations", "sectors", "lastModified"),
-    minfo.fuel: ("amountCurrent", "estimatedLaps"),
+    minfo.fuel: ("amountCurrent", "estimatedLaps", "estimatedValidConsumption"),
     minfo.energy: ("available", "amountCurrent", "estimatedLaps"),
 }
 
@@ -233,6 +233,7 @@ def test_flag_yellow_blue_low_fuel_and_custom_text(widgets, monkeypatch):
     minfo.vehicles.nearestBlueClass = ""
     minfo.fuel.amountCurrent = 3.5
     minfo.fuel.estimatedLaps = 1.2
+    minfo.fuel.estimatedValidConsumption = 2.9  # laps known from consumption
     minfo.energy.available = False
     widget = widgets("flag", yellow_flag_text="YEL", layout=1)
     update(widget)

@@ -605,6 +605,41 @@ class PresetBackend(PageBackend):
             self._host.warn(trm("Failed to create backup, please try again."))
 
     @Slot(str)
+    def checkPreset(self, filename: str):
+        """Unknown, invalid or out of range options of preset listed, then repaired if confirmed"""
+        from ...userfile.json_setting import save_and_verify_json_file
+        from ...userfile.preset_check import check_preset_file
+
+        if not self._known(filename):
+            return
+        try:
+            checked, changes = check_preset_file(filename, cfg.path.settings, cfg.default.setting)
+        except (OSError, ValueError) as error:
+            self._host.warn(trm(f"<b>{filename}</b> not checked: {error}"))
+            return
+        if not changes:
+            self._host.toast(tr("No problem found"))
+            return
+        shown = "<br>".join(f"• {change}" for change in changes[:25])
+        more = f"<br>... (+{len(changes) - 25})" if len(changes) > 25 else ""
+        if filename in cfg.user.filelock:
+            self._host.warn(trm(f"<b>{filename}</b>: {len(changes)} option(s) to repair (locked preset, not "
+                                f"changed):<br><br>{shown}{more}"))
+            return
+        if not self._host.confirm_operation(tr("Check Preset"), trm(
+                f"<b>{filename}</b>: {len(changes)} option(s) to repair (as loading it does):<br><br>{shown}{more}"
+                "<br><br>Save repaired preset?")):
+            return
+        if filename == cfg.filename.setting:  # loaded preset: repaired when loaded, saved as shown
+            saved = cfg.save(0) is not False
+        else:
+            saved = save_and_verify_json_file(checked, filename, cfg.path.settings)
+        if saved:
+            self._host.toast(tr("Preset repaired"))
+        else:
+            self._host.warn(trm("Failed to save preset, please try again."))
+
+    @Slot(str)
     def exportPackage(self, filename: str):
         if self._known(filename):
             self._host.export_package(filename)

@@ -93,6 +93,8 @@ class Realtime(ModernOverlay):
         lap_elapsed = api.read.timing.elapsed()
         laptime_current = max(lap_elapsed - lap_start, 0)
         data = minfo.sectors.allTimeBest if self.wcfg["enable_all_time_best_sectors"] else minfo.sectors.sessionBest
+        if data.sectorIndex < 0:  # sector data reset, sector not known yet
+            return
         sector_best = data.sectorBestTB if self.theoretical else data.sectorBestPB
         delta_best = data.deltaSectorBestTB if self.theoretical else data.deltaSectorBestPB
 

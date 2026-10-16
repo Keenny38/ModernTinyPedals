@@ -424,6 +424,13 @@ TpPage {
                     onClicked: backend.setModifiedOnly(!backend.modifiedOnly)
                 }
                 TpSwitch {
+                    checkable: false
+                    checked: backend.usedOnly
+                    text: i18n.tr("Used only")
+                    tip: i18n.tr("Hide options doing nothing with current values (greyed out)")
+                    onClicked: backend.setUsedOnly(!backend.usedOnly)
+                }
+                TpSwitch {
                     visible: page.info.simpleMode && !(backend.filtering && backend.scopeAll)
                     checkable: false
                     checked: backend.advanced
@@ -594,7 +601,9 @@ TpPage {
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: i18n.tr("Simulated race values")
+                                    text: backend.previewCompare && page.info.canCompare
+                                          ? page.info.otherDesign + " · " + page.info.designOptions
+                                          : i18n.tr("Simulated race values")
                                     color: theme.dimText
                                     font.pixelSize: theme.em * 0.8
                                     elide: Text.ElideRight
@@ -710,6 +719,29 @@ TpPage {
                             Item { Layout.fillWidth: true }
                             TpButton {
                                 flat: true
+                                visible: page.info.canCompare === true
+                                checked: backend.previewCompare
+                                text: i18n.tr("Other Design")
+                                tip: page.info.canCompare ? i18n.tr("Compare: same values drawn by the other design") + "\n"
+                                                            + page.info.otherDesign + " · " + page.info.designOptions : ""
+                                onClicked: backend.setPreviewCompare(!backend.previewCompare)
+                            }
+                            TpCombo {
+                                Layout.preferredWidth: theme.em * 10
+                                model: backend.scenarioNames
+                                currentIndex: backend.previewScenario
+                                tip: i18n.tr("Race situation of preview: shows what overlays draw only then")
+                                onActivated: function(index) { backend.setPreviewScenario(index) }
+                            }
+                            TpButton {
+                                flat: true
+                                checked: backend.testing
+                                text: backend.testing ? i18n.tr("Stop Test") : i18n.tr("Test on Screen")
+                                tip: i18n.tr("Overlays on screen show this race situation for a few seconds (saved values)")
+                                onClicked: backend.testOnScreen()
+                            }
+                            TpButton {
+                                flat: true
                                 checked: previewPanel.expanded
                                 glyph: previewPanel.expanded ? "" : ""  // shrink, enlarge
                                 text: theme.iconFont === "" ? (previewPanel.expanded ? i18n.tr("Shrink") : i18n.tr("Enlarge")) : ""
@@ -766,7 +798,10 @@ TpPage {
                         text: theme.iconFont === "" ? i18n.tr("Undo") : ""
                         tip: i18n.tr("Undo (Ctrl+Z)")
                         enabled: backend.canUndo
-                        onClicked: backend.undo()
+                        onClicked: {
+                            page.commitEdits()  // field being edited left first: shows undone value, never sent again
+                            backend.undo()
+                        }
                     }
                     TpButton {
                         flat: true
@@ -774,12 +809,18 @@ TpPage {
                         text: theme.iconFont === "" ? i18n.tr("Redo") : ""
                         tip: i18n.tr("Redo (Ctrl+Y)")
                         enabled: backend.canRedo
-                        onClicked: backend.redo()
+                        onClicked: {
+                            page.commitEdits()  // field being edited left first: shows redone value, never sent again
+                            backend.redo()
+                        }
                     }
                     TpButton {
                         text: i18n.tr("Discard")
                         tip: i18n.tr("Drop every unsaved change")
-                        onClicked: backend.discard()
+                        onClicked: {
+                            page.commitEdits()  // focus left: typed value dropped too, field shows saved value
+                            backend.discard()
+                        }
                     }
                     TpButton {
                         accent: true

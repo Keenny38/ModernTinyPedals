@@ -54,6 +54,7 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 1), _user_prior_2_51_1),  # 2026-10-15
         ((2, 50, 9), _user_prior_2_50_9),  # 2026-10-11
         ((2, 50, 7), _user_prior_2_50_7),  # 2026-10-10
         ((2, 50, 6), _user_prior_2_50_6),  # 2026-10-10
@@ -124,6 +125,18 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_51_1(dict_user: dict):
+    # Options read by no overlay removed: deltabest text color (text in gain & loss colors), pit stop count column
+    # of driver lists (stops shown in pit status column)
+    deltabest = dict_user.get("deltabest")
+    if isinstance(deltabest, dict):
+        deltabest.pop("font_color_deltabest", None)
+    for name in ("relative", "standings", "rivals"):
+        widget = dict_user.get(name)
+        if isinstance(widget, dict):
+            widget.pop("column_pitstop_count", None)
+
+
 def _user_prior_2_50_9(dict_user: dict):
     # System performance: app options named after the legacy app name (show_<name>_performance...) renamed,
     # default prefix of that name too

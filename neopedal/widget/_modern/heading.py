@@ -138,8 +138,9 @@ class Realtime(HeadingMixin, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         heading = round(self.read_heading(), 1)
-        yaw = round(self.display_yaw_angle(self.yaw_angle), 1)
-        slip = round(self.slip_angle, 1)
+        decimals = max(self.decimals, 1)  # readings shown with decimal places, 2 included
+        yaw = round(self.display_yaw_angle(self.yaw_angle), decimals)
+        slip = round(self.slip_angle, decimals)
         self.refresh((heading, round(self.yaw_angle, 1), yaw, slip))
 
     def paint_static(self, painter: QPainter):

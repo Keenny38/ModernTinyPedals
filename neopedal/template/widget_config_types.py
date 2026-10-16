@@ -534,7 +534,6 @@ class DeltabestConfig(WidgetConfig):
     deltabest_source: DeltabestSourceChoice
     show_game_deltabest_if_available: bool
     swap_style: bool
-    font_color_deltabest: str
     background_color_deltabest: str
     background_color_time_gain: str
     background_color_time_loss: str
@@ -886,6 +885,7 @@ class FlagConfig(WidgetConfig):
     show_low_fuel_for_race_only: bool
     low_fuel_volume_threshold: float
     low_fuel_lap_threshold: float
+    low_energy_percentage_threshold: float
     low_fuel_text: str
     low_energy_text: str
     font_color_low_fuel: str
@@ -2274,7 +2274,6 @@ class RelativeConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
-    column_pitstop_count: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -2545,7 +2544,6 @@ class RivalsConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
-    column_pitstop_count: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -3092,7 +3090,6 @@ class StandingsConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
-    column_pitstop_count: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -3116,6 +3113,7 @@ class StandingsConfig(WidgetConfig):
     column_time_gap: bool
     show_lap_difference: bool
     show_class_header: bool
+    show_class_column_with_class_header: bool
     show_column_headers: bool
 
 
@@ -4037,6 +4035,58 @@ class TyreLoadConfig(WidgetConfig):
     background_color_caption: str
 
 
+class TyreOverviewConfig(WidgetConfig):
+    """tyre_overview widget"""
+
+    enable_classic_layout: bool
+    font_name: str
+    font_size: int
+    font_weight: FontWeightChoice
+    enable_auto_font_offset: bool
+    font_offset_vertical: float
+    bar_padding: float
+    bar_gap: int
+    show_car_body: bool
+    show_wheel_label: bool
+    show_tyre_compound: bool
+    show_tyre_alerts: bool
+    flat_spot_threshold: float
+    show_alert_highlight: bool
+    show_tyre_graphic: bool
+    show_tread_grooves: bool
+    show_surface_temperature: bool
+    show_inner_center_outer: bool
+    show_carcass_temperature: bool
+    show_inner_layer_temperature: bool
+    show_layer_labels: bool
+    show_degree_sign: bool
+    enable_heatmap_auto_matching: bool
+    heatmap_name: str
+    enable_heatmap_from_optimal_temperature: bool
+    show_pressure: bool
+    show_pressure_unit: bool
+    enable_tyre_pressure_target: bool
+    show_pressure_target_range: bool
+    tyre_pressure_target_minimum: float
+    tyre_pressure_target_maximum: float
+    tyre_pressure_target_rear_minimum: float
+    tyre_pressure_target_rear_maximum: float
+    tyre_target_by_compound: str
+    tyre_pressure_low_color: str
+    tyre_pressure_high_color: str
+    show_tread_gauge: bool
+    show_wear: bool
+    show_wear_per_lap: bool
+    show_lifespan_laps: bool
+    warning_threshold_remaining: float
+    warning_threshold_laps: float
+    font_color_caption: str
+    background_color_caption: str
+    font_color_value: str
+    background_color_value: str
+    font_color_warning: str
+
+
 class TyrePressureConfig(WidgetConfig):
     """tyre_pressure widget"""
 
@@ -4898,6 +4948,7 @@ WIDGET_CONFIG_TYPES: dict[str, type] = {
     "tyre_deflection": TyreDeflectionConfig,
     "tyre_inner_layer": TyreInnerLayerConfig,
     "tyre_load": TyreLoadConfig,
+    "tyre_overview": TyreOverviewConfig,
     "tyre_pressure": TyrePressureConfig,
     "tyre_temp_trend": TyreTempTrendConfig,
     "tyre_temperature": TyreTemperatureConfig,

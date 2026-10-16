@@ -28,7 +28,7 @@ released once the drag ends (its screen size image is not kept in memory).
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QRegion
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QRegion, QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 
 COLOR_GRID = QColor(255, 255, 255, 28)
@@ -80,6 +80,7 @@ class LayoutGuide(QWidget):
         self._lines: tuple[set[int], set[int]] = (set(), set())
         self._grid_size = 0
         self._grid_brush: QBrush | None = None
+        self._screen: QScreen | None = None
         self._label = ""
         self._label_rect = QRect()
         self._label_font = QFont(self.font())
@@ -90,6 +91,7 @@ class LayoutGuide(QWidget):
     def begin(self, widget: QWidget, grid_size: int = 0):
         """Show guide on widget screen"""
         screen = widget.screen()
+        self._screen = screen
         self.setGeometry(screen.geometry())
         self._grid_size = grid_size if grid_size >= 4 else 0
         self._grid_brush = grid_brush(self._grid_size) if self._grid_size else None
@@ -105,6 +107,9 @@ class LayoutGuide(QWidget):
 
     def track(self, widget: QWidget):
         """Update dragged widget position, only changed parts drawn again"""
+        if self._screen is not None and widget.screen() is not self._screen:  # dragged to another monitor
+            self.begin(widget, self._grid_size)
+            return
         old_parts = self.drawn_parts()
         self._target = widget.geometry()
         self._lines = alignment_lines(self._target, self._others, self.geometry())

@@ -17,7 +17,8 @@ from neopedal.command_server import CommandServer
 from neopedal.setting import cfg
 from neopedal.userfile.json_setting import copy_setting
 
-PORT = 18337
+# Own port per test process (pytest-xdist workers "gw0", "gw1"... run at once)
+PORT = 18337 + 10 * int(os.environ.get("PYTEST_XDIST_WORKER", "gw0")[2:] or 0)
 
 
 @pytest.fixture

@@ -197,3 +197,20 @@ def test_self_test_report(monkeypatch, tmp_path):
     assert "1/2 checks passed" in report
     monkeypatch.setattr(self_test, "CHECKS", (("Good", lambda: "fine"),))
     assert self_test.run_self_test() == 0
+
+
+def test_changelog_draft_from_commits(git_repo):
+    from gen_release_notes import draft_changelog
+
+    commit(git_repo, "Fix old thing")
+    run_git(git_repo, "tag", "v0.10.0")
+    commit(git_repo, "Add test on screen of overlays")
+    commit(git_repo, "Fix flag energy alert")
+    commit(git_repo, "Show limits of number options")
+    commit(git_repo, "Add preview race situations")
+    draft = draft_changelog("v0.11.0", "2026-10-15")
+    assert draft.startswith("## 0.11.0 (2026-10-15)\n")
+    new = draft.index("### New")
+    assert draft.index("- Add test on screen of overlays") < draft.index("- Add preview race situations")  # oldest first
+    assert new < draft.index("### Improvements") < draft.index("- Show limits") < draft.index("### Fixes")
+    assert "Fix old thing" not in draft  # released before

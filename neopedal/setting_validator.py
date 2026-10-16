@@ -22,6 +22,7 @@ Setting validator function
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -31,8 +32,48 @@ from . import version
 from .const_common import VERSION_NA
 from .hotkey.common import validate_hotkey
 from .setting_preupdate import PENDING_STYLE_UPDATES, preupdate_global_setting, preupdate_user_setting
+from .template.option_limits import clamp_to_limit
 from .validator import is_clock_format, is_finite_number, is_hex_color
 from .version_check import parse_version_string
+
+logger = logging.getLogger(__name__)
+# Values brought within limits by last validations (option, value read, value kept): preset check, log
+CLAMPED: list[tuple[str, float, float]] = []
+
+
+def clamp_value(key: str, dict_user: dict) -> None:
+    """Number brought within the limit of its option (typed in file, imported, older limit): a value the
+    options page refuses never reaches an overlay (huge sizes: memory, crash)"""
+    value = dict_user[key]
+    clamped = clamp_to_limit(key, value)
+    if clamped != value:
+        dict_user[key] = clamped
+        CLAMPED.append((key, value, clamped))
+        logger.info("SETTING: %s %s out of allowed values, %s used", key, value, clamped)
+
+
+def normalize_display_orders(config: dict) -> dict:
+    """Display orders made unique & not negative, order kept
+
+    Same values (Overlay Options numbers the items it lists, options of the other design keep theirs) are
+    shifted after one another in display order, then option order; a negative grid position crashes Qt
+    layouts: all shifted. Shown order never changes.
+    """
+    keys = [key for key in config if key.startswith("display_order") and isinstance(config[key], int)
+            and not isinstance(config[key], bool)]
+    values = [config[key] for key in keys]
+    if values and min(values) < 0:
+        values = [value - min(values) for value in values]
+        for key, value in zip(keys, values):
+            config[key] = value
+    if len(set(values)) == len(values):
+        return config
+    last: int | None = None
+    for index in sorted(range(len(keys)), key=lambda index: (values[index], index)):
+        value = values[index] if last is None else max(values[index], last + 1)
+        config[keys[index]] = value
+        last = value
+    return config
 
 
 def _get_preset_version(dict_user: dict, version_current: str) -> tuple[int, int, int]:
@@ -264,6 +305,8 @@ class ValueValidator:
             dict_user.pop(key)
         elif key.endswith("_port") and not 0 <= dict_user[key] <= 65535:
             dict_user.pop(key)  # out of range port raises OverflowError at bind
+        else:
+            clamp_value(key, dict_user)
         return True
 
     @staticmethod
@@ -271,6 +314,8 @@ class ValueValidator:
         """Value - numeric (finite: JSON NaN & Infinity not allowed)"""
         if not is_finite_number(dict_user[key]):
             dict_user.pop(key)
+        else:
+            clamp_value(key, dict_user)
         return True
 
 
@@ -387,4 +432,5 @@ class PresetValidator:
                 dict_user[item] = dict_def[item].copy()
                 continue
             cls.validate_key_pair(dict_user[item], dict_def[item], keep_unknown)
+            normalize_display_orders(dict_user[item])
         return dict_user

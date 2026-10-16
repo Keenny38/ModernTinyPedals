@@ -60,7 +60,7 @@ class Realtime(Overlay):
 
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
-        bar_width = font_m.width * 1 + bar_padx
+        bar_width = font_m.width * 2 + bar_padx  # levels of 2 digits (TC, ABS, motor map, ARB 10+)
         row_caption = 2 * self.wcfg["swap_upper_caption"]
 
         # ABS

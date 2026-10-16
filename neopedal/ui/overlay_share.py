@@ -26,9 +26,10 @@ page (undo, saved with Apply), like any edit made there.
 from __future__ import annotations
 
 import html
+import logging
 import os
 import zipfile
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -66,6 +67,8 @@ from ..version import SETTING_VERSION
 from ._common import UIScaler, translate_filter
 from .module_view import sort_key
 from .toast import show_toast
+
+logger = logging.getLogger(__name__)
 
 FILE_FILTER = "NeoPedal overlay settings (*.zip)"
 
@@ -288,7 +291,7 @@ def import_overlay_file(parent, zip_filename: str, page=None) -> bool:
     if package.unknown:
         lines.append(trm(f"Not available in this version: {html.escape(', '.join(package.unknown))}"))
     if package.skipped:
-        lines.append(trm(f"{package.skipped} unknown option(s) left out"))
+        lines.append(trm(f"{package.skipped} option(s) left out:") + report_html(package.left_out))
     shown = [name for name in names if name in package.overlays]
     items = []
     for name in shown:
@@ -316,9 +319,26 @@ def import_overlay_file(parent, zip_filename: str, page=None) -> bool:
         page = open_overlay_options(parent, picked[0])
         if page is None:
             return False
-    changed, skipped = page.backend.import_values(values)
+    changed, report = page.backend.import_values(values)
     text = trm(f"{len(picked)} overlay(s) imported: {changed} option(s) changed, saved with Apply")
-    if skipped:
-        text += "<br>" + trm(f"{skipped} invalid value(s) skipped")
+    if report:
+        text += "<br>" + trm(f"{len(report)} value(s) skipped or corrected:") + report_html(report)
+        logger.info("IMPORT OVERLAYS: %s", "; ".join(report))
     page.backend.notify_host(text)
     return True
+
+
+REPORT_LINES = 10  # lines of an import report shown, the others counted
+
+
+def report_line(line: str) -> str:
+    """Report line with why a value is invalid translated (English line kept in log)"""
+    head, marker, reason = line.partition("skipped: ")
+    return f"{head}{marker}{tr(reason[:-1])})" if marker and reason.endswith(")") else line
+
+
+def report_html(lines: Sequence[str]) -> str:
+    """Options left out or corrected by an import, one per line (translated reasons), the first ones only"""
+    shown = "".join(f"<br>• {html.escape(trm(report_line(line)))}" for line in lines[:REPORT_LINES])
+    more = len(lines) - REPORT_LINES
+    return shown + (f"<br>{trm(f'... and {more} more')}" if more > 0 else "")

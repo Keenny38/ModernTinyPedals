@@ -577,7 +577,7 @@ def test_preview_drawn_again_only_when_inputs_change(options, monkeypatch):
     drawn = []
     real = overlay_options_backend.render_overlay
     monkeypatch.setattr(overlay_options_backend, "render_overlay",
-                        lambda name, values, zoom=1.0: drawn.append(zoom) or real(name, values, zoom))
+                        lambda name, values, zoom=1.0, scenario="": drawn.append(zoom) or real(name, values, zoom, scenario))
     options.selectOverlay("speedometer")
     options.set_active(True)
     options.render_preview()
@@ -645,6 +645,8 @@ def window(ui_env, monkeypatch):
         if page.dialog is not None:
             backend = getattr(page.dialog, "backend", None)
             if backend is not None and hasattr(backend, "discard"):
+                if hasattr(page.dialog, "commit_edits"):
+                    page.dialog.commit_edits()  # as Discard button: field being edited left first
                 backend.discard()  # closed without question
             page.dialog.close()
     tray = main.findChild(QSystemTrayIcon)
@@ -917,3 +919,355 @@ def test_black_box_preview_click_shows_part_options(options):
     assert options.preview_part_option(1.5, 0.5) == ""  # outside the picture
     options.selectOverlay("speedometer")
     assert not options.overlayInfo["previewParts"] and options.preview_part_option(0.5, 0.5) == ""
+
+
+def test_heatmap_choices_read_again_once_shown(options):
+    """Heatmap added in heatmap editor while page open: offered once page shown again"""
+    from neopedal.ui.quick.option_kinds import choice_values
+
+    assert "my heatmap" not in choice_values(options.kind("heatmap_name"))
+    cfg.user.heatmap["my heatmap"] = dict(next(iter(cfg.user.heatmap.values())))
+    options.set_active(False)
+    options.set_active(True)
+    assert "my heatmap" in choice_values(options.kind("heatmap_name"))
+    options.set_active(False)
+
+
+def test_close_asks_to_save_value_typed_without_enter(window, monkeypatch):
+    """Value typed, field still focused (app quit, close all): committed first, so asked to save"""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMessageBox
+
+    from neopedal.i18n.options import option_label
+    from neopedal.ui.overlay_options import open_overlay_options
+
+    key = "speed_minimum_reset_cooldown"
+    page = open_overlay_options(window, "speedometer", key)
+    page.view.setFocus()
+    QTest.qWait(150)
+    flush()
+    stack, field = [page.view.rootObject()], None
+    while stack and field is None:
+        item = stack.pop()
+        if "NumberField" in item.metaObject().className() and item.property("tip") == option_label(key):
+            field = item
+        stack.extend(item.childItems())
+    assert field is not None
+    field.forceActiveFocus()
+    QTest.keyClicks(page.view, "7")  # no Enter
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: asked.append(True)
+                        or QMessageBox.StandardButton.Save)
+    page.close()
+    flush()
+    assert asked and cfg.user.setting["speedometer"][key] == 7
+
+
+# --- Driver lists: column order of the page is the order of the overlay, unused options told
+def driver_columns(name):
+    from importlib import import_module
+
+    from neopedal.widget._modern import create_widget
+
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
+    widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
+    keys = [column.key for column in widget.table.columns]
+    class_headers = widget.class_column_hidden  # class column left out for class headers
+    widget.deleteLater()
+    return keys, class_headers
+
+
+def shown_columns(backend, name, class_headers):
+    from neopedal.template.widget.drivers_ui import COLUMN_TITLES, order_option
+
+    column_of = {order_option(column): column for column in COLUMN_TITLES}
+    row = backend._order_row(name, backend._order_section(name))
+    return [column_of[entry["key"]] for entry in row["orders"]
+            if entry["checked"] and not (class_headers and column_of[entry["key"]] == "class")]
+
+
+@pytest.mark.parametrize("name", ["standings", "relative", "rivals"])
+def test_driver_list_columns_in_page_order(options, name):
+    """Moved, dragged, switched & reset columns shown by the overlay in the order of the page (was: same
+    display order values of the other design shifted moved columns after later ones)"""
+    import random
+
+    rng = random.Random(name)
+    set_classic(name, False)
+    options.refresh()
+    options.selectOverlay(name)
+    options.moveOrder(name, "display_order_position_change", 1)  # first move (was: wrong order already)
+    assert options.apply()
+    widget_keys, class_headers = driver_columns(name)
+    assert widget_keys == shown_columns(options, name, class_headers)
+    for _ in range(60):
+        row = options._order_row(name, options._order_section(name))
+        entry = rng.choice(row["orders"])
+        action = rng.choice(("move", "place", "toggle", "toggle", "reset"))
+        if action == "move":
+            options.moveOrder(name, entry["key"], rng.choice((-1, 1)))
+        elif action == "place":
+            options.placeOrder(name, entry["key"], rng.randrange(len(row["orders"])))
+        elif action == "toggle":
+            options.setBool(entry["toggle"], not entry["checked"])
+        else:
+            options.resetOrder(name)
+        assert options.apply()
+        widget_keys, class_headers = driver_columns(name)
+        assert widget_keys == shown_columns(options, name, class_headers), action
+
+
+def test_display_order_made_unique_without_moving_items():
+    from neopedal.widget._base import validate_option
+
+    config = {"display_order_a": 1, "display_order_hidden": 4, "display_order_late": 5, "display_order_b": 2,
+              "display_order_c": 4, "other": 4}
+    validate_option(config)
+    order = sorted((value, key) for key, value in config.items() if key.startswith("display_order_"))
+    assert [key for _, key in order] == ["display_order_a", "display_order_b", "display_order_hidden",
+                                         "display_order_c", "display_order_late"]  # c (4) still before late (5)
+    assert len({value for value, _ in order}) == 5 and config["other"] == 4
+    unique = {"display_order_a": 3, "display_order_b": 1}
+    assert validate_option(dict(unique)) == unique  # nothing changed when already unique
+
+
+def test_standings_options_unused_in_class_mode_told(options):
+    options.selectOverlay("standings")
+    set_classic("standings", False)
+    options.setBool("standings/enable_single_class_exclusive_mode", True)
+    options.setBool("standings/enable_multi_class_split_mode", True)
+    split_cars = row(options, "standings/maximum_vehicles_per_split_player")
+    assert split_cars["dimmed"] and "exclusive" in split_cars["note"].lower()
+    class_order = row(options, "standings/class_order")
+    assert class_order["dimmed"]
+    options.setBool("standings/enable_single_class_exclusive_mode", False)
+    assert row(options, "standings/maximum_vehicles_combined_mode")["dimmed"]
+    assert not row(options, "standings/maximum_vehicles_per_split_player")["dimmed"]
+    options.setBool("standings/show_class_header", True)
+    columns = options._order_row("standings", options._order_section("standings"))["orders"]
+    class_item = next(entry for entry in columns if entry["key"] == "display_order_class")
+    assert class_item["note"]  # class column replaced by class headers
+    options.setBool("standings/enable_multi_class_split_mode", False)
+    assert row(options, "standings/show_class_header")["dimmed"]
+    columns = options._order_row("standings", options._order_section("standings"))["orders"]
+    assert not next(entry for entry in columns if entry["key"] == "display_order_class")["note"]
+    options.discard()
+
+
+# --- Options of every overlay: dimmed only while they do nothing (checked against overlay code)
+def layout_of(name, modern, **options):
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
+    return build_layout(name, dict(cfg.user.setting[name], enable_classic_layout=not modern, **options))
+
+
+def test_gear_bars_led_by_bar_switch_not_inverted_switch(ui_env):
+    """Classic gear: bar options were dimmed while the bar is shown (led by "inverted", off by default)"""
+    layout = layout_of("gear", False)
+    battery = layout.section_of["battery_bar_height"]
+    assert battery.toggle == "show_battery_bar" and "show_inverted_battery" in battery.keys
+    assert layout.section_of["rpm_bar_height"].toggle == "show_rpm_bar"
+    assert layout.dependencies["decimal_places_battery"] == "show_battery_reading"
+    assert "show_battery_bar" not in layout.section_of["show_consumption_bar"].keys  # out of Shown Items
+
+
+@pytest.mark.parametrize("modern", [True, False])
+def test_option_dependencies_follow_overlay_code(ui_env, modern):
+    pedal = layout_of("pedal", modern)
+    assert pedal.dependencies.get("wheel_slip_threshold") == "show_wheel_slip_flash"
+    assert pedal.dependencies.get("show_abs_activation_flash", "") == ""
+    rpm_led = layout_of("rpm_led", modern)
+    assert not rpm_led.dependencies.get("rpm_multiplier_safe")  # LED zones, flickering or not
+    push = layout_of("push_to_pass", modern)
+    assert push.dependencies["activation_threshold_gear"] == "show_battery_charge"
+    fuel = layout_of("fuel", modern)
+    assert not fuel.dependencies.get("low_fuel_lap_threshold")  # low amount color, flashing or not
+    assert fuel.dependencies["show_refueling_level_mark"] == "show_fuel_level_bar"
+    notes = layout_of("track_notes", modern)
+    assert not notes.dependencies.get("pit_notes_text")
+    track_map = layout_of("track_map", modern)
+    assert track_map.dependencies["auto_prediction_additional_pitstop_time"] == "enable_auto_pitout_prediction"
+    black_box = layout_of("black_box", modern)
+    assert black_box.dependencies["tyre_pressure_low_color"] == "enable_tyre_pressure_target"
+    assert black_box.dependencies["enable_shift_flash"] == "enable_gear_rpm_color"
+    assert "text_track_limits" not in black_box.dependencies  # also label of track limits points
+
+
+def test_options_unused_with_other_values_told(options):
+    set_classic("relative_finish_order", False)
+    options.selectOverlay("relative_finish_order")
+    options.setNumber("relative_finish_order/number_of_prediction", 2)
+    assert row(options, "relative_finish_order/prediction_3_leader_pit_time")["dimmed"]
+    assert not row(options, "relative_finish_order/prediction_2_leader_pit_time")["dimmed"]
+    options.selectOverlay("radar")
+    options.setBool("radar/enable_auto_hide", True)
+    options.setBool("radar/enable_radar_fade", True)
+    assert "fade" in row(options, "radar/auto_hide_time_threshold")["note"].lower()
+    set_classic("speedometer")  # font options of classic design
+    options.refresh()
+    options.selectOverlay("speedometer")
+    options.setBool("speedometer/enable_auto_font_offset", True)
+    assert row(options, "speedometer/font_offset_vertical")["dimmed"]
+    options.discard()
+
+
+def test_display_orders_never_negative():
+    from neopedal.widget._base import validate_option
+
+    config = {"display_order_a": -1000, "display_order_b": 0, "display_order_c": 2}
+    validate_option(config)
+    assert sorted(config, key=config.get) == ["display_order_a", "display_order_b", "display_order_c"]
+    assert min(config.values()) == 0
+
+
+def test_negative_display_order_classic_overlay(ui_env, bundled_fonts):
+    """Negative grid position (preset file, imported package) crashed Qt in classic designs"""
+    from importlib import import_module
+
+    from neopedal.widget._modern import create_widget
+
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Legacy Dark"
+    cfg.user.setting["tyre_wear"]["display_order_remaining"] = -1000
+    widget = create_widget(import_module("neopedal.widget.tyre_wear"), cfg, "tyre_wear")
+    widget.grab()
+    widget.deleteLater()
+
+
+def test_overlay_sizes_limited():
+    from neopedal.ui.option_limits import limit_error
+
+    for key, value in (("font_size", 400), ("bar_padding", 1000), ("global_scale", 1000), ("radar_radius", 1000),
+                       ("number_of_led", 1000), ("font_scale_caption", 1000), ("inner_gap", 100000)):
+        assert limit_error(key, value), key
+    assert not limit_error("font_size", 44) and not limit_error("horizontal_gap", 1186)
+
+
+def test_option_of_several_parts_dimmed_while_every_part_off(options):
+    """Label used by a status chip & by the setting change pop-up: dimmed only while both are off, event log
+    events counted only while the event log is on (chain)"""
+    options.selectOverlay("black_box")
+    options.setAdvanced(True)
+    options.setText("black_box/display_profile", "Custom")
+    options.setBool("black_box/show_abs_indicator", False)
+    options.setBool("black_box/show_setting_change_popup", True)
+    assert not row(options, "black_box/text_abs")["dimmed"]
+    options.setBool("black_box/show_setting_change_popup", False)
+    label = row(options, "black_box/text_abs")
+    assert label["dimmed"] and "one of" in label["note"] and "Show ABS Indicator" in label["note"]
+    options.setBool("black_box/show_abs_indicator", True)
+    assert not row(options, "black_box/text_abs")["dimmed"]
+    options.setBool("black_box/show_engine_status", False)
+    options.setBool("black_box/show_event_log", True)
+    options.setBool("black_box/show_engine_overheat_events", True)
+    assert not row(options, "black_box/engine_oil_warning_temperature")["dimmed"]
+    options.setBool("black_box/show_event_log", False)  # overheat events not logged: temperature unused
+    assert row(options, "black_box/engine_oil_warning_temperature")["dimmed"]
+
+
+def test_shift_flash_interval_of_leds_and_gear_flash(options):
+    options.selectOverlay("black_box")
+    options.setAdvanced(True)
+    options.setText("black_box/display_profile", "Custom")
+    options.setBool("black_box/show_rpm_leds", False)
+    options.setBool("black_box/enable_shift_flash", False)
+    assert row(options, "black_box/shift_flash_interval")["dimmed"]
+    options.setBool("black_box/show_gear", True)
+    options.setBool("black_box/enable_gear_rpm_color", True)
+    options.setBool("black_box/enable_shift_flash", True)
+    assert not row(options, "black_box/shift_flash_interval")["dimmed"]
+    options.setBool("black_box/enable_gear_rpm_color", False)  # gear flash off up the chain
+    assert row(options, "black_box/shift_flash_interval")["dimmed"]
+
+
+def class_entry(backend) -> dict:
+    return next(entry for entry in order_list(backend)["orders"] if entry["toggle"] == "standings/column_class")
+
+
+def test_class_column_kept_with_class_headers_if_chosen(options):
+    set_classic("standings", False)
+    cfg.user.setting["standings"].update(enable_multi_class_split_mode=True, show_class_header=True,
+                                         column_class=True, show_class_column_with_class_header=False)
+    options.refresh()
+    options.selectOverlay("standings")
+    assert "class" not in driver_columns("standings")[0]
+    assert class_entry(options)["note"]  # why not shown
+    options.setBool("standings/show_class_column_with_class_header", True)
+    assert options.apply()
+    assert "class" in driver_columns("standings")[0]
+    assert not class_entry(options)["note"]
+    options.setBool("standings/show_class_header", False)  # kept column: option of class headers only
+    assert row(options, "standings/show_class_column_with_class_header")["dimmed"]
+
+
+def test_used_only_hides_options_doing_nothing(options):
+    set_classic("speedometer")
+    options.refresh()
+    options.selectOverlay("speedometer")
+    options.setBool("speedometer/show_speed_minimum", False)
+    options.setUsedOnly(True)
+    keys = {entry["key"] for entry in rows(options)}
+    assert "speedometer/font_color_speed_minimum" not in keys and options.usedOnly
+    assert "speedometer#item:show_speed_minimum" in {entry["key"] for entry in options.rows.rows}  # switch kept
+    options.setBool("speedometer/show_speed_minimum", True)  # used again: shown
+    assert "speedometer/font_color_speed_minimum" in {entry["key"] for entry in rows(options)}
+    options.setUsedOnly(False)
+    options.setBool("speedometer/show_speed_minimum", False)
+    assert row(options, "speedometer/font_color_speed_minimum")["dimmed"]
+
+
+@pytest.mark.parametrize(("name", "scenario"), [
+    ("flag", "flags"), ("flag", "pits"), ("damage", "damage"), ("weather", "rain"), ("black_box", "damage")])
+def test_preview_race_situations_drawn(ui_env, bundled_fonts, name, scenario):
+    """Parts drawn only in a race situation (flags, pit, damage, rain) seen on the preview"""
+    from neopedal.ui.widget_preview import render_widget
+
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
+    values = dict(cfg.user.setting[name])
+    racing = render_widget(cfg, name, dict(values)).toImage()
+    situation = render_widget(cfg, name, dict(values), scenario=scenario).toImage()
+    assert racing != situation
+
+
+def test_preview_situation_chosen_on_page(options, monkeypatch):
+    from neopedal.demo_data import SCENARIOS
+    from neopedal.ui.quick import overlay_options_backend
+
+    drawn = []
+    real = overlay_options_backend.render_overlay
+    monkeypatch.setattr(overlay_options_backend, "render_overlay", lambda name, values, zoom=1.0, scenario="": (
+        drawn.append(scenario) or real(name, values, zoom, scenario)))
+    options.selectOverlay("flag")
+    options.set_active(True)
+    options.render_preview()
+    assert options.previewScenario == 0 and len(options.scenarioNames) == len(SCENARIOS)
+    options.setPreviewScenario(SCENARIOS.index("pits"))
+    options.render_preview()
+    assert drawn == ["", "pits"] and options.previewScenario == SCENARIOS.index("pits")
+    options.setPreviewScenario(99)  # unknown: racing
+    options.render_preview()
+    assert drawn[-1] == "" and options.previewScenario == 0
+
+
+def test_preview_of_other_design_to_compare(options, monkeypatch):
+    from neopedal.ui.quick import overlay_options_backend
+
+    drawn = []
+    real = overlay_options_backend.render_overlay
+    monkeypatch.setattr(overlay_options_backend, "render_overlay", lambda name, values, zoom=1.0, scenario="": (
+        drawn.append(values["enable_classic_layout"]) or real(name, values, zoom, scenario)))
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
+    set_classic("speedometer", False)
+    options.refresh()
+    options.selectOverlay("speedometer")
+    info = options.overlayInfo
+    assert info["canCompare"] and info["otherDesign"] == "Classic layout" and "of this design only" in info["designOptions"]
+    options.set_active(True)
+    options.render_preview()
+    options.setPreviewCompare(True)
+    options.render_preview()
+    assert drawn == [False, True] and options.previewCompare  # same values, classic layout drawn
+    assert not options.value("speedometer", "enable_classic_layout")  # nothing edited
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Legacy Dark"  # one design only with this theme
+    options.refresh()
+    assert not options.overlayInfo["canCompare"]

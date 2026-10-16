@@ -165,7 +165,8 @@ class Realtime(Overlay):
     # Additional methods
     def scale_mark(self, degree, rot_range, width):
         """Scale mark gap (degree), mark counts"""
-        mark_num = max(int(rot_range / max(degree, 10) * 0.5), 0)
+        degree = max(degree, 10)  # same degree for count & gap (5, 0 or negative: marks off the scale)
+        mark_num = max(int(rot_range / degree * 0.5), 0)
         if rot_range != 0:
             return degree / (rot_range * 0.5) * width, mark_num
         return 0, mark_num

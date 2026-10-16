@@ -58,7 +58,7 @@ class Realtime(QuadMixin, ModernOverlay):
         self.leading_zero = min(max(int(wcfg["leading_zero"]), 1), 3)
         self.show_average = wcfg["show_average"]
         self.off_brake_duration = max(wcfg["off_brake_duration"], 0)
-        interval = max(wcfg["update_interval"], 0.01)
+        interval = max(self._update_interval, 0.01)  # timer interval (minimum update interval applied)
         samples = int(min(max(wcfg["average_sampling_duration"], 1), 600) / (interval * 0.001))
         self.ema_temp = calc.ema_filter(samples)
         self.averages = [0.0] * 4
@@ -71,6 +71,10 @@ class Realtime(QuadMixin, ModernOverlay):
         self.off_brake_timer = 0.0
         section = Section(widget_name, "", f"8888{self.sign}", sub=self.show_average)
         self.set_size(*self.build_quads([section], show_labels=False))
+
+    def post_update(self):
+        """Average restarts from next braking (new session, other vehicle)"""
+        self.averages = [0.0] * 4
 
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)
@@ -113,7 +117,8 @@ class Realtime(QuadMixin, ModernOverlay):
                     self.off_brake_timer = elapsed
                 if elapsed - self.off_brake_timer <= self.off_brake_duration:
                     for index in range(4):
-                        self.averages[index] = self.ema_temp(self.averages[index], temps[index])
+                        average = self.averages[index]  # first reading: average starts from it, not from 0
+                        self.averages[index] = self.ema_temp(average, temps[index]) if average > 0 else temps[index]
         tiles = []
         for index in range(4):
             temp = round(temps[index])

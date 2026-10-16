@@ -123,20 +123,22 @@ class DriverTable(TableMixin, ModernOverlay):
     COLUMNS: tuple[str, ...] = ()
     # Class shown by a header above each class group (widget sets): no class column, position in class
     class_headers = False
+    class_column_hidden = False  # class column left out (class name in class headers)
 
     def setup_table(self):
         """Columns from options"""
         self.row_style = RowStyle(self, self.wcfg)
         self.add_font("tiny", 0.5, "bold", caps=True)  # per wheel compound letters
         columns = []
-        for key in self.COLUMNS:
-            if key == "class" and self.class_headers:
+        # Every column ordered (shown or not), as the column list of Overlay Options: design order while no
+        # display order of any column was changed, same order there & here
+        for key in self.display_ordered(list(self.COLUMNS), key=str, names=DISPLAY_ORDER_NAMES):
+            if key == "class" and self.class_column_hidden:
                 continue
             if self.wcfg.get(f"column_{key}", False):
                 column = self.column_of(key)
                 if column is not None:
                     columns.append(column)
-        columns = self.display_ordered(columns, names=DISPLAY_ORDER_NAMES)
         header = bool(self.wcfg.get("show_column_headers", False))
         if header:
             columns = [column._replace(label=HEADER_LABELS.get(column.key, "")) for column in columns]
@@ -453,7 +455,7 @@ ARROW_GAP = 0.15  # space between time slot & trend arrow (font size units, see 
 
 def running_text(seconds: float) -> str:
     """Running lap time, tenths: 1:23.4"""
-    minutes, rest = divmod(max(seconds, 0.0), 60)
+    minutes, rest = divmod(round(max(seconds, 0.0), 1), 60)  # rounded first: 59.96 is 1:00.0, never 0:60.0
     return f"{int(minutes)}:{rest:04.1f}"
 
 

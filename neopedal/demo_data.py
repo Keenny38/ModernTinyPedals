@@ -639,6 +639,17 @@ def set_modules(minfo: ModuleInfo):
 
     minfo.stats.metersDriven = 18_640_000
 
+    # Notes of the track (pace & track notes overlays: shown, not auto hidden as without notes)
+    from .userfile.track_notes import COLUMN_COMMENT, COLUMN_DISTANCE, COLUMN_PACENOTE, COLUMN_TRACKNOTE
+
+    for notes, column, (current, following) in (
+        (minfo.pacenotes, COLUMN_PACENOTE, ("3 Right tightens", "Long left over crest")),
+        (minfo.tracknotes, COLUMN_TRACKNOTE, ("Turn 5 chicane", "Turn 6 fast left")),
+    ):
+        notes.out.currentIndex = 4
+        notes.out.currentNote = {COLUMN_DISTANCE: 1820.0, column: current, COLUMN_COMMENT: "Brake at 100 board"}
+        notes.out.nextNote = {COLUMN_DISTANCE: 2140.0, column: following, COLUMN_COMMENT: "Stay off the kerb"}
+
     history = minfo.history
     history.consumptionDataSet = deque(
         (
@@ -682,7 +693,7 @@ def set_modules(minfo: ModuleInfo):
     wheels.lockingPercentFront = 0.4
     wheels.lockingPercentRear = 0.1
     wheels.yawRate = 0.21
-    wheels.currentTreadDepth = [8.62, 8.71, 9.04, 9.11]
+    wheels.currentTreadDepth = [86.2, 87.1, 90.4, 91.1]  # percent of tread left
     wheels.currentLapTreadWear = [0.031, 0.028, 0.019, 0.018]
     wheels.lastLapTreadWear = [0.074, 0.069, 0.046, 0.044]
     wheels.estimatedTreadWear = [0.073, 0.069, 0.046, 0.045]
@@ -821,29 +832,82 @@ class DemoAPI:
         self.read = sim.reader()
 
 
+# Race situations of preview (Overlay Options): what overlays show only then (flags, pit, damage, rain), "" racing
+SCENARIOS = ("", "flags", "pits", "damage", "rain")
+SCENARIO_LABELS = {"": "Racing", "flags": "Yellow & Blue Flags", "pits": "In Pits", "damage": "Damage",
+                   "rain": "Rain"}
+
+
+def set_scenario(sim, data, minfo: ModuleInfo, scenario: str):
+    """Race situation set on simulated session (after set_telemetry, set_vehicles & set_modules)"""
+    tele = data.telemetry.telemInfo[PLAYER]
+    scoring = data.scoring.scoringInfo
+    player = data.scoring.vehScoringInfo[PLAYER]
+    rest = sim._restapi_dataset
+    if scenario == "flags":  # yellow in next sector (car stopped ahead), faster car behind (blue flag)
+        scoring.mSectorFlag[2] = 1
+        player.mFlag = 6
+        minfo.vehicles.nearestYellowAhead = 180.0
+    elif scenario == "pits":  # pit lane, limiter on, stop asked
+        player.mInPits = True
+        player.mPitState = 2  # entering
+        tele.mSpeedLimiter = 1
+        tele.mSpeedLimiterActive = 1
+        tele.mLocalVel.z = -16.6  # 60 km/h
+        tele.mLocalVel.x = tele.mLocalAccel.x = tele.mLocalRot.y = 0.0
+        tele.mGear = 2
+        tele.mEngineRPM = 4300
+        tele.mUnfilteredThrottle = tele.mFilteredThrottle = 0.35
+        tele.mUnfilteredSteering = tele.mFilteredSteering = 0.0
+    elif scenario == "damage":  # front left hit: body dents, aero & suspension damage, puncture
+        for part, severity in enumerate((2, 1, 0, 0, 0, 0, 1, 2)):
+            tele.mDentSeverity[part] = severity
+        rest.aeroDamage = 0.35
+        rest.suspensionDamage = (0.42, 0.06, 0.0, 0.0)
+        tele.mWheels[0].mFlat = True
+        tele.mWheels[0].mPressure = 40.0
+        tele.mLastImpactET = ELAPSED - 2.0
+        tele.mLastImpactMagnitude = 4800.0
+        tele.mLastImpactPos.x, tele.mLastImpactPos.z = 0.8, -1.9  # front left
+    elif scenario == "rain":  # wet track, wipers & lights on, wet surface under the car
+        scoring.mRaining = 0.65
+        scoring.mDarkCloud = 0.9
+        scoring.mCloudCoverage = 8
+        scoring.mMinPathWetness, scoring.mAvgPathWetness, scoring.mMaxPathWetness = 0.4, 0.6, 0.8
+        tele.mWiperState = 2
+        tele.mHeadlights = True
+        for wheel in tele.mWheels:
+            wheel.mSurfaceType = 1
+
+
+
 class DemoSession:
     """Simulated race: game data (api.read) and module outputs (minfo) read by widgets"""
 
     __slots__ = ("sim", "data", "api", "minfo")
 
-    def __init__(self, standings: Mapping[str, Any]):
+    def __init__(self, standings: Mapping[str, Any], scenario: str = ""):
         self.sim, self.data = lmu_api()
         self.api = DemoAPI(self.sim)
         self.minfo = ModuleInfo()
         set_telemetry(self.sim, self.data)
         set_vehicles(self.minfo, standings, self.api.read)
         set_modules(self.minfo)
+        if scenario:
+            set_scenario(self.sim, self.data, self.minfo, scenario)
 
 
-_session: tuple[dict, DemoSession] | None = None
+_session: tuple[dict, str, DemoSession] | None = None
 
 
-def demo_session(standings: Mapping[str, Any]) -> DemoSession:
-    """Simulated session, made again only when standings setting changes"""
+def demo_session(standings: Mapping[str, Any], scenario: str = "") -> DemoSession:
+    """Simulated session (in race situation), made again only when standings setting or situation changes"""
     global _session
-    if _session is None or _session[0] != standings:
-        _session = (dict(standings), DemoSession(standings))
-    return _session[1]
+    if scenario not in SCENARIOS:
+        scenario = ""
+    if _session is None or _session[0] != standings or _session[1] != scenario:
+        _session = (dict(standings), scenario, DemoSession(standings, scenario))
+    return _session[2]
 
 
 def release_session():

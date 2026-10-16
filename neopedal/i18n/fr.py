@@ -141,7 +141,7 @@ TRANSLATION = MappingProxyType({
     "Heatmap Editor": "Éditeur de heatmaps",
     "Tyre Compound Editor": "Éditeur de gommes",
     "Vehicle Brand Editor": "Éditeur de marques",
-    "Vehicle Class Editor": "Éditeur de classes",
+    "Vehicle Class Editor": "Éditeur de catégories",
     "Track Info Editor": "Éditeur d'infos de piste",
 
     # Help menu
@@ -284,7 +284,9 @@ TRANSLATION = MappingProxyType({
     "Not a Google Sheets address.": "Ce n'est pas une adresse Google Sheets.",
     "Change Sheet Address...": "Changer l'adresse de la feuille...",
     "Address of the published Google Sheet of community lap times (empty for default):": "Adresse de la feuille Google publiée des temps de la communauté (vide pour celle par défaut) :",
-    "Vehicle class unknown: set vehicle classification to class (Class - Brand) to compare.": "Catégorie du véhicule inconnue : réglez le classement des véhicules par catégorie (Catégorie - Marque) pour comparer.",
+    "Vehicle class unknown: set vehicle classification to class (Class - Brand) to compare.":
+        "Catégorie du véhicule inconnue : réglez le classement des véhicules par catégorie (Catégorie - marque) "
+        "pour comparer.",
     "Community lap times unavailable (offline?)": "Temps de la communauté indisponibles (hors ligne ?)",
     "No reference for this track or class": "Pas de référence pour ce circuit ou cette catégorie",
     "Community lap times": "Temps de la communauté",
@@ -708,14 +710,14 @@ TRANSLATION = MappingProxyType({
     "Import Package": "Importer un paquet",
     "Export Package...": "Exporter le paquet...",
     "Backup Preset": "Sauvegarder le preset",
-    "Set Primary for Class": "Principal pour la classe",
+    "Set Primary for Class": "Principal pour la catégorie",
     "Set Primary for Track": "Principal pour la piste",
     "Clear Primary Tag": "Retirer l'étiquette principale",
     "Include track notes & pace notes in package?": "Inclure les notes de piste et de pilotage dans le paquet ?",
     "Also import style presets (brakes, brands, classes, compounds, heatmap, tracks)?<br><br>"
     "This will <b>overwrite</b> your existing style presets.":
-        "Importer aussi les presets de style (freins, marques, classes, gommes, heatmaps, pistes) ?<br><br>"
-        "Vos presets de style actuels seront <b>remplacés</b>.",
+        "Importer aussi les presets de style (freins, marques, catégories, gommes, heatmaps, pistes) ?<br><br>Vos "
+        "presets de style actuels seront <b>remplacés</b>.",
     "Primary preset for track": "Preset principal pour la piste",
     "Lock Preset": "Verrouiller le preset",
     "Unlock Preset": "Déverrouiller le preset",
@@ -893,7 +895,8 @@ TRANSLATION = MappingProxyType({
     "Stint and consumption history of past laps and stints.":
         "Historique des relais et de la consommation des tours et relais passés.",
     "Data of every car: class, laps, gaps, pit stops, nearest traffic, blue and yellow flags.":
-        "Données de chaque voiture : classe, tours, écarts, arrêts aux stands, trafic proche, drapeaux bleus et jaunes.",
+        "Données de chaque voiture : catégorie, tours, écarts, arrêts aux stands, trafic proche, drapeaux bleus "
+        "et jaunes.",
     "Tyre and brake wear per lap, wheel locking, suspension travel, weight distribution and slip.":
         "Usure des pneus et des freins par tour, blocage des roues, débattement des suspensions, répartition des "
         "masses et glissement.",
@@ -985,9 +988,10 @@ TRANSLATION = MappingProxyType({
     "Delta per corner": "Écart par virage",
     'Export Map Picture...': "Exporter l'image de la carte...",
     "Lockup": "Blocage",
-    "Measure distance: click two points on the map (M)": "Mesurer une distance : cliquer deux points sur la carte (M)",
+    "Measure distance: click two points on the map (M)":
+        "Mesurer une distance : cliquer sur deux points de la carte (M)",
     "Pedal zones": "Zones de pédales",
-    "Ruler: click two points (Esc to quit)": "Règle : cliquer deux points (Échap pour quitter)",
+    "Ruler: click two points (Esc to quit)": "Règle : cliquer sur deux points (Échap pour quitter)",
     "Throttle application": "Remise des gaz",
     "Track limits": "Limites de piste",
     "Driver Rank": "Driver Rank",
@@ -1337,7 +1341,7 @@ TRANSLATION = MappingProxyType({
     "Compounds": "Gommes",
     "Recorder": "Enregistreur",
     "Brands": "Marques",
-    "Classes": "Classes",
+    "Classes": "Catégories",
     "Tracks": "Circuits",
     "Notes": "Notes",
     "Layout": "Disposition",
@@ -1445,7 +1449,8 @@ TRANSLATION = MappingProxyType({
     "Imported log name:": "Nom du log importé :",
     "Name already used by another imported log.": "Nom déjà utilisé par un autre log importé.",
     'Invalid name, characters \\ / : * ? " < > | not allowed.': 'Nom invalide, caractères \\ / : * ? " < > | interdits.',
-    "No imported lap. Import a MoTeC log (.ld) with Import MoTeC..., or drop it on the app.": "Aucun tour importé. Importe un log MoTeC (.ld) avec Importer MoTeC..., ou dépose-le sur l'app.",
+    "No imported lap. Import a MoTeC log (.ld) with Import MoTeC..., or drop it on the app.":
+        "Aucun tour importé. Importez un log MoTeC (.ld) avec Importer MoTeC..., ou déposez-le sur l'app.",
     "Search track, vehicle, driver or log...": "Rechercher circuit, voiture, pilote ou log...",
     "Import MoTeC...": "Importer MoTeC...",
     "Import complete laps of MoTeC logs (.ld), also by dropping them on the app": "Importer les tours complets de logs MoTeC (.ld), aussi en les déposant sur l'app",
@@ -1560,7 +1565,8 @@ TRANSLATION = MappingProxyType({
     "Oil Temp": "Temp. huile",
     "Camber": "Carrossage",
     "Car Settings": "Réglages voiture",
-    "Not counted in ideal lap & mini-sectors (invalid, out or in lap)": "Non compté dans le tour idéal et les mini-secteurs (tour invalide, de sortie ou de retour)",
+    "Not counted in ideal lap & mini-sectors (invalid, out or in lap)":
+        "Non compté dans le tour idéal et les mini-secteurs (tour invalide, de sortie ou de rentrée)",
     "Delta & time gain/loss against ideal lap: fastest clean shown lap in each mini-sector": "Delta et gain/perte de temps par rapport au tour idéal : tour propre affiché le plus rapide dans chaque mini-secteur",
     "Ideal": "Idéal",
     "Charts": "Courbes",
@@ -1864,8 +1870,8 @@ TRANSLATION = MappingProxyType({
     "No session matches the filters": "Aucune session ne correspond aux filtres",
     "Results are written by Le Mans Ultimate (or rFactor 2) in UserData/Log/Results at the end of each session. "
     "Choose that folder if the game is not installed with Steam.":
-        "Le Mans Ultimate (ou rFactor 2) écrit les résultats dans UserData/Log/Results à la fin de chaque session. "
-        "Choisis ce dossier si le jeu n'est pas installé avec Steam.",
+        "Le Mans Ultimate (ou rFactor 2) écrit les résultats dans UserData/Log/Results à la fin de chaque "
+        "session. Choisissez ce dossier si le jeu n'est pas installé avec Steam.",
     "The game writes a results file at the end of each session (practice, qualifying, race).":
         "Le jeu écrit un fichier de résultats à la fin de chaque session (essais, qualifications, course).",
     "Choose Folder...": "Choisir un dossier...",
@@ -1875,7 +1881,7 @@ TRANSLATION = MappingProxyType({
     "Hide sessions without laps": "Masquer les sessions sans tour",
     "Car picked only": "Voiture choisie seulement",
     "Car picked": "Voiture choisie",
-    "Your car": "Ta voiture",
+    "Your car": "Votre voiture",
     "No event": "Aucun événement",
     "No lap completed": "Aucun tour terminé",
     "Time / Gap": "Temps / écart",
@@ -1918,9 +1924,9 @@ TRANSLATION = MappingProxyType({
     "On air: %1 sources shown": "En direct : %1 sources affichées",
     "Ready": "Prêt",
     "New access token: copy the addresses again into your streaming software.":
-        "Nouveau jeton d'accès : copie à nouveau les adresses dans ton logiciel de stream.",
+        "Nouveau jeton d'accès : copiez à nouveau les adresses dans votre logiciel de stream.",
     "Address copied: paste it as URL of a Browser source.":
-        "Adresse copiée : colle-la comme URL d'une source navigateur.",
+        "Adresse copiée : collez-la comme URL d'une source navigateur.",
     "Copy Address": "Copier l'adresse",
     "Open in browser": "Ouvrir dans le navigateur",
     "LIVE": "EN DIRECT",
@@ -1928,7 +1934,7 @@ TRANSLATION = MappingProxyType({
     "Every source in a browser page, to test them": "Toutes les sources dans une page du navigateur, pour les tester",
     "Add these addresses as Browser sources in OBS Studio, Streamlabs, XSplit or vMix: transparent background, "
     "overlays exactly as on screen, also with the game in exclusive fullscreen.":
-        "Ajoute ces adresses comme sources navigateur dans OBS Studio, Streamlabs, XSplit ou vMix : fond "
+        "Ajoutez ces adresses comme sources navigateur dans OBS Studio, Streamlabs, XSplit ou vMix : fond "
         "transparent, overlays exactement comme à l'écran, même avec le jeu en plein écran exclusif.",
     "Sources": "Sources",
     "Every overlay shown on stream, at its place on screen.":
@@ -1942,22 +1948,22 @@ TRANSLATION = MappingProxyType({
     "Cars per page": "Voitures par page",
     "Page time": "Durée par page",
     "Stream only: hidden on your screen while overlays are locked.":
-        "Stream seulement : masqué sur ton écran tant que les overlays sont verrouillés.",
+        "Stream seulement : masqué sur votre écran tant que les overlays sont verrouillés.",
     "No overlay enabled: enable overlays on the Overlays page.":
-        "Aucun overlay activé : active des overlays sur la page Overlays.",
+        "Aucun overlay activé : activez des overlays sur la page Overlays.",
     "Server": "Serveur",
     "Port": "Port",
     "Server port (default 8339)": "Port du serveur (8339 par défaut)",
     "Images per second": "Images par seconde",
     "Another computer (LAN)": "Autre ordinateur (réseau local)",
-    "Sources for a streaming PC on your local network": "Sources pour un PC de stream sur ton réseau local",
+    "Sources for a streaming PC on your local network": "Sources pour un PC de stream sur votre réseau local",
     "New Access Token": "Nouveau jeton d'accès",
     "Every address gets a new token: addresses copied before stop working (address shown on stream by mistake)":
         "Chaque adresse reçoit un nouveau jeton : les adresses copiées avant ne fonctionnent plus (adresse "
         "montrée en stream par erreur)",
     "Addresses for another computer": "Adresses pour un autre ordinateur",
     "Invalid address: copy it again from the Stream Overlays page of NeoPedal.":
-        "Adresse invalide : copie-la à nouveau depuis la page Overlays de stream de NeoPedal.",
+        "Adresse invalide : copiez-la à nouveau depuis la page Overlays de stream de NeoPedal.",
     "Waiting for results…": "En attente de résultats…",
     "Format": "Format",
     "16:9 (screen centre)": "16:9 (centre de l'écran)",
@@ -1967,16 +1973,16 @@ TRANSLATION = MappingProxyType({
     "Show overlays while spectating": "Afficher les overlays en spectateur",
     "Overlays shown & updated while you spectate a session or watch a replay, as long as a layout or overlay "
     "source is on air (hidden otherwise by Auto Hide)":
-        "Overlays affichés et mis à jour quand tu regardes une session en spectateur ou un replay, tant qu'une "
+        "Overlays affichés et mis à jour quand vous regardez une session en spectateur ou un replay, tant qu'une "
         "source disposition ou overlay est à l'antenne (sinon masqués par le masquage automatique)",
     "No overlay shown now: Auto Hide hides them outside sessions. They show while you drive, and while you "
     "spectate or watch a replay with a source on air.":
-        "Aucun overlay affiché pour l'instant : le masquage automatique les cache hors session. Ils s'affichent quand "
-        "tu pilotes, et quand tu regardes en spectateur ou un replay avec une source à l'antenne.",
+        "Aucun overlay affiché pour l'instant : le masquage automatique les cache hors session. Ils s'affichent "
+        "quand vous pilotez, et quand vous regardez en spectateur ou un replay avec une source à l'antenne.",
     "No overlay shown now: Auto Hide hides them while you are not driving. Turn on \"Show overlays while "
     "spectating\" to stream a session you watch.":
-        "Aucun overlay affiché pour l'instant : le masquage automatique les cache quand tu ne pilotes pas. Active "
-        "« Afficher les overlays en spectateur » pour streamer une session que tu regardes.",
+        "Aucun overlay affiché pour l'instant : le masquage automatique les cache quand vous ne pilotez pas. "
+        "Activez « Afficher les overlays en spectateur » pour streamer une session que vous regardez.",
     "No overlay shown now: hidden by their visibility options or a hotkey.":
         "Aucun overlay affiché pour l'instant : masqués par leurs options de visibilité ou un raccourci.",
     "Leader": "Leader",
@@ -1989,13 +1995,13 @@ TRANSLATION = MappingProxyType({
     "Reset All": "Tout réinitialiser",
     "Layout saved": "Disposition enregistrée",
     "Drag a graphic to move it, mouse wheel to resize it, double click: back to its place.":
-        "Fais glisser un graphisme pour le déplacer, molette pour le redimensionner, double clic : retour à sa "
+        "Faites glisser un graphisme pour le déplacer, molette pour le redimensionner, double clic : retour à sa "
         "place.",
     "Layout not saved": "Disposition non enregistrée",
     "Drag an overlay to move it, mouse wheel to resize it, double click: back to its place on screen. Only overlays "
     "shown now can be placed.":
-        "Fais glisser un overlay pour le déplacer, molette pour le redimensionner, double clic : retour à sa place à "
-        "l'écran. Seuls les overlays affichés en ce moment peuvent être placés.",
+        "Faites glisser un overlay pour le déplacer, molette pour le redimensionner, double clic : retour à sa "
+        "place à l'écran. Seuls les overlays affichés en ce moment peuvent être placés.",
     "Out lap": "Tour de sortie",
     "Import Championship": "Importer un championnat",
     "No driver with points found in this file": "Aucun pilote avec des points dans ce fichier",
@@ -2007,7 +2013,7 @@ TRANSLATION = MappingProxyType({
     "Lap times": "Chronos au tour",
     "Battle train: up to 6 cars close together": "Train de bataille : jusqu'à 6 voitures groupées",
     "Instant replay graphics: driver or contact card, banners held until live":
-        "Graphismes du replay instantané : fiche pilote ou contact, bandeaux retenus jusqu'au direct",
+        "Graphismes du ralenti : fiche pilote ou contact, bandeaux retenus jusqu'au direct",
     "Onboard: speed, gear, rpm, pedals of the car on air":
         "Onboard : vitesse, rapport, régime, pédales de la voiture à l'antenne",
     "Dash": "Tableau de bord",
@@ -2022,30 +2028,31 @@ TRANSLATION = MappingProxyType({
     "Classification now, shown until captured again": "Classement actuel, affiché jusqu'à la prochaine capture",
     "Import...": "Importer...",
     "Import a CSV file: driver, points, and team, class if you want":
-        "Importer un fichier CSV : pilote, points, et équipe, catégorie si tu veux",
+        "Importer un fichier CSV : pilote, points, et équipe, catégorie si vous voulez",
     "Remove this championship": "Retirer ce championnat",
     "Remove this championship?": "Retirer ce championnat ?",
     "Its standings leave the broadcast graphics. Import the CSV file again to get them back.":
-        "Son classement quitte l'habillage de diffusion. Importe à nouveau le fichier CSV pour le retrouver.",
+        "Son classement quitte l'habillage de diffusion. Importez à nouveau le fichier CSV pour le retrouver.",
     "Rows per page": "Lignes par page",
     "Panel opacity": "Opacité des panneaux",
     "Temperatures": "Températures",
     "App setting": "Réglage de l'app",
     "Move and resize every graphic in your browser, with sample data: drag to move, mouse wheel to resize, then "
     "Save. Every source of this computer follows.":
-        "Déplace et redimensionne chaque graphisme dans ton navigateur, avec des données d'exemple : glisser pour "
-        "déplacer, molette pour redimensionner, puis Enregistrer. Toutes les sources de cet ordinateur suivent.",
+        "Déplacez et redimensionnez chaque graphisme dans votre navigateur, avec des données d'exemple : glisser "
+        "pour déplacer, molette pour redimensionner, puis Enregistrer. Toutes les sources de cet ordinateur "
+        "suivent.",
     "Edit Layout": "Éditer la disposition",
     "Reset Layout": "Réinitialiser la disposition",
     "Drag a column title to move it, right click: columns shown":
-        "Fais glisser un titre de colonne pour la déplacer, clic droit : colonnes affichées",
+        "Faites glisser un titre de colonne pour la déplacer, clic droit : colonnes affichées",
     "Columns of this view by default": "Colonnes par défaut de cette vue",
     "Timing table: race, qualifying & pits views, columns of your choice":
         "Tableau de chronométrage : vues course, qualif et stands, colonnes au choix",
     "Place overlays on this layout in your browser, apart from their place on screen (for example overlays of the "
     "sides of an ultrawide screen)":
-        "Placer les overlays sur cette disposition dans ton navigateur, indépendamment de leur place à l'écran (par "
-        "exemple les overlays des côtés d'un écran ultra-large)",
+        "Placer les overlays sur cette disposition dans votre navigateur, indépendamment de leur place à l'écran "
+        "(par exemple les overlays des côtés d'un écran ultra-large)",
     "Overlays of this layout back to their place on screen":
         "Overlays de cette disposition remis à leur place à l'écran",
     "Pen": "Pén.",
@@ -2069,7 +2076,7 @@ TRANSLATION = MappingProxyType({
     "League logo": "Logo de la ligue",
     "Sponsors": "Partenaires",
     "Start in": "Début dans",
-    "Choose a PNG, JPG, WEBP or SVG picture": "Choisis une image PNG, JPG, WEBP ou SVG",
+    "Choose a PNG, JPG, WEBP or SVG picture": "Choisissez une image PNG, JPG, WEBP ou SVG",
     "Layout: %1": "Disposition : %1",
     "%1 races": "%1 courses",
     "%1 podiums": "%1 podiums",
@@ -2096,7 +2103,7 @@ TRANSLATION = MappingProxyType({
     "Remove the logo": "Retirer le logo",
     "Sponsors in turn": "Partenaires à tour de rôle",
     "Folder of sponsors pictures (PNG, JPG, WEBP, SVG)": "Dossier des images des partenaires (PNG, JPG, WEBP, SVG)",
-    "Preset in use": "Préréglage utilisé",
+    "Preset in use": "Preset utilisé",
     "Source with some graphics only": "Source avec certains graphismes seulement",
     "Head to head": "Face-à-face",
     # Broadcast director page (LMU): camera desk, director, commentator screen
@@ -2129,7 +2136,7 @@ TRANSLATION = MappingProxyType({
         "Contacts, dépassements, arrêts au stand et meilleurs tours s'affichent au fil de la course.",
     "No battle right now": "Aucune bagarre en ce moment",
     "Two cars of a class within the battle gap (races only).":
-        "Deux voitures d'une même classe sous l'écart de bagarre (en course uniquement).",
+        "Deux voitures d'une même catégorie sous l'écart de bagarre (en course uniquement).",
     "%1 cars": "%1 voitures",
     "%1 stops": "%1 arrêts",
     "Stint %1 laps": "Relais : %1 tours",
@@ -2159,7 +2166,7 @@ TRANSLATION = MappingProxyType({
     "Longest shot": "Plan le plus long",
     "Then another car, even if the story goes on": "Puis une autre voiture, même si l'action continue",
     "Battle gap": "Écart de bagarre",
-    "Two cars of a class closer than this": "Deux voitures d'une classe plus proches que cela",
+    "Two cars of a class closer than this": "Deux voitures d'une catégorie plus proches que cela",
     "Replay: seconds before an event": "Replay : secondes avant un événement",
     "Director cameras": "Caméras du réalisateur",
     "Overlays follow the car on air": "Les overlays suivent la voiture à l'antenne",
@@ -2280,7 +2287,8 @@ TRANSLATION = MappingProxyType({
     "Places": "Places",
     "%1 cars approaching": "%1 voitures arrivent",
     "Alongside": "À côté",
-    "Pit radar: cars near the car on air in the pit lane": "Pit radar : voitures proches de la voiture à l'antenne dans la voie des stands",
+    "Pit radar: cars near the car on air in the pit lane":
+        "Radar des stands : voitures proches de la voiture à l'antenne dans la voie des stands",
     # Audit fixes (package A)
     "Replay recorded with another game data structure (older game or app version), it cannot be played.":
         "Rejeu enregistré avec une autre structure de données du jeu (version plus ancienne du jeu ou de "
@@ -2459,7 +2467,7 @@ TRANSLATION = MappingProxyType({
     "Viewer": "Visionneuse",
     "Personal": "Personnel",
     "Center": "Centre",
-    "Class - Brand": "Classe - marque",
+    "Class - Brand": "Catégorie - marque",
     "Always": "Toujours",
     "Qualifying & Race": "Qualifications et course",
     "Practice & Qualifying": "Essais et qualifications",
@@ -2647,18 +2655,19 @@ TRANSLATION = MappingProxyType({
     "Set the game display mode to Borderless or Windowed (exclusive fullscreen hides the overlay). "
     "Le Mans Ultimate: enable Settings > Gameplay > Enable plugins. "
     "rFactor 2: install the shared memory plugin.":
-        "Mets le jeu en mode Sans bordure ou Fenêtré (le plein écran exclusif cache l'overlay). "
-        "Le Mans Ultimate : active Paramètres > Gameplay > Activer les plugins. "
-        "rFactor 2 : installe le plugin de mémoire partagée.",
+        "Mettez le jeu en mode Sans bordure ou Fenêtré (le plein écran exclusif cache l'overlay). Le Mans "
+        "Ultimate : activez Paramètres > Gameplay > Activer les plugins. rFactor 2 : installez le plugin de "
+        "mémoire partagée.",
     "Quick Access": "Accès rapide",
     "Unlock Overlay": "Déverrouiller l'overlay",
-    "Drag overlays to move them": "Fais glisser les overlays pour les déplacer",
+    "Drag overlays to move them": "Faites glisser les overlays pour les déplacer",
     "Checking...": "Vérification...",
     "See Update": "Voir la mise à jour",
     "Customize...": "Personnaliser...",
     "Add, remove or reorder quick access buttons": "Ajouter, retirer ou réordonner les boutons d'accès rapide",
     "No quick access button: use Customize... to add tools, pages or actions.":
-        "Aucun bouton d'accès rapide : utilise Personnaliser... pour ajouter des outils, des pages ou des actions.",
+        "Aucun bouton d'accès rapide : utilisez Personnaliser... pour ajouter des outils, des pages ou des "
+        "actions.",
     "Customize Quick Access...": "Personnaliser l'accès rapide...",
     "Customize Quick Access": "Personnaliser l'accès rapide",
     "Action": "Action",
@@ -2672,22 +2681,22 @@ TRANSLATION = MappingProxyType({
     "Actions": "Actions",
     "Move Up": "Monter d'un cran",
     "Move Down": "Descendre d'un cran",
-    "Nothing shown: add entries from the list.": "Aucune entrée affichée : ajoutes-en depuis la liste.",
+    "Nothing shown: add entries from the list.": "Aucune entrée affichée : ajoutez-en depuis la liste.",
     "Every entry is shown.": "Toutes les entrées sont affichées.",
     "No entry found.": "Aucune entrée trouvée.",
     "Back to default entries": "Revenir aux entrées par défaut",
     "Back to default order (saved with Apply)": "Revenir à l'ordre par défaut (enregistré avec Appliquer)",
     "Drag rows to reorder, or use the arrows (Alt+Up / Alt+Down).":
-        "Fais glisser les lignes pour les réordonner, ou utilise les flèches (Alt+Haut / Alt+Bas).",
+        "Faites glisser les lignes pour les réordonner, ou utilisez les flèches (Alt+Haut / Alt+Bas).",
     "Drag entries to reorder, or use the arrows. Add entries from the list on the right. "
     "Ctrl+1 to Ctrl+9 open the first 9 entries, hidden pages stay in command palette (Ctrl+K).":
-        "Fais glisser les entrées pour les réordonner, ou utilise les flèches. Ajoute des entrées depuis la liste "
-        "de droite. Ctrl+1 à Ctrl+9 ouvrent les 9 premières entrées, les pages masquées restent dans la palette "
-        "de commandes (Ctrl+K).",
+        "Faites glisser les entrées pour les réordonner, ou utilisez les flèches. Ajoutez des entrées depuis la "
+        "liste de droite. Ctrl+1 à Ctrl+9 ouvrent les 9 premières entrées, les pages masquées restent dans la "
+        "palette de commandes (Ctrl+K).",
     "Buttons of home page: drag entries to reorder, or use the arrows. "
     "Add tools, pages or actions from the list on the right.":
-        "Boutons de la page d'accueil : fais glisser les entrées pour les réordonner, ou utilise les flèches. "
-        "Ajoute des outils, des pages ou des actions depuis la liste de droite.",
+        "Boutons de la page d'accueil : faites glisser les entrées pour les réordonner, ou utilisez les flèches. "
+        "Ajoutez des outils, des pages ou des actions depuis la liste de droite.",
     # Presets, Spectate, Find Option & Settings pages (Qt Quick)
     "Show the data of another driver in your overlays": "Afficher les données d'un autre pilote dans vos overlays",
     "Spectate mode": "Mode spectateur",
@@ -2723,7 +2732,7 @@ TRANSLATION = MappingProxyType({
     "Changed from default": "Différente de la valeur par défaut",
     "Switch on / off now (saved & applied)": "Activer / désactiver maintenant (enregistré et appliqué)",
     "Settings": "Paramètres",
-    "All Settings": "Tous les réglages",
+    "All Settings": "Tous les paramètres",
     "Next start": "Au prochain démarrage",
     "Applied once NeoPedal restarts (offered after Apply)":
         "Appliqué au redémarrage de NeoPedal (proposé après Appliquer)",
@@ -2865,8 +2874,8 @@ TRANSLATION = MappingProxyType({
     "Order of shown items, top first: drag them, or use the arrows.":
         "Ordre des éléments affichés, le premier en haut : faites-les glisser, ou utilisez les flèches.",
     "Classes in multi-class split mode, top first: drag them, or use the arrows. Classes found in no list come after, fastest first.":
-        "Catégories en mode de séparation multi-classe, la première en haut : faites-les glisser, ou utilisez les flèches. "
-        "Les catégories absentes de la liste viennent après, la plus rapide d'abord.",
+        "Catégories en mode de séparation multi-catégorie, la première en haut : faites-les glisser, ou utilisez "
+        "les flèches. Les catégories absentes de la liste viennent après, la plus rapide d'abord.",
     "Overlay state (saved)": "État de l'overlay (enregistré)",
     "Position & Layout": "Position et disposition",
     # Overlay Options: driver lists (Relative, Standings, Rivals)
@@ -2907,6 +2916,28 @@ TRANSLATION = MappingProxyType({
     "Try searching every overlay, or other words.": "Essayez de chercher dans tous les overlays, ou d'autres mots.",
     "Type more words to narrow the search": "Tapez d'autres mots pour affiner la recherche",
     "Used only while on:": "Utilisé seulement si activé :",
+    "Not used while on:": "Pas utilisé si activé :",
+    "Used only up to:": "Utilisé seulement jusqu'à :",
+    "Used only while set (not 0):": "Utilisé seulement si réglé (pas 0) :",
+    "Used only with:": "Utilisé seulement avec :",
+    "Used only with one of:": "Utilisé seulement avec l'un de :",
+    "Used only": "Utilisées seulement",
+    "Racing": "En course",
+    "Other Design": "Autre design",
+    "Stop Test": "Arrêter le test",
+    "Test on Screen": "Tester à l'écran",
+    "Overlays on screen show this race situation for a few seconds (saved values)": "Les overlays à l'écran montrent cette situation de course quelques secondes (valeurs enregistrées)",
+    "No overlay on screen now: enable overlays, unlock them or start the game": "Aucun overlay à l'écran : activez des overlays, déverrouillez-les ou lancez le jeu",
+    "Compare: same values drawn by the other design": "Comparer : mêmes valeurs dessinées par l'autre design",
+    "Yellow & Blue Flags": "Drapeaux jaune & bleu",
+    "Race situation of preview: shows what overlays draw only then": "Situation de course de l'aperçu : montre ce que les overlays affichent seulement dans ce cas",
+    "Hide options doing nothing with current values (greyed out)": "Masquer les options sans effet avec les valeurs actuelles (grisées)",
+    "Allowed:": "Autorisé :",
+    "Check Preset": "Vérifier le preset",
+    "No problem found": "Aucun problème trouvé",
+    "Preset repaired": "Preset réparé",
+    "Minimum": "Minimum",
+    "Maximum": "Maximum",
     "Where search & filter look": "Où cherchent la recherche et le filtre",
     # Settings imported from a folder (ui/settings_import.py)
     "Import Settings...": "Importer des réglages...",
@@ -3017,12 +3048,18 @@ TRANSLATION = MappingProxyType({
     "With changes": "Avec modifications",
     "Keep my positions": "Garder mes positions",
     "Overlays stay where you placed them, else they move to the positions of the file":
-        "Les overlays restent où tu les as placés, sinon ils prennent les positions du fichier",
+        "Les overlays restent où vous les avez placés, sinon ils prennent les positions du fichier",
     "No overlay of this file is available in this version.": "Aucun overlay de ce fichier n'existe dans cette version.",
     "This is a preset package: import it on the Presets page.":
-        "C'est un paquet de presets : importe-le depuis la page Presets.",
+        "C'est un paquet de presets : importez-le depuis la page Presets.",
     "not a NeoPedal overlay settings package": "ce n'est pas un fichier de réglages d'overlays NeoPedal",
     "not a NeoPedal preset package": "ce n'est pas un paquet de presets NeoPedal",
     "package made by newer NeoPedal version": "paquet créé par une version plus récente de NeoPedal",
     "too many files in package": "trop de fichiers dans le paquet",
+    # Pages: texts found untranslated by the French check
+    "global": "global",
+    "Undo with Ctrl+Z while this page is open.": "Annulez avec Ctrl+Z tant que cette page est ouverte.",
+    "Championship not imported": "Championnat non importé",
+    "Logo not saved": "Logo non enregistré",
+    "Badge": "Badge",
 })

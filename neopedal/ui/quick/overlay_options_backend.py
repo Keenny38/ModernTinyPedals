@@ -48,9 +48,11 @@ from ...i18n import tr, trm
 from ...i18n.options import module_label, option_help_specific, option_label
 from ...module_control import ModuleControl
 from ...setting import cfg
+from ...template.option_limits import clamp_to_limit, format_number, limit_error
 from ...template.widget import WIDGET_OPTION_UI
 from ...template.widget.black_box_ui import OptionUI, theme_color
-from ...widget._style import OVERLAY_SCALE_RANGE
+from ...template.widget.option_rules import ANY_OF, INACTIVE_RULES, fixes_of, font_offset_inactive
+from ...widget._style import OVERLAY_SCALE_RANGE, overlay_theme
 from ..module_view import sort_key
 from ..widget_preview import set_showing
 from .models import DictListModel
@@ -85,6 +87,7 @@ from .overlay_sections import (
     Section,
     auto_sections,
     declared_sections,
+    fix_sections,
     listed_sections,
     order_keys,
     section_dependencies,
@@ -98,7 +101,7 @@ ROW_ROLES = (
     "key", "overlay", "option", "row", "label", "help", "kind", "title", "first", "last",
     "toggle", "toggleChecked", "collapsed", "count", "changedCount", "customizedCount",
     "checked", "choices", "choiceIndex", "text", "number", "decimals", "step", "minimum", "maximum",
-    "color", "modified", "changed", "error", "defaultText", "dimmed", "locked", "note", "hint", "shared",
+    "color", "modified", "changed", "error", "defaultText", "dimmed", "locked", "note", "hint", "rangeText", "shared",
     "table", "orders",
 )
 NAV_ROLES = (
@@ -155,6 +158,7 @@ class OverlayLayout(NamedTuple):
     section_of: Mapping[str, Section]
     dependencies: Mapping[str, str]  # option: on/off option it is used with
     option_ui: OptionUI | None
+    name: str = ""  # overlay (rules of options doing nothing with some values, see option_rules)
 
 
 def option_id(name: str, key: str) -> str:
@@ -196,7 +200,12 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     except Exception as error:  # broken modern module: every option shown
         logger.debug("Overlay options: design of %s: %s", name, error, exc_info=True)
     option_ui = WIDGET_OPTION_UI.get(name)
-    if option_ui is not None and option_ui.modern_only and not uses_modern_design(design_config, name):
+    try:
+        modern = uses_modern_design(design_config, name)
+    except Exception as error:  # broken modern module
+        logger.debug("Overlay options: design of %s: %s", name, error, exc_info=True)
+        modern = False
+    if option_ui is not None and option_ui.modern_only and not modern:
         option_ui = None  # classic layout: automatic sections
     if option_ui is not None and option_ui.hidden:
         keys = [key for key in keys if key not in option_ui.hidden]
@@ -209,9 +218,21 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     else:
         sections = auto_sections(keys, values)
         dependencies = section_dependencies(sections)
+    # On/off options really controlling options, where the automatic sections guess wrong
+    toggle_fixes, dependency_fixes = fixes_of(name, modern)
+    if toggle_fixes or dependency_fixes:
+        if option_ui is None:
+            sections = fix_sections(sections, toggle_fixes, dependency_fixes)
+            dependencies = section_dependencies(sections)
+        dependencies = dict(dependencies)
+        for key, control in dependency_fixes.items():
+            if control:
+                dependencies[key] = control
+            else:
+                dependencies.pop(key, None)
     ordered = tuple(key for section in sections for key in section.keys)
     section_of = {key: section for section in sections for key in section.keys}
-    return OverlayLayout(ordered, tuple(sections), section_of, dependencies, option_ui)
+    return OverlayLayout(ordered, tuple(sections), section_of, dependencies, option_ui, name)
 
 
 class OverlayOptionsBackend(PageBackend):
@@ -244,7 +265,9 @@ class OverlayOptionsBackend(PageBackend):
         self._layouts: dict[str, OverlayLayout] = {}
         self._sorted_names: list[str] = []
         self._row_overrides: dict[str, Mapping[str, bool]] = {}  # overlay: profile overrides its rows were built with
+        self._row_inactive: dict[str, Mapping[str, tuple[str, ...]]] = {}  # overlay: unused options its rows show
         self._kinds: dict[str, OptionKind] = {}  # option key: kind (same for every overlay)
+        self._heatmaps: tuple[str, ...] = tuple(cfg.user.heatmap)  # choices of heatmap options cached in _kinds
         self._search_texts: dict[str, str] = {}
         self._pending: dict[str, Any] = {}  # option id: valid value not saved yet
         self._invalid: dict[str, tuple[str, str]] = {}  # option id: (typed text, English reason)
@@ -257,6 +280,7 @@ class OverlayOptionsBackend(PageBackend):
         self._words: tuple[str, ...] = ()
         self._scope_all = False
         self._modified_only = False
+        self._used_only = False  # options doing nothing with current values (dimmed) hidden
         self._advanced = False
         self._collapsed: dict[str, set[str]] = {}
         self._nav_words: tuple[str, ...] = ()
@@ -275,6 +299,9 @@ class OverlayOptionsBackend(PageBackend):
         self._preview_size = (0, 0)
         self._preview_scale = 1.0  # size of picture shown, relative to overlay size
         self._preview_zoom = 1.0  # size asked by page (zoomed preview), see setPreviewScale
+        self._preview_scenario = ""  # race situation of preview (demo_data.SCENARIOS), "" racing
+        self._preview_compare = False  # preview of the other design (classic or modern) with same values
+        self._test_connected = False  # page told when test on screen ends (see testOnScreen)
         self._preview_signature: object = None  # inputs of picture shown (see render_preview)
         self._preview_bytes = 0  # size of picture in store
         self._preview_timer = QTimer(self)
@@ -406,6 +433,7 @@ class OverlayOptionsBackend(PageBackend):
         self._truncated = 0
         self._helped = set()
         self._row_overrides = {}
+        self._row_inactive = {}
         if self.filtering and self._scope_all:
             for name in self._names:
                 self._overlay_rows(name, rows, with_name=True)
@@ -423,10 +451,15 @@ class OverlayOptionsBackend(PageBackend):
         overrides = self._overrides(layout, values)
         fixed = self._fixed(layout, values, overrides)
         self._row_overrides[name] = overrides
+        self._row_inactive[name] = self._inactive(layout, values)
         collapsed = self._collapsed.get(name, set()) if not self.filtering else set()
         for section in layout.sections:
             shown = [key for key in section.keys
                      if key != section.toggle and self.shown_in_mode(layout, key) and self.matches(name, key)]
+            if self._used_only:
+                inactive = self._row_inactive[name]
+                shown = [key for key in shown
+                         if key not in inactive and not self._off_control(layout, values, overrides, key)]
             toggle_match = bool(section.toggle) and self.matches(name, section.toggle)
             if section.key == SECTION_ORDER:
                 if not shown:
@@ -488,6 +521,9 @@ class OverlayOptionsBackend(PageBackend):
         toggles = {key: toggle for key, toggle in (ui.order_toggles if ui is not None else {}).items()
                    if toggle in section.keys}
         labels = ui.order_labels if ui is not None else {}
+        layout = self.layout(name)
+        values = self.values(name)
+        overrides = self._overrides(layout, values)
         orders = []
         for key in self._ordered(name, section):
             toggle = toggles.get(key, "")
@@ -497,6 +533,8 @@ class OverlayOptionsBackend(PageBackend):
                 "changed": self.is_changed(name, key) or (bool(toggle) and self.is_changed(name, toggle)),
                 "toggle": option_id(name, toggle) if toggle else "",
                 "checked": bool(self.value(name, toggle)) if toggle else True,
+                # Column switched on but not shown (class column replaced by class headers): why
+                "note": self._unused_note(layout, values, overrides, toggle) if toggle else "",
             })
         row.update(
             kind=ROW_ORDER,
@@ -532,7 +570,8 @@ class OverlayOptionsBackend(PageBackend):
             "count": 0, "changedCount": 0, "customizedCount": 0, "checked": False, "choices": [],
             "choiceIndex": -1, "text": "", "number": 0.0, "decimals": 0, "step": 1.0, "minimum": 0.0,
             "maximum": 0.0, "color": "", "modified": False, "changed": False, "error": "", "defaultText": "",
-            "dimmed": False, "locked": False, "note": "", "hint": "", "shared": 0, "table": False, "orders": [],
+            "dimmed": False, "locked": False, "note": "", "hint": "", "rangeText": "", "shared": 0, "table": False,
+            "orders": [],
         }
 
     def _error_text(self, oid: str) -> str:
@@ -569,7 +608,7 @@ class OverlayOptionsBackend(PageBackend):
             help=tr(LIST_OPTIONS[key][0]),
             orders=[{
                 "key": item, "label": item, "changed": index >= len(saved) or saved[index] != item,
-                "toggle": "", "checked": True,
+                "toggle": "", "checked": True, "note": "",
             } for index, item in enumerate(items)],
             modified=default is not None and items != self.list_items(name, key, default),
             changed=self.is_changed(name, key),
@@ -579,7 +618,11 @@ class OverlayOptionsBackend(PageBackend):
     def _option_row(self, name: str, key: str, layout: OverlayLayout, values: Mapping[str, Any],
                     overrides: Mapping[str, bool], fixed: Collection[str]) -> dict:
         if key in LIST_OPTIONS:
-            return self._list_row(name, key)
+            row = self._list_row(name, key)
+            note = self._unused_note(layout, values, overrides, key)
+            if note:
+                row.update(dimmed=True, note=note)
+            return row
         oid = option_id(name, key)
         kind = self.kind(key)
         value = self.value(name, key)
@@ -612,10 +655,10 @@ class OverlayOptionsBackend(PageBackend):
                 row["note"] += f"  ·  {tr('Changing it switches to')} {tr('Custom')}"
             row["checked"] = bool(overrides[key]) if kind.kind == KIND_BOOL else row["checked"]
         else:
-            control = self._off_control(layout, values, overrides, key)
-            if control:
+            note = self._unused_note(layout, values, overrides, key)
+            if note:
                 row["dimmed"] = True
-                row["note"] = f"{tr('Used only while on:')} {option_label(control)}"
+                row["note"] = note
         if kind.kind in (KIND_CHOICE, KIND_FONT):
             choices = list(choice_values(kind))
             if value not in choices:
@@ -626,7 +669,8 @@ class OverlayOptionsBackend(PageBackend):
             places = decimals(value, default) if kind.kind != KIND_INTEGER else 0
             minimum, maximum = number_range(key)
             row.update(number=float(value), decimals=places, step=10 ** -places if places else 1.0,
-                       minimum=float(minimum), maximum=float(maximum), hint=unit_hint_text(key, value))
+                       minimum=float(minimum), maximum=float(maximum), hint=unit_hint_text(key, value),
+                       rangeText=range_text(minimum, maximum))
         return row
 
     @staticmethod
@@ -650,6 +694,59 @@ class OverlayOptionsBackend(PageBackend):
             return ui.overrides({**values, **release}).keys() if release else overrides.keys()
         except (KeyError, TypeError, ValueError):  # invalid value pending
             return overrides.keys()
+
+    def _unused_note(self, layout: OverlayLayout, values: Mapping[str, Any], overrides: Mapping[str, bool],
+                     key: str) -> str:
+        """Why option does nothing with current values (on/off option it depends on is off, or option unused
+        in the mode chosen), "" if used"""
+        control = self._off_control(layout, values, overrides, key)
+        if control:
+            return f"{tr('Used only while on:')} {option_label(control)}"
+        state, control, *value = self._inactive(layout, values).get(key, ("", ""))
+        if state == "on":
+            return f"{tr('Used only while on:')} {option_label(control)}"
+        if state == "off":
+            return f"{tr('Not used while on:')} {option_label(control)}"
+        if state == "any":
+            return f"{tr('Used only with one of:')} {', '.join(option_label(item) for item in (control, *value))}"
+        if state == "count":
+            return f"{tr('Used only up to:')} {option_label(control)}"
+        if state == "set":
+            return f"{tr('Used only while set (not 0):')} {option_label(control)}"
+        if state == "value" and value:
+            return f"{tr('Used only with:')} {option_label(control)} = {tr(str(value[0]))}"
+        return ""
+
+    @staticmethod
+    def _inactive(layout: OverlayLayout, values: Mapping[str, Any]) -> Mapping[str, tuple[str, ...]]:
+        """Options doing nothing with these values: overlay rules, page rules (see option_rules)"""
+        ui = layout.option_ui
+        rules = [font_offset_inactive, INACTIVE_RULES.get(layout.name), ui.inactive if ui is not None else None]
+        inactive: dict[str, tuple[str, ...]] = {}
+        for rule in rules:
+            if rule is None:
+                continue
+            try:
+                inactive.update(rule(values))
+            except (KeyError, TypeError, ValueError):  # invalid value pending
+                continue
+        inactive.update(OverlayOptionsBackend._any_of_inactive(layout, values))
+        return inactive
+
+    @staticmethod
+    def _any_of_inactive(layout: OverlayLayout, values: Mapping[str, Any]) -> Mapping[str, tuple[str, ...]]:
+        """Options of several parts (see option_rules.ANY_OF) while every part is off (or its chain)"""
+        rules = ANY_OF.get(layout.name)
+        if not rules:
+            return {}
+        overrides = OverlayOptionsBackend._overrides(layout, values)
+
+        def used(control: str) -> bool:
+            return (bool(overrides.get(control, values.get(control, True)))
+                    and not OverlayOptionsBackend._off_control(layout, values, overrides, control))
+
+        return {key: ("any", *controls) for key, controls in rules.items()
+                if key in values and not any(used(control) for control in controls)}
 
     @staticmethod
     def _off_control(layout: OverlayLayout, values: Mapping[str, Any], overrides: Mapping[str, bool],
@@ -744,6 +841,9 @@ class OverlayOptionsBackend(PageBackend):
         overrides = self._overrides(layout, values)
         if overrides != self._row_overrides.get(name, overrides):
             return False
+        inactive = self._inactive(layout, values)
+        if inactive != self._row_inactive.get(name, inactive):  # other options unused or used again: every row
+            return False
         number = self.rows.index_of(oid)
         if number >= 0:
             shown = self.rows.rows[number]
@@ -792,17 +892,25 @@ class OverlayOptionsBackend(PageBackend):
         if not name:
             return {"name": "", "label": "", "category": "", "color": "", "enabled": False, "design": "",
                     "optionCount": 0, "customized": 0, "simpleMode": False, "themes": [], "preset": "",
-                    "profile": "", "profileOption": "", "userProfiles": [], "previewParts": False}
+                    "profile": "", "profileOption": "", "userProfiles": [], "previewParts": False,
+                    "canCompare": False, "otherDesign": "", "designOptions": ""}
         from ...template.widget.modern import MODERN_DESIGNS
         from ...widget._modern import uses_modern_design
 
         layout = self.layout(name)
         category = widget_category(name)
-        design = ""
+        design = other_design = design_options = ""
         if name in MODERN_DESIGNS:
-            design_config = SimpleNamespace(user=SimpleNamespace(config=cfg.user.config,
-                                                                 setting={name: self.values(name)}))
-            design = tr("Modern design") if uses_modern_design(design_config, name) else tr("Classic layout")
+            values = self.values(name)
+            design_config = SimpleNamespace(user=SimpleNamespace(config=cfg.user.config, setting={name: values}))
+            modern = uses_modern_design(design_config, name)
+            design = tr("Modern design") if modern else tr("Classic layout")
+            if can_compare(name):
+                other_design = tr("Classic layout") if modern else tr("Modern design")
+                other_keys = set(build_layout(name, other_design_values(values)).keys)
+                own = len(set(layout.keys) - other_keys)
+                unused = len(other_keys - set(layout.keys))
+                design_options = trm(f"{own} option(s) of this design only, {unused} of the other one")
         ui = layout.option_ui
         # Option setting others (display profile) away from default: named in header, options it sets are
         # shown with its value
@@ -829,6 +937,9 @@ class OverlayOptionsBackend(PageBackend):
             "userProfiles": [{"name": profile_name, "label": tr(profile_name)}
                              for profile_name in (ui.user_profiles if ui is not None else {})],
             "previewParts": ui is not None and bool(ui.part_options),
+            "canCompare": bool(other_design),  # preview of the other design (see setPreviewCompare)
+            "otherDesign": other_design,
+            "designOptions": design_options,
         }
 
     @Property(int, notify=stateChanged)
@@ -886,6 +997,10 @@ class OverlayOptionsBackend(PageBackend):
     @Property(bool, notify=filterChanged)
     def modifiedOnly(self) -> bool:
         return self._modified_only
+
+    @Property(bool, notify=filterChanged)
+    def usedOnly(self) -> bool:
+        return self._used_only
 
     @Property(bool, notify=filterChanged)
     def advanced(self) -> bool:
@@ -993,6 +1108,15 @@ class OverlayOptionsBackend(PageBackend):
         if modified_only != self._modified_only:
             self._modified_only = modified_only
             self.update_all()
+            self.filterChanged.emit()
+            self.stateChanged.emit()
+
+    @Slot(bool)
+    def setUsedOnly(self, used_only: bool):
+        """Options doing nothing with current values (dimmed: on/off option off, unused mode) hidden"""
+        if used_only != self._used_only:
+            self._used_only = used_only
+            self.update_rows()
             self.filterChanged.emit()
             self.stateChanged.emit()
 
@@ -1289,25 +1413,33 @@ class OverlayOptionsBackend(PageBackend):
         """Overlay settings package file picked, its values set as pending edits"""
         self._host.import_overlays()
 
-    def import_values(self, overlays: Mapping[str, Mapping[str, Any]]) -> tuple[int, int]:
-        """Imported overlay values set as pending edits (one undo step, saved with Apply), invalid values
-        skipped (saved value kept), first overlay shown
+    def import_values(self, overlays: Mapping[str, Mapping[str, Any]]) -> tuple[int, list[str]]:
+        """Imported overlay values set as pending edits (one undo step, saved with Apply), numbers out of limits
+        brought within, invalid values skipped (saved value kept), first overlay shown
 
         Returns:
-            Number of options changed & of values skipped.
+            Number of options changed, report of values skipped or corrected ("overlay: option ...", English).
         """
-        changed = skipped = 0
+        changed = 0
+        report: list[str] = []
         names = [name for name in overlays if name in self._names]
         with self._step():
             for name in names:
                 for key, value in overlays[name].items():
                     if key not in cfg.user.setting[name]:
-                        skipped += 1
+                        report.append(f"{name}: {key} (unknown option, skipped)")
                         continue
                     kind = self.kind(key)
-                    if check_value(key, kind, value) or (
-                            kind.kind == KIND_CHOICE and value not in choice_values(kind)):
-                        skipped += 1
+                    if (kind.kind in NUMBER_KINDS and isinstance(value, (int, float))
+                            and not isinstance(value, bool) and limit_error(key, float(value))):
+                        limited = clamp_to_limit(key, value)
+                        report.append(f"{name}: {key} {format_number(value)} -> {format_number(limited)} (limit)")
+                        value = limited
+                    error = check_value(key, kind, value)
+                    if not error and kind.kind == KIND_CHOICE and value not in choice_values(kind):
+                        error = "not a choice"
+                    if error:
+                        report.append(f"{name}: {key} (invalid value, skipped: {error})")
                         continue
                     if kind.kind == KIND_INTEGER and isinstance(value, float):
                         value = round(value)
@@ -1316,7 +1448,7 @@ class OverlayOptionsBackend(PageBackend):
                     self._set(option_id(name, key), value)
         if names:
             self.selectOverlay(names[0])
-        return changed, skipped
+        return changed, report
 
     @Slot(float, float)
     def previewClicked(self, x: float, y: float):
@@ -1435,10 +1567,13 @@ class OverlayOptionsBackend(PageBackend):
 
     @Slot(str)
     def resetOrder(self, name: str):
+        """Display order back to default: listed items & those of the other design (same values as listed ones
+        once changed: overlay would shift listed ones to keep every value unique)"""
         section = self._order_section(name)
         if section is not None:
+            keys = {*order_keys(section), *(key for key in default_keys(name) if key.startswith("display_order_"))}
             with self._step():
-                self._reset_keys(name, order_keys(section))
+                self._reset_keys(name, [key for key in keys if key in cfg.user.setting[name]])
 
     def _order_section(self, name: str) -> Section | None:
         if name not in self._names:
@@ -1557,6 +1692,8 @@ class OverlayOptionsBackend(PageBackend):
             self._preset = ""
         self._layouts.clear()
         self._search_texts.clear()
+        self._kinds.clear()  # choices read again (heatmaps added, renamed or removed)
+        self._heatmaps = tuple(cfg.user.heatmap)
         self._count_shared()
         self._sort_names()  # names or language changed
         self.namesChanged.emit()
@@ -1614,6 +1751,11 @@ class OverlayOptionsBackend(PageBackend):
         """Page shown or hidden: nothing rendered or read while hidden (racing)"""
         self._active = active
         if active:
+            heatmaps = tuple(cfg.user.heatmap)
+            if heatmaps != self._heatmaps:  # heatmap editor used meanwhile: choices read again
+                self._heatmaps = heatmaps
+                self._kinds.clear()
+                self.update_rows()
             self.schedule_preview(now=True)
             if self._warm_queue:
                 self._warm_timer.start()
@@ -1647,6 +1789,68 @@ class OverlayOptionsBackend(PageBackend):
             self._preview_url = ""
         self.previewChanged.emit()
         self.schedule_preview(now=True)
+
+    @Property(list, constant=True)
+    def scenarioNames(self) -> list[str]:
+        """Race situations of preview, translated"""
+        from ...demo_data import SCENARIO_LABELS, SCENARIOS
+
+        return [tr(SCENARIO_LABELS[scenario]) for scenario in SCENARIOS]
+
+    @Property(bool, notify=previewChanged)
+    def testing(self) -> bool:
+        """Overlays on screen shown in the race situation of preview (see testOnScreen)"""
+        from ..overlay_test import overlay_test
+
+        return overlay_test().running
+
+    @Slot()
+    def testOnScreen(self):
+        """Overlays on screen shown a few seconds in the race situation of preview (saved values), again: stopped"""
+        from ..overlay_test import TEST_SECONDS, overlay_test
+
+        test = overlay_test()
+        if not self._test_connected:
+            self._test_connected = True
+            test.changed.connect(self.previewChanged)
+        if test.running:
+            test.stop()
+            return
+        shown = test.start(self._preview_scenario)
+        if shown:
+            self.notify_host(trm(f"{shown} overlay(s) on screen show this situation for {TEST_SECONDS} s "
+                                 "(saved values)"))
+        else:
+            self.notify_host(tr("No overlay on screen now: enable overlays, unlock them or start the game"))
+
+    @Property(bool, notify=previewChanged)
+    def previewCompare(self) -> bool:
+        return self._preview_compare
+
+    @Slot(bool)
+    def setPreviewCompare(self, compare: bool):
+        """Preview of the other design (classic or modern) drawn with the same values, to compare"""
+        if compare != self._preview_compare:
+            self._preview_compare = compare
+            self.previewChanged.emit()
+            self.schedule_preview(now=True)
+
+    @Property(int, notify=previewChanged)
+    def previewScenario(self) -> int:
+        from ...demo_data import SCENARIOS
+
+        return SCENARIOS.index(self._preview_scenario)
+
+    @Slot(int)
+    def setPreviewScenario(self, index: int):
+        """Preview drawn in race situation (flags, pit, damage, rain): parts overlays show only then"""
+        from ...demo_data import SCENARIOS
+
+        scenario = SCENARIOS[index] if 0 <= index < len(SCENARIOS) else ""
+        if scenario != self._preview_scenario:
+            self._preview_scenario = scenario
+            self.previewChanged.emit()
+            self.schedule_preview(now=True)
 
     @Slot(float)
     def setPreviewScale(self, zoom: float):
@@ -1689,13 +1893,15 @@ class OverlayOptionsBackend(PageBackend):
                 self.previewChanged.emit()
             return
         values = self.values(name)
+        if self._preview_compare and can_compare(name):
+            values = other_design_values(values)
         zoom = self._preview_zoom
         # Same values, overlay style, zoom & shared inputs (page shown again, edit undone): picture kept
-        signature = preview_signature(name, values, zoom)
+        signature = preview_signature(name, values, zoom, self._preview_scenario)
         if signature == self._preview_signature and self._preview_state in (PREVIEW_READY, PREVIEW_UNAVAILABLE):
             return
         self._preview_signature = signature
-        image = render_overlay(name, values, zoom)
+        image = render_overlay(name, values, zoom, self._preview_scenario)
         if image is None:
             self._preview_state = PREVIEW_UNAVAILABLE
             self._preview_url = ""
@@ -1747,24 +1953,36 @@ def drawn_scale(overlay_scale: float, zoom: float) -> float:
     return min(max(overlay_scale * zoom, low), high) / base
 
 
-def render_overlay(name: str, values: dict, zoom: float = 1.0):
-    """Overlay picture with values (QImage) drawn at zoom, None if it cannot be drawn; same inputs as a picture
-    drawn before (any page): that picture"""
+def can_compare(name: str) -> bool:
+    """Overlay drawn by both designs with this overlay theme (modern theme: classic layout switch)"""
+    from ...template.widget.modern import MODERN_DESIGNS
+
+    return name in MODERN_DESIGNS and overlay_theme(cfg.user.config["overlay_style"]).modern
+
+
+def other_design_values(values: Mapping[str, Any]) -> dict:
+    """Values drawn by the other design (classic layout switched)"""
+    return {**values, "enable_classic_layout": not values.get("enable_classic_layout", False)}
+
+
+def render_overlay(name: str, values: dict, zoom: float = 1.0, scenario: str = ""):
+    """Overlay picture with values (QImage) drawn at zoom in race situation, None if it cannot be drawn; same
+    inputs as a picture drawn before (any page): that picture"""
     from ..widget_preview import render_image
 
     try:
-        return render_image(cfg, name, values, zoom)
+        return render_image(cfg, name, values, zoom, scenario=scenario)
     except Exception as error:  # never break the page
         logger.debug("Overlay options preview error: %s: %s", name, error, exc_info=True)
         return None
 
 
-def preview_signature(name: str, values: dict, zoom: float) -> object:
+def preview_signature(name: str, values: dict, zoom: float, scenario: str = "") -> object:
     """Inputs of overlay picture (see widget_preview.preview_key)"""
     from ..widget_preview import preview_key
 
     try:
-        return preview_key(cfg, name, values, zoom)
+        return preview_key(cfg, name, values, zoom, scenario=scenario)
     except Exception:  # never break the page: drawn again
         logger.debug("Overlay options preview inputs error: %s", name, exc_info=True)
         return object()
@@ -1785,6 +2003,19 @@ def text_value(kind: OptionKind, text: str) -> Any:
     if kind.kind == KIND_COLOR:
         return text.strip().upper()
     return text
+
+
+def range_text(minimum: float, maximum: float) -> str:
+    """Allowed values of a number option ("Allowed: 0 - 4000"), "" if not limited"""
+    low = format_number(minimum) if minimum > -1e8 else ""
+    high = format_number(maximum) if maximum < 1e8 else ""
+    if low and high:
+        return f"{tr('Allowed:')} {low} - {high}"
+    if low:
+        return f"{tr('Minimum')} {low}"
+    if high:
+        return f"{tr('Maximum')} {high}"
+    return ""
 
 
 def unit_hint_text(key: str, value: Any) -> str:

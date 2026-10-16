@@ -1221,3 +1221,16 @@ def test_overlays_follow_car_on_air_and_stop(director_page, monkeypatch):
     assert not cfg.api["enable_player_index_override"] and len(setups) == 3
     backend.setFollowOverlays(False)  # already off: nothing done again
     assert len(setups) == 3
+
+
+def test_graphics_emptied_when_page_closed(director_page):
+    """Page closed: no more updates, broadcast graphics never left frozen on air"""
+    from neopedal.stream_director import director_feed, live_feed
+
+    page, backend = director_page, director_page.backend
+    poll(page, race_answers(100.0, car(1, 1, distance=2000.0), car(2, 2, distance=1000.0), focus=1))
+    director_feed.publish({"tower": [1], "live": True})
+    live_feed.publish({"cars": [1]})
+    backend.release()
+    assert not any(director_feed.state.values())
+    assert live_feed.wait(0, 0)[1] == b"{}"
