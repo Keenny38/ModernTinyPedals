@@ -451,7 +451,7 @@ class RankWatcher:
         updated = max(mtime, 0.0)
         remembered = False
         if player is None and located.path:  # game found, its menu cache has no ranks now: last known kept
-            last = self.last_entry(located.steam_id)
+            last = self.last_entry(located.steam_id) or self.adopt_unknown_account(located.steam_id)
             if last is not None and (last.driver is not None or last.safety is not None):
                 player = DriverRanks(located.names[0] if located.names else "", located.steam_id, "", "",
                                      last.driver, last.safety, last.badge)
@@ -498,6 +498,22 @@ class RankWatcher:
         if self._last_entry is None or self._last_entry[0] != path:
             self._last_entry = (path, {entry.steam_id: entry for entry in read_history(path)})
         return self._last_entry[1].get(steam_id)
+
+    def adopt_unknown_account(self, steam_id: str) -> HistoryEntry | None:
+        """Last entry of unknown account (lines saved before accounts were, version < 0.24) given to game account
+        in use when no other account has lines, saved again with account (never given to a second one later), None
+        if none"""
+        path = self._history_path()
+        if not path or not steam_id or self.last_entry(steam_id) is not None or self._last_entry is None:
+            return None
+        entries = self._last_entry[1]
+        unknown = entries.get("")
+        if unknown is None or any(entries):  # any(): account of a line known
+            return None
+        entry = unknown._replace(steam_id=steam_id)
+        append_history(path, entry)  # not saved: given again next time (same account if still the only one)
+        entries[steam_id] = entry
+        return entry
 
     def record(self, player: DriverRanks, mtime: float, steam_id: str) -> None:
         """Add ranks of game account to history when changed since its last entry (badge too: shown while game

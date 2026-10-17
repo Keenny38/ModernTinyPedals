@@ -3,7 +3,7 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
-## 0.25.0 (unreleased)
+## 0.25.0 (2026-10-17)
 
 Des options plus sûres partout : chaque nombre a des limites visibles, les presets sont réparés au chargement, et la page Options des overlays montre des situations de course et les deux designs.
 
@@ -42,6 +42,7 @@ Des options plus sûres partout : chaque nombre a des limites visibles, les pres
 
 - **Classement, Relatif et Rivaux** : l'ordre des colonnes et les colonnes activées suivent la page à chaque fois ; le design classique ne liste plus l'ordre des colonnes propres au design moderne (tendance d'écart, limites de piste, énergie par tour).
 - **Options des overlays** : `Annuler` et `Rétablir` pendant l'édition d'un champ affichent la valeur rétablie ; options grisées à tort, ou pas grisées, sur de nombreux overlays.
+- **Driver Rank** : les rangs enregistrés avant la 0.24.0 (sans leur compte Steam) s'affichent de nouveau quand le fichier du menu du jeu n'en a pas : ils vont au compte utilisé si aucun autre compte n'a de rangs enregistrés, jamais à un deuxième compte.
 - **Traduction française relue en entier** : vouvoiement partout, un seul mot pour les classes de véhicules (« catégorie »), environ 200 libellés, aides et messages corrigés (accords, rapport puissance/poids, mots manquants), et les textes encore en anglais traduits (overlays Drapeau, Moteur, Force, Performances système, messages d'erreur).
 - **Overlays**, trouvés en vérifiant chaque option : rayon de disparition du radar, température moyenne des freins et vitesse maxi du Compteur de vitesse remises à zéro avec la session, cône d'impact du Compteur ATH après un redémarrage, overlay ramené à l'écran qui y reste, alerte de carburant ou d'énergie faible avec une consommation inconnue, échelle globale qui ne rallume plus les options à 0, `100%` qui n'est plus coupé, temps au tour comme `1:60.0`, Secteurs après un reset, échelle de temps de l'Historique, décimales du Cap, moyenne de Pression des pneus, minuteurs des Notes de piste, graduations de la Jauge de direction, et bien d'autres.
 

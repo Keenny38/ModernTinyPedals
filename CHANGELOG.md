@@ -3,7 +3,7 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
-## 0.25.0 (unreleased)
+## 0.25.0 (2026-10-17)
 
 Safer options everywhere: every number has limits you can see, presets are repaired as they load, and the Overlay Options page shows race situations and both designs.
 
@@ -42,6 +42,7 @@ Safer options everywhere: every number has limits you can see, presets are repai
 
 - **Standings, Relative and Rivals**: column order and columns on or off follow the page every time; the classic design no longer lists the orders of modern only columns (gap trend, track limits, energy per lap).
 - **Overlay Options**: `Undo` and `Redo` while a field is being edited show the restored value; options greyed out wrongly, or not greyed out, on many overlays.
+- **Driver Rank**: ranks saved before 0.24.0 (without their Steam account) are shown again while the game menu file has none: they go to the account in use when no other account has saved ranks, never to a second account.
 - **French translation reviewed in full**: the app speaks to you with « vous » everywhere, one word for vehicle classes (« catégorie »), about 200 labels, help texts and messages corrected (agreements, power/weight ratio, missing words), and texts still in English translated (Flag, Engine, Force, System Performance overlays, error messages).
 - **Overlays**, found by reviewing every option: radar fade radius, brake average temperature and Speedometer top speed reset with the session, Dashboard HUD impact cone after a restart, overlay brought back on screen staying there, low fuel or energy alert with an unknown consumption, global scale no longer turning on options set to 0, `100%` no longer cut, lap times like `1:60.0`, Sectors after a reset, Trailing time scale, Heading decimals, Tyre Pressure average, Track Notes timers, Steering Meter marks, and many more.
 

@@ -43,12 +43,13 @@ if TYPE_CHECKING:
     from ...template.widget_config_types import TyreOverviewConfig
 
 # Info rows of a card: (key, height in unit)
-HEADER_H = 1.05
-SURFACE_H = 1.05
-PRESSURE_H = 1.25
-RANGE_H = 0.5
-LAYERS_H = 0.95
-WEAR_H = 0.95
+HEADER_H = 0.85
+SURFACE_H = 0.9
+PRESSURE_H = 1.1
+RANGE_H = 0.4
+LAYERS_H = 0.8
+WEAR_H = 0.8
+TYRE_RATIO = 1.3  # tyre height / width, seen from above
 RANGE_MARGIN = 0.18  # pressure scale reaches past target range by this share of the range on both sides
 
 
@@ -74,8 +75,8 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         self.setup_overview()
         unit = self.unit
         self.add_font("tiny", 0.5, "bold", caps=True)
-        self.add_font("band", 0.62, "bold")  # temperatures on tyre bands
-        self.add_font("big", 1.18, "bold")  # pressure
+        self.add_font("band", 0.52, "bold")  # temperatures on tyre bands
+        self.add_font("big", 1.05, "bold")  # pressure
         wcfg = self.wcfg
         self.show_body = bool(wcfg["show_car_body"])
         self.show_highlight = self.show_alerts and bool(wcfg["show_alert_highlight"])
@@ -85,18 +86,18 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         self.show_range = self.use_target and bool(wcfg["show_pressure_target_range"])
         self.show_gauge = bool(wcfg["show_tread_gauge"])
         self.need_wear = self.need_wear or self.show_gauge
-        pad = unit * 0.4
-        self.card_pad = card_pad = unit * 0.3
-        self.chassis_w = unit * (1.6 if self.show_body else 0.4)  # middle of the car, between left & right cards
-        row_gap = unit * 0.35
+        pad = unit * 0.3
+        self.card_pad = card_pad = unit * 0.22
+        self.chassis_w = unit * (1.1 if self.show_body else 0.3)  # middle of the car, between left & right cards
+        row_gap = unit * 0.22
         # Tyre: three bands wide enough for their temperature, taller than wide (seen from above)
         bands = 3 if self.ico else 1
-        band_w = max(self.text_width("band", f"888{self.sign}") + unit * 0.2, unit * (0.9 if bands == 3 else 2.4))
-        self.band_inset = unit * 0.1
-        tyre_w = band_w * bands + self.band_inset * 2 if self.show_surface else unit * 2.0
-        self.gauge_w = unit * 0.32
+        band_w = max(self.text_width("band", f"888{self.sign}") + unit * 0.1, unit * (0.75 if bands == 3 else 2.0))
+        self.band_inset = unit * 0.09
+        tyre_w = band_w * bands + self.band_inset * 2 if self.show_surface else unit * 1.8
+        self.gauge_w = unit * 0.26
         chip_text = self.text_width("small", f"888{self.sign}")
-        layer_label = self.text_width("label", tr("Carc.")) if self.show_layer_labels else 0.0
+        layer_label = max(self.text_width("tiny", tr(label)) for label in ("Carc.", "Inner")) if self.show_layer_labels else 0.0
         rows = []
         if self.show_caption:
             rows.append(("header", HEADER_H))
@@ -111,18 +112,19 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         if self.need_wear and (self.show_wear or self.show_wear_lap or self.show_laps):
             rows.append(("wear", WEAR_H))
         info_w = max(
-            self.text_width("big", "888.8") + self.text_width("small", self.symbol_pres) + unit * 0.4,
-            (layer_label + chip_text + unit * 1.0) * 2,
-            (chip_text + unit * 0.4) * bands,
-            sum(self.text_width("small", text) for text in ("88%", "▼8.88", f"99+ {tr('laps')}")) + unit * 1.2,
-            unit * 5.2,
+            self.text_width("big", "888.8") + self.text_width("small", self.symbol_pres) + unit * 0.3,
+            (layer_label + chip_text + unit * 0.75) * 2 + unit * 0.12,
+            (chip_text + unit * 0.3) * bands,
+            self.text_width("small", "88%") + sum(self.text_width("label", text) for text in (
+                "▼8.88", f"99+ {tr('Laps').lower()}")) + unit * 0.7,
+            unit * 4.6,
         ) if rows else 0.0
         info_h = sum(height for _, height in rows) * unit
-        content_h = max(info_h, tyre_w * 1.45 if self.show_graphic else 0.0, unit * 2.0)
+        content_h = max(info_h, tyre_w * TYRE_RATIO if self.show_graphic else 0.0, unit * 2.0)
         # Parts of a card from outer side (corner of the car) toward the chassis, with gap before each
         parts = [(key, width, gap) for key, width, gap, shown in (
-            ("tyre", tyre_w, 0.0, self.show_graphic), ("gauge", self.gauge_w, unit * 0.2, self.show_gauge),
-            ("info", info_w, unit * 0.35, bool(rows))) if shown]
+            ("tyre", tyre_w, 0.0, self.show_graphic), ("gauge", self.gauge_w, unit * 0.15, self.show_gauge),
+            ("info", info_w, unit * 0.25, bool(rows))) if shown]
         if parts:
             parts[0] = (parts[0][0], parts[0][1], 0.0)
         content_w = sum(width + gap for _, width, gap in parts) or unit * 2.0
@@ -397,7 +399,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         theme = self.theme
         layers = [(label, value) for label, value, shown in (
             ("Carc.", card.carcass, self.show_carcass), ("Inner", card.inner, self.show_inner)) if shown]
-        gap = self.unit * 0.15
+        gap = self.unit * 0.12
         width = (rect.width() - gap * (len(layers) - 1)) / len(layers)
         for part, (label, value) in enumerate(layers):
             cell = QRectF(rect.left() + (width + gap) * part, rect.top() + rect.height() * 0.1, width,
@@ -408,7 +410,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
             if color is not None:
                 rounded(painter, QRectF(cell.left() + dot * 0.6, cell.center().y() - dot / 2, dot, dot), dot / 2,
                         color)
-            inner = cell.adjusted(dot * 1.8, 0, -self.unit * 0.2, 0)
+            inner = cell.adjusted(dot * 1.7, 0, -self.unit * 0.15, 0)
             if self.show_layer_labels:
                 self.draw_text(painter, inner, tr(label), "tiny", theme.text_muted, LEFT)
             self.draw_text(painter, inner, self.temperature_text(value), "small", theme.text,
@@ -419,20 +421,21 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         parts = []
         if self.show_wear:
             warn = 0 <= card.remaining <= self.warn_remaining
-            parts.append((self.remaining_text(card.remaining), theme.negative if warn else theme.text))
+            parts.append((self.remaining_text(card.remaining), "small", theme.negative if warn else theme.text))
         if self.show_wear_lap:
             text = self.wear_text(card.wear)
-            parts.append((f"▼{text}" if text != DASH else DASH, theme.text_dim))
+            parts.append((f"▼{text}" if text != DASH else DASH, "label", theme.text_dim))
         if self.show_laps:
             warn = 0 <= card.laps <= self.warn_laps
-            parts.append((f"{self.laps_text(card.laps)} {self.laps_label}", theme.negative if warn else theme.text_dim))
+            parts.append((f"{self.laps_text(card.laps)} {self.laps_label}", "label",
+                          theme.negative if warn else theme.text_dim))
         if not parts:
             return
         # Justified: measured texts with even spaces between them
-        widths = [self.text_width("small", text) for text, _ in parts]
+        widths = [self.text_width(role, text) for text, role, _ in parts]
         space = (rect.width() - sum(widths)) / max(len(parts) - 1, 1)
         left = rect.left()
-        for (text, color), width in zip(parts, widths, strict=True):
-            self.draw_text(painter, QRectF(left, rect.top(), width, rect.height()), text, "small", color, LEFT,
+        for (text, role, color), width in zip(parts, widths, strict=True):
+            self.draw_text(painter, QRectF(left, rect.top(), width, rect.height()), text, role, color, LEFT,
                            elide=False)
             left += width + space

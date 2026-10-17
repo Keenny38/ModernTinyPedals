@@ -194,6 +194,47 @@ def test_history_kept_per_steam_account(tmp_path):
     assert len(dr.account_history(dr.read_history(str(history)), "")) == 2  # account unknown: every line
 
 
+def test_history_of_unknown_account_given_to_account_in_use(tmp_path):
+    """History saved before accounts were (no account in lines), game cache emptied since: last ranks shown for
+    account in use, saved again with it, never given to another account later"""
+    path = tmp_path / dr.STORAGE_FILE
+    path.write_text(json.dumps({"other": "x"}), encoding="utf-8")
+    history = tmp_path / dr.HISTORY_FILE
+    history.write_text('{"time": 1791812665, "driver": ["Silver", 2, 40], "safety": ["Platinum", 3, 50]}\n',
+                       encoding="utf-8")
+    located = {"steam": "76561190000000001"}
+    watcher = dr.RankWatcher(lambda: dr.Located(str(path), located["steam"], ("Keenny Hess",)), lambda: str(history))
+    watcher.check()
+    assert watcher.remembered and watcher.updated == 1791812665
+    assert watcher.player.driver == dr.Rank("Silver", 2, 40) and watcher.player.safety == dr.Rank("Platinum", 3, 50)
+    assert watcher.player.steam_id == "76561190000000001"
+    entries = dr.read_history(str(history))
+    assert [entry.steam_id for entry in entries] == ["", "76561190000000001"] and entries[-1].time == 1791812665
+    watcher.check()  # file unchanged: not saved twice
+    assert len(dr.read_history(str(history))) == 2
+    # Other account: lines of first one never shown (new watcher: history read again from file)
+    located["steam"] = "76561190000000002"
+    other = dr.RankWatcher(lambda: dr.Located(str(path), located["steam"], ("Keenny Hess",)), lambda: str(history))
+    other.check()
+    assert other.player is None and not other.remembered
+    assert [account.steam_id for account in other.others] == ["76561190000000001"]
+    assert len(dr.read_history(str(history))) == 2
+
+
+def test_history_of_unknown_account_kept_when_other_account_known(tmp_path):
+    """Lines of unknown account never given to an account when another account has lines"""
+    path = tmp_path / dr.STORAGE_FILE
+    path.write_text(json.dumps({"other": "x"}), encoding="utf-8")
+    history = tmp_path / dr.HISTORY_FILE
+    history.write_text('{"time": 1, "driver": ["Gold", 1, 0], "safety": null}\n'
+                       '{"time": 2, "driver": ["Silver", 2, 40], "safety": null, "steam": "76561190000000002"}\n',
+                       encoding="utf-8")
+    watcher = dr.RankWatcher(lambda: dr.Located(str(path), "76561190000000001", ()), lambda: str(history))
+    watcher.check()
+    assert watcher.player is None and not watcher.remembered
+    assert len(dr.read_history(str(history))) == 2
+
+
 def test_recent_steam_users_order(tmp_path):
     from neopedal.process import player_profile as pp
 

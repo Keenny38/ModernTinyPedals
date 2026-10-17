@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>Telemetry overlays and analysis tools for Le Mans Ultimate and rFactor 2</b><br>
-  89 overlays with a modern design, a telemetry viewer, race strategy, driver stats and a broadcast director.<br>
+  90 overlays with a modern design, a telemetry viewer, race strategy, driver stats and a broadcast director.<br>
   Free and open source, in English and French.
 </p>
 
@@ -29,12 +29,12 @@
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
 
-![The 89 overlays with the modern design on a simulated race at Road Atlanta](images/readme_preview.png)
+![The 90 overlays with the modern design on a simulated race at Road Atlanta](images/readme_preview.png)
 
 NeoPedal is a telemetry overlay and analysis app: a modern design, a clear interface, many tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.24.0**: new **`Driver Rank`** overlay and your **Driver Rank & Safety Rank** (Le Mans Ultimate) on the Home page, the driver stats and the Broadcast Director, kept per Steam account. **Standings, Relative and Rivals** like a timing tower: running lap time with sector bars, pit status and stops in one column, the **real penalties** of the game (`DT`, `SG10`), column labels, gaps in class timed like a timing screen, new `Energy per Lap` and `Track limits` columns. The Black box is now the **Dashboard HUD**, with a pop-up for every setting you change in the car, track limits, gaps, lift & coast and wipers, your own display profiles. **Results & Replays** are now one page: each replay linked to its results, and a play button on every event or lap opens the replay at that moment. **One look per meaning everywhere**: the same status colors, class badges and tyre compound badges in overlays, app pages and stream sources. `Trailing` gets pedal bars. On / off switch for the **Broadcast Director** and the **Race Calculator**, standings tower carousel up to 70 cars. Keyboard navigation on every page, `Config` > `Import Settings...`, and **lighter on memory, CPU and GPU** (hidden pages freed, overlays repainted only when a pixel changes, VR and stream capture on demand). All the details, with screenshots, in the [changelog](CHANGELOG.md).
+> **New in 0.25.0**: new **`Tyre Overview`** overlay, every tyre reading in one card per tyre placed as on the car (temperatures on the tyre, compound or alert, pressure on its target scale, carcass & inner layer, tread gauge, wear and laps left). **Safer options**: every number has limits shown in its tooltip, out of range values are repaired as the preset loads, `Check Preset` lists and repairs a preset, an overlay too big is cut instead of freezing the computer. The **Overlay Options** preview shows race situations (flags, pits, damage, rain) and the other design, `Test on Screen` shows them on the overlays on screen, `Used only` hides the options doing nothing. French translation reviewed in full and many overlay fixes. All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
