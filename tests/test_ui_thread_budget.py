@@ -6,6 +6,7 @@ handed over later are not counted). Budget kept generous (slow CI machines): bef
 thread these slots took 0.15 s to 1 s on a fast machine.
 """
 
+import gc
 import time
 
 import pytest
@@ -23,6 +24,9 @@ LAP_SAMPLES = 20000
 
 
 def timed(call) -> float:
+    # Garbage of the whole test run collected first: a full collection of Python 3.11 / 3.13 (no incremental GC)
+    # over the heap of thousands of tests landing in the slot took up to 0.7 s on CI, never the slot itself
+    gc.collect()
     start = time.perf_counter()
     call()
     return time.perf_counter() - start
