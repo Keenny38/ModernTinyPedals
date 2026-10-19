@@ -75,6 +75,7 @@ A corner coach, the Driver Rank and Safety Rank of every driver online, new flag
 - **Standings**: `show_pitstop_duration_while_requested_pitstop` off by default (the Time column keeps lap times when a pit stop is requested), also in existing presets.
 - **One copy of the app per settings folder** with a system lock, released even after a crash (no more `pid.log`); a restart waits for the previous copy to close.
 - **Lighter and smoother**: hidden pages no longer refresh, fewer refreshes when the followed car changes (Broadcast Director, spectate), lap viewer playback texts at 10 Hz, lighter lists, charts and gauges.
+- **Telemetry viewer**: changing a setting (time axis, smoothing, channels...) no longer waits for the disk: up to hundreds of milliseconds on a busy disk.
 - **Replays**: deleted replays go to the recycle bin in the background, with progress and `Stop`.
 - **Updates**: the installer is downloaded into a private temporary folder and checked again as it is extracted; it is deleted when you decline the install or when it fails to start.
 - **Interface review**: consistent sizes, spacings and colors, French labels fitting at every width (Race Calculator header), focus and keys in the Broadcast Director.

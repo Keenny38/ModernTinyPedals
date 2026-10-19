@@ -75,6 +75,7 @@ Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en lig
 - **Classement** : `show_pitstop_duration_while_requested_pitstop` désactivé par défaut (la colonne Temps garde les temps au tour quand un arrêt est demandé), aussi dans les presets existants.
 - **Une seule copie de l'app par dossier de réglages**, avec un verrou système libéré même après un plantage (plus de `pid.log`) ; un redémarrage attend que la copie précédente soit fermée.
 - **Plus léger et plus fluide** : les pages cachées ne se rafraîchissent plus, moins de rafraîchissements quand la voiture suivie change (Régie de course, spectateur), textes de lecture de la visionneuse de tours à 10 Hz, listes, graphiques et jauges plus légers.
+- **Visionneuse de télémétrie** : changer un réglage (axe du temps, lissage, canaux...) n'attend plus le disque : jusqu'à plusieurs centaines de millisecondes sur un disque occupé.
 - **Rejeux** : les rejeux supprimés partent à la corbeille en arrière-plan, avec une progression et `Arrêt`.
 - **Mises à jour** : l'installateur est téléchargé dans un dossier temporaire privé et vérifié de nouveau à l'extraction ; il est supprimé si vous refusez l'installation ou s'il ne démarre pas.
 - **Revue de l'interface** : tailles, espacements et couleurs cohérents, libellés français qui tiennent à toutes les largeurs (en-tête du calculateur de course), focus et touches dans la Régie de course.

@@ -39,7 +39,7 @@ from PySide6.QtWidgets import QVBoxLayout
 from .. import units
 from ..i18n import localized, tr, trm  # localized: shared with stream graphics
 from ..setting import cfg
-from ..userfile import write_json
+from ..userfile import atomic_replace, encode_text
 from ..userfile.motec_import import import_ld_file
 from ..userfile.telemetry_lap import IMPORT_FOLDER, LapData, LapFile, lap_number_of, lap_stem, lap_time_of
 from ._common import BaseDialog, UIScaler, singleton_dialog
@@ -384,12 +384,14 @@ def load_viewer_setting(folder: str) -> dict:
 def save_viewer_setting(folder: str, **values):
     """Update lap viewer settings, other saved values kept
 
-    Written to a temporary file then renamed: a crash while writing never leaves a broken file.
+    Written to a temporary file then renamed: a crash while writing never leaves a broken file. Not flushed to
+    disk: saved on the UI thread at each viewer setting change, where a flush took 20 ms to hundreds of ms on a
+    busy disk; display preferences lost by a power cut come back to defaults.
     """
     setting = load_viewer_setting(folder)
     setting.update(values)
     try:
-        write_json(os.path.join(folder, VIEWER_SETTING), setting, raise_error=True)
+        atomic_replace(os.path.join(folder, VIEWER_SETTING), encode_text(json.dumps(setting)), fsync=False)
     except OSError as error:
         logger.warning("LAP VIEWER: unable to save setting: %s", error)
 

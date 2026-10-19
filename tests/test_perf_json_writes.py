@@ -24,6 +24,21 @@ def test_viewer_setting_and_history_bytes(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_viewer_setting_not_flushed_to_disk(tmp_path, monkeypatch):
+    """Saved on the UI thread at each viewer setting change: no fsync (20 ms to hundreds of ms on a busy disk)"""
+    import os
+
+    from neopedal.ui.lap_viewer import load_viewer_setting, save_viewer_setting
+
+    def no_fsync(fd):
+        raise AssertionError("viewer setting flushed to disk")
+
+    monkeypatch.setattr(os, "fsync", no_fsync)
+    save_viewer_setting(str(tmp_path), smoothing=2)
+    save_viewer_setting(str(tmp_path), envelope=True)
+    assert load_viewer_setting(str(tmp_path)) == {"smoothing": 2, "envelope": True}
+
+
 def test_imported_preset_bytes(tmp_path):
     from neopedal.ui.file_drop import import_preset_file
 
