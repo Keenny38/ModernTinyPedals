@@ -34,7 +34,7 @@ def shortcut_blocks(text: str) -> list[str]:
 def test_qml_shortcuts_only_while_page_shown():
     """Window shortcuts of a hidden page (other page shown) fire too: every QML Shortcut needs the page shown"""
     found = 0
-    for path in QML_FOLDER.glob("*.qml"):
+    for path in QML_FOLDER.rglob("*.qml"):
         text = path.read_text(encoding="utf-8")
         for block in shortcut_blocks(text):
             found += 1

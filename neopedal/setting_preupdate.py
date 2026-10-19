@@ -37,6 +37,7 @@ def preupdate_global_setting(preset_version: tuple[int, int, int], dict_user: di
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 3), _global_prior_2_51_3),  # 2026-10-18
         ((2, 51, 0), _global_prior_2_51_0),  # 2026-10-12
         ((2, 50, 8), _global_prior_2_50_8),  # 2026-10-11
         ((2, 50, 4), _global_prior_2_50_4),  # 2026-10-06
@@ -54,6 +55,8 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 3), _user_prior_2_51_3),  # 2026-10-18
+        ((2, 51, 2), _user_prior_2_51_2),  # 2026-10-17
         ((2, 51, 1), _user_prior_2_51_1),  # 2026-10-15
         ((2, 50, 9), _user_prior_2_50_9),  # 2026-10-11
         ((2, 50, 7), _user_prior_2_50_7),  # 2026-10-10
@@ -81,6 +84,19 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
 
 
 # Global setting update function
+def _global_prior_2_51_3(dict_user: dict):
+    # Navigation bar: Stream Overlays page added after Broadcast Director (or last), customized bars kept
+    application = dict_user.get("application")
+    if not isinstance(application, dict) or not isinstance(application.get("rail_items"), str):
+        return
+    items = [item.strip() for item in application["rail_items"].split(",") if item.strip()]
+    if not items or "stream_overlay_view" in items:
+        return
+    index = items.index("broadcast_director") + 1 if "broadcast_director" in items else len(items)
+    items.insert(index, "stream_overlay_view")
+    application["rail_items"] = ",".join(items)
+
+
 def _global_prior_2_51_0(dict_user: dict):
     # Tyre compound colors (soft white, medium yellow, hard red, wet blue), same as app pages:
     # compounds still at former default color updated once (see StyleValidator.compounds)
@@ -125,6 +141,23 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_51_3(dict_user: dict):
+    # Standings: pit stop durations of every car while player pit stop requested off by default (whole lap time
+    # column replaced, looked broken); presets keeping the former default turned off too
+    standings = dict_user.get("standings")
+    if isinstance(standings, dict) and standings.get("show_pitstop_duration_while_requested_pitstop") is True:
+        standings["show_pitstop_duration_while_requested_pitstop"] = False
+
+
+def _user_prior_2_51_2(dict_user: dict):
+    # Flag: sector yellow flags got their own race only option, formerly the yellow flag one
+    flag = dict_user.get("flag")
+    if isinstance(flag, dict) and "show_sector_yellow_flags_for_race_only" not in flag:
+        race_only = flag.get("show_yellow_flag_for_race_only")
+        if isinstance(race_only, bool):
+            flag["show_sector_yellow_flags_for_race_only"] = race_only
+
+
 def _user_prior_2_51_1(dict_user: dict):
     # Options read by no overlay removed: deltabest text color (text in gain & loss colors), pit stop count column
     # of driver lists (stops shown in pit status column)

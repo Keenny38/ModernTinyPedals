@@ -78,5 +78,6 @@ class SpectateList(QWidget):
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self, *_):
-        """Spectate mode or driver changed elsewhere (hotkey, API menu): shown state only, nothing saved"""
-        self.backend.refresh()
+        """Spectate mode or driver changed elsewhere (hotkey, API menu, Broadcast Director cut): shown state only,
+        nothing saved, once shown if hidden"""
+        self.backend.changed_elsewhere()

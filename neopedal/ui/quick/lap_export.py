@@ -51,7 +51,7 @@ from PySide6.QtGui import (
     QPen,
     QTextDocument,
 )
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from ...i18n import tr, trm
 from ...setting import cfg
@@ -349,11 +349,9 @@ class LapExports(PagePart):
                       f"<b>{html.escape(name)}</b>?")
         if current > 0:
             message += "<br>" + trm(f"Current delta best: {format_laptime(current)} (kept as backup file)")
-        confirm = QMessageBox.question(
-            self._page.widget, tr("Delta Best"), message,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No)
-        if confirm != QMessageBox.StandardButton.Yes:
+        from .._common import confirm_action
+
+        if not confirm_action(self._page.widget, tr("Delta Best"), message, tr("Use as Delta Best")):
             return
         aligning = self.delta_best_source(path, lap)
 

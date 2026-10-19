@@ -52,7 +52,36 @@ from .director_shared import (
 from .models import DictListModel
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .director_backend import DirectorBackend
+
+# Rows: values of every column (Python callers) & cells of the columns shown (QML reads one role per row, not one
+# Python data() call per cell & value)
+TIMING_CELL_ROLES = (*TIMING_ROLES, "cells")
+TONE_MARKS = {"fastest": "◆ ", "gain": "● "}  # marks besides colors (colorblind): best of class, personal best
+
+
+def timing_cell(row: dict[str, Any], key: str) -> dict[str, Any]:
+    """Cell of column key: text (marks included) & tone (theme.tone name, "" plain), tyres & energy level for the
+    badges & bar drawn under their cells"""
+    if key == "tyres":
+        return {"text": "", "tone": "", "tyres": row["tyreList"]}
+    value, tone = row[key], row.get(f"{key}Tone", "")
+    if key == "interval" and row["battle"]:  # battle: trend arrow, accent unless the gap has its own color
+        trend = row["trend"]
+        return {"text": ("▼ " if trend < 0 else "▲ " if trend > 0 else "• ") + value, "tone": tone or "accent"}
+    if key == "change":
+        return {"text": value, "tone": ("gain" if row["changeValue"] > 0 else "loss") if value else ""}
+    cell = {"text": TONE_MARKS.get(tone, "") + value, "tone": tone}
+    if key == "energy":
+        cell["level"] = row["energyLevel"]
+    return cell
+
+
+def timing_cells(row: dict[str, Any], keys: Iterable[str]) -> list[dict[str, Any]]:
+    """Cells of the columns shown, in their order"""
+    return [timing_cell(row, key) for key in keys]
 
 
 class TimingTable(DirectorPart):
@@ -68,7 +97,7 @@ class TimingTable(DirectorPart):
         self.timing_view = view if view in TIMING_VIEWS else "race"
         self.timing_open = False  # timing table shown: its rows made at each answer
         self._timing_stale = False  # answers came while the page was hidden: timing rows made once shown
-        self._timing_model = DictListModel(TIMING_ROLES, self)
+        self._timing_model = DictListModel(TIMING_CELL_ROLES, self)
         self._timing_column_model = DictListModel(TIMING_COLUMN_ROLES, self)
         self.sync_timing_columns()
 
@@ -121,6 +150,8 @@ class TimingTable(DirectorPart):
     def timing_columns_changed(self):
         self.page.save_settings()
         self.sync_timing_columns()
+        if self.timing_open:  # cells of the columns shown (gap of the view too: qualifying gap to pole)
+            self.update_timing()
         self.timingColumnsChanged.emit()
 
     @Slot(bool)
@@ -183,6 +214,7 @@ class TimingTable(DirectorPart):
         leader = page.standings[0] if page.standings else None
         slow = {event.slots[0] for event in page.events[-80:] if event.kind in (dr.SLOW, dr.STOPPED, dr.YELLOW)
                 and event.slots and session_time - event.time < 30}
+        shown = self.timing_columns[self.timing_view]
         rows = []
         for car in page.standings:
             status, tone = status_text(car)
@@ -208,7 +240,7 @@ class TimingTable(DirectorPart):
             stint = watcher.stint_laps(car)
             change = grid[car.slot] - places.get(car.slot, 0) if car.slot in grid else 0
             car_tyres = [letter for letter in dict.fromkeys(tyres.get(car.slot, ())) if letter]
-            rows.append({
+            row: dict[str, Any] = {
                 "key": str(car.slot), "slot": car.slot, "classColor": class_color(car.car_class),
                 "onAir": car.slot == page.on_air_slot, "battle": car.slot in in_battle,
                 "trend": in_battle.get(car.slot, 0), "yellow": car.slot in slow,
@@ -230,6 +262,8 @@ class TimingTable(DirectorPart):
                 "pitTime": pit_time, "energy": f"{round(level * 100)}%" if level >= 0 else "",
                 "tyres": "/".join(car_tyres), "penalties": str(car.penalties) if car.penalties else "",
                 "status": status,
-            })
+            }
+            row["cells"] = timing_cells(row, shown)
+            rows.append(row)
         if self._timing_model.sync(rows):
             self.timingChanged.emit()

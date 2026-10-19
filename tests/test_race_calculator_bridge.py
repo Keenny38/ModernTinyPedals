@@ -144,7 +144,7 @@ def test_qml_items_kept_when_values_change(page):  # noqa: F811
             QCoreApplication.processEvents()
         root = view.rootObject()
         timeline = find_item(root, "barWidth")
-        tiles = find_items(root, "tint")
+        tiles = find_items(root, "figure")  # key figure tiles (TpStatTile of the page)
         tables = find_items(root, "naturalWidths")
         table_rows = pointers(row for table in tables for row in find_items(table, "cells"))
         blocks = pointers(find_items(timeline, "stint"))
@@ -154,7 +154,7 @@ def test_qml_items_kept_when_values_change(page):  # noqa: F811
         backend.refresh_history([lap(4), lap(3), lap(2), lap(1)])
         for _ in range(3):
             QCoreApplication.processEvents()
-        assert pointers(find_items(root, "tint")) == pointers(tiles)
+        assert pointers(find_items(root, "figure")) == pointers(tiles)
         assert pointers(row for table in tables for row in find_items(table, "cells")) == table_rows
         assert pointers(find_items(timeline, "stint")) == blocks
         assert laps < pointers(find_items(root, "serial"))  # new lap row added, others kept

@@ -65,8 +65,8 @@ class PaceNotesPlayer(QMediaPlayer):
 
     @Slot(bool)  # type: ignore[operator]
     def __toggle_timer(self, paused: bool):
-        """Toggle widget timer state"""
-        if paused:
+        """Toggle widget timer state, never running while playback disabled (player released later)"""
+        if paused or not self.mcfg["enable"]:
             self._update_timer.stop()
         else:
             if self._vehicle_resets != realtime_state.resets:

@@ -21,8 +21,10 @@ Settings page backend (qml/Settings.qml): every global option of config.json, by
 
 Categories are sections of config.json (Application, Overlay Style, Compatibility...), options shown
 in groups with their description, an editor matching their kind (switch, choice, number, color,
-folder...) and a reset to default. Edits stay pending (undo & redo) until applied: invalid values
-are marked at once and block Apply. A search looks through every category.
+folder...) and a reset to default. A group may list options of another section ("section/key"):
+they are shown there only. Edits stay pending (undo & redo) until applied: invalid values
+are marked at once and block Apply. Undo goes on past Apply: an applied edit undone is pending again.
+A search looks through every category.
 """
 
 from __future__ import annotations
@@ -94,7 +96,7 @@ class Category(NamedTuple):
 
 
 CATEGORIES = (
-    Category("application", "Application", "\ue713", "Interface, startup, updates, presets & backups, overlay editing", (
+    Category("application", "Application", "\ue713", "Interface, startup, updates, presets & backups", (
         ("Interface", (
             "language", "window_color_theme", "enable_high_dpi_scaling", "show_overlay_previews",
             "show_option_group_title", "show_confirmation_for_batch_toggle",
@@ -104,23 +106,26 @@ CATEGORIES = (
             "keep_director_and_calculator_running_while_hidden", "show_setup_wizard_at_startup",
         )),
         ("Updates", ("check_for_updates_on_startup", "number_of_hours_between_update_checks", "update_repository")),
+        ("Online", ("enable_online_driver_ranks",)),
         ("Presets & Backups", (
             "enable_auto_load_preset", "number_of_automatic_backups", "number_of_days_to_keep_deleted_presets",
-            "maximum_loading_attempts", "maximum_saving_attempts",
-        )),
-        ("Overlay Editing", (
-            "enable_edit_mode_on_unlock", "enable_magnetic_snap", "snap_distance", "snap_gap", "show_layout_guides",
-            "grid_move_size", "enable_layout_per_screen_setup",
+            "maximum_saving_attempts",
         )),
         ("Performance & Hotkeys", ("minimum_update_interval", "enable_global_hotkey")),
     )),
-    Category("overlay_style", "Overlay Style", "\ue790", "Modern design, theme, fonts & size of every overlay", (
+    Category("overlay_style", "Overlay Style", "\ue790", 
+             "Modern design, theme, fonts, size & editing of every overlay", (
         ("Design", (
-            "overlay_theme", "enable_colorblind_colors", "enable_depth_effects", "enable_fade_animation",
-            "corner_radius_scale", "minimum_bar_gap",
+            "overlay_theme", "enable_colorblind_colors", "overlay_opacity_percentage", "background_opacity_percentage",
+            "enable_black_background", "enable_depth_effects", "enable_fade_animation", "corner_radius_scale", "minimum_bar_gap",
         )),
         ("Font", ("enable_modern_font", "modern_font_name", "modern_design_font_name")),
         ("Size", ("overlay_scale",)),
+        ("Overlay Editing", (  # saved in application section
+            "application/enable_edit_mode_on_unlock", "application/enable_magnetic_snap", "application/snap_distance",
+            "application/snap_gap", "application/show_layout_guides", "application/grid_move_size",
+            "application/enable_layout_per_screen_setup",
+        )),
     )),
     Category("notification", "Notification", "\uea8f", "Notices shown at the bottom of the main window", (
         ("Preset Locked", ("notify_locked_preset", "font_color_locked_preset", "background_color_locked_preset")),
@@ -150,6 +155,10 @@ CATEGORIES = (
     Category("user_path", "User Path", "\ue8b7", "Folders of presets, data & recorded laps"),
 )
 CATEGORY_KEYS = tuple(category.key for category in CATEGORIES)
+# Options shown in a category of another config.json section: option id -> category key
+MOVED_OPTIONS = {
+    option: category.key for category in CATEGORIES for _, keys in category.groups for option in keys if "/" in option
+}
 # Notice previews (Notification category): group title -> font & background color options
 NOTICE_COLORS = {
     title: (keys[1], keys[2]) for title, keys in CATEGORIES[CATEGORY_KEYS.index("notification")].groups
@@ -166,6 +175,7 @@ class SettingsHost(Protocol):
     def open_folder(self, folder: str) -> None: ...
     def applied(self, sections: set[str], restart: list[str]) -> None: ...
     def open_link(self, name: str) -> None: ...
+    def toast(self, text: str) -> None: ...  # short notice at bottom of page (optional)
 
 
 class OptionInfo(NamedTuple):
@@ -175,29 +185,43 @@ class OptionInfo(NamedTuple):
     key: str
     group: str  # English group title
     kind: OptionKind
+    category: str  # page category showing it: section, or another one (MOVED_OPTIONS)
 
     @property
     def id(self) -> str:
         return f"{self.section}/{self.key}"
 
 
+def option_info(section: str, key: str, group: str, category: str) -> OptionInfo | None:
+    """Option of config.json section shown in category, None if not saved or hidden"""
+    options = cfg.user.config.get(section, {})
+    if key not in options or key in HIDDEN_OPTIONS.get(section, ()):
+        return None
+    kind = value_kind(key, cfg.default.config.get(section, {}).get(key, options[key]))
+    return OptionInfo(section, key, group, kind, category)
+
+
 def category_options(category: Category) -> list[OptionInfo]:
-    """Options of category in page order: groups, then options of no group ("Other")"""
-    options = cfg.user.config.get(category.key, {})
-    hidden = HIDDEN_OPTIONS.get(category.key, ())
-    keys = [key for key in options if key not in hidden]
-    defaults = cfg.default.config.get(category.key, {})
+    """Options of category in page order: groups, then options of no group ("Other")
+
+    Options of the section moved to another category (MOVED_OPTIONS) are left for it.
+    """
     infos: list[OptionInfo] = []
     grouped: set[str] = set()
     for title, group_keys in category.groups:
-        for key in group_keys:
-            if key in options and key not in hidden:
-                infos.append(OptionInfo(category.key, key, title, value_kind(key, defaults.get(key, options[key]))))
-                grouped.add(key)
-    rest = [key for key in keys if key not in grouped]
+        for option in group_keys:
+            section, key = option.split("/", 1) if "/" in option else (category.key, option)
+            info = option_info(section, key, title, category.key)
+            if info is not None:
+                infos.append(info)
+                grouped.add(info.id)
     rest_title = OTHER_GROUP if category.groups else category.label
-    infos.extend(
-        OptionInfo(category.key, key, rest_title, value_kind(key, defaults.get(key, options[key]))) for key in rest)
+    for key in cfg.user.config.get(category.key, {}):
+        option_id = f"{category.key}/{key}"
+        if option_id not in grouped and option_id not in MOVED_OPTIONS:
+            info = option_info(category.key, key, rest_title, category.key)
+            if info is not None:
+                infos.append(info)
     return infos
 
 
@@ -260,17 +284,17 @@ class SettingsBackend(QObject):
         """Options of current category, or matching search in every category"""
         if self._words:
             return [info for info in self._infos.values() if self.matches(info)]
-        return [info for info in self._infos.values() if info.section == self._category]
+        return [info for info in self._infos.values() if info.category == self._category]
 
     def matches(self, info: OptionInfo) -> bool:
-        category = CATEGORIES[CATEGORY_KEYS.index(info.section)]
+        category = CATEGORIES[CATEGORY_KEYS.index(info.category)]
         text = sort_key(
             f"{option_label(info.key)} {info.key.replace('_', ' ')} {info.key} {tr(info.group)} {tr(category.label)}")
         return all(word in text for word in self._words)
 
     def group_title(self, info: OptionInfo) -> str:
         """Group title of option, "" for the only group of a category (page title says it)"""
-        category = CATEGORIES[CATEGORY_KEYS.index(info.section)]
+        category = CATEGORIES[CATEGORY_KEYS.index(info.category)]
         if not self._words:
             return "" if info.group == category.label else tr(info.group)
         if info.group == category.label:
@@ -357,7 +381,7 @@ class SettingsBackend(QObject):
             return self._categories[1]
         entries = []
         for category in CATEGORIES:
-            infos = [info for info in self._infos.values() if info.section == category.key]
+            infos = [info for info in self._infos.values() if info.category == category.key]
             entries.append({
                 "key": category.key,
                 "label": tr(category.label),
@@ -508,8 +532,9 @@ class SettingsBackend(QObject):
     def focus_option(self, section: str, key: str):
         """Show category of option & flash it (option search)"""
         option_id = f"{section}/{key}"
-        if section in CATEGORY_KEYS:
-            self.selectCategory(section)
+        category = MOVED_OPTIONS.get(option_id, section)
+        if category in CATEGORY_KEYS:
+            self.selectCategory(category)
         if option_id in self._infos:
             self._highlight = ""
             self.highlightChanged.emit()  # same option again: flashed again
@@ -626,7 +651,7 @@ class SettingsBackend(QObject):
             return
         before = self._snapshot()
         for info in self._infos.values():
-            if info.section != category.key:
+            if info.category != category.key:
                 continue
             default = self.default(info)
             if default is None:
@@ -642,8 +667,27 @@ class SettingsBackend(QObject):
             self._redo.clear()
         self.changed()
 
+    def _rebased(self, state: tuple[dict, dict], replaced: dict[str, Any]) -> tuple[dict, dict]:
+        """Undo or redo state on newly saved values: same values shown, pending where they differ
+
+        Args:
+            replaced: option id: value saved before (state pending edits were relative to it).
+        """
+        pending, invalid = dict(state[0]), state[1]
+        for option_id, previous in replaced.items():
+            if option_id in invalid:
+                continue  # typed text shown, nothing pending
+            value = pending.get(option_id, previous)
+            if value == self.saved(self._infos[option_id]):
+                pending.pop(option_id, None)
+            else:
+                pending[option_id] = value
+        return pending, dict(invalid)
+
     def _restore(self, state: tuple[dict, dict]):
-        self._pending, self._invalid = state
+        # Options gone from config.json since (history kept across Apply & refresh) skipped
+        self._pending = {key: value for key, value in state[0].items() if key in self._infos}
+        self._invalid = {key: value for key, value in state[1].items() if key in self._infos}
         self._typed.clear()  # fields show restored values
         self._typing = ("", 0.0)
         self.changed()
@@ -696,16 +740,20 @@ class SettingsBackend(QObject):
             return True
         sections: set[str] = set()
         restart: list[str] = []  # options read when app starts
+        replaced: dict[str, Any] = {}  # option id: value saved before
         for option_id, value in self._pending.items():
             info = self._infos[option_id]
+            replaced[option_id] = self.saved(info)
             cfg.user.config[info.section][info.key] = value
             sections.add(info.section)
             if APPLIES_AT.get(option_id) == APPLIES_RESTART:
                 restart.append(option_label(info.key))
         self._pending.clear()
         self._typed.clear()
-        self._undo.clear()
-        self._redo.clear()
+        self._typing = ("", 0.0)  # keys typed next: a new undo step
+        # History kept: undoing an applied edit makes the previous value pending again (Apply needed)
+        self._undo = [self._rebased(state, replaced) for state in self._undo]
+        self._redo = [self._rebased(state, replaced) for state in self._redo]
         if "user_path" in sections:
             cfg.update_path()
         cfg.save(0, config_type=ConfigType.CONFIG)
@@ -786,6 +834,9 @@ class SettingsBackend(QObject):
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(text)
+            toast = getattr(self._host, "toast", None)
+            if callable(toast):
+                toast(tr("Copied"))  # told: nothing else shows the copy
 
 
 def text_reason(info: OptionInfo, text: str) -> str:

@@ -20,12 +20,15 @@
 Launcher
 """
 
+import ctypes
+import hashlib
 import logging
 import os
 import sys
+import tempfile
 from glob import glob
+from time import monotonic, sleep
 
-import psutil
 from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QIcon, QPixmapCache
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -42,41 +45,111 @@ from .userfile.settings_import import apply_pending_import, log_import_report, r
 logger = logging.getLogger(__package__)
 UI_FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans")  # app UI, not overlays
 log_stream = BoundedLogStream()  # latest log text only (log dialog, bug report), see getvalue()
+INSTANCE_LOCK_RESTART_WAIT = 10.0  # seconds restarted app waits for previous one to exit (releasing its lock)
+INSTANCE_LOCK_RETRY = 0.05  # seconds between lock tries while waiting
+ERROR_ACCESS_DENIED = 5  # Windows error codes
+ERROR_ALREADY_EXISTS = 183
+SYNCHRONIZE = 0x00100000  # Windows access right, enough to tell a mutex exists
+_instance_lock: int | None = None  # mutex handle (Windows) or locked file descriptor, held until process ends
 
 
-def save_pid_file():
-    """Save PID info to file (locked file or read-only config folder: single instance not enforced)
+def instance_lock_name() -> str:
+    """Lock name of config folder in use: one running instance per config folder (user or portable)"""
+    folder = os.path.normcase(os.path.abspath(cfg.path.config))
+    return f"{CONFIG_ID}-{hashlib.sha1(folder.encode('utf-8', 'surrogatepass')).hexdigest()[:16]}"
 
-    Format "pid,create time,NeoPedal": a PID saved by another app (no or other name) is ignored,
-    only a running instance of this app counts.
+
+def instance_lock_file() -> str:
+    """Lock file (Linux), outside config folder (replaced by settings import while locked)"""
+    folder = os.getenv("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(folder, f"{instance_lock_name()}.lock")
+
+
+def lock_instance() -> bool:
+    """Take lock of this instance (one step: two instances started together never both get it),
+    False if held by another running instance. Lock released by OS when process ends (crash too).
+
+    Raises:
+        OSError: lock not available (single instance not enforced).
     """
-    try:
-        with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as f:
-            current_pid = os.getpid()
-            pid_create_time = psutil.Process(current_pid).create_time()
-            pid_str = f"{current_pid},{pid_create_time},{CONFIG_ID}"
-            f.write(pid_str)
-    except (OSError, psutil.Error) as error:
-        logger.warning("PID file not saved: %s", error)
+    global _instance_lock
+    if sys.platform == "win32":
+        from ctypes import wintypes
 
-
-def is_pid_exist() -> bool:
-    """Check and verify PID existence"""
-    try:
-        # Load last recorded PID and creation time from pid log file
-        with open(f"{cfg.path.config}{LogFile.PID}", encoding="utf-8") as f:
-            pid_read = f.readline()
-        pid = pid_read.strip().split(",")
-        pid_last = int(pid[0])
-        pid_last_create_time = pid[1]
-        if pid[2] != CONFIG_ID:  # saved by another app
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, False, f"Local\\{instance_lock_name()}")  # user session
+        error = ctypes.get_last_error()
+        if not handle:
+            if error == ERROR_ACCESS_DENIED:  # created by another instance of other rights
+                return False
+            raise ctypes.WinError(error)
+        if error == ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
             return False
-        # Verify if last PID is running and belongs to NeoPedal
-        if psutil.pid_exists(pid_last) and str(psutil.Process(pid_last).create_time()) == pid_last_create_time:
-            return True  # already running
-    except (OSError, psutil.Error, ValueError, IndexError):  # also unreadable (locked) file
-        logger.info("PID not found or invalid")
-    return False  # no running
+        _instance_lock = handle
+        return True
+    import fcntl
+
+    descriptor = os.open(instance_lock_file(), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(descriptor)
+        return False
+    except OSError:
+        os.close(descriptor)
+        raise
+    _instance_lock = descriptor
+    return True
+
+
+def acquire_instance_lock(wait: float = 0.0) -> bool:
+    """Lock of this instance taken, waiting up to wait seconds for another instance to release it,
+    False if still held by another running instance (lock not available: True, not enforced)"""
+    deadline = monotonic() + wait
+    while True:
+        try:
+            if lock_instance():
+                return True
+        except OSError as error:
+            logger.warning("Single instance lock not available: %s", error)
+            return True
+        if monotonic() >= deadline:
+            return False
+        sleep(INSTANCE_LOCK_RETRY)
+
+
+def other_instance_running() -> bool:
+    """Another instance running in single instance mode (holding lock of config folder), lock not taken"""
+    if sys.platform == "win32":
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.OpenMutexW.restype = wintypes.HANDLE
+        handle = kernel32.OpenMutexW(SYNCHRONIZE, False, f"Local\\{instance_lock_name()}")
+        if handle:
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
+            return True
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    import fcntl
+
+    try:
+        descriptor = os.open(instance_lock_file(), os.O_RDWR)
+    except OSError:  # no lock file: never locked since system start
+        return False
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+    return False
 
 
 def single_instance_check(is_single_instance: bool):
@@ -87,14 +160,13 @@ def single_instance_check(is_single_instance: bool):
         logger.info("Single instance mode: OFF")
         return
     logger.info("Single instance mode: ON")
-    # Skip if restarted
+    # Restarted: always let in, lock taken once previous instance (exiting) released it
     if os.getenv(RESTART_ENVIRONMENT) == "TRUE":
         os.environ.pop(RESTART_ENVIRONMENT, None)
-        save_pid_file()
+        if not acquire_instance_lock(INSTANCE_LOCK_RESTART_WAIT):
+            logger.warning("Single instance lock still held by previous instance, started anyway")
         return
-    # Check existing PID file first, then exe PID
-    if not is_pid_exist():  # (is_pid_exist() or is_exe_running())
-        save_pid_file()
+    if acquire_instance_lock():
         return
     # Show warning to console and popup dialog
     warning_text = (
@@ -115,11 +187,10 @@ def apply_settings_import():
     config_folder, data_folder = settings_import_folders()
     if not read_request(config_folder.rstrip("/\\")):
         return
-    if not realtime_state.singleton and is_pid_exist():  # multiple instances allowed: another one running
+    if not realtime_state.singleton and other_instance_running():  # multiple instances allowed: another one running
         record_message(logging.WARNING, "IMPORT: another NeoPedal is running, settings imported on next start")
         return
-    if apply_pending_import(config_folder, data_folder) and realtime_state.singleton:
-        save_pid_file()  # PID file of this instance set aside with previous settings
+    apply_pending_import(config_folder, data_folder)
 
 
 def get_version():
@@ -226,16 +297,16 @@ def set_environment():
 
 def ask_safe_mode() -> bool:
     """Previous start did not finish: ask whether to start in safe mode"""
-    answer = QMessageBox.question(
+    from .ui._common import confirm_action
+
+    return confirm_action(
         None,
         f"{APP_NAME} v{VERSION}",
         tr("NeoPedal did not finish starting last time.\n\n"
            "Start in safe mode? Plugins and overlays are not started, so settings can be fixed, "
            "then NeoPedal restarted normally (Window menu, Restart NeoPedal)."),
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.Yes,
+        tr("Start in Safe Mode"), cancel_text=tr("Start Normally"), default_action=True,
     )
-    return answer == QMessageBox.StandardButton.Yes
 
 
 def check_safe_mode(flag: bool):

@@ -97,8 +97,8 @@ def test_login_form_wrong_code(dashboard):
 
 
 def test_forged_session_rejected(dashboard):
-    assert get("/api/telemetry", {"Cookie": "tp_session=forged"})[0] == 401
-    assert get("/", {"Cookie": "tp_session=forged"})[0] == 401
+    assert get("/api/telemetry", {"Cookie": "np_session=forged"})[0] == 401
+    assert get("/", {"Cookie": "np_session=forged"})[0] == 401
 
 
 def test_telemetry_api(dashboard):

@@ -28,7 +28,7 @@ from PySide6.QtGui import QColor
 
 from ...api_control import api
 from ...template.setting_heatmap import HEATMAP_DEFAULT_TYRE
-from ...userfile.heatmap import select_tyre_heatmap_name
+from ...userfile.heatmap import select_compound_symbol, select_tyre_heatmap_name
 from .quad import heatmap, reload_heatmaps
 from .rows import compound_badge
 
@@ -51,14 +51,18 @@ class TyreCompounds:
 
     Heatmap of a wheel: centered on optimal temperature given by game (LMU) if optimal option,
     else heatmap of compound (auto matching), else fixed heatmap.
+
+    Args:
+        badge_color: color of every compound badge, None: color of each compound type (compound presets).
     """
 
     def __init__(self, auto_heatmap: bool = True, heatmap_name: str = HEATMAP_DEFAULT_TYRE,
-                 optimal_heatmap: bool = False):
+                 optimal_heatmap: bool = False, badge_color: QColor | None = None):
         reload_heatmaps()  # new widget: latest saved heatmaps
         self.auto_heatmap = auto_heatmap
         self.heatmap_name = heatmap_name
         self.use_optimal = optimal_heatmap
+        self.badge_color = badge_color
         self.last_in_pits = -1
         self.names: tuple[str, ...] = ("", "", "", "")
         self.optimal: tuple[int, ...] = (0, 0, 0, 0)
@@ -95,12 +99,15 @@ class TyreCompounds:
         self.names = names
         if self.auto_heatmap:
             self.compound_heat = [heatmap(select_tyre_heatmap_name(name), HEATMAP_DEFAULT_TYRE) for name in names]
-        self.badges = (axle_badges(names[0], names[1]), axle_badges(names[2], names[3]))
+        color = self.badge_color
+        self.badges = (axle_badges(names[0], names[1], color), axle_badges(names[2], names[3], color))
         return True
 
 
-def axle_badges(left: str, right: str) -> tuple:
-    """Compound badge of axle, left & right badges if wheels have different compounds"""
-    if left == right:
-        return (compound_badge(left),)
-    return compound_badge(left), compound_badge(right)
+def axle_badges(left: str, right: str, color: QColor | None = None) -> tuple:
+    """Compound badge of axle, left & right badges if wheels have different compounds (in color if given, else in
+    color of compound)"""
+    names = (left,) if left == right else (left, right)
+    if color is None:
+        return tuple(map(compound_badge, names))
+    return tuple((select_compound_symbol(name), color) for name in names)

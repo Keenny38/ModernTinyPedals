@@ -33,6 +33,7 @@ from ..module_info import ConsumptionDataSet, HistoryInfo, StintDataSet, minfo
 from ..userfile.consumption_history import (
     merge_consumption_history,
     read_consumption_history_file,
+    rewrite_consumption_history,
     save_consumption_history_file,
 )
 from ..userfile.heatmap import select_compound_symbol
@@ -108,20 +109,25 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
         """History saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
         nonlocal delayed_save, readable, next_checkpoint
         next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
-        if not readable:  # not accessible at load: laps of file kept, added to recorded laps
-            saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
-            if readable:
-                output.consumptionDataSet = deque(merge_consumption_history(
-                    output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
-                ), output.consumptionDataSet.maxlen)
-                output.consumptionDataVersion += 1
-        if readable:
-            save_consumption_history_file(
-                dataset=output.consumptionDataSet,
-                filepath=filepath,
-                filename=combo_name,
-            )
+        with output.consumptionLock:
+            if not readable:  # not accessible at load: laps of file kept, added to recorded laps
+                saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
+                if readable:
+                    output.consumptionDataSet = deque(merge_consumption_history(
+                        output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
+                    ), output.consumptionDataSet.maxlen)
+                    output.consumptionDataVersion += 1
+            laps, version = tuple(output.consumptionDataSet), output.consumptionDataVersion
         delayed_save = False
+        if not readable:
+            return
+        # Written without the lock (Race Calculator deleting laps on UI thread never waits for the disk)
+        save_consumption_history_file(dataset=laps, filepath=filepath, filename=combo_name)
+        with output.consumptionLock:
+            if output.consumptionDataVersion != version:
+                # Laps deleted meanwhile (saved by Race Calculator under the lock, maybe before this write):
+                # history of now written again, deleted laps never back in file
+                rewrite_consumption_history(output.consumptionDataSet, filepath, combo_name)
 
     while True:
         reset = yield None
@@ -145,8 +151,9 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
                 backup=True,  # own history file, replaced by next save
             )
             # New data set (copy on write), as GUI may be iterating current one
-            output.consumptionDataSet = deque(dataset, output.consumptionDataSet.maxlen)
-            output.consumptionDataVersion += 1
+            with output.consumptionLock:
+                output.consumptionDataSet = deque(dataset, output.consumptionDataSet.maxlen)
+                output.consumptionDataVersion += 1
             next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
 
         # Update at start of lap
@@ -163,21 +170,20 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             output.consumptionDataSet[0].lapTimeLast != minfo.delta.lapTimeLast
             or output.consumptionDataSet[0].lapNumber != lap_number
         ):
-            output.consumptionDataSet = prepend(
-                output.consumptionDataSet,
-                ConsumptionDataSet(
-                    lapNumber=lap_number,
-                    isValidLap=int(minfo.delta.isValidLap),
-                    lapTimeLast=minfo.delta.lapTimeLast,
-                    lastLapUsedFuel=minfo.fuel.lastLapConsumption,
-                    lastLapUsedEnergy=minfo.energy.lastLapConsumption,
-                    batteryDrainLast=minfo.hybrid.batteryDrainLast,
-                    batteryRegenLast=minfo.hybrid.batteryRegenLast,
-                    tyreAvgWearLast=calc.mean(minfo.wheels.lastLapTreadWear),
-                    capacityFuel=minfo.fuel.capacity,
-                ),
+            lap = ConsumptionDataSet(
+                lapNumber=lap_number,
+                isValidLap=int(minfo.delta.isValidLap),
+                lapTimeLast=minfo.delta.lapTimeLast,
+                lastLapUsedFuel=minfo.fuel.lastLapConsumption,
+                lastLapUsedEnergy=minfo.energy.lastLapConsumption,
+                batteryDrainLast=minfo.hybrid.batteryDrainLast,
+                batteryRegenLast=minfo.hybrid.batteryRegenLast,
+                tyreAvgWearLast=calc.mean(minfo.wheels.lastLapTreadWear),
+                capacityFuel=minfo.fuel.capacity,
             )
-            output.consumptionDataVersion += 1
+            with output.consumptionLock:  # laps deleted by Race Calculator meanwhile kept deleted
+                output.consumptionDataSet = prepend(output.consumptionDataSet, lap)
+                output.consumptionDataVersion += 1
             delayed_save = True
             if monotonic() >= next_checkpoint:  # checkpoint while driving (crash, power loss)
                 save_data()
@@ -190,8 +196,14 @@ def record_stint_history(
     minimum_pitstop_seconds: float,
     minimum_tyre_temperature: float,
 ):
-    """Record stint history"""
+    """Record stint history
+
+    Stints of one combo (track & car class, as consumption history) only: history cleared when combo changes,
+    kept from one session to the next on same combo (practice, then race).
+    """
     last_reset = None  # reset check
+    last_combo = ""  # combo of recorded stints
+    check_combo = False  # combo read again once driving after reset
 
     stint_data = output.stintDataCurrent
 
@@ -237,6 +249,8 @@ def record_stint_history(
             last_reset != reset  # vehicle resets
             or api.read.session.pre_race()  # ignore before race starts
         ):
+            if last_reset != reset:
+                check_combo = True
             last_reset = reset
             reset_stint = True
             if stint_running and stint_data.totalTime >= minimum_stint_seconds:
@@ -257,6 +271,16 @@ def record_stint_history(
             ):
                 reset_stint = True
                 update_stint_history = True
+
+        # Other combo: stints of previous combo dropped, its last stint included
+        if check_combo and realtime_state.active:
+            check_combo = False
+            combo_name = api.read.session.combo_name()
+            if last_combo != combo_name:
+                if last_combo:
+                    output.reset_stint()
+                    update_stint_history = False
+                last_combo = combo_name
 
         if update_stint_history:
             update_stint_history = False

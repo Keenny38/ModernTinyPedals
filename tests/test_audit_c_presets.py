@@ -297,9 +297,10 @@ def test_french_preset_and_plugin_messages(french, message, expected):
 
 
 def test_french_plugin_trust_prompt(ui_env, monkeypatch, french, tmp_path):
+    from neopedal import plugin_loader
     from neopedal.ui.plugin_manager import PluginManager
 
-    monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
+    monkeypatch.setattr(plugin_loader, "PLUGIN_FOLDER", str(tmp_path / "plugins"))  # no plugin shipped with the app
     plugin = tmp_path / "plugins" / "gauge"
     plugin.mkdir(parents=True)
     (plugin / "setting.json").write_text("{}", encoding="utf-8")

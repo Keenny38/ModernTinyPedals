@@ -43,7 +43,7 @@ The `Stream Overlays` page tells why its sources are empty when no overlay is sh
 
 ### Already running
 
-"NeoPedal is already running": only one copy runs at a time. Look for its icon in the tray (it may be hidden in the tray overflow).
+"NeoPedal is already running": only one copy runs at a time per settings folder. Look for its icon in the tray (it may be hidden in the tray overflow). The check uses a system lock released when the app closes or crashes, so a crashed copy never blocks the next start.
 
 ### Safe mode
 

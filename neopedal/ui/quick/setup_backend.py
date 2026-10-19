@@ -250,6 +250,7 @@ class SetupBackend(PageBackend):
     def __init__(self, parent=None, detect_games: bool = True):
         super().__init__(parent, "Setup")
         self._step = STEP_WELCOME
+        self._visited = {STEP_WELCOME}  # steps shown at least once: marked done only then (not jumped over)
         self._language = cfg.application["language"] if cfg.application["language"] in LANGUAGES else "English"
         self.translator = SetupTranslator(self, self._language)
         self._labels = option_labels(self.translator.code)
@@ -305,6 +306,11 @@ class SetupBackend(PageBackend):
     def stepCount(self) -> int:
         return len(STEPS)
 
+    @Property(list, notify=stepChanged)
+    def visitedSteps(self) -> list[int]:
+        """Steps shown at least once, in order: steps jumped over (step list, summary links) are not done"""
+        return sorted(self._visited)
+
     @Property(list, notify=languageChanged)
     def steps(self) -> list[dict]:
         return [
@@ -318,6 +324,7 @@ class SetupBackend(PageBackend):
         if step == self._step:
             return
         self._step = step
+        self._visited.add(step)
         if step >= STEP_LOOK:
             self.start_previews()
         if step == STEP_OVERLAYS:

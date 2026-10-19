@@ -31,6 +31,10 @@ MAX_METERS = 999999.0  # for distance limit
 MAX_FORECASTS = 5  # for weather forecast
 MAX_FORECAST_MINUTES = 9999.0  # for weather forecast
 ABS_ZERO_CELSIUS = -273.15  # absolute zero celsius
+# Game index of local yellow flag in sector 1, 2, 3 (shared memory mSectorFlag, REST sectorFlag): natural order, not
+# vehicle sector order (mSector 0 = sector 3). Checked in LMU (2026-10-18): order 2, 0, 1 showed yellow one sector
+# after (sector 1 in sector 2)
+SECTOR_FLAG_ORDER = (0, 1, 2)
 
 # Text
 TEXT_PLACEHOLDER = "-"

@@ -50,11 +50,10 @@ import threading
 import time
 from contextlib import suppress
 from html import escape
-from http.cookies import CookieError, SimpleCookie
 from urllib.parse import parse_qs, urlparse
 
 from . import app_signal, units
-from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
+from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer, redact_secret_query
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
@@ -74,7 +73,9 @@ MAX_SESSIONS = 32
 SESSION_IDLE_SECONDS = 12 * 3600  # session expires when unused (no dashboard open) for this time
 SESSION_MAX_SECONDS = 7 * 24 * 3600  # session expires after this time anyway
 MAX_FORM_SIZE = 1024
-SESSION_COOKIE = "tp_session"
+# Session cookie name, port of server added: cookies are per host (not port), each dashboard (installed & source
+# copy, several instances) keeps its own session
+SESSION_COOKIE = "np_session"
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O, 1/I
 
 
@@ -167,6 +168,19 @@ def lookup_local_addresses() -> list[str]:
     except OSError:
         pass
     return sorted(addresses)
+
+
+def cookie_value(header: str, name: str) -> str | None:
+    """Value of cookie of name in a Cookie header, None if not sent: read by hand, SimpleCookie stops at the first
+    cookie it cannot parse (set by another site of the same host), so the session was lost"""
+    for part in header.split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key.strip() == name:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                value = value[1:-1]
+            return value
+    return None
 
 
 def _safe(func, default=0.0):
@@ -353,15 +367,10 @@ class DashboardHandler(BoundedRequestHandler):
 
     def has_session(self) -> bool:
         """Check session cookie"""
-        cookie = SimpleCookie()
-        try:
-            cookie.load(self.headers.get("Cookie", ""))
-        except CookieError:
+        cookie = cookie_value(self.headers.get("Cookie", "") or "", self.session_cookie())
+        if not cookie:
             return False
-        morsel = cookie.get(SESSION_COOKIE)
-        if morsel is None:
-            return False
-        value = morsel.value.encode("utf-8")  # bytes: str compare raises TypeError on non ASCII cookie
+        value = cookie.encode("utf-8")  # bytes: str compare raises TypeError on non ASCII cookie
         now = time.monotonic()
         with self.lock:
             self.purge_sessions(now)
@@ -434,6 +443,12 @@ class DashboardHandler(BoundedRequestHandler):
         for address in expired:
             del cls.failures[address]
 
+    def session_cookie(self) -> str:
+        """Session cookie name of this dashboard (port of server)"""
+        server = getattr(self, "server", None)
+        address = getattr(server, "server_address", None)
+        return f"{SESSION_COOKIE}_{address[1]}" if address else SESSION_COOKIE
+
     def send_redirect_with_session(self):
         token = self.new_session()
         self.send_response(303)
@@ -441,7 +456,7 @@ class DashboardHandler(BoundedRequestHandler):
         secure = "; Secure" if self.secure else ""
         self.send_header(
             "Set-Cookie",
-            f"{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_MAX_SECONDS}; HttpOnly; SameSite=Strict{secure}",
+            f"{self.session_cookie()}={token}; Path=/; Max-Age={SESSION_MAX_SECONDS}; HttpOnly; SameSite=Strict{secure}",
         )
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
@@ -467,7 +482,8 @@ class DashboardHandler(BoundedRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        logger.debug("WEB DASHBOARD: %s", format % args)
+        if logger.isEnabledFor(logging.DEBUG):  # every request: no formatting & regex while not logged
+            logger.debug("WEB DASHBOARD: %s", redact_secret_query(format % args))  # request line: ?code=
 
 
 class DashboardServer(LocalHTTPServer):

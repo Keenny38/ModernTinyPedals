@@ -20,6 +20,7 @@
 Track map Widget
 """
 
+from collections.abc import Callable
 from math import isfinite
 from typing import TYPE_CHECKING, Any
 
@@ -28,8 +29,10 @@ from PySide6.QtGui import QBrush, QFontMetricsF, QPainter, QPainterPath, QPen, Q
 
 from .. import calculation as calc
 from ..api_control import api
+from ..demo_state import drawing_demo
 from ..formatter import random_color_class
 from ..module_info import minfo
+from ..userfile.corner_coach import MapCorners, map_corners
 from ..validator import vehicle_position_interp
 from ._base import Overlay
 from ._painter import fill_pixmap, fill_rect
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
 
 
 class TrackMapMixin:
-    """Map geometry, car, safety car & pit out prediction positions, for classic & modern widget"""
+    """Map geometry, car, safety car & pit out prediction positions, official corners, for classic & modern widget"""
 
     wcfg: "TrackMapConfig"
 
@@ -66,9 +69,13 @@ class TrackMapMixin:
         self.safetycar_pos: tuple[float, float] | None = None  # set by update_safetycar, read by paint
         # Pit out predictions, set by update_predictions, read by paint (None: not updated yet, picture)
         self.predictions: tuple | None = None
+        # Official corners of recorded map, set by update_corners (None: not placed yet)
+        self.show_corner_numbers = bool(self.wcfg["show_corner_numbers"])
+        self.map_corners: MapCorners | None = None
 
         # Last data
-        self.last_modified = 0
+        self.last_modified: float = 0
+        self.last_orientation = 0.0
         self.last_veh_data_version: int | None = None
         # Car positions, set by update (vehicle_positions), read by paint (None: not updated yet, picture)
         self.car_positions: tuple[tuple[int, float, float], ...] | None = None
@@ -79,13 +86,23 @@ class TrackMapMixin:
         self.map_offset = (0, 0)
         self.map_orient = 0.0  # radians
 
+    def map_changed(self, modified: float) -> bool:
+        """True once per new recorded map or new orientation of track (modified -1: temporary circle map)"""
+        orientation = minfo.mapping.orientation if modified != -1 else 0.0
+        if self.last_modified == modified and self.last_orientation == orientation:
+            return False
+        self.last_modified = modified
+        self.last_orientation = orientation
+        return True
+
     def create_map_path(self, raw_coords=None):
         """Create map path"""
         map_sector_paths = []
         sectors_index = minfo.mapping.sectors
         if raw_coords and isinstance(sectors_index, tuple):
             dist = calc.distance(raw_coords[0], raw_coords[-1])
-            angle = int(self.wcfg["display_orientation"]) % 360  # -90 is 270
+            # Overlay orientation plus orientation of this track (track info editor), -90 is 270
+            angle = int(self.wcfg["display_orientation"] + minfo.mapping.orientation) % 360
             self.map_orient = calc.radians(angle)
             (self.map_scaled, self.map_range, self.map_scale, self.map_offset
              ) = calc.scale_map(raw_coords, self.area_size, self.area_margin, angle)
@@ -164,13 +181,48 @@ class TrackMapMixin:
 
     def map_position(self, veh_info) -> tuple[float, float]:
         """Car position on recorded map"""
+        return self.map_point(veh_info.worldPositionX, veh_info.worldPositionY)
+
+    def map_point(self, pos_x: float, pos_y: float) -> tuple[float, float]:
+        """World position on recorded map"""
         # Position = coords * scale - (min_range * scale - offset)
         x_offset = self.map_range[0] * self.map_scale - self.map_offset[0]  # min range x, offset x
         y_offset = self.map_range[2] * self.map_scale - self.map_offset[1]  # min range y, offset y
         if self.map_orient:
-            rot_x, rot_y = calc.rotate_coordinate(self.map_orient, veh_info.worldPositionX, veh_info.worldPositionY)
+            rot_x, rot_y = calc.rotate_coordinate(self.map_orient, pos_x, pos_y)
             return rot_x * self.map_scale - x_offset, rot_y * self.map_scale - y_offset
-        return veh_info.worldPositionX * self.map_scale - x_offset, veh_info.worldPositionY * self.map_scale - y_offset
+        return pos_x * self.map_scale - x_offset, pos_y * self.map_scale - y_offset
+
+    def update_corners(self) -> bool:
+        """Official corners of recorded map (placed in background thread, at once for overlay pictures), True when
+        newly placed"""
+        if not (self.show_corner_numbers and self.map_scaled):
+            return False
+        corners = map_corners(api.read.session.track_name(), minfo.mapping, drawing_demo())
+        if corners is None or corners is self.map_corners:
+            return False
+        self.map_corners = corners
+        return True
+
+    def corner_labels(self, size_of: Callable[[str], tuple[float, float]],
+                      clearance: float) -> list[tuple[str, QRectF]]:
+        """Official corner labels outside their bend, clear of road (clearance from road center), a label over an
+        earlier one left out: text & rect (size_of: label width & height of text)"""
+        corners = self.map_corners
+        if not corners or not self.map_scaled:
+            return []
+        placed: list[tuple[str, QRectF]] = []
+        for corner, text in zip(corners.corners, corners.texts()):
+            pos_x, pos_y = self.map_point(corner.x, corner.y)
+            out_x, out_y = corner.out_x, corner.out_y
+            if self.map_orient:
+                out_x, out_y = calc.rotate_coordinate(self.map_orient, out_x, out_y)
+            width, height = size_of(text)
+            reach = clearance + abs(out_x) * width / 2 + abs(out_y) * height / 2
+            rect = QRectF(pos_x + out_x * reach - width / 2, pos_y + out_y * reach - height / 2, width, height)
+            if not any(rect.intersects(other) for _, other in placed):
+                placed.append((text, rect))
+        return placed
 
     def vehicle_positions(self, inpit_offset: float) -> tuple[tuple[int, float, float], ...]:
         """Index & position of each car in draw order (recorded map, else temporary circle map, cars in pit moved
@@ -442,6 +494,11 @@ class Realtime(TrackMapMixin, Overlay):
         if self.wcfg["show_proximity_circle"]:
             self.rect_proximity = QRectF()
 
+        if self.show_corner_numbers:
+            self.corner_voffset = font_m.voffset
+            self.pen_corner = QPen(self.wcfg["font_color_corner_numbers"])
+            self.brush_corner = QBrush(self.wcfg["background_color_corner_numbers"], Qt.BrushStyle.SolidPattern)
+        self.map_shapes: tuple[list, Any] = ([], None)  # map sector paths & full path (map image drawn again)
         self.update_map(-1)
 
     def timerEvent(self, event):
@@ -449,6 +506,9 @@ class Realtime(TrackMapMixin, Overlay):
         # Map
         modified = minfo.mapping.lastModified
         self.update_map(modified)
+        if self.update_corners():
+            self.draw_map_image(*self.map_shapes, self.circular_map)
+            self.update()
 
         # Vehicles, safety car & pit out predictions: repaint when drawn in other device pixels or style
         ratio = self.devicePixelRatioF()
@@ -483,10 +543,11 @@ class Realtime(TrackMapMixin, Overlay):
     # GUI update methods
     def update_map(self, data):
         """Map update"""
-        if self.last_modified != data:
-            self.last_modified = data
+        if self.map_changed(data):
             raw_data = minfo.mapping.coordinates if data != -1 else None
             map_sector_paths, map_full_path = self.create_map_path(raw_data)
+            self.map_shapes = (map_sector_paths, map_full_path)
+            self.map_corners = None  # placed again on new map
             self.draw_map_image(map_sector_paths, map_full_path, self.circular_map)
             self.car_positions = None  # map scale changed
             if self.wcfg["show_proximity_circle"]:
@@ -575,6 +636,9 @@ class Realtime(TrackMapMixin, Overlay):
                         continue
                     pos_x1, pos_y1, pos_x2, pos_y2 = self.map_line(index, self.wcfg["sector_line_length"])
                     painter.drawLine(int(pos_x1), int(pos_y1), int(pos_x2), int(pos_y2))
+
+            if self.show_corner_numbers:
+                self.draw_corner_numbers(painter)
         else:
             # SF line
             if self.wcfg["show_start_line"]:
@@ -587,6 +651,23 @@ class Realtime(TrackMapMixin, Overlay):
                     int(self.area_margin + self.wcfg["start_line_length"]),
                     int(self.area_size * 0.5),
                 )
+
+    def draw_corner_numbers(self, painter):
+        """Draw official corner numbers (or names) outside their bend"""
+        painter.setFont(self.font())
+        metrics = QFontMetricsF(self.font())
+        height = metrics.height()
+
+        def size_of(text: str) -> tuple[float, float]:
+            return max(metrics.horizontalAdvance(text) + height * 0.5, height), height
+
+        clearance = (self.wcfg["map_width"] + max(self.wcfg["map_outline_width"], 0)) * 0.5 + 2
+        for text, rect in self.corner_labels(size_of, clearance):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.brush_corner)
+            painter.drawRoundedRect(rect, height * 0.25, height * 0.25)
+            painter.setPen(self.pen_corner)
+            painter.drawText(rect.translated(0, self.corner_voffset), Qt.AlignmentFlag.AlignCenter, text)
 
     def draw_vehicle_on_circle(self, painter, veh_info, positions):
         """Draw vehicles on temporary circle map (index & position in draw order, see vehicle_positions)"""

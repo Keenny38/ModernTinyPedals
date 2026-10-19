@@ -90,6 +90,7 @@ class Realtime(DataModule):
                     reset = True
                     output.dataSetVersion = -1
                     output.scoringSnapshot = None
+                    reset_leader(output)  # until place 1 found in scoring (stale index of other session)
                     _index_slot_ids.clear()  # new session or reload: slot ids from scratch
                     reset_session_timing(output)
                     last_veh_total = -1
@@ -186,6 +187,9 @@ class Realtime(DataModule):
                         last_session_elapsed = session_elapsed
                         last_in_race = in_race
 
+                else:
+                    reset_leader(output)  # no car listed
+
             else:
                 if reset:
                     reset = False
@@ -197,6 +201,7 @@ class Realtime(DataModule):
         output.finishLapOffset = 0.0
         output.finishLapOffsetLeader = 0.0
         output.scoringSnapshot = None
+        reset_leader(output)
 
 
 def near_range_of(setting: dict) -> float:
@@ -272,6 +277,7 @@ def update_vehicle_data(
     output.playerIndex = plr_index if 0 <= plr_index < output.totalVehicles else -1
     # Scoring data of every car for relative module (same scoring sample: read once)
     snapshot_rows: list[tuple] = []
+    leader_index = -1  # no place 1 in scoring (new session)
 
     # Update dataset from all vehicles in current session
     for index, data in zip(range(output.totalVehicles), output.dataSet):
@@ -448,7 +454,7 @@ def update_vehicle_data(
 
             # Save leader info
             if data.positionOverall == 1:
-                output.leaderIndex = index
+                leader_index = index
                 output.leaderBestLapTime = data.bestLapTime
 
             snapshot_rows.append((
@@ -462,6 +468,10 @@ def update_vehicle_data(
             ))
 
     if update_low_priority:
+        if leader_index < 0:
+            reset_leader(output)
+        else:
+            output.leaderIndex = leader_index
         update_class_best_sectors(output)
         if in_race:
             update_class_gaps(output, scoring_time)
@@ -490,7 +500,7 @@ def update_finish_time(output: VehiclesInfo, max_finish_time_diff: float) -> Non
     remaining_time = api.read.session.remaining()
     leader_index = output.leaderIndex
     player_index = output.playerIndex
-    leader_pace = output.dataSet[leader_index].lapTimeHistory.average
+    leader_pace = output.dataSet[leader_index].lapTimeHistory.average if leader_index >= 0 else 0.0
     player_pace = minfo.delta.lapTimePace
 
     # Time only
@@ -511,6 +521,7 @@ def update_finish_time(output: VehiclesInfo, max_finish_time_diff: float) -> Non
         if (
             leader_index == player_index
             or player_index < 0  # no player car listed
+            or leader_index < 0  # no leader listed
             or output.dataSet[leader_index].isFinished
             or not 0 < leader_pace < MAX_SECONDS
             or not 0 < player_pace < MAX_SECONDS
@@ -588,12 +599,22 @@ def update_finish_time(output: VehiclesInfo, max_finish_time_diff: float) -> Non
 
 
 def update_qualify_position(output: VehiclesInfo) -> None:
-    """Update qualify position"""
+    """Update qualify position
+
+    Game qualification place is 1-based, 0 or -1 if invalid (not qualified, joined later): such cars placed
+    after qualified ones, overall & in class, in vehicle index order.
+    """
+    places = [api.read.vehicle.qualification(index) for index in range(output.totalVehicles)]
+    next_place = max([0, *places])
+    for index, place in enumerate(places):
+        if place < 1:
+            next_place += 1
+            places[index] = next_place
     temp_class = sorted((
         api.read.vehicle.class_name(index),  # 0 class name
-        api.read.vehicle.qualification(index),  # 1 qualification position
+        place,  # 1 qualification position
         index,  # 2 player index
-    ) for index in range(output.totalVehicles))
+    ) for index, place in enumerate(places))
     # Update position
     qualify_in_class = 0
     last_class_name = None
@@ -693,6 +714,12 @@ def update_class_gaps(output: VehiclesInfo, now: float) -> None:
             if -1 < lap_diff < 1:
                 gap = time_behind(_point_times.get(ahead_index), data.totalLapProgress, now)
             setattr(data, target, gap if gap is not None else calc_time_gap_behind(ahead_index, index, lap_diff))
+
+
+def reset_leader(output: VehiclesInfo) -> None:
+    """No overall leader (readers check leaderIndex >= 0)"""
+    output.leaderIndex = -1
+    output.leaderBestLapTime = MAX_SECONDS
 
 
 def reset_session_timing(output: VehiclesInfo) -> None:

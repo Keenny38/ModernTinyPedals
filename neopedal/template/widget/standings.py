@@ -613,7 +613,7 @@ WIDGET_STANDINGS = {
         "background_color_laptime": "#2A2A2A",
         "font_color_player_laptime": "#000000",
         "background_color_player_laptime": "#BBBBBB",
-        "show_pitstop_duration_while_requested_pitstop": True,
+        "show_pitstop_duration_while_requested_pitstop": False,
         "show_highlighted_fastest_last_laptime": True,
         "font_color_fastest_last_laptime": "#FF44FF",
         "background_color_fastest_last_laptime": "#2A2A2A",

@@ -37,6 +37,15 @@ pylintrc
 *.log
 *.db
 
+# local release notes and test checklists (kept at the repo root, never committed)
+discord_*.md
+patreon_*
+tests_en_jeu_*
+
+# profiler output
+prof.out
+*.prof
+
 # build stuff
 /build/
 /native/openxr_layer/build/

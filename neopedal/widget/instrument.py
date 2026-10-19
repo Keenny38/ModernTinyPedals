@@ -42,9 +42,11 @@ class InstrumentMixin:
     wcfg: "InstrumentConfig"
 
     def read_ignition(self) -> int:
-        """0 ignition & engine off, 1 ignition on & engine off, 2 ignition & engine on"""
-        return api.read.switch.ignition_starter() * (
-            1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"]))
+        """0 ignition & engine off, 1 ignition on & engine off, 2 ignition & engine on (game ignition
+        value 2 while starter cranks)"""
+        if not api.read.switch.ignition_starter():
+            return 0
+        return 1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"])
 
     def read_clutch(self) -> int:
         """Auto clutch on adds 2, clutch pressed adds 1"""
@@ -104,15 +106,16 @@ class Realtime(InstrumentMixin, Overlay):
 
         # Ignition
         if self.wcfg["show_ignition"]:
-            self.color_ignition = (
-                self.wcfg["background_color_ignition"],
+            self.color_ignition = (  # by read_ignition state: off, stalled, running
+                self.wcfg["warning_color_engine_off"],
                 self.wcfg["warning_color_stalling"],
+                self.wcfg["background_color_ignition"],
             )
             self.bar_ignition = self.set_rawimage(
                 image=self.pixmap_ignition[1],
                 fixed_width=icon_size,
                 fixed_height=icon_size,
-                bg_color=self.color_ignition[0],
+                bg_color=self.color_ignition[2],
             )
             self.set_primary_orient(
                 target=self.bar_ignition,
@@ -211,7 +214,7 @@ class Realtime(InstrumentMixin, Overlay):
         if target.last != data:
             target.last = data
             target.image = self.pixmap_ignition[data == 0]
-            target.bg = self.color_ignition[data == 1]
+            target.bg = self.color_ignition[data]
             target.update()
 
     def update_clutch(self, target, data):

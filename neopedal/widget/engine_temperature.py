@@ -232,10 +232,12 @@ class Realtime(Overlay):
             self.last_lap_stime = lap_stime
             new_lap = True
 
+        overheating = bool(self.wcfg["show_game_overheating_highlight"] and api.read.engine.overheating())
+
         # Oil temperature
         if self.wcfg["show_oil_temperature"]:
             temp_oil = api.read.engine.oil_temperature()
-            self.update_oil(self.bar_oil_temp, temp_oil)
+            self.update_oil(self.bar_oil_temp, temp_oil, overheating)
 
             if self.wcfg["show_rate_of_change"] and interval:
                 if self.last_temp_oil is not None:  # first reading: no rate yet (from 0 is a fake spike)
@@ -252,7 +254,7 @@ class Realtime(Overlay):
         # Water temperature
         if self.wcfg["show_water_temperature"]:
             temp_water = api.read.engine.water_temperature()
-            self.update_water(self.bar_water_temp, temp_water)
+            self.update_water(self.bar_water_temp, temp_water, overheating)
 
             if self.wcfg["show_rate_of_change"] and interval:
                 if self.last_temp_water is not None:  # first reading: no rate yet
@@ -267,22 +269,22 @@ class Realtime(Overlay):
                 self.update_net(self.bar_water_net, temp_water, self.bar_water_net.last)
 
     # GUI update methods
-    def update_oil(self, target, data):
-        """Oil temperature"""
-        if target.last != data:
-            target.last = data
+    def update_oil(self, target, data, overheating):
+        """Oil temperature, overheat color above threshold or while game warns of overheating"""
+        if target.last != (data, overheating):
+            target.last = (data, overheating)
             text_temp = f"{self.unit_temp(data):.3f}"
             target.text = f"{text_temp:.5}°"
-            target.bg = self.bar_style_oil_temp[data >= self.wcfg["overheat_threshold_oil"]]
+            target.bg = self.bar_style_oil_temp[overheating or data >= self.wcfg["overheat_threshold_oil"]]
             target.update()
 
-    def update_water(self, target, data):
-        """Water temperature"""
-        if target.last != data:
-            target.last = data
+    def update_water(self, target, data, overheating):
+        """Water temperature, overheat color above threshold or while game warns of overheating"""
+        if target.last != (data, overheating):
+            target.last = (data, overheating)
             text_temp = f"{self.unit_temp(data):.3f}"
             target.text = f"{text_temp:.5}°"
-            target.bg = self.bar_style_water_temp[data >= self.wcfg["overheat_threshold_water"]]
+            target.bg = self.bar_style_water_temp[overheating or data >= self.wcfg["overheat_threshold_water"]]
             target.update()
 
     def update_rate(self, target, data):

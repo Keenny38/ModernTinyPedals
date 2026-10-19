@@ -6,8 +6,17 @@ from pathlib import Path
 
 QML_FOLDER = Path(__file__).resolve().parent.parent / "neopedal" / "ui" / "qml"
 
-# Known exceptions: (file, rule) -> count (none: combos take object models with textRole)
-ALLOWED: dict[tuple[str, str], int] = {}
+# Known exceptions: (file, rule) -> count. Small lists changing rarely: header cells, entries put before combo items
+# (TpCombo makes its items only while open), first chips of a row, setup steps
+ALLOWED: dict[tuple[str, str], int] = {
+    ("DirectorGraphics.qml", "model"): 2,  # combo: "All Classes" / "Preset in use" + names
+    ("OverlayOptions.qml", "model"): 2,  # combo: "Save as Profile..." / "Color Theme..." + names
+    ("PresetRow.qml", "model"): 2,  # first 3 classes & 2 tracks of a preset
+    ("RaceResults.qml", "model"): 1,  # class chips ("All" + classes) when any
+    ("RaceTyreTab.qml", "model"): 1,  # header cells: Stint, wheels, Change
+    ("SetupWelcome.qml", "model"): 1,  # steps between welcome & finish
+    ("TrackMapViewer.qml", "model"): 1,  # map info lines while shown
+}
 
 STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|`(?:[^`\\]|\\.)*`')
 COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
@@ -112,6 +121,18 @@ def bound_array(value: str, ids: set[str]) -> bool:
     return False
 
 
+def branches(code: str) -> list[str]:
+    """Parts of a value split at its top level ? and : (each result of a conditional model)"""
+    parts, depth, last = [], 0, 0
+    for index, char in enumerate(code):
+        depth += (char in OPENERS) - (char in CLOSERS)
+        if not depth and char in "?:":
+            parts.append(code[last:index])
+            last = index + 1
+    parts.append(code[last:])
+    return parts
+
+
 def violations(path: Path) -> list[tuple[str, int, str]]:
     """(rule, line, text) of performance patterns found in QML file"""
     text = path.read_text(encoding="utf-8")
@@ -120,7 +141,8 @@ def violations(path: Path) -> list[tuple[str, int, str]]:
     found = []
     for start, end in bindings(code, "model"):
         value = text[start:end]
-        if re.search(r"\.(?:filter|map)\s*\(", code[start:end]) or bound_array(value, ids):
+        if (re.search(r"\.(?:filter|map|concat|slice|split)\s*\(", code[start:end])
+                or any(bound_array(part, ids) for part in branches(value))):
             found.append(("model", line_of(text, start), value.strip()))
     for start, end in blocks(code, "BusyIndicator"):
         running = own_binding(code, start, end, "running")
@@ -143,7 +165,7 @@ def violations(path: Path) -> list[tuple[str, int, str]]:
 def test_qml_performance_patterns():
     counts: dict[tuple[str, str], int] = {}
     unexpected = []
-    for path in sorted(QML_FOLDER.glob("*.qml")):
+    for path in sorted(QML_FOLDER.rglob("*.qml")):
         for rule, line, text in violations(path):
             key = (path.name, rule)
             counts[key] = counts.get(key, 0) + 1
@@ -166,6 +188,9 @@ def test_rules_catch_patterns(tmp_path):
         ]
     }
     Repeater { model: backend.rows }
+    Repeater { model: shown ? [backend.first, backend.second] : [] }
+    Repeater { model: [0].concat(backend.rows) }
+    Repeater { model: shown ? backend.rows : [] }
     BusyIndicator { running: backend.busy }
     BusyIndicator { running: backend.busy && pageState.active }
     Image { source: "icons/flag.svg" }
@@ -180,4 +205,4 @@ def test_rules_catch_patterns(tmp_path):
 }
 """, encoding="utf-8")
     assert [(rule, line) for rule, line, _ in violations(page)] == [
-        ("model", 3), ("model", 6), ("busy", 11), ("image", 14), ("tooltip", 16)]
+        ("model", 3), ("model", 6), ("model", 11), ("model", 12), ("busy", 14), ("image", 17), ("tooltip", 19)]

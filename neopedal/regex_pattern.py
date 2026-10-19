@@ -139,7 +139,6 @@ CFG_INTEGER = (
     "^lap_time_history_count$|"
     "^leading_zero$|"
     "^manual_steering_range$|"
-    "^maximum_loading_attempts$|"
     "^maximum_saving_attempts$|"
     "^player_index$|"
     "^parts_width$|"
@@ -261,6 +260,7 @@ CHOICE_UNITS = MappingProxyType({
     "turbo_pressure_unit": ("bar", "psi", "kPa"),
     "tyre_pressure_unit": ("kPa", "psi", "bar"),
     "weight_unit": ("Kilogram", "Pound"),
+    "wind_speed_unit": ("m/s", "KPH", "MPH"),
 })
 # App window & overlay themes: modern or legacy (classic look) design, dark or light colors
 THEME_NAMES = ("Modern Dark", "Modern Light", "Legacy Dark", "Legacy Light")

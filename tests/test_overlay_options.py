@@ -246,7 +246,8 @@ def test_search_this_overlay_and_every_overlay(options):
     assert [entry["key"] for entry in rows(options)] == ["speedometer/opacity"]
     options.setScopeAll(True)
     found = rows(options)
-    assert len(found) == len(options._names) and options.matchCount == len(found)
+    opacity = [entry["overlay"] for entry in found if entry.get("option") == "opacity"]
+    assert sorted(opacity) == sorted(options._names) and options.matchCount == len(found)
     assert row(options, "fuel#layout")["title"].startswith("Fuel")
     nav = {entry["key"]: entry for entry in options.nav.rows}
     assert nav["fuel"]["matches"] == 1
@@ -543,7 +544,7 @@ def test_unit_hint_in_display_unit(options):
 def test_search_every_overlay_shows_description_once(options):
     options.setScopeAll(True)
     options.setSearch("opacity")
-    helps = [entry["help"] for entry in rows(options)]
+    helps = [entry["help"] for entry in rows(options) if entry.get("option") == "opacity"]  # not reference_line_opacity
     assert helps[0] and not any(helps[1:])
 
 
@@ -805,14 +806,14 @@ def test_page_qml_bundled_modules_and_translated():
     import re
 
     from neopedal.i18n.fr import TRANSLATION
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
     from neopedal.ui.quick.overlay_sections import FIXED_TITLES
     from neopedal.ui.quick.qml_modules import QML_MODULES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
     for name in PAGE_QML:
-        with open(f"{QML_FOLDER}/{name}.qml", encoding="utf-8") as file:
+        with open(qml_path(f"{name}.qml"), encoding="utf-8") as file:
             text = file.read()
         modules = re.findall(r"^import ([A-Za-z.]+)", text, flags=re.MULTILINE)
         assert modules and all(module.replace(".", "/") in QML_MODULES for module in modules), (name, modules)

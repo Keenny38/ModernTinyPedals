@@ -102,6 +102,8 @@ GLOBAL_DEFAULT = {
         "check_for_updates_on_startup": True,
         "number_of_hours_between_update_checks": 12,  # checked again while app runs, 0 = startup only
         "update_repository": "Keenny38/ModernTinyPedals",
+        # Driver & Safety Rank read online from RaceControl (sign in with a game ticket), see process/raceos.py
+        "enable_online_driver_ranks": True,
         'snap_distance': 10,
         "snap_gap": 0,
         "enable_magnetic_snap": True,  # overlays snap while dragged (Ctrl: free move), else snap with Ctrl
@@ -109,7 +111,6 @@ GLOBAL_DEFAULT = {
         "enable_edit_mode_on_unlock": False,  # unlock shows edit toolbar, else overlays only movable on hover
         "grid_move_size": 8,
         "minimum_update_interval": 10,
-        "maximum_loading_attempts": 5,
         "maximum_saving_attempts": 10,
         "number_of_automatic_backups": 10,
         # Phase 2 (package C2): deleted presets kept in trash, update version not proposed again
@@ -182,6 +183,9 @@ GLOBAL_DEFAULT = {
     "overlay_style": {
         "overlay_theme": "Modern Dark",  # see regex_pattern.THEME_NAMES, legacy = classic look
         "enable_colorblind_colors": False,
+        "background_opacity_percentage": 92,  # modern panels, see widget._modern.theme.background_alpha
+        "overlay_opacity_percentage": 100,  # whole overlays, times each overlay opacity, see widget._style
+        "enable_black_background": False,  # modern dark themes: neutral black panels
         "enable_modern_font": True,
         "modern_font_name": "JetBrains Mono",
         "modern_design_font_name": "Barlow Semi Condensed",
@@ -251,6 +255,9 @@ GLOBAL_DEFAULT = {
         "race_tab": 0,
         "live_unfollowed": "",
         "enable_game_data": True,
+        "recent_history_file_names": "",
+        "recent_race_plan_file_names": "",
+        "recent_tyre_plan_file_names": "",
     },
     "driver_stats_viewer": {
         "enable_lap_reference": True,

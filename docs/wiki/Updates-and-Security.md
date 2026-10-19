@@ -22,13 +22,13 @@ The app checks GitHub for a new release at startup (`check_for_updates_on_startu
 
 `Download And Install` (or `Install Now`) shows the progress (percent and size) in the notice and on the What's New page. `Cancel Download` stops it and removes the partial file. Then the updater:
 
-1. downloads `NeoPedal-<version>-setup.zip` from GitHub;
+1. downloads `NeoPedal-<version>-setup.zip` from GitHub, into a new private temporary folder;
 2. checks its **SHA-256**, against the digest GitHub gives for the file, or else the SHA256 list of the release notes, and refuses a file that does not match;
-3. extracts the installer from the ZIP;
+3. extracts the installer from the ZIP, read through the same open file as a second SHA-256 check;
 4. checks the installer's **Authenticode signature** when it is signed, and refuses an invalid signature. An unsigned installer is accepted (and logged) only from the official repository: with a custom update repository, the installer must be signed. The repository checked is the one the update was found in, even if the setting changed since;
 5. runs the installer silently: it closes the app, updates it and starts it again. Your presets and data are kept.
 
-The downloaded installer is deleted when you decline the install or when it fails to start.
+The downloaded installer and its folder are deleted when you decline the install or when it fails to start.
 
 Running from source on Windows, the update installs the Windows app the same way: it updates your installed copy (folder found from the installer registry entry, else from the `NeoPedal` Start menu shortcut), or installs it if there is none, then the installed app starts. The source folder itself is not changed: update it with `git pull`.
 

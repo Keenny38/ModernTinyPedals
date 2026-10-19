@@ -364,6 +364,31 @@ class ChatConfig(WidgetConfig):
     background_color_message: str
 
 
+class CornerCoachConfig(WidgetConfig):
+    """corner_coach widget"""
+
+    enable_classic_layout: bool
+    font_name: str
+    font_size: int
+    font_weight: FontWeightChoice
+    enable_auto_font_offset: bool
+    font_offset_vertical: float
+    bar_padding: float
+    bar_gap: int
+    reference_lap_source: ReferenceLapSourceChoice
+    show_next_corner: bool
+    show_braking_point: bool
+    show_apex_speed: bool
+    braking_point_tolerance: float
+    font_color_caption: str
+    background_color_caption: str
+    font_color_reading: str
+    background_color: str
+    font_color_time_gain: str
+    font_color_time_loss: str
+    font_color_warning: str
+
+
 class CruiseConfig(WidgetConfig):
     """cruise widget"""
 
@@ -545,6 +570,7 @@ class DeltabestConfig(WidgetConfig):
     delta_display_range: float
     freeze_duration: float
     enable_animated_deltabest: bool
+    show_invalid_lap_highlight: bool
     show_invalid_lap_indicator: bool
 
 
@@ -764,6 +790,8 @@ class ElevationConfig(WidgetConfig):
     show_sector_line: bool
     sector_line_color: str
     sector_line_width: float
+    show_corner_numbers: bool
+    font_color_corner_numbers: str
     show_position_mark: bool
     position_mark_color: str
     position_mark_width: float
@@ -784,6 +812,7 @@ class EngineConfig(WidgetConfig):
     overheat_threshold_oil: float
     overheat_threshold_water: float
     warning_color_overheat: str
+    show_game_overheating_highlight: bool
     show_oil_temperature: bool
     font_color_oil: str
     background_color_oil: str
@@ -834,6 +863,7 @@ class EngineTemperatureConfig(WidgetConfig):
     overheat_threshold_oil: float
     overheat_threshold_water: float
     warning_color_overheat: str
+    show_game_overheating_highlight: bool
     show_oil_temperature: bool
     font_color_oil_temperature: str
     background_color_oil_temperature: str
@@ -896,6 +926,11 @@ class FlagConfig(WidgetConfig):
     speed_limiter_text: str
     font_color_speed_limiter: str
     background_color_speed_limiter: str
+    show_speed_limit_difference: bool
+    show_speed_limiter_off_warning: bool
+    speed_limiter_off_text: str
+    font_color_speed_limiter_over: str
+    background_color_speed_limiter_over: str
     show_yellow_flag: bool
     show_yellow_flag_for_race_only: bool
     yellow_flag_maximum_range_ahead: float
@@ -905,6 +940,7 @@ class FlagConfig(WidgetConfig):
     background_color_yellow_flag: str
     show_blue_flag: bool
     show_blue_flag_for_race_only: bool
+    show_blue_flag_gap: bool
     font_color_blue_flag: str
     background_color_blue_flag: str
     show_start_lights: bool
@@ -937,6 +973,7 @@ class FlagConfig(WidgetConfig):
     font_color_scheduled_repairs: str
     background_color_scheduled_repairs: str
     show_sector_yellow_flags: bool
+    show_sector_yellow_flags_for_race_only: bool
     sector_yellow_flags_text: str
     font_color_sector_yellow_flags: str
     background_color_sector_yellow_flags: str
@@ -944,6 +981,21 @@ class FlagConfig(WidgetConfig):
     full_course_yellow_text: str
     font_color_full_course_yellow: str
     background_color_full_course_yellow: str
+    show_penalty: bool
+    penalty_text: str
+    font_color_penalty: str
+    background_color_penalty: str
+    show_last_lap: bool
+    last_lap_text: str
+    font_color_last_lap: str
+    background_color_last_lap: str
+    show_damage: bool
+    damage_text: str
+    font_color_damage: str
+    background_color_damage: str
+    enable_new_flag_flash: bool
+    new_flag_flash_duration: float
+    enable_urgency_order: bool
     display_order_pit_timer: int
     display_order_low_fuel: int
     display_order_speed_limiter: int
@@ -956,6 +1008,9 @@ class FlagConfig(WidgetConfig):
     display_order_scheduled_repairs: int
     display_order_sector_yellow_flags: int
     display_order_full_course_yellow: int
+    display_order_penalty: int
+    display_order_last_lap: int
+    display_order_damage: int
 
 
 class ForceConfig(WidgetConfig):
@@ -1244,6 +1299,7 @@ class GearConfig(WidgetConfig):
     speed_limiter_padding_horizontal: float
     font_color_speed_limiter: str
     background_color_speed_limiter: str
+    show_speed_limiter_pit_reminder: bool
     show_battery_bar: bool
     show_inverted_battery: bool
     battery_bar_height: int
@@ -1362,6 +1418,7 @@ class InstrumentConfig(WidgetConfig):
     background_color_headlights: str
     show_ignition: bool
     background_color_ignition: str
+    warning_color_engine_off: str
     warning_color_stalling: str
     stalling_rpm_threshold: float
     show_clutch: bool
@@ -1400,6 +1457,8 @@ class LapsAndPositionConfig(WidgetConfig):
     font_color_laps: str
     background_color_laps: str
     warning_color_maximum_laps: str
+    show_invalid_lap_highlight: bool
+    warning_color_invalid_lap: str
     show_position_overall: bool
     prefix_position_overall: str
     font_color_position_overall: str
@@ -2274,6 +2333,7 @@ class RelativeConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
+    show_pit_stops_beside_status: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -2291,6 +2351,18 @@ class RelativeConfig(WidgetConfig):
     column_lift_and_coast_time: bool
     column_time_gap: bool
     column_gap_trend: bool
+    column_driver_ranks: bool
+    show_driver_badge: bool
+    display_order_driver_ranks: int
+    column_delta_laptime: bool
+    number_of_delta_laptime: int
+    show_inverted_delta_laptime_layout: bool
+    display_order_delta_laptime: int
+    column_energy_per_lap: bool
+    show_energy_per_lap_average: bool
+    display_order_energy_per_lap: int
+    column_track_limits: bool
+    display_order_track_limits: int
 
 
 class RelativeFinishOrderConfig(WidgetConfig):
@@ -2544,6 +2616,7 @@ class RivalsConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
+    show_pit_stops_beside_status: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -2564,6 +2637,13 @@ class RivalsConfig(WidgetConfig):
     show_player_highlighted: bool
     show_lap_difference: bool
     show_highlighted_fastest_last_laptime: bool
+    column_track_limits: bool
+    display_order_track_limits: int
+    column_driver_ranks: bool
+    show_driver_badge: bool
+    display_order_driver_ranks: int
+    column_gap_trend: bool
+    display_order_gap_trend: int
 
 
 class RollAngleConfig(WidgetConfig):
@@ -2703,6 +2783,8 @@ class SessionConfig(WidgetConfig):
     display_order_system_clock: int
     display_order_session_time: int
     display_order_estimated_laps: int
+    show_field_level: bool
+    display_order_field_level: int
 
 
 class SlipAngleConfig(WidgetConfig):
@@ -3090,6 +3172,7 @@ class StandingsConfig(WidgetConfig):
     column_brand_logo: bool
     column_tyre_compound: bool
     column_pit_status: bool
+    show_pit_stops_beside_status: bool
     column_laptime: bool
     show_lap_sectors: bool
     show_lap_delta: bool
@@ -3106,6 +3189,11 @@ class StandingsConfig(WidgetConfig):
     show_energy_per_lap_average: bool
     column_incidents: bool
     column_track_limits: bool
+    column_driver_ranks: bool
+    show_driver_badge: bool
+    display_order_driver_ranks: int
+    column_gap_trend: bool
+    display_order_gap_trend: int
     column_stint_laps: bool
     column_speed_trap: bool
     column_lift_and_coast_time: bool
@@ -3114,6 +3202,7 @@ class StandingsConfig(WidgetConfig):
     show_lap_difference: bool
     show_class_header: bool
     show_class_column_with_class_header: bool
+    show_class_sof: bool
     show_column_headers: bool
 
 
@@ -3550,6 +3639,7 @@ class TimingConfig(WidgetConfig):
     prefix_current: str
     font_color_current: str
     background_color_current: str
+    show_invalid_lap_highlight: bool
     show_estimated: bool
     prefix_estimated: str
     font_color_estimated: str
@@ -3642,6 +3732,9 @@ class TrackMapConfig(WidgetConfig):
     sector_line_color: str
     sector_line_width: float
     sector_line_length: float
+    show_corner_numbers: bool
+    font_color_corner_numbers: str
+    background_color_corner_numbers: str
     show_proximity_circle: bool
     proximity_circle_radius: float
     proximity_circle_width: float
@@ -4350,6 +4443,10 @@ class WeatherConfig(WidgetConfig):
     starting_rubber_practice: float
     starting_rubber_qualifying: float
     starting_rubber_race: float
+    show_wind_speed: bool
+    prefix_wind: str
+    font_color_wind: str
+    background_color_wind: str
     show_trend: bool
     temperature_trend_interval: float
     raininess_trend_interval: float
@@ -4360,6 +4457,7 @@ class WeatherConfig(WidgetConfig):
     display_order_temperature: int
     display_order_rain: int
     display_order_wetness: int
+    display_order_wind: int
     show_wind: bool
 
 
@@ -4825,6 +4923,28 @@ class BlackBoxConfig(WidgetConfig):
     display_order_lift_coast: int
 
 
+class WheelDimensionConfig(WidgetConfig):
+    """wheel_dimension widget"""
+
+    enable_classic_layout: bool
+    font_name: str
+    font_size: int
+    font_weight: FontWeightChoice
+    enable_auto_font_offset: bool
+    font_offset_vertical: float
+    layout: int
+    bar_padding: float
+    bar_gap: int
+    show_front_tyre_radius: bool
+    font_color_front_tyre_radius: str
+    background_color_front_tyre_radius: str
+    show_rear_tyre_radius: bool
+    font_color_rear_tyre_radius: str
+    background_color_rear_tyre_radius: str
+    display_order_front_tyre_radius: int
+    display_order_rear_tyre_radius: int
+
+
 class WheelToeConfig(WidgetConfig):
     """wheel_toe widget"""
 
@@ -4856,6 +4976,57 @@ class WheelToeConfig(WidgetConfig):
     background_color_caption: str
 
 
+class WindDirectionConfig(WidgetConfig):
+    """wind_direction widget"""
+
+    enable_classic_layout: bool
+    font_name: str
+    font_size: int
+    font_weight: FontWeightChoice
+    enable_auto_font_offset: bool
+    font_offset_vertical: float
+    display_size: int
+    display_margin: int
+    wind_arrow_scale_top: float
+    wind_arrow_scale_side: float
+    wind_arrow_scale_bottom: float
+    wind_arrow_scale_center: float
+    wind_arrow_color: str
+    show_wind_strength_color: bool
+    wind_strength_threshold_calm: float
+    wind_strength_threshold_light: float
+    wind_strength_threshold_moderate: float
+    wind_strength_threshold_strong: float
+    wind_strength_threshold_gale: float
+    wind_strength_threshold_storm: float
+    wind_strength_color_calm: str
+    wind_strength_color_light: str
+    wind_strength_color_moderate: str
+    wind_strength_color_strong: str
+    wind_strength_color_gale: str
+    wind_strength_color_storm: str
+    show_background: bool
+    background_color: str
+    show_circle_background: bool
+    background_color_circle: str
+    show_wind_speed: bool
+    show_wind_speed_unit: bool
+    decimal_places: int
+    wind_speed_offset_x: float
+    wind_speed_offset_y: float
+    font_color_wind_speed: str
+    show_direction_mark: bool
+    direction_mark_north_length: float
+    direction_mark_north_width: float
+    direction_mark_north_color: str
+    direction_mark_major_length: float
+    direction_mark_major_width: float
+    direction_mark_major_color: str
+    direction_mark_minor_length: float
+    direction_mark_minor_width: float
+    direction_mark_minor_color: str
+
+
 class PluginConfig(WidgetConfig):
     """Base options of plugin widgets (own options of each plugin not typed)"""
 
@@ -4878,6 +5049,7 @@ WIDGET_CONFIG_TYPES: dict[str, type] = {
     "brake_temperature": BrakeTemperatureConfig,
     "brake_wear": BrakeWearConfig,
     "chat": ChatConfig,
+    "corner_coach": CornerCoachConfig,
     "cruise": CruiseConfig,
     "damage": DamageConfig,
     "damage_stats": DamageStatsConfig,
@@ -4959,5 +5131,7 @@ WIDGET_CONFIG_TYPES: dict[str, type] = {
     "weight_distribution": WeightDistributionConfig,
     "wheel_camber": WheelCamberConfig,
     "black_box": BlackBoxConfig,
+    "wheel_dimension": WheelDimensionConfig,
     "wheel_toe": WheelToeConfig,
+    "wind_direction": WindDirectionConfig,
 }

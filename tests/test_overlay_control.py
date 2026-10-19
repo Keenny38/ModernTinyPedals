@@ -32,7 +32,7 @@ def overlay(ui_env, monkeypatch):
     monkeypatch.setattr(overlay_control, "overlay_signal", SimpleNamespace(**{
         name: recorder(calls, name) for name in ("hidden", "context", "locked", "paused", "iconify")}))
     monkeypatch.setattr(overlay_control, "app_signal", SimpleNamespace(reload=recorder(calls, "reload")))
-    for name in ("active", "shown", "paused", "resets", "hidden", "session_type", "in_pits"):
+    for name in ("active", "shown", "paused", "resets", "hidden", "screen_hidden", "session_type", "in_pits"):
         monkeypatch.setattr(realtime_state, name, getattr(realtime_state, name))
     game = {"active": True, "paused": False, "resets": 3, "session_type": 4, "in_pits": False,
             "track": "Spa", "class": "GT3", "vehicles": 20, "on_air": False}
@@ -101,6 +101,50 @@ def test_spectating_shown_while_streamed(overlay):
     game["on_air"] = False  # source stopped
     run_loop(control)
     assert ("hidden", True) in calls and ("paused", True) in calls
+
+
+def test_auto_hide_on_screen_in_garage_while_streamed(overlay, monkeypatch):
+    """Garage (game not driven) with a stream source on air: overlays kept shown for the source, auto hide still
+    hides them on screen (window fully transparent), shown on screen again once driving"""
+    from neopedal import stream_overlay
+    from neopedal.hotkey import command
+    from neopedal.setting import cfg
+
+    control, game, calls = overlay
+    monkeypatch.setattr(realtime_state, "screen_hidden", False)
+    monkeypatch.setattr(realtime_state, "editing", False)
+    monkeypatch.setattr(command, "overlay_signal", SimpleNamespace(hidden=recorder(calls, "hidden")))
+    cfg.overlay["auto_hide"] = True
+    game["active"], game["on_air"] = False, True  # back to garage, layout source shown in OBS
+    run_loop(control)
+    assert realtime_state.shown and not realtime_state.hidden and realtime_state.screen_hidden
+    assert ("hidden", False) in calls
+    widget = SimpleNamespace(cfg=cfg, wcfg={"opacity": 0.8, "stream_visibility": "Screen & Stream"},
+                             opacity_scale=1.0, windowOpacity=lambda: 0.0)
+    from neopedal.widget._base import Base
+
+    assert Base.screen_opacity(widget) == 0.0  # type: ignore[arg-type]
+    assert stream_overlay.stream_opacity(widget) == 0.8  # type: ignore[arg-type]
+    realtime_state.editing = True  # edit mode: placed on screen
+    assert Base.screen_opacity(widget) == 0.8  # type: ignore[arg-type]
+    realtime_state.editing = False
+    # Visibility hotkey: shown on screen too
+    command.hotkey_overlay_visibility()
+    assert not realtime_state.hidden and not realtime_state.screen_hidden
+    command.hotkey_overlay_visibility()
+    assert realtime_state.hidden
+    # Auto hide off: shown on screen
+    cfg.overlay["auto_hide"] = False
+    run_loop(control)
+    assert not realtime_state.hidden and not realtime_state.screen_hidden
+    # Driving again: shown on screen
+    cfg.overlay["auto_hide"] = True
+    run_loop(control)
+    assert realtime_state.screen_hidden
+    calls.clear()
+    game["active"] = True
+    run_loop(control)
+    assert not realtime_state.screen_hidden and ("hidden", False) in calls
 
 
 def test_state_signals_sent_on_change_only(overlay):
@@ -222,4 +266,13 @@ def test_stream_on_air_never_imports_stream_overlay(monkeypatch):
         streamoverlay=SimpleNamespace(on_air=lambda: on_air["value"])))
     assert overlay_control.stream_on_air()
     on_air["value"] = False
+    assert not overlay_control.stream_on_air()
+
+
+def test_stream_on_air_while_stream_overlay_still_importing(monkeypatch):
+    """Main thread importing stream_overlay: module listed before its instance exists (overlay control thread
+    crashed with AttributeError "partially initialized module")"""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "neopedal.stream_overlay", SimpleNamespace())  # no streamoverlay yet
     assert not overlay_control.stream_on_air()

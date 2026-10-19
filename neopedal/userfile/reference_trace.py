@@ -257,16 +257,18 @@ class ReferenceLoader:
         job = self._job
         if job is not None and job.done():
             self._job = None
-            trace = None
-            if not job.cancelled():
+            if job.cancelled():  # thread ended by another overlay closing (stop_loading): trace kept, checked again
+                self._next_check = 0.0
+            else:
+                trace = None
                 error = job.exception()
                 if error is None:
                     trace = job.result()
                 else:
                     logger.error("REFERENCE LAP: check failed: %s", error)
-            if (self._job_track, self._job_length) == (self.track, self.track_length) and trace is not self.trace:
-                self.trace = trace
-                changed = True
+                if (self._job_track, self._job_length) == (self.track, self.track_length) and trace is not self.trace:
+                    self.trace = trace
+                    changed = True
         if self._job is None and track and now >= self._next_check:
             self._next_check = now + CHECK_INTERVAL
             self._job_track = track

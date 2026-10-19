@@ -45,7 +45,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 from datetime import date, timedelta
 from functools import partial
@@ -79,7 +79,6 @@ from ...process import results_file as rf
 from ...process import results_index as ri
 from ...process.player_profile import PlayerProfile, player_profile
 from ...process.results_text import gap_seconds_text, laps_behind_text
-from ...rank_info import history_path as ranks_history_path
 from ...rank_info import ranks
 from ...setting import cfg
 from ...userfile import lap_reference
@@ -222,7 +221,7 @@ def format_duration(seconds: float) -> str:
     return f"{hours} h {minutes:02d} min" if hours else f"{minutes} min"
 
 
-def rank_rows(player: dr.DriverRanks | None, history: list[dr.HistoryEntry]) -> list[dict]:
+def rank_rows(player: dr.DriverRanks | None, history: Sequence[dr.HistoryEntry]) -> list[dict]:
     """Driver card rank rows: label, value, color, progress (0-1), progress text, change since previous rank
     (percent of a tier, history of rank changes) & its tone (1 better, -1 worse, 0 none)"""
     if player is None:
@@ -313,6 +312,8 @@ def rank_info_text(player: dr.DriverRanks | None) -> str:
         return ""
     if ranks.remembered:  # game emptied its menu cache: last ranks seen
         return trm(f"Last ranks seen in game menu, {format_date(ranks.updated)}")
+    if ranks.online:
+        return trm(f"Ranks of RaceControl, updated {format_date(ranks.updated)}")
     return trm(f"Ranks of game menu, updated {format_date(ranks.updated)}")
 
 
@@ -932,7 +933,10 @@ class DriverStatsBackend(PageBackend):
             self.refresh_table()
 
     def settings_changed(self, _changed: bool = True):
-        """Settings applied (units, vehicle classification): page shown again with them"""
+        """Settings applied (units, vehicle classification): page shown again with them (hidden page: once shown,
+        never while its session history is released, see page_shown)"""
+        if self.defer_while_hidden(self.settings_changed):
+            return
         if self._loaded and not self._released:
             self.refresh_table()
 
@@ -1108,6 +1112,9 @@ class DriverStatsBackend(PageBackend):
         home = bool(hidden_since) and time.monotonic() - hidden_since >= HOME_RESET_DELAY and self._loaded
         if self._history_released:
             self._history_released = self._dirty = False
+            # Table made again with the history read: settings changed meanwhile never shown on the empty one
+            self.drop_when_shown(self.settings_changed)
+            self.drop_when_shown(self.pictures_changed)  # logos of the history read again
             # history read again, then its results files & links (see stats_files_read)
             self.reload_stats(select=ALL_TRACKS if home else None)
             return
@@ -1321,8 +1328,7 @@ class DriverStatsBackend(PageBackend):
             "detail": " · ".join(part for part in details if part),
             "avatar": QUrl.fromLocalFile(profile.avatar).toString() if profile is not None and profile.avatar else "",
             "figures": figures,
-            "ranks": rank_rows(player, dr.account_history(dr.read_history(ranks_history_path()), player.steam_id)
-                               if player is not None else []),
+            "ranks": rank_rows(player, ranks.history_of(player.steam_id) if player is not None else ()),
             "ranksInfo": rank_info_text(player),
             "badge": badge_card(player),
             "otherAccounts": other_account_rows(others),
@@ -1612,8 +1618,8 @@ class DriverStatsBackend(PageBackend):
     @Slot()
     def pictures_changed(self):
         """Logos fetched from game meanwhile (or theme changed): track list & table shown again if their
-        logos changed"""
-        if not self._loaded:
+        logos changed (once shown again if hidden: hidden pages never rebuild, see page_backend)"""
+        if not self._loaded or self.defer_while_hidden(self.pictures_changed):
             return
         tracks = [dict(entry, logo=self.logos.track(entry["key"])) if entry["key"] else entry
                   for entry in self._tracks]
@@ -1890,7 +1896,8 @@ class DriverStatsBackend(PageBackend):
                 width = max(user_widths[key] * em, em * 2)
             tip = HEADER_TOOLTIPS.get(key, "")
             columns.append({"key": key, "label": label, "tip": tr(tip) if tip else "", "width": round(width),
-                            "align": "left" if key in FIXED_COLUMNS else "center", "extras": extras})
+                            # names at left, numbers at right (tabular digits line up)
+                            "align": "left" if key in FIXED_COLUMNS else "right", "extras": extras})
         self._columns = columns
 
     def publish_rows(self):
@@ -2427,11 +2434,21 @@ class DriverStatsBackend(PageBackend):
         default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Session History')}.{extension}")
         filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export Session History..."), default,
                                                   "JSON (*.json)" if extension == "json" else "CSV (*.csv)")
-        if filename:
-            self.write_history(filename, extension)
+        if filename and self.write_history(filename, extension):
+            self.toast_exported(filename)
+
+    def toast_exported(self, filename: str):
+        """File exported: told, its folder opened from the toast"""
+        from ..toast import show_toast
+        from .replay_files import show_in_folder
+
+        show_toast(self._window, trm(f"Exported: <b>{os.path.basename(filename)}</b>"),
+                   action_text=tr("Show in Folder"), action=partial(show_in_folder, filename))
 
     def write_history(self, filename: str, kind: str, decimal_point: str = "") -> bool:
         """Write session history of selected track (every track for All Tracks), CSV in system number format"""
+        from ...userfile import atomic_path
+
         records = self.history_records()
         try:
             if kind == "json":
@@ -2441,7 +2458,8 @@ class DriverStatsBackend(PageBackend):
             else:
                 decimal = decimal_point or QLocale.system().decimalPoint() or "."
                 header = [tr(name) for name in HISTORY_COLUMNS]
-                write_history_csv(filename, records, header, [tr(name) for name in SESSION_NAMES], decimal)
+                with atomic_path(filename) as temp_filename:  # file open in a spreadsheet: left whole
+                    write_history_csv(temp_filename, records, header, [tr(name) for name in SESSION_NAMES], decimal)
         except OSError as error:
             logger.error("DRIVER STATS: unable to export %s: %s", filename, error)
             self.warning(trm(f"Unable to export: {error}"))
@@ -3189,8 +3207,8 @@ class DriverStatsBackend(PageBackend):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Driver Stats Viewer')}.csv")
         filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export CSV..."), default, "CSV (*.csv)")
-        if filename:
-            self.write_csv(filename, raw=raw)
+        if filename and self.write_csv(filename, raw=raw):
+            self.toast_exported(filename)
 
     def write_csv(self, filename: str, decimal_point: str = "", raw: bool = False) -> bool:
         """Visible columns of table, number format of system locale (decimal comma & semicolon in French)
@@ -3198,6 +3216,8 @@ class DriverStatsBackend(PageBackend):
         Args:
             raw: values in base units without formatting (lap times in seconds, distance in meters...).
         """
+        from ...userfile import atomic_path
+
         decimal = decimal_point or QLocale.system().decimalPoint() or "."
         delimiter = ";" if decimal == "," else ","
         keys = self.visible_keys()
@@ -3207,7 +3227,9 @@ class DriverStatsBackend(PageBackend):
             unit = RAW_UNITS.get("pb" if key.startswith("class:") else key, "") if raw else ""
             header.append(f"{label} ({unit})" if unit else label)
         try:
-            with open(filename, "w", newline="", encoding="utf-8-sig") as file:  # BOM: Excel reads UTF-8
+            # BOM: Excel reads UTF-8; file open in a spreadsheet left whole
+            with atomic_path(filename) as temp_filename, open(temp_filename, "w", newline="",
+                                                                encoding="utf-8-sig") as file:
                 writer = csv.writer(file, delimiter=delimiter)
                 writer.writerow(header)
                 for _, cells in self._table:

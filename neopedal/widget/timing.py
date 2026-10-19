@@ -133,6 +133,10 @@ class Realtime(Overlay):
         # Current laptime
         if self.wcfg["show_current"]:
             text_curr = f"{self.prefix_curr}{TEXT_NOLAPTIME}"
+            self.bar_style_curr = (
+                self.wcfg["font_color_current"],
+                self.wcfg["font_color_invalid_last"],  # lap invalidated by game
+            )
             self.bar_curr = self.set_rawtext(
                 text=text_curr,
                 width=font_m.width * len(text_curr) + bar_padx,
@@ -249,7 +253,8 @@ class Realtime(Overlay):
         # Current laptime
         if self.wcfg["show_current"]:
             laptime_curr = minfo.delta.lapTimeCurrent
-            self.update_laptime(self.bar_curr, laptime_curr, self.prefix_curr)
+            invalid = self.wcfg["show_invalid_lap_highlight"] and api.read.lap.invalidated()
+            self.update_current(self.bar_curr, laptime_curr, invalid)
 
         # Estimated laptime
         if self.wcfg["show_estimated"]:
@@ -280,6 +285,18 @@ class Realtime(Overlay):
                 text = f"{prefix}{calc.sec2laptime(data):>8.8}"
             else:
                 text = f"{prefix}{TEXT_NOLAPTIME}"
+            target.text = text
+            target.update()
+
+    def update_current(self, target, data, invalid):
+        """Update current laptime, in invalid lap color while game invalidated lap"""
+        if target.last != (data, invalid):
+            target.last = (data, invalid)
+            target.fg = self.bar_style_curr[invalid]
+            if 0 < data < MAX_SECONDS:
+                text = f"{self.prefix_curr}{calc.sec2laptime(data):>8.8}"
+            else:
+                text = f"{self.prefix_curr}{TEXT_NOLAPTIME}"
             target.text = text
             target.update()
 

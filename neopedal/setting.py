@@ -38,7 +38,7 @@ from .const_api import API_MAP_CONFIG
 from .const_common import EMPTY_DICT
 from .const_file import ConfigType, FileExt
 from .setting_validator import PresetValidator, StyleValidator
-from .userfile import set_global_config_path, set_user_data_path
+from .userfile import app_path, set_global_config_path, set_user_data_path
 from .userfile.json_setting import (
     copy_setting,
     create_versioned_backup,
@@ -143,6 +143,7 @@ class FilePath:
 
         Invalid or unavailable path (USB drive, NAS or cloud folder not mounted): default path
         used for this session only, user path kept (used again once available).
+        Relative path is resolved against APP root folder, never the working folder.
         """
         for key in user_path:
             path = user_path[key]
@@ -151,7 +152,7 @@ class FilePath:
                 logger.warning("SETTING: %s %s unavailable, %s used for this session", key, user_path[key], path)
                 set_user_data_path(path)
             # Assign path
-            setattr(self, key.replace("_path", ""), path)
+            setattr(self, key.replace("_path", ""), app_path(path))
 
 
 class Preset:
@@ -353,7 +354,6 @@ class Setting:
 
     def load_user(self):
         """Load user settings, should be called after loaded global setting"""
-        loading_attempts = self.max_loading_attempts
         # Load preset JSON file
         if self._setting_to_load != "":
             filename_setting_temp = self._setting_to_load
@@ -364,7 +364,6 @@ class Setting:
             filename=filename_setting_temp,
             filepath=self.path.settings,
             dict_def=self.default.setting,
-            max_attempts=loading_attempts,
         )
         self.filename.setting = filename_setting_temp
         self.load_styles()
@@ -376,7 +375,6 @@ class Setting:
             discard_queued: drop queued saves of style files (styles replaced on disk, by import):
                 a queued save would write older styles in memory over loaded ones.
         """
-        loading_attempts = self.max_loading_attempts
         if discard_queued:
             with self._save_lock:
                 for config_type in STYLE_TYPES:
@@ -386,42 +384,36 @@ class Setting:
             filepath=self.path.settings,
             dict_def=self.default.brakes,
             validator=StyleValidator.brakes,
-            max_attempts=loading_attempts,
         )
         self.user.brands = load_style_json_file(
             filename=self.filename.brands,
             filepath=self.path.settings,
             dict_def=self.default.brands,
             validator=StyleValidator.brands,
-            max_attempts=loading_attempts,
         )
         self.user.classes = load_style_json_file(
             filename=self.filename.classes,
             filepath=self.path.settings,
             dict_def=self.default.classes,
             validator=StyleValidator.classes,
-            max_attempts=loading_attempts,
         )
         self.user.compounds = load_style_json_file(
             filename=self.filename.compounds,
             filepath=self.path.settings,
             dict_def=self.default.compounds,
             validator=StyleValidator.compounds,
-            max_attempts=loading_attempts,
         )
         self.user.heatmap = load_style_json_file(
             filename=self.filename.heatmap,
             filepath=self.path.settings,
             dict_def=self.default.heatmap,
             validator=StyleValidator.heatmap,
-            max_attempts=loading_attempts,
         )
         self.user.tracks = load_style_json_file(
             filename=self.filename.tracks,
             filepath=self.path.settings,
             dict_def=self.default.tracks,
             validator=StyleValidator.tracks,
-            max_attempts=loading_attempts,
         )
 
     @property
@@ -652,10 +644,6 @@ class Setting:
         """Get max saving attempts"""
         return max(self.application["maximum_saving_attempts"], 3)
 
-    @property
-    def max_loading_attempts(self) -> int:
-        """Get max loading attempts"""
-        return max(self.application["maximum_loading_attempts"], 1)
 
 
 def snapshot_dict(dict_user: dict, max_attempts: int = 20) -> dict:

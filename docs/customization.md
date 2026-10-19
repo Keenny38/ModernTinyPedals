@@ -239,6 +239,8 @@ Heatmap preset can be customized by accessing `Heatmap editor` from `Tools` menu
 
 `heatmap.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
+New tyre compounds use `tyre_optimal_80` heatmap and new brakes use `brake_optimal_400` heatmap by default. `thermal_infrared` heatmap has the colors of former `tyre_default` heatmap. Heatmaps of existing presets are not changed: former `tyre_default` and `brake_default` heatmaps stay in existing `heatmap.json` as user heatmaps.
+
 [**`Back to Top`**](#)
 
 
@@ -415,7 +417,7 @@ Set running mode. `0` allows running multiple instances (copies) of NeoPedal. `1
 
 To run multiple copies of NeoPedal at same time: `python .\run.py -s 0` or `.\neopedal.exe --single-instance 0`
 
-Single instance mode saves `pid.log` file in the same folder as `neopedal.log`, which is used for instance identification.
+Single instance mode holds a system lock of its settings folder while running (released when NeoPedal closes, or crashes), which is used for instance identification.
 
     --safe-mode
 Start in safe mode: plugins are not loaded, overlays (widgets & VR overlay) are not started, so settings can be fixed in the main window (a widget can still be turned on by hand). Window title and a notice show safe mode; `Restart Normally` in the notice, or `Restart NeoPedal` in `Window` menu, starts normally again.
@@ -770,13 +772,6 @@ Set grid size for grid move, value in pixel. Default is `8` pixel. Minimum value
     minimum_update_interval
 Set minimum refresh rate limit for widget and module in milliseconds. This option is used for preventing extremely low refresh rate that may cause performance issues in case user incorrectly sets `update_interval` and `idle_update_interval` values. Default value is `10`, and should not be modified.
 
-    maximum_loading_attempts
-Set maximum retry attempts for preset loading. Default value is `5`. Minimum value is limited to `1` maximum attempt.
-
-Note, each attempt has a roughly 50ms delay. If all loading attempts failed, a backup copy will be created in `settings` folder, and preset will be reset to default. See [How to restore your preset from backups](#how-to-restore-your-preset-from-backups) for details.
-
-This option does not affect global config preset, which always has `5` maximum loading attempts.
-
     maximum_saving_attempts
 Set maximum retry attempts for preset saving. Default value is `10`. Minimum value is limited to `3` maximum attempts.
 
@@ -804,6 +799,9 @@ Show setup wizard at next startup. The wizard asks for language, game, units, wi
 
     update_repository
 Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value disables update checks. Default is `Keenny38/ModernTinyPedals` (this fork), so updates never offer the upstream releases.
+
+    enable_online_driver_ranks
+Read Driver Rank (DR) & Safety Rank (SR) of Le Mans Ultimate online from RaceControl, the way the game menu does: the app asks the running game for a Steam sign-in ticket, signs in to RaceControl (raceos.gg) with it and reads ranks only (nothing else sent, no change made to your account; ticket & sign-in kept in memory only, never saved). The game no longer keeps ranks in its menu file while it runs, so without this option the Driver Rank overlay, driver cards & Broadcast Director show the last ranks seen. Ranks are read when the app starts (game running), after each session (new race results file: read 30 seconds, 2 and 5 minutes later, as RaceControl updates them a moment after) and every 5 minutes while the game runs. While the game is on an online server, the ranks of the other drivers of the session are read too, by name (kept in memory only), for the Driver & Safety Rank column, strength of field and Broadcast Director cards. This option is enabled by default.
 
     number_of_automatic_backups
 Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from `Restore Backup` dialog. Set `0` to disable. Default is `10`.
@@ -858,6 +856,8 @@ Note, global background color will only be visible when `enable_translucent_back
 ## Overlay Style
 **Overlay style options can be accessed from `Config` menu in main window. Changes apply to all widgets in all presets.**
 
+`Config` > `Overlay Style` page also shows `Overlay Editing` group: `enable_edit_mode_on_unlock`, `enable_magnetic_snap`, `snap_distance`, `snap_gap`, `show_layout_guides`, `grid_move_size` and `enable_layout_per_screen_setup`. They are saved in `application` section of `config.json`, see [Application](#application).
+
 Themes only restyle options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so changing theme never changes presets. Modern themes use modern design, rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Legacy themes keep classic look: modern font, corner, depth and bar gap options do not apply.
 
     overlay_theme
@@ -872,6 +872,15 @@ Light themes invert gray panels and text, keep colored backgrounds (flags, warni
 
     enable_colorblind_colors
 Colorblind safe variant of overlay theme (Okabe-Ito palette): red / green pairs become orange / blue, on every theme. Default is disabled.
+
+    overlay_opacity_percentage
+Set opacity of every overlay at once, in percent, text included: multiplies `opacity` option of each widget, so differences between overlays are kept (for example `80` with widget `opacity` `0.9` shows widget at 72%). Applies on screen, on stream and in VR. Value range in `10` to `100`. Default is `100` (each widget `opacity` unchanged).
+
+    background_opacity_percentage
+Set panel background opacity of modern design widgets, in percent: `100` for opaque panels, lower values let the game show through. Value range in `0` to `100`. Widget `opacity` option still applies to the whole widget. Default is `92`.
+
+    enable_black_background
+Draw modern design panels in neutral black and dark grays instead of the slate (blue tinted) grays of `Modern Dark` theme. `Modern Light` theme keeps its light panels. Default is disabled.
 
     enable_modern_font
 Use modern fonts while a `Modern` overlay theme is selected. Modern design widgets draw labels and names in `modern_design_font_name`, and values (times, gaps, speeds, temperatures, fuel...) in `modern_font_name`, a monospace font that keeps digits steady and aligned. Classic layout widgets (`enable_classic_layout` enabled) replace their default font with `modern_font_name`; width of text bar is calculated from digit width to avoid clipping numbers. Disable to draw every widget, modern design included, in its own `font_name` option. Default is enabled.
@@ -959,7 +968,7 @@ Remote control allows other programs (Stream Deck, Companion, SimHub, button box
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
 
-A browser page reading the telemetry stream must be served from `http://localhost` or `http://127.0.0.1`: pages opened from a local file or shown in a sandboxed frame (`null` origin) are refused too.
+A browser page reading the telemetry stream must be served by NeoPedal itself (remote control, web dashboard or stream overlay port, on `localhost` or `127.0.0.1`): pages of other local servers, pages opened from a local file or shown in a sandboxed frame (`null` origin) are refused. Programs that are not browsers (no `Origin` header) are not limited.
 
     enable_remote_control
 Enable remote control server.
@@ -1132,6 +1141,9 @@ Available units: `kPa`, `psi`, `bar`.
 
     weight_unit
 Available units: `Kilogram`, `Pound`.
+
+    wind_speed_unit
+Unit of wind speed readings ([Wind Direction](#wind-direction) and [Weather](#weather) widgets). Available units: `m/s`, `KPH`, `MPH`. Default is `m/s`.
 
 [**`Back to Top`**](#)
 
@@ -1547,6 +1559,8 @@ Track info editor is used for editing [Tracks Preset](#tracks-preset). Note, any
 `Pit speed (m/s)` column is pit lane speed limit (in meters per second). This value is automatically recorded or updated by [Mapping Module](#mapping-module). Note, vehicle pit limiter must be activated while in pit lane to allow recording speed limit.
 
 `Speed trap (m)` column is speed trap position (in meters) relative to track length. To manually set speed trap position at your current on-track position, `Right-Click` on corresponding track's speed trap column and select `Set from Telemetry`.
+
+`Orient (°)` column is display orientation angle (in degrees) of this track's map in [Track Map](#track-map) widget, which allows custom map orientation for each track without switching presets. This value is added to `display_orientation` option of Track Map widget. Default is `0`.
 
 `Sunrise` column is sunrise hour in `Hour:Minute` format. This value has to be manually defined.
 
@@ -1972,6 +1986,9 @@ Set minimum recording distance (in meters) between each battery charge usage sam
     module_mapping
 Enable mapping module.
 
+    minimum_node_distance
+Set minimum recording distance (in meters) between each map node sample. Default value is `5` meters. Lower value records more detailed map and bigger file size. Value range is limited from `0.1` to `50` meters. A lap is not recorded if vehicle position jumps more than 100 meters (teleported to garage or skipped part of lap), or if both sector lines are not crossed.
+
 [**`Back to Top`**](#)
 
 
@@ -2129,6 +2146,9 @@ Set minimum axle rotation (radians per second) for calculating wheel radius and 
 
     maximum_rotation_difference_front, maximum_rotation_difference_rear
 Set maximum rotation difference between left or right wheel rotation and same axle rotation for limiting wheel radius calculation. Default value is `0.002` (0.2%). Setting higher difference value may result inaccurate wheel radius reading.
+
+    enable_wheel_dimension_measurement
+Enable real time wheel dimension measurement: front and rear tyre radius (in millimeters) shown by [Wheel Dimension](#wheel-dimension) widget. Disabled, the widget shows unavailable sign. Wheel radius used for slip ratio and wheel lock calculation is always measured. This option is enabled by default.
 
     wheel_lock_threshold
 Set percentage threshold for counting wheel lock duration under braking. `0.3` means 30% of tyre slip ratio.
@@ -2428,6 +2448,29 @@ Show time of day each message was sent.
 [**`Back to Top`**](#)
 
 
+## Corner coach
+**This widget coaches you corner by corner against reference lap of Lap Telemetry Viewer: next corner, braking point and apex speed.**
+
+Corners are found on reference lap speed, as in the corner table of Lap Telemetry Viewer, and named after official corner numbers (or names) of the circuit when known, else numbered in lap order. Reference lap comes from laps recorded by [Recorder module](#recorder-module) for current track & class, as for [Telemetry comparison](#telemetry-comparison) widget: `No reference lap` is shown while track has no recorded lap. Corners of reference lap are found once, in background. `Delta module` keeps distances smooth between game position updates.
+
+    reference_lap_source
+Set reference lap. Available values are: `Viewer` = lap set as reference in Lap Telemetry Viewer (last lap selection of track), `Best` = fastest valid recorded lap, `Last` = last recorded lap. Without lap set in viewer, fastest valid lap is used. Reference lap is checked again every few seconds, so a new best lap or a reference changed in viewer is used while driving.
+
+    show_next_corner
+Show next corner: official number or name (else number of corner found on reference lap), and distance to its apex.
+
+    show_braking_point
+Show distance to braking point of reference lap for next corner, then where you braked against it: `On point`, earlier or later (distance), or `Now` once reference braking point is passed without braking. `No braking` when reference lap does not brake for this corner.
+
+    show_apex_speed
+Show your minimum speed in last corner driven, and its difference to reference lap: positive (gain color) when faster.
+
+    braking_point_tolerance
+Set distance in meters within which a braking point counts as on point. Default is `3` meters.
+
+[**`Back to Top`**](#)
+
+
 ## Cruise
 **This widget displays compass, elevation, odometer info.**
 
@@ -2608,6 +2651,9 @@ Deltabest display follows delta bar progress.
     show_invalid_lap_indicator
 Modern design: outline deltabest in loss color while game invalidated current lap (track limits). This option only works for `LMU`.
 
+    show_invalid_lap_highlight
+Classic layout: outline deltabest in `background_color_time_loss` while game invalidated current lap (track limits). This option only works for `LMU`. Default is disabled.
+
 [**`Back to Top`**](#)
 
 
@@ -2777,6 +2823,9 @@ Show start line mark.
     show_sector_line
 Show sector line mark.
 
+    show_corner_numbers
+Show official corner numbers (or names, at Le Mans) along bottom of elevation plot, for circuits known by the app (as in Lap Telemetry Viewer). A label over the previous one is left out. Corners are placed once per track map, in background. Default is disabled.
+
     show_position_mark
 Show player's current position line mark.
 
@@ -2819,6 +2868,9 @@ Show estimated (maximum recorded) power to (current) weight ratio. Final reading
     show_game_overheating_warning
 Modern design: highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`.
 
+    show_game_overheating_highlight
+Classic layout: show oil and water temperature in `warning_color_overheat` while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`. Default is disabled.
+
 [**`Back to Top`**](#)
 
 
@@ -2836,6 +2888,9 @@ Set temperature threshold for oil and water overheat color indicator, unit in Ce
 
     show_game_overheating_warning
 Modern design: highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`.
+
+    show_game_overheating_highlight
+Classic layout: show oil and water temperature in `warning_color_overheat` while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`. Default is disabled.
 
     show_rate_of_change
 Show temperature rate of change for a specific time interval.
@@ -2855,7 +2910,13 @@ Show temperature net change per lap.
 ## Flag
 **This widget displays flags, pit state, warnings, start lights info.**
 
-Modern design: one chip per active item, in flag color (yellow, blue, green, red...), caption above value (pit time, fuel left, speed, distance to yellow flag, class & time of blue flag, traffic gap, pit window laps, repair time, sectors under yellow, full course yellow phase). Chips are packed in display order, inactive items take no room. Text options (`*_text`) replace design captions once changed from default value.
+Modern design: one chip per active item, in flag color (yellow, blue, green, red...), caption above value (pit time, fuel left, speed or difference to pit speed limit, distance to yellow flag with arrow (▲ ahead, ▼ behind), class & gap of car lapping under blue flag, traffic gap, pit window laps, repair time, sectors under yellow, full course yellow phase, penalty to serve, last lap, heavy damage). Chips are packed in display order, inactive items take no room: the live overlay is as large as its chips shown (every chip slot while overlays are unlocked or in edit mode, to place it). Text options (`*_text`) replace design captions once changed from default value.
+
+    enable_urgency_order
+Modern design: show most urgent chips first (full course yellow, start lights, penalty, speed limiter, yellow flags, blue flag, traffic, damage, low fuel, last lap...) instead of display order. Default is disabled.
+
+    enable_new_flag_flash, new_flag_flash_duration
+Modern design: flash alert chips (colors swapped) for a moment when raised: flags, penalty, traffic, damage, low fuel, last lap, speed limiter over pit speed limit or switched off in pit lane. Set flash duration in seconds. Default is enabled, `1.5` seconds.
 
     update_interval
 Set refresh interval in milliseconds. Default is `100`.
@@ -2870,7 +2931,7 @@ Show pit timer, and total amount time spent in pit after exit pit.
 Set highlight duration for total amount time spent in pit after exit pit.
 
     pit_in_text, pit_out_text, pit_closed_text
-Set custom text for pit in, out, closed.
+Set custom text for pit in, out, closed. Modern design: shown as chip caption once changed from default value.
 
     font_color_pit_closed, background_color_pit_closed
 Set color indicator on pit timer when pit lane is closed.
@@ -2902,6 +2963,18 @@ Show current vehicle speed while speed limiter is on. This option is enabled by 
     speed_limiter_text
 Set custom pit speed limiter text which shows when speed limiter is engaged.
 
+    show_speed_limit_difference
+Show difference to pit speed limit (negative under limit) instead of current speed, once pit speed limit is known (measured on track with speed limiter on, see Track Info). Speed limiter turns to over limit colors (modern design: red) when over pit speed limit in pit lane. Default is enabled.
+
+    show_speed_limiter_off_warning
+Show warning when pit lane is driven without speed limiter, from pit lane entry (or garage exit) until speed limiter is switched on. Limiter released at pit lane exit is no warning. Default is enabled.
+
+    speed_limiter_off_text
+Set custom text for speed limiter off warning.
+
+    font_color_speed_limiter_over, background_color_speed_limiter_over
+Set color of speed limiter over pit speed limit, and of speed limiter off warning.
+
     show_yellow_flag
 Show yellow flag indicator and distance display which shows nearest yellow flag vehicle distance. Note, positive distance reading indicates yellow flag that ahead of driver, negative indicates behind.
 
@@ -2917,7 +2990,10 @@ Note, yellow flags that ahead of driver take priority over those from behind.
 Set custom text for yellow flag.
 
     show_blue_flag
-Show blue flag indicator with nearest leading vehicle class name displayed on the left, and total duration (seconds) under blue flag on the right. Note, the class name is limited and trimmed to 4 characters.
+Show blue flag indicator with nearest leading vehicle class name displayed on the left, and time gap of car behind (see `show_blue_flag_gap`) or total duration (seconds) under blue flag on the right. Note, the class name is limited and trimmed to 4 characters (modern design: class name shown as chip caption).
+
+    show_blue_flag_gap
+Show time gap (seconds) of nearest car behind, the one lapping under blue flag, instead of duration under blue flag. Duration is shown while gap is unknown or over 30 seconds. Default is enabled.
 
     show_blue_flag_for_race_only
 Only show blue flag indicator during race session.
@@ -2965,7 +3041,10 @@ Show scheduled repairs notification and estimated repair time when damage repair
 Set custom text for scheduled repairs.
 
     show_sector_yellow_flags
-Show sectors under local yellow flag (sector numbers, `-` for clear sector). This option follows `show_yellow_flag_for_race_only`.
+Show sectors under local yellow flag (sector numbers, `-` for clear sector).
+
+    show_sector_yellow_flags_for_race_only
+Only show sector yellow flags during race session.
 
     sector_yellow_flags_text
 Set custom text before sector numbers.
@@ -2975,6 +3054,24 @@ Show full course yellow phase: pending or pits closed (`FCY`), pits open for lea
 
     full_course_yellow_text
 Set custom text for full course yellow, shown before phase.
+
+    show_penalty
+Show penalty to serve: drive through (`DT`), stop and go with stop time (`SG10`), number of penalties when several (`DT×2`), `PEN` if kind is unknown. Disqualification is shown by finish state.
+
+    penalty_text
+Set custom text for penalty.
+
+    show_last_lap
+Show last lap indicator (white flag) during race, when current lap ends with the checkered flag. Same finish lap as `Laps and Position` and `Session` widgets: timed race ends on crossing the line after the timer.
+
+    last_lap_text
+Set custom text for last lap.
+
+    show_damage
+Show heavy damage indicator when a body part is heavily dented, or a part or wheel is detached, with aerodynamic damage in percent if known (`LMU`).
+
+    damage_text
+Set custom text for damage.
 
 [**`Back to Top`**](#)
 
@@ -3316,6 +3413,9 @@ Set custom pit speed limiter text which shows when speed limiter is engaged.
     show_speed_limiter_reminder
 Modern design: show outlined speed limiter reminder while driving in pit lane with pit speed limiter off (vehicle with pit speed limiter only).
 
+    show_speed_limiter_pit_reminder
+Classic layout: show speed limiter text in swapped colors (`background_color_speed_limiter` text on `font_color_speed_limiter`) while driving in pit lane with pit speed limiter off (vehicle with pit speed limiter only). Default is disabled.
+
     show_battery_bar
 Show battery bar, which is only visible if electric motor available.
 
@@ -3449,7 +3549,10 @@ Set size of instrument icon in pixel. Minimum value is limited to `16`.
 Show headlights state.
 
     show_ignition
-Show engine ignition, starter, stalling state.
+Show engine ignition, starter, stalling state. Ignition background shows `warning_color_engine_off` color while both ignition and engine are off, and `warning_color_stalling` color while ignition is on and engine is off (stalled).
+
+    warning_color_engine_off
+Set ignition background color while both ignition and engine are off. Modern design uses red tile.
 
     stalling_rpm_threshold
 Set RPM threshold for triggering engine stalling warning. Default is `100` RPM.
@@ -3476,7 +3579,7 @@ Set percentage threshold for triggering wheel slip warning under acceleration. `
 **This widget displays lap number, driver overall position, position in class info.**
 
     show_laps
-Show your current lap number (lap progression) and total race laps. If total race laps is not available, such as in time-based session, estimated total laps will be displayed instead, and a `~` sign will be displayed before estimated total laps reading, and up to two decimal places will be kept.
+Show your completed laps with current lap progression (for example `5.50`: 5 laps done, halfway through the 6th) and total race laps. If total race laps is not available, such as in time-based session, estimated total laps will be displayed instead, and a `~` sign will be displayed before estimated total laps reading. Estimated total laps is the lap the race ends on, when crossing the line after the timer ended (whole laps): total minus current lap reading is the same as `estimated laps` reading of [Session](#session) widget.
 
 Note, estimated total laps reading is calculated based on local player's lap time pace, which can be different from in-game HUD reading.
 
@@ -3511,6 +3614,9 @@ Show driver position change in class instead of overall. This option is enabled 
 
     show_invalid_lap_indicator
 Modern design: show lap progress in loss color while game invalidated current lap (track limits). This option only works for `LMU`.
+
+    show_invalid_lap_highlight, warning_color_invalid_lap
+Classic layout: show lap number background in `warning_color_invalid_lap` while game invalidated current lap (track limits), before `warning_color_maximum_laps`. This option only works for `LMU`. Default is disabled.
 
 [**`Back to Top`**](#)
 
@@ -4131,6 +4237,27 @@ Modern design columns: brand logo after vehicle name (on by default: own logo of
     column_gap_trend
 Modern design column after relative time gap (on by default): gap change per lap to each car, averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain (closing on a car ahead, pulling away from a car behind), red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
 
+    column_driver_ranks
+Modern design column (Relative & Standings), off by default (`LMU` only): Driver Rank & Safety Rank of each driver, short and in rank color (`S2 P3`), dashes while unknown. Yours and your team members' come from the game menu (or RaceControl with `enable_online_driver_ranks`). Other drivers' need `enable_online_driver_ranks` (Config > Application > Online): while the game is on an online server (practice, race, private server), the app asks RaceControl the profiles of the drivers of the session by name (drivers joining the session asked at once, known ones again every 5 minutes and after each session; drivers leaving are no longer shown). Drivers without a RaceControl profile: dashes.
+
+    show_driver_badge
+Show the game badge of each driver after the ranks (on by default): Good Driver, Trusted Racer, Rookie, Warning... as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there. The Broadcast Director driver card shows the badge name.
+
+    column_delta_laptime
+Modern design column, off by default: lap time difference to player over recent laps (green if player was faster, most recent lap at right), as in Standings.
+
+    number_of_delta_laptime
+Set number of delta lap time records to display. Minimum number is limited to `2`, maximum is limited to `5`.
+
+    show_inverted_delta_laptime_layout
+Enable this option to invert layout order for delta lap time records.
+
+    column_energy_per_lap, show_energy_per_lap_average
+Modern design column, off by default (`LMU` only): virtual energy each driver used in the last lap, as the game gives it to its Rest API (`/rest/strategy/usage`, read every 10 seconds while the column is shown), in percent of a full tank. With `show_energy_per_lap_average`, average of the last 5 laps instead. Laps with a pit stop or a refill are left out. A dash for cars without virtual energy or before a complete lap.
+
+    column_track_limits
+Modern design column, off by default (`LMU` only): track limits points of each driver in current session, amber once any, red one point before penalty in races (points allowed per penalty given by the game; no penalty in practice and qualifying).
+
     show_player_highlighted
 Highlight player row with customizable specific color.
 
@@ -4262,6 +4389,9 @@ Show each driver's pit stop count, or penalty if any, with purple (default) back
 
     show_pit_request
 Show pit request color indicator on pit stop count column.
+
+    show_pit_stops_beside_status
+Modern design: show pit stops (or penalty) after the pit status pill (pit lane, garage, slow, finished), in a wider column. Disabled by default: one slot, the pit status pill is shown instead of pit stops while there is one, about half as wide.
 
     show_vehicle_in_garage
 Show vehicles parked in garage stall. Default is `false`. Note, local player is always displayed.
@@ -4436,6 +4566,24 @@ Note, most options are inherited from [Relative](#relative) and [Standings](#sta
     column_delta_laptime, column_time_interval
 Modern design columns besides those of [Relative](#relative): lap time difference to player over recent laps, and interval to player (car ahead in green, car behind in orange).
 
+    number_of_delta_laptime
+Set number of delta lap time records to display. Minimum number is limited to `2`, maximum is limited to `5`.
+
+    show_inverted_delta_laptime_layout
+Enable this option to invert layout order for delta lap time records.
+
+    column_track_limits
+Modern design column, off by default (`LMU` only): track limits points of each driver in current session, amber once any, red one point before penalty in races (points allowed per penalty given by the game; no penalty in practice and qualifying).
+
+    column_driver_ranks
+Modern design column, off by default (`LMU` only): Driver Rank & Safety Rank of each rival, short and in rank color, as the column of [Relative](#relative) (ranks of other drivers need `enable_online_driver_ranks`).
+
+    show_driver_badge
+Show the game badge of each driver after the ranks (on by default): Good Driver, Trusted Racer, Rookie, Warning... as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there. The Broadcast Director driver card shows the badge name.
+
+    column_gap_trend
+Modern design column, off by default: gap change per lap between you and each car by race position (gap to a car ahead of you, gap of a car behind you), averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain, red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
+
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
 Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
 
@@ -4574,6 +4722,9 @@ For example, a `12.45(+1)` reading means there are `12.45` total estimated laps,
 
 Note, this option only works for time-based race type, and there is no guarantee that prediction will be 100% accurate, as anything can happen in the last hour of race.
 
+    show_field_level
+Modern design, off by default (`LMU` only): average Driver Rank & Safety Rank of the drivers of an online race (`S3 · G1`, in color of the average Driver Rank), from their RaceControl profiles (see `column_driver_ranks` of Relative). Needs `enable_online_driver_ranks`; dashes offline.
+
 [**`Back to Top`**](#)
 
 
@@ -4634,6 +4785,9 @@ Show speed difference against personal all time best lap, current session best l
 
     layout
 2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
+
+    leading_zero
+Set amount of whole digits of each speed value, padded with leading zeros, from `1` to `3`. Default is `1`.
 
     show_speed
 Show current vehicle speed.
@@ -4710,6 +4864,9 @@ Modern design column, off by default (`LMU` only): virtual energy each driver us
     column_track_limits
 Modern design column, off by default (`LMU` only): track limits points of each driver in current session, amber once any, red one point before penalty in races (points allowed per penalty given by the game; no penalty in practice and qualifying).
 
+    column_gap_trend
+Modern design column, off by default: gap change per lap between you and each car by race position (gap to a car ahead of you, gap of a car behind you), averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain, red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
+
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
 Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
 
@@ -4739,6 +4896,9 @@ Show class name above the vehicles of each class (modern design), in multi-class
 
     show_class_column_with_class_header
 Keep class column next to each driver while class names are shown above their vehicles (`show_class_header`, modern design), for class colors on every row. Disabled by default: class headers replace class column.
+
+    show_class_sof
+Show the strength of field of each class at the right end of its class header (modern design, `LMU` only, disabled by default): average Driver Rank & Safety Rank of the drivers of the class whose ranks are known (`SoF S2 40% · G1 15%`: rank, tier and progress to the next tier, in color of the average Driver Rank), from their RaceControl profiles (needs `enable_online_driver_ranks`, see `column_driver_ranks` of Relative). Nothing shown while no rank is known (offline). Needs `show_class_header`, in multi-class split mode or single-class exclusive mode.
 
     minimum_top_vehicles
 Set minimum amount top place vehicles to display: top of player's class in split mode, top of all vehicles otherwise. This value has higher priority over `maximum_vehicles_per_split_player`, `maximum_vehicles_exclusive_mode` and `maximum_vehicles_combined_mode`, not over `maximum_vehicles_per_split_others`. Default is `3`, which always shows top 3 vehicles if present.
@@ -5159,7 +5319,7 @@ Show speed difference against reference lap at car position: positive when faste
 Show chart of each channel. Throttle and brake share pedal chart.
 
     reference_line_opacity
-Set opacity of reference lap lines (classic layout), from `0` to `1`. Reference lap lines are drawn with color of channel, thicker and faded.
+Set opacity of reference lap lines, from `0` to `1`. Classic layout: reference lap lines are drawn with color of channel, thicker and faded. Modern design: opacity of reference lap lines and areas, design look at default `0.45`.
 
 [**`Back to Top`**](#)
 
@@ -5199,6 +5359,9 @@ Show personal current average lap time pace, this reading is also used in real-t
 
     show_invalid_lap_indicator
 Modern design: highlight current lap time in loss color while game invalidated current lap (track limits). This option only works for `LMU`.
+
+    show_invalid_lap_highlight
+Classic layout: show current lap time in `font_color_invalid_last` while game invalidated current lap (track limits). This option only works for `LMU`. Default is disabled.
 
 [**`Back to Top`**](#)
 
@@ -5288,6 +5451,9 @@ Show start line mark.
 
     show_sector_line
 Show sector line mark.
+
+    show_corner_numbers
+Show official corner numbers (or names, at Le Mans) outside their bend, for circuits known by the app (as in Lap Telemetry Viewer). A label over an earlier one is left out. Corners are placed once per track map, in background. Default is disabled.
 
     show_proximity_circle
 Show proximity circle around player's position, which helps to quickly spot player and nearby opponents on map.
@@ -5754,7 +5920,7 @@ Show degree sign after temperatures.
 Enable heatmap auto matching: heatmap of each tyre compound, as set in the Tyre compound editor. Disabled, `heatmap_name` is used.
 
     heatmap_name
-Set heatmap preset name of tyre temperatures (used while `enable_heatmap_auto_matching` is disabled). Default is `tyre_default`.
+Set heatmap preset name of tyre temperatures (used while `enable_heatmap_auto_matching` is disabled). Default is `tyre_optimal_80`.
 
     enable_heatmap_from_optimal_temperature
 Color temperatures around the optimal temperature given by the game for each compound (Le Mans Ultimate), instead of the heatmap. Disabled by default.
@@ -5989,7 +6155,10 @@ Show rain precipitation in percentage.
 Show average surface wetness in percentage.
 
     show_wind
-Modern design: show wind speed in speed unit, with arrow of where wind blows relative to vehicle (up: tailwind, down: headwind, no arrow while calm).
+Modern design: show wind speed in wind speed unit, with arrow of where wind blows relative to vehicle (up: tailwind, down: headwind, no arrow while calm).
+
+    show_wind_speed
+Classic layout: show wind speed in wind speed unit, after an arrow of where wind blows relative to vehicle in four directions (up: tailwind, down: headwind, `-` while calm). Default is disabled.
 
     show_rubber_coverage_while_dry
 Show rough estimate of rubber coverage (percent) based on total number of laps done by all drivers while road surface is dry.
@@ -6037,6 +6206,9 @@ If weather readings increased within the interval, `▲` uparrow sign will be sh
 
     layout
 2 layouts are available: `0` = show columns from left to right, `1` = show columns from right to left. Note, the `now` column always shows current weather condition.
+
+    icon_size
+Set size of weather icons in pixels. Minimum value is limited to `16`. Modern design: icons scaled from their default size (`32`), columns widened to fit.
 
     show_estimated_time
 Show estimated time reading for upcoming weather. Note, estimated time reading only works in time-based race. Other race type such as lap-based race shows `n/a` instead.
@@ -6509,6 +6681,20 @@ Options of this widget in Overlay Options page are in sections, one per part of 
 [**`Back to Top`**](#)
 
 
+## Wheel dimension
+**This widget displays front and rear tyre radius measured in real time.**
+
+Tyre radius (in millimeters) is the rolling radius measured by [Wheels Module](#wheels-module) while driving without wheel slip, it is unavailable (`N/A`) until measured, or while `enable_wheel_dimension_measurement` option of wheels module is disabled. Note, wheel track and wheelbase are not available from `LMU` and `RF2` game API.
+
+    layout
+2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
+
+    show_front_tyre_radius, show_rear_tyre_radius
+Show average front and rear tyre radius (in millimeters).
+
+[**`Back to Top`**](#)
+
+
 ## Wheel toe
 **This widget displays wheel toe angle info.**
 
@@ -6522,6 +6708,50 @@ Show total toe angle between left and right wheel on the same axle, useful for q
 
     toe_in_smoothing_samples, total_toe_angle_smoothing_samples
 Set number of samples for reducing data fluctuation. Lower value may result more fluctuated reading. Set `1` to disable smoothing.
+
+[**`Back to Top`**](#)
+
+
+## Wind direction
+**This widget displays wind direction and speed relative to player's vehicle heading.**
+
+Direction marks turn with vehicle heading (north mark in its own color). Wind arrow points where wind blows relative to vehicle (up: tailwind, down: headwind), colored by wind strength. Wind arrow is replaced by a dot while wind speed is below calm threshold. Note, wind speed reads zero while game does not simulate wind (`LMU` and `RF2` may not), wind arrow then shows as a dot.
+
+    display_size
+Set widget size in pixel.
+
+    display_margin
+Set margin of direction marks from widget edge in pixel.
+
+    wind_arrow_scale_top, wind_arrow_scale_side, wind_arrow_scale_bottom, wind_arrow_scale_center
+Set wind arrow shape: tip, side, bottom and center points, as a fraction of widget radius.
+
+    show_wind_strength_color
+Color wind arrow by wind strength, with `wind_strength_color_*` colors. Disabled, wind arrow uses `wind_arrow_color`.
+
+    wind_strength_threshold_calm, wind_strength_threshold_light, wind_strength_threshold_moderate, wind_strength_threshold_strong, wind_strength_threshold_gale, wind_strength_threshold_storm
+Set wind speed thresholds (in meters per second) of wind strength colors. Below calm threshold, wind arrow is replaced by a dot. Defaults are `0.1`, `2`, `6`, `11`, `17`, `24`.
+
+    show_circle_background
+Show round background.
+
+    show_wind_speed
+Show wind speed reading, in wind speed unit set in [Units](#units) dialog.
+
+    show_wind_speed_unit
+Show wind speed unit after reading.
+
+    decimal_places
+Set amount decimal places of wind speed reading. Default is `1` decimal place.
+
+    wind_speed_offset_x, wind_speed_offset_y
+Set wind speed reading position as a fraction of widget size. Defaults are `0.5` and `0.8`.
+
+    show_direction_mark
+Show direction marks: north mark, major marks (east, south, west) and minor marks every 30 degrees.
+
+    direction_mark_north_length, direction_mark_major_length, direction_mark_minor_length
+Set inner end of direction marks as a fraction of mark radius.
 
 [**`Back to Top`**](#)
 

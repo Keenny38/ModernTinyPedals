@@ -61,7 +61,7 @@ def test_rail_items_setting():
     assert parse_rail_items("game_replays,race_results_viewer") == ["race_results_viewer"]
     assert default_rail_items() == [
         "home", "widget", "driver_stats_viewer", "race_results_viewer",
-        "broadcast_director", "lap_viewer", "race_calculator", "preset",
+        "broadcast_director", "stream_overlay_view", "lap_viewer", "race_calculator", "preset",
     ]
 
 
@@ -1044,3 +1044,24 @@ def test_language_change_keeps_input_of_kept_page(window):
     finally:
         editor.set_unmodified()
         change_language(window, language)
+
+
+def test_stream_page_added_to_navigation_bar_once():
+    """Setting 2.51.3: Stream Overlays page added after Broadcast Director in every bar (customized bars kept)"""
+    from neopedal.setting_preupdate import preupdate_global_setting
+
+    bar = {"application": {"rail_items": "home,broadcast_director,preset"}}
+    preupdate_global_setting((2, 51, 2), bar)
+    assert bar["application"]["rail_items"] == "home,broadcast_director,stream_overlay_view,preset"
+    bar = {"application": {"rail_items": "home, tools"}}  # no Broadcast Director: last
+    preupdate_global_setting((2, 51, 2), bar)
+    assert bar["application"]["rail_items"] == "home,tools,stream_overlay_view"
+    bar = {"application": {"rail_items": "stream_overlay_view,home"}}  # already there: kept
+    preupdate_global_setting((2, 51, 2), bar)
+    assert bar["application"]["rail_items"] == "stream_overlay_view,home"
+    bar = {"application": {"rail_items": "home,tools"}}  # bar changed after update: kept
+    preupdate_global_setting((2, 51, 3), bar)
+    assert bar["application"]["rail_items"] == "home,tools"
+    empty: dict = {"application": {}}  # default bar (has the page)
+    preupdate_global_setting((2, 51, 2), empty)
+    assert empty == {"application": {}}

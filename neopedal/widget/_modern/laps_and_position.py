@@ -29,11 +29,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ...api_control import api
 from ...formatter import format_points
 from ...module_info import minfo
-from .._common import player_vehicle
+from .._common import player_race_laps, player_vehicle
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
@@ -118,15 +117,14 @@ class Realtime(StatsMixin, ModernOverlay):
 
     def laps_value(self) -> Value:
         """Laps done / total laps, last lap highlighted"""
-        lap_into = calc.lap_progress_correction(api.read.lap.progress(), api.read.timing.current_laptime())
         lap_num = api.read.lap.number()
         lap_max = api.read.lap.maximum()
+        laps_done, lap_total = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
         if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-            text_total = f"{lap_max:.2f}"
+            text_total = f"{lap_total:.2f}"
         else:
-            session_time = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
-            text_total = f"~{lap_num + calc.end_timer_laps_remain(lap_into, minfo.delta.lapTimePace, session_time):.2f}"
-        text = f"{lap_num + lap_into:.2f}/{text_total}"
+            text_total = f"~{lap_total:.2f}"
+        text = f"{laps_done:.2f}/{text_total}"
         if self.wcfg["show_predicted_extra_laps"]:
             text = f"{text} ({minfo.vehicles.finishLapOffset:+.0f})"
         final = lap_num - lap_max >= -1

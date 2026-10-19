@@ -612,18 +612,59 @@ class DirectorBackend(PageBackend):
                 self.update_on_air()
                 self.update_cars()
 
-    @staticmethod
-    def overlays_follow(slot: int):
-        """Overlays (stream sources too) show the car on air: spectate mode on that car"""
+    # Car followed by overlays: written at most every FOLLOW_SAVE_MS (cuts every few seconds in automatic mode)
+    # and before preset reload, restart & quit, see save_followed_later
+    FOLLOW_SAVE_MS = 30000
+    _follow_unsaved = False  # car followed not written yet (any page)
+    _follow_save_due = 0.0  # time.monotonic() of the save scheduled, see save_followed_later
+
+    def overlays_follow(self, slot: int):
+        """Overlays (stream sources too) show the car on air: spectate mode on that car
+
+        Spectate mode turned on: saved & whole GUI refreshed (notification bar). Another car (each cut): only the
+        Spectate page told (spectate_changed), saved later (see save_followed_later).
+        """
         from ...api_control import api
 
-        if cfg.api["player_index"] == slot and cfg.api["enable_player_index_override"]:
+        setting = cfg.api
+        if setting["player_index"] == slot and setting["enable_player_index_override"]:
             return
-        cfg.api["player_index"] = slot
-        cfg.api["enable_player_index_override"] = True
-        cfg.save()
+        turned_on = not setting["enable_player_index_override"]
+        setting["player_index"] = slot
+        setting["enable_player_index_override"] = True
         api.setup()
-        app_signal.refresh.emit(True)
+        if turned_on:
+            DirectorBackend._follow_unsaved = False
+            cfg.save()
+            app_signal.refresh.emit(True)
+        else:
+            self.save_followed_later()
+            app_signal.spectate_changed.emit(slot)
+
+    def save_followed_later(self):
+        """Car followed written within FOLLOW_SAVE_MS (one save for many cuts), or before preset reload, restart &
+        quit (a preset file loaded again would bring back the car saved before)"""
+        from ... import loader
+
+        cls = DirectorBackend
+        cls._follow_unsaved = True
+        now = time.monotonic()
+        if now >= cls._follow_save_due:  # none scheduled, or its page deleted before (written by loader anyway)
+            cls._follow_save_due = now + cls.FOLLOW_SAVE_MS / 1000
+            QTimer.singleShot(cls.FOLLOW_SAVE_MS, self, cls.save_followed)
+        loader.on_pending_write(cls.save_followed_now)
+
+    @staticmethod
+    def save_followed(delay: int = 66):
+        """Car followed by overlays written, if not yet (cfg.save delay)"""
+        if DirectorBackend._follow_unsaved:
+            DirectorBackend._follow_unsaved = False
+            cfg.save(delay)
+
+    @staticmethod
+    def save_followed_now():
+        """Preset reload, restart or quit: car followed written at once (saving thread waited by interpreter exit)"""
+        DirectorBackend.save_followed(0)
 
     def can_command(self) -> bool:
         return self.state in (SESSION, REPLAY)

@@ -216,10 +216,15 @@ class Realtime(Overlay):
 
         leader_index = minfo.vehicles.leaderIndex
         player_index = minfo.vehicles.playerIndex
-        leader_lap_into = api.read.lap.progress(leader_index)
         player_lap_into = api.read.lap.progress()
+        if leader_index >= 0:
+            leader_data = minfo.vehicles.dataSet[leader_index]
+            leader_lap_into = api.read.lap.progress(leader_index)
+            leader_laptime_pace = leader_data.lapTimeHistory.average
+            leader_pit_time = leader_data.pitTimer.elapsed
+        else:  # no leader (new session, no place 1 in scoring)
+            leader_lap_into = leader_laptime_pace = leader_pit_time = 0.0
 
-        leader_laptime_pace = minfo.vehicles.dataSet[leader_index].lapTimeHistory.average
         player_laptime_pace = minfo.delta.lapTimePace
 
         leader_valid = 0 < leader_laptime_pace < MAX_SECONDS
@@ -238,7 +243,7 @@ class Realtime(Overlay):
             laps_diff = 0
 
         # Update last pit time slot
-        self.leader_pit_time_set[-1] = minfo.vehicles.dataSet[leader_index].pitTimer.elapsed
+        self.leader_pit_time_set[-1] = leader_pit_time
         self.update_pit_time(self.bars_pit_leader[-1], self.leader_pit_time_set[-1])
 
         self.player_pit_time_set[-1] = player_vehicle().pitTimer.elapsed

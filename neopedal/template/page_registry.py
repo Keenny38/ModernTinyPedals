@@ -76,7 +76,7 @@ PAGES: tuple[PageSpec, ...] = (
     PageSpec("home", "Home", "", PAGE_MAIN, letter="A", rail=0),  # home
     PageSpec("widget", "Overlays", "", PAGE_MAIN, letter="W", rail=1),  # all apps grid
     PageSpec("module", "Module", "", PAGE_MAIN, letter="M"),  # diagnostic
-    PageSpec("preset", "Preset", "", PAGE_MAIN, letter="P", rail=7),  # library
+    PageSpec("preset", "Preset", "", PAGE_MAIN, letter="P", rail=8),  # library
     PageSpec("spectate", "Spectate", "", PAGE_MAIN, letter="S"),  # view
     PageSpec("pacenotes", "Pacenotes", "", PAGE_MAIN, letter="N"),  # quick note
     PageSpec("hotkey", "Hotkey", "", PAGE_MAIN, letter="H"),  # keyboard
@@ -84,7 +84,7 @@ PAGES: tuple[PageSpec, ...] = (
     # Utilities
     PageSpec(
         "race_calculator", "Race Calculator", "", "Utilities",  # calculator
-        "race_calculator.RaceCalculator", short_label="Race", rail=6,
+        "race_calculator.RaceCalculator", short_label="Race", rail=7,
         keywords=(
             "fuel calculator tyre tire strategy planner energy pit stop stint "
             "carburant calculateur pneus strategie energie arret relais"
@@ -101,7 +101,7 @@ PAGES: tuple[PageSpec, ...] = (
     ),
     PageSpec(
         "lap_viewer", "Lap Telemetry Viewer", "", "Utilities",  # area chart
-        "lap_viewer.LapViewer", short_label="Telemetry", rail=5,
+        "lap_viewer.LapViewer", short_label="Telemetry", rail=6,
     ),
     PageSpec(
         "broadcast_director", "Broadcast Director", "", "Utilities",  # sliders (mixing desk)
@@ -123,7 +123,7 @@ PAGES: tuple[PageSpec, ...] = (
     ),
     PageSpec(
         "stream_overlay_view", "Stream Overlays", "", "Utilities",  # streaming
-        "stream_overlay_view.StreamOverlaysView", short_label="Stream",
+        "stream_overlay_view.StreamOverlaysView", short_label="Stream", rail=5,
         keywords=(
             "obs streamlabs xsplit vmix twitch youtube stream streaming browser source broadcast layout "
             "diffusion direct source navigateur streamer"

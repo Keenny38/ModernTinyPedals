@@ -193,12 +193,14 @@ def test_stream_ends_when_server_stops(stream_data, monkeypatch):
 
 
 @pytest.mark.parametrize(("origin", "allowed"), [
-    (None, True), ("http://localhost:8080", True), ("http://127.0.0.1", True),
-    ("https://evil.example", False), ("http://localhost.evil.example", False),
+    (None, True), ("http://localhost:8338", True), ("http://127.0.0.1:8339", True), ("https://localhost:8338", True),
+    ("http://localhost:8080", False), ("http://127.0.0.1", False),  # other local page (any program on this computer)
+    ("https://evil.example", False), ("http://localhost.evil.example", False), ("http://localhost:99999", False),
+    ("ftp://localhost:8338", False),
     ("null", False), (" NULL ", False),  # sandboxed frame of any site can send "null"
 ])
 def test_allowed_origin(origin, allowed):
-    assert command_server.is_allowed_origin(origin) is allowed
+    assert command_server.is_allowed_origin(origin, {8337, 8338, 8339}) is allowed
 
 
 def test_stream_interval_bounds():

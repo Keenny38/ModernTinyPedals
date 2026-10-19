@@ -217,6 +217,9 @@ def valid_delta_set(data: tuple) -> tuple:
     # Delta list must have at least 10 lines of samples
     if len(data) < 10:
         raise ValueError
+    # Distance & value in every row (blank or cut line of an edited file): never an IndexError while driving
+    if any(len(row) < 2 for row in data):
+        raise ValueError
     # Final row value(second column) must be higher than previous row
     if data[-1][1] < data[-2][1]:
         raise ValueError

@@ -79,10 +79,10 @@ def write_bom(filename: str, data) -> None:
 def test_setting_and_style_with_bom_loaded(folder):
     write_bom(f"{folder}race.json", {"widget": {"enable": True}})
     loaded = json_setting.load_setting_json_file(
-        "race.json", folder, {"widget": {"enable": False}}, validator=lambda user, default: user, max_attempts=1)
+        "race.json", folder, {"widget": {"enable": False}}, validator=lambda user, default: user)
     assert loaded == {"widget": {"enable": True}}
     write_bom(f"{folder}classes.json", {"Hypercar": {"color": "#FF0000"}})
-    loaded = json_setting.load_style_json_file("classes.json", folder, {}, max_attempts=1)
+    loaded = json_setting.load_style_json_file("classes.json", folder, {})
     assert loaded == {"Hypercar": {"color": "#FF0000"}}
     assert not any(".backup" in name for name in os.listdir(folder))  # never seen as corrupted
 
@@ -109,7 +109,7 @@ def test_tyre_strategy_and_layout_profile_with_bom_loaded(folder):
 def test_style_not_object_falls_back_to_default(folder, content):
     with open(f"{folder}brands.json", "w", encoding="utf-8") as file:
         file.write(content)
-    loaded = json_setting.load_style_json_file("brands.json", folder, {"A": "B"}, max_attempts=1)
+    loaded = json_setting.load_style_json_file("brands.json", folder, {"A": "B"})
     assert loaded == {"A": "B"}
     with open(f"{folder}brands.json", encoding="utf-8") as file:
         assert json.load(file) == {"A": "B"}  # default saved
@@ -126,7 +126,7 @@ def test_brands_validator_drops_invalid_entries(folder):
     with open(f"{folder}brands.json", "w", encoding="utf-8") as file:
         json.dump({"Car A": "Brand A", "Car B": ["x"]}, file)
     loaded = json_setting.load_style_json_file(
-        "brands.json", folder, {}, validator=StyleValidator.brands, max_attempts=1)
+        "brands.json", folder, {}, validator=StyleValidator.brands)
     assert loaded == {"Car A": "Brand A"}
 
 

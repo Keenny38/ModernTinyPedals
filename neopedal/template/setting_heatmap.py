@@ -20,13 +20,15 @@
 Default heatmap template
 """
 
-HEATMAP_DEFAULT_TYRE = "tyre_default"
-HEATMAP_DEFAULT_BRAKE = "brake_default"
+HEATMAP_DEFAULT_TYRE = "tyre_optimal_80"  # new tyre compounds & tyre overlays
+HEATMAP_DEFAULT_BRAKE = "brake_optimal_400"  # new brakes & brake overlays
 
 # key = temperature in Celsius
 # value = HEX color code
+# Former defaults "tyre_default" (now "thermal_infrared") & "brake_default" (same as "brake_optimal_400")
+# stay in heatmap files of existing users, as user heatmaps
 HEATMAP_DEFAULT = {
-    HEATMAP_DEFAULT_TYRE: {
+    "thermal_infrared": {
         "-273": "#44F",
         "40": "#84F",
         "60": "#F4F",
@@ -34,17 +36,6 @@ HEATMAP_DEFAULT = {
         "100": "#F44",
         "120": "#F84",
         "140": "#FF4",
-    },
-    HEATMAP_DEFAULT_BRAKE: {
-        "-273": "#44F",
-        "100": "#48F",
-        "200": "#4FF",
-        "300": "#4F8",
-        "400": "#4F4",
-        "500": "#8F4",
-        "600": "#FF4",
-        "700": "#F84",
-        "800": "#F44",
     },
     "tyre_optimal_50": {
         "-273": "#44F",
@@ -122,5 +113,16 @@ HEATMAP_DEFAULT = {
         "450": "#FF4",
         "525": "#F84",
         "600": "#F44",
+    },
+    "brake_optimal_400": {
+        "-273": "#44F",
+        "100": "#48F",
+        "200": "#4FF",
+        "300": "#4F8",
+        "400": "#4F4",
+        "500": "#8F4",
+        "600": "#FF4",
+        "700": "#F84",
+        "800": "#F44",
     },
 }

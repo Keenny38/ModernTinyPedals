@@ -122,7 +122,7 @@ def test_window_keys_on_charts_track_box_never_keeps_them(opener, warnings):
     chart = chart_of(view)
     assert focused(view) is chart and QCoreApplication.instance().focusWidget() is view
     track_box = named(view, "trackBox")
-    assert track_box.property("focusPolicy") == Qt.FocusPolicy.NoFocus.value
+    assert track_box.property("focusPolicy") == Qt.FocusPolicy.TabFocus.value  # Tab reaches it, a click never
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center_of(track_box))
     wait(0.4)
     key(view, Qt.Key.Key_Escape)  # popup closed
@@ -195,18 +195,18 @@ def test_escape_never_closes_viewer(opener, warnings):
     split.forceActiveFocus()
     key(view, Qt.Key.Key_Escape)
     assert dialog.isVisible() and focused(view) is chart
-    # Hysteresis slider & XY channel lists never take keys
+    # Hysteresis slider & XY channel lists never take keys when clicked (Tab reaches them)
     backend.setSideTab(2)
     wait(0.4)
     slider = find(view, lambda item: "Slider" in class_name(item) and item.property("from") == 3.0)[0]
-    assert slider.property("focusPolicy") == Qt.FocusPolicy.NoFocus.value
+    assert slider.property("focusPolicy") == Qt.FocusPolicy.TabFocus.value
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center_of(slider))
     wait(0.2)
     assert focused(view) is chart
     backend.setSideTab(5)
     wait(0.4)
     boxes = find(view, lambda item: item.property("textRole") == "title" and item.property("column") is not None)
-    assert boxes and all(box.property("focusPolicy") == Qt.FocusPolicy.NoFocus.value for box in boxes)
+    assert boxes and all(box.property("focusPolicy") == Qt.FocusPolicy.TabFocus.value for box in boxes)
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center_of(boxes[0]))
     wait(0.4)
     key(view, Qt.Key.Key_Escape)  # popup closed

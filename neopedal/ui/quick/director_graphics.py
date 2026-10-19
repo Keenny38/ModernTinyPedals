@@ -37,9 +37,10 @@ from ...i18n import tr
 from ...process import championship as champ
 from ...process import director as dr
 from ...process.game_info import Standing
-from ...rank_info import ranks
+from ...rank_info import driver_ranks, poll_field
 from ...setting import cfg
 from ...template.setting_status_colors import SAME_TIME
+from ...userfile.badge_icons import badge_info
 from .director_shared import (
     ACCENT,
     AUTO_EVENT_SECONDS,
@@ -94,6 +95,7 @@ class BroadcastGraphics(DirectorPart):
     graphicsChanged = Signal()
     onDemandChanged = Signal()
     championshipChanged = Signal()
+    logoChanged = Signal()
 
     def __init__(self, page: DirectorBackend, settings: dict[str, Any]):
         super().__init__(page)
@@ -118,6 +120,8 @@ class BroadcastGraphics(DirectorPart):
         self._sector_ends = [0.0, 0.0]  # meters: end of sectors 1 & 2 (furthest place seen in each)
         self._brand: tuple[float, tuple[str, list[str]]] = (0.0, ("", []))  # read time, logo & sponsors
         self._champ_view: tuple = ()  # what the championship graphic was made from
+        self._champ_version = 0  # championship list changes (graphic made again)
+        self._layout_undo: tuple[str, dict[str, list[float]], int] | None = None  # preset, places & version at reset
         self._champ_state: dict[str, Any] | None = None
         self._quali_times: tuple[tuple, dict[str, float]] = ((), {})  # qualifying results of the session
         self._index_of: dict[int, int] = {}  # shared memory vehicle index of each slot (live feed)
@@ -304,8 +308,8 @@ class BroadcastGraphics(DirectorPart):
         logo, picture = self.picture_links(car.vehicle)
         gained = grid.get(car.slot, 0) - places.get(car.slot, 0) if car.slot in grid else 0
         name = car.driver.split("#", 1)[0].strip() or car.driver
-        ranks.poll()
-        known = ranks.team_ranks(name)  # player & team members only (game menu data)
+        poll_field([other.driver for other in self.page.standings])
+        known = driver_ranks(name)  # player & team members, other drivers of an online race (RaceControl option)
         return {
             "number": car.number, "name": name,
             "team": car.team or car.vehicle, "cls": car.car_class, "color": class_color(car.car_class),
@@ -315,7 +319,8 @@ class BroadcastGraphics(DirectorPart):
                       [tr("Laps"), str(car.laps)],
                       [tr("Places"), f"{'+' if gained > 0 else ''}{gained}" if gained else ""],
                       ["DR", known.driver.short if known is not None and known.driver else ""],
-                      ["SR", known.safety.short if known is not None and known.safety else ""]],
+                      ["SR", known.safety.short if known is not None and known.safety else ""],
+                      [tr("Badge"), badge_name(known.badge) if known is not None else ""]],
             "story": story, "storyTone": tone,
         }
 
@@ -576,8 +581,7 @@ class BroadcastGraphics(DirectorPart):
 
     def championship_state(self) -> dict[str, Any] | None:
         """Championship standings chosen (class chosen, or every driver), made again only when changed"""
-        view = (self.championship_index, self.championship_class, id(self.championships),
-                len(self.championships))
+        view = (self.championship_index, self.championship_class, self._champ_version)
         if view != self._champ_view:
             self._champ_view = view
             self._champ_state = self.make_championship_state()
@@ -770,8 +774,10 @@ class BroadcastGraphics(DirectorPart):
 
     @Slot()
     def checkGraphics(self):
-        """Graphics panel opened: source address made again (stream overlays turned on or off meanwhile)"""
+        """Graphics panel opened: source address made again (stream overlays turned on or off meanwhile), logo
+        looked for again (file put in the branding folder by hand)"""
         self.graphicsChanged.emit()
+        self.logoChanged.emit()
 
     @Slot()
     def showDriverCard(self):
@@ -896,18 +902,28 @@ class BroadcastGraphics(DirectorPart):
         name = os.path.splitext(os.path.basename(path))[0]
         items = [item for item in self.championships if item["name"] != name]
         items.append({"name": name, "rows": rows})
-        self.championships = items
-        self.championship_index = len(items) - 1
-        self.championship_class = ""
-        self.store_championships()
+        if not self.store_championships(items, len(items) - 1, tr("Championship not imported")):
+            return False
         self.page.notify(tr("%1 drivers imported").replace("%1", str(len(rows))))
         return True
 
-    def store_championships(self):
+    def store_championships(self, items: list[dict[str, Any]], index: int, failed: str) -> bool:
+        """Championship list replaced by items (index chosen) once saved; not saved: list kept as it was, failed:
+        error notified"""
         try:
-            save_championships(self.championships)
+            save_championships(items)
         except OSError as error:
-            self.page.notify(f"{tr('Championship not imported')}: {error}", True)
+            self.page.notify(f"{failed}: {error}", True)
+            return False
+        self.championships = items
+        self._champ_version += 1
+        self.championship_index = index
+        self.championship_class = ""
+        self.championships_changed()
+        return True
+
+    def championships_changed(self):
+        """Championship list or choice changed: choice saved with page settings, graphic sent again if shown"""
         self.page.save_settings()
         self.championshipChanged.emit()
         if self.on_demand == "champ":
@@ -915,26 +931,28 @@ class BroadcastGraphics(DirectorPart):
 
     @Slot()
     def removeChampionship(self):
-        if 0 <= self.championship_index < len(self.championships):
-            del self.championships[self.championship_index]
-            self.championship_index = max(min(self.championship_index, len(self.championships) - 1), 0)
-            if not self.championships and self.on_demand == "champ":
-                self.on_demand = ""
-                self.onDemandChanged.emit()
-            self.store_championships()
+        if not 0 <= self.championship_index < len(self.championships):
+            return
+        items = [item for number, item in enumerate(self.championships) if number != self.championship_index]
+        if (self.store_championships(items, max(min(self.championship_index, len(items) - 1), 0),
+                                     tr("Championship not removed"))
+                and not items and self.on_demand == "champ"):
+            self.on_demand = ""
+            self.onDemandChanged.emit()
+            self.publish_graphics(force=True)
 
     @Slot(int)
     def setChampionship(self, index: int):
         if 0 <= index < len(self.championships) and index != self.championship_index:
             self.championship_index = index
             self.championship_class = ""
-            self.store_championships()
+            self.championships_changed()
 
     @Slot(str)
     def setChampionshipClass(self, name: str):
         if name != self.championship_class:
             self.championship_class = name
-            self.store_championships()
+            self.championships_changed()
 
     # Layout editor of the graphics (browser)
     @Slot()
@@ -950,12 +968,39 @@ class BroadcastGraphics(DirectorPart):
 
     @Slot()
     def resetGraphicsLayout(self):
-        """Every graphic back to its place & size"""
+        """Every graphic of the layout preset in use (the one the editor changes) back to its place & size, places
+        kept for one undo"""
         from ...stream_director import director_feed, director_layout
 
-        director_layout.set("", {})
+        preset = director_layout.active()
+        places = director_layout.get(preset)
+        director_layout.set(preset, {})
+        self._layout_undo = (preset, places, director_layout.version) if places else None
         director_feed.bump()
+        self.graphicsChanged.emit()
         self.page.notify(tr("Graphics back to their places"))
+
+    @Property(bool, notify=graphicsChanged)
+    def canUndoLayoutReset(self) -> bool:
+        """Places before the last reset can be put back (layout not changed since)"""
+        from ...stream_director import director_layout
+
+        return self._layout_undo is not None and self._layout_undo[2] == director_layout.version
+
+    @Slot()
+    def undoLayoutReset(self):
+        from ...stream_director import director_feed, director_layout
+
+        undo, self._layout_undo = self._layout_undo, None
+        if undo is None:
+            return
+        if undo[2] != director_layout.version:  # layout saved by the editor or preset changed meanwhile
+            self.page.notify(tr("Layout changed since the reset: nothing undone"), True)
+        else:
+            director_layout.set(undo[0], undo[1])
+            director_feed.bump()
+            self.page.notify(tr("Previous layout restored"))
+        self.graphicsChanged.emit()
 
     # Graphics shown by the director itself: starting grid before the start, event card, classification at the end
     def auto_graphics(self, new_events: list[dr.Event]):
@@ -1073,34 +1118,58 @@ class BroadcastGraphics(DirectorPart):
             self.page.notify(tr("Choose a PNG, JPG, WEBP or SVG picture"), True)
             return False
         folder = brand_folder()
+        saved = True
         try:
             os.makedirs(folder, exist_ok=True)
             self.remove_logo_files()
             shutil.copyfile(path, os.path.join(folder, f"logo.{extension}"))
         except OSError as error:
             self.page.notify(f"{tr('Logo not saved')}: {error}", True)
-            return False
-        self._brand = (0.0, self._brand[1])
+            saved = False
+        self._brand = (0.0, self._brand[1])  # graphics show the logo files there now (some removed before a failure)
         self.publish_graphics(force=True)
-        return True
+        self.logoChanged.emit()
+        return saved
+
+    @Property(bool, notify=logoChanged)
+    def hasLogo(self) -> bool:
+        """League logo file in the branding folder (remove button enabled), read when told changed only"""
+        from ...stream_director import brand_folder
+
+        try:
+            with os.scandir(brand_folder()) as entries:
+                return any(entry.is_file() and entry.name.lower().startswith("logo.") for entry in entries)
+        except OSError:
+            return False
 
     @staticmethod
     def remove_logo_files():
+        """League logo files removed (OSError: one could not be removed, opened by another program...)"""
         from ...stream_director import brand_folder
 
         folder = brand_folder()
-        try:
-            for entry in os.scandir(folder):
-                if entry.is_file() and entry.name.lower().startswith("logo."):
-                    os.remove(entry.path)
-        except OSError:
-            pass
+        if not os.path.isdir(folder):
+            return
+        with os.scandir(folder) as entries:
+            logos = [entry.path for entry in entries if entry.is_file() and entry.name.lower().startswith("logo.")]
+        for logo in logos:
+            os.remove(logo)
 
     @Slot()
     def clearLogo(self):
-        self.remove_logo_files()
-        self._brand = (0.0, self._brand[1])
+        self.clear_logo()
+
+    def clear_logo(self) -> bool:
+        removed = True
+        try:
+            self.remove_logo_files()
+        except OSError as error:
+            self.page.notify(f"{tr('Logo not removed')}: {error}", True)
+            removed = False
+        self._brand = (0.0, self._brand[1])  # graphics show the logo files left
         self.publish_graphics(force=True)
+        self.logoChanged.emit()
+        return removed
 
     @Slot()
     def openSponsorsFolder(self):
@@ -1172,6 +1241,12 @@ class BroadcastGraphics(DirectorPart):
             query += f"&preset={preset}"
         QGuiApplication.clipboard().setText(streamoverlay.url("/director", query))
         self.page.notify(tr("Address copied: add it as a browser source (1920 x 1080)"))
+
+
+def badge_name(badge: str) -> str:
+    """Game name of a driver badge (translated), empty if none or unknown"""
+    info = badge_info(badge) if badge else None
+    return tr(info.name) if info is not None else ""
 
 
 def tower_state(car: Standing) -> str:

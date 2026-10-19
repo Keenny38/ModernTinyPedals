@@ -154,8 +154,8 @@ def test_table_editor_layout_unchanged(editor_env, module_name, class_name, tabl
         table = getattr(editor, table_name)
         headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
         assert headers and all(headers)
-        if widths is None:  # tracks: every column but name fixed, slip columns narrower
-            widths = {column: 5 if 5 <= column <= 6 else 8 for column in range(1, table.columnCount())}
+        if widths is None:  # tracks: every column but name fixed, orientation & clock columns narrower
+            widths = {column: 5 if 5 <= column <= 7 else 8 for column in range(1, table.columnCount())}
         assert fixed_widths(table) == {column: UIScaler.size(width) for column, width in widths.items()}
         assert table.verticalHeader().isHidden() == (class_name == "VehicleClassEditor")
     finally:

@@ -43,7 +43,9 @@ REPLAY_EXTENSION = ".Vcr"
 PART_EXTENSION = ".part"  # file being copied
 TEMP_PATTERN = ("_vcr", ".tmp")  # game temporary files: _vcr1222177728.tmp
 TEMP_MIN_AGE = 600.0  # seconds: newer temporary files can be the replay being recorded
-CHUNK_SIZE = 8 << 20  # bytes copied between progress reports
+CHUNK_SIZE = 8 << 20  # bytes copied between progress checks
+PROGRESS_STEPS = 200  # copy progress told when it moved a step (0.5 %: bar & percent show no finer)...
+PROGRESS_INTERVAL = 0.05  # ...and this long (seconds) after the last one told (fast disks: 250 chunks a second)
 FREE_MARGIN = 200 << 20  # bytes left free on disk after copy
 INVALID_NAME = '<>:"/\\|?*'
 
@@ -52,6 +54,14 @@ class CopyResult(NamedTuple):
     """Replays copied: names given, errors (file name: reason), copy cancelled"""
 
     added: list[str]
+    errors: list[str]
+    cancelled: bool = False
+
+
+class TrashResult(NamedTuple):
+    """Files moved to the recycle bin: paths moved, errors (names of files left in place), stopped before the end"""
+
+    moved: list[str]
     errors: list[str]
     cancelled: bool = False
 
@@ -86,10 +96,39 @@ def free_space(folder: str) -> int:
         return -1
 
 
+class ProgressThrottle:
+    """Progress callback of a copy called only when progress shows (moved a step) and at most every
+    PROGRESS_INTERVAL: one signal to the UI thread per call. First progress & the end (1) always told."""
+
+    def __init__(self, progress: Callable[[float], None], clock: Callable[[], float] = time.monotonic):
+        self.progress = progress
+        self.clock = clock
+        self.step = -1  # step last told, -1 if none
+        self.told = 0.0  # clock time last told
+        self.ended = False
+
+    def __call__(self, value: float):
+        if value >= 1:
+            if self.ended:  # told once (file grown during copy: more than its size copied)
+                return
+            self.ended = True
+        else:
+            step = round(value * PROGRESS_STEPS)
+            if step == self.step:
+                return
+            now = self.clock()
+            if self.step >= 0 and now - self.told < PROGRESS_INTERVAL:
+                return
+            self.step, self.told = step, now
+        self.progress(value)
+
+
 def copy_replays(sources: Sequence[str], folder: str, progress: Callable[[float], None],
                  cancelled: threading.Event | None = None) -> CopyResult:
     """Copy replay files to folder (in background), names already used get a number, nothing copied
-    if disk has not enough free space. Cancelled: file being copied removed, next ones left out."""
+    if disk has not enough free space. Cancelled: file being copied removed, next ones left out.
+    Progress told in steps (see ProgressThrottle)."""
+    report = ProgressThrottle(progress)
     sizes: dict[str, int] = {}
     for source in sources:
         if is_replay_file(source) and not same_file(os.path.dirname(source), folder):
@@ -116,7 +155,7 @@ def copy_replays(sources: Sequence[str], folder: str, progress: Callable[[float]
                         break
                     writer.write(chunk)
                     copied += len(chunk)
-                    progress(copied / max(total, 1))
+                    report(copied / max(total, 1))
             if cancelled is not None and cancelled.is_set():
                 remove_part(part)
                 return CopyResult(added, errors, True)
@@ -174,9 +213,22 @@ def temp_files(folder: str, now: float | None = None) -> list[str]:
     return paths
 
 
-def trash_replays(paths: Sequence[str]) -> list[str]:
-    """Move files to the recycle bin, names of files left in place"""
-    return [os.path.basename(path) for path in paths if not QFile.moveToTrash(path)]
+def trash_replays(paths: Sequence[str], progress: Callable[[float], None] | None = None,
+                  cancelled: threading.Event | None = None) -> TrashResult:
+    """Move files to the recycle bin (in background: a few seconds each for large replays on some disks), progress
+    told after each file. Cancelled: files not reached yet left in place (not errors)."""
+    moved: list[str] = []
+    errors: list[str] = []
+    for index, path in enumerate(paths):
+        if cancelled is not None and cancelled.is_set():
+            return TrashResult(moved, errors, True)
+        if QFile.moveToTrash(path):
+            moved.append(path)
+        else:
+            errors.append(os.path.basename(path))
+        if progress is not None:
+            progress((index + 1) / len(paths))
+    return TrashResult(moved, errors)
 
 
 def show_in_folder(path: str):

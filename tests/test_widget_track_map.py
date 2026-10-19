@@ -126,3 +126,23 @@ def test_sector_index_out_of_map_skipped(track, name):
         assert visible_pixels(widget.grab().toImage()) > 100
     finally:
         widget.deleteLater()
+
+
+def test_track_orientation_added_to_display_orientation(track, monkeypatch):
+    """Orient column of track info editor turns this track's map, on top of display_orientation"""
+    from neopedal.widget.track_map import Realtime
+
+    monkeypatch.setattr(minfo.mapping, "orientation", 0.0)
+    cfg.user.setting["track_map"].update(display_orientation=30)
+    widget = Realtime(cfg, "track_map")
+    try:
+        widget.timerEvent(QTimerEvent(0))
+        assert widget.map_orient == pytest.approx(math.radians(30))
+        assert not widget.map_changed(minfo.mapping.lastModified)  # same map, same orientation
+        minfo.mapping.orientation = 300.0  # edited in track info editor: map drawn again at once
+        widget.timerEvent(QTimerEvent(0))
+        assert widget.map_orient == pytest.approx(math.radians(330))
+        assert widget.map_changed(-1)  # temporary circle map ignores track orientation
+        assert widget.last_orientation == 0.0
+    finally:
+        widget.deleteLater()

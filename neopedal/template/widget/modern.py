@@ -45,6 +45,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
+        "show_pit_stops_beside_status": False,  # pit stops after pit status (wider), else status shown instead
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -63,6 +64,22 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_time_gap": True,
         "column_gap_trend": True,
         "display_order_gap_trend": 23,  # column of modern design only (default order in template)
+        "column_driver_ranks": False,
+        "show_driver_badge": True,
+        "display_order_driver_ranks": 24,
+        "column_delta_laptime": False,
+        "number_of_delta_laptime": 3,
+        "show_inverted_delta_laptime_layout": False,
+        "display_order_delta_laptime": 25,
+        "column_energy_per_lap": False,
+        "show_energy_per_lap_average": False,
+        "display_order_energy_per_lap": 26,
+        "column_track_limits": False,
+        "display_order_track_limits": 27,
+    },
+    "session": {
+        "show_field_level": False,  # average driver & safety rank of online race (RaceControl option)
+        "display_order_field_level": 4,
     },
     "standings": {
         "column_position": True,
@@ -73,6 +90,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
+        "show_pit_stops_beside_status": False,  # pit stops after pit status (wider), else status shown instead
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -91,6 +109,11 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_track_limits": False,
         "display_order_track_limits": 25,  # columns of modern design only (default orders in template)
         "display_order_energy_per_lap": 26,
+        "column_driver_ranks": False,
+        "show_driver_badge": True,
+        "display_order_driver_ranks": 27,
+        "column_gap_trend": False,
+        "display_order_gap_trend": 28,
         "column_stint_laps": False,
         "column_speed_trap": False,
         "column_lift_and_coast_time": False,
@@ -99,6 +122,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "show_lap_difference": True,
         "show_class_header": True,
         "show_class_column_with_class_header": False,
+        "show_class_sof": False,  # strength of field (average driver & safety rank) in class headers
         "show_column_headers": True,
     },
     "rivals": {
@@ -110,6 +134,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_brand_logo": True,
         "column_tyre_compound": True,
         "column_pit_status": True,
+        "show_pit_stops_beside_status": False,  # pit stops after pit status (wider), else status shown instead
         "column_laptime": True,
         "show_lap_sectors": True,
         "show_lap_delta": True,
@@ -130,6 +155,13 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "show_player_highlighted": True,
         "show_lap_difference": True,
         "show_highlighted_fastest_last_laptime": True,
+        "column_track_limits": False,
+        "display_order_track_limits": 24,  # columns of modern design only
+        "column_driver_ranks": False,
+        "show_driver_badge": True,
+        "display_order_driver_ranks": 25,
+        "column_gap_trend": False,
+        "display_order_gap_trend": 26,
     },
     "timing": {"show_invalid_lap_indicator": True},
     "deltabest": {"show_invalid_lap_indicator": True},
@@ -157,6 +189,11 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "show_layer_labels": True,
         "show_pressure_target_range": True,
         "show_tread_gauge": True,
+    },
+    "flag": {  # in template at their place in options page
+        "enable_new_flag_flash": True,
+        "new_flag_flash_duration": 1.5,
+        "enable_urgency_order": False,
     },
 })
 

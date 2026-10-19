@@ -137,6 +137,7 @@ OPTION_FIXES: dict[str, tuple[OptionFix, ...]] = {
     }),),
     "track_map": (OptionFix(dependencies={
         "auto_prediction_additional_pitstop_time": "enable_auto_pitout_prediction"}),),
+    "corner_coach": (OptionFix(dependencies={"braking_point_tolerance": "show_braking_point"}),),
 }
 
 

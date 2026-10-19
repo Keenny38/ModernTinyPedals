@@ -128,7 +128,11 @@ def singleton_dialog(dialog_type: str, show_error: bool = True):
                 DialogSingleton.register(dialog_type, instance)
                 return instance
             if DialogSingleton.new(dialog_type):
-                instance = dialog_class(*args, **kwargs)
+                try:
+                    instance = dialog_class(*args, **kwargs)
+                except BaseException:  # never made: type free again, or "already opened" until restart
+                    DialogSingleton.remove(dialog_type)
+                    raise
                 instance.destroyed.connect(unset_dialog_state)
                 DialogSingleton.register(dialog_type, instance)
                 return instance
@@ -250,6 +254,36 @@ class FocusRingButton(QPushButton):
         radius = self.fontMetrics().height() * 0.4  # button border radius (0.4em)
         draw_focus_ring(painter, self, QRectF(self.rect()), radius)
         painter.end()
+
+
+_QUESTION = QMessageBox.__dict__.get("question")  # Qt's own, to see when tests or scripts replaced it
+
+
+def confirm_box(parent: QWidget | None, title: str, text: str, action_text: str, cancel_text: str = "",
+                danger: bool = False, default_action: bool = False) -> tuple[QMessageBox, QPushButton]:
+    """Confirmation box: Cancel then the action button, named after the action (same order as TpConfirmDialog
+    of QML pages on every platform: both in ActionRole, kept in added order), Esc cancels. Default button:
+    Cancel, unless default_action (harmless actions)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
+    box.setWindowTitle(title)
+    box.setText(text)
+    cancel = box.addButton(cancel_text or tr("Cancel"), QMessageBox.ButtonRole.ActionRole)
+    action = box.addButton(action_text, QMessageBox.ButtonRole.ActionRole)
+    box.setEscapeButton(cancel)
+    box.setDefaultButton(action if default_action else cancel)
+    return box, action
+
+
+def confirm_action(parent: QWidget | None, title: str, text: str, action_text: str, cancel_text: str = "",
+                   danger: bool = False, default_action: bool = False) -> bool:
+    """Ask before an action (Cancel, then the action: see confirm_box), True when the action was chosen.
+    A replaced QMessageBox.question (tests, scripted runs) answers instead: Yes chooses the action."""
+    if QMessageBox.__dict__.get("question") is not _QUESTION:
+        return QMessageBox.question(parent, title, text) == QMessageBox.StandardButton.Yes
+    box, action = confirm_box(parent, title, text, action_text, cancel_text, danger, default_action)
+    box.exec()
+    return box.clickedButton() is action
 
 
 def find_dialog_host(widget: QWidget | None):
@@ -406,14 +440,10 @@ class BaseDialog(QDialog):
         """Set utility dialog title"""
         self.setWindowTitle(f"{name} - {APP_NAME}")
 
-    def confirm_operation(self, title: str = "Confirm", message: str = "") -> bool:
-        """Confirm operation"""
-        confirm = QMessageBox.question(
-            self, tr(title), trm(message),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        return confirm == QMessageBox.StandardButton.Yes
+    def confirm_operation(self, title: str = "Confirm", message: str = "", action_text: str = "") -> bool:
+        """Confirm operation: Cancel, then the action button (action_text, else the title when it names the
+        action: "Delete Preset", else "Confirm")"""
+        return confirm_action(self, tr(title), trm(message), action_text or tr(title))
 
 
 class BaseEditor(BaseDialog):

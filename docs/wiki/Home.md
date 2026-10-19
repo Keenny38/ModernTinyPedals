@@ -4,7 +4,7 @@ NeoPedal is a free, open-source telemetry overlay and analysis app for **Le Mans
 
 The app is built with PySide6 (Qt 6) and runs in English or French.
 
-![87 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/images/readme_preview.png)
+![93 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/images/readme_preview.png)
 
 ## Key features
 

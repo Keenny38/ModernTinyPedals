@@ -135,8 +135,8 @@ def test_open_other_map_and_invalid(viewer, monkeypatch, tmp_path):
                         lambda *args, **kwargs: (str(tmp_path / "Bad.svg"), ""))
     backend.openMap()
     wait_jobs(backend)
-    assert warnings and backend.mapName == "" and not backend.loaded  # invalid map: warned, map cleared
-    assert backend.view == {} and not VertexStore.has(backend.key("road"))
+    assert warnings and backend.mapName == "Other" and backend.loaded  # invalid map: warned, map shown kept
+    assert VertexStore.has(backend.key("road"))
     assert not backend.load_map(f"{tmp_path.as_posix()}/", "Missing")
 
 

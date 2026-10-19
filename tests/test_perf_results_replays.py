@@ -8,11 +8,9 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage
 
-from neopedal.ui.quick import preview_provider
+from neopedal.ui.quick import preview_provider, qml_path
 from neopedal.ui.quick.models import DictListModel
 from neopedal.ui.quick.preview_provider import PreviewStore
-
-QML = Path(__file__).resolve().parent.parent / "neopedal" / "ui" / "qml"
 
 
 def changes_of(model):
@@ -123,14 +121,16 @@ def test_positions_chart_sent_without_place_tables(ui_env):
 def test_qml_heavy_parts_gone():
     """Replays map moved by a 30 Hz timer without arrays per car, timeline markers as items, stats canvases
     painted by a thread, setup pictures loaded async at shown size"""
-    panel = (QML / "MapPanel.qml").read_text(encoding="utf-8")
+    panel = Path(qml_path("MapPanel.qml")).read_text(encoding="utf-8")
     assert "FrameAnimation" not in panel and "interval: 33" in panel and "return [" not in panel
-    incidents = (QML / "IncidentPanel.qml").read_text(encoding="utf-8")
+    incidents = Path(qml_path("IncidentPanel.qml")).read_text(encoding="utf-8")
     assert "Canvas" not in incidents and 'objectName: "incidentMarkers"' in incidents
     for name in ("StatsChart.qml", "StatsActivity.qml"):
-        text = (QML / name).read_text(encoding="utf-8")
+        text = Path(qml_path(name)).read_text(encoding="utf-8")
         assert text.count("Canvas {") == text.count("renderStrategy: Canvas.Threaded")
-    backdrop = (QML / "SetupBackdrop.qml").read_text(encoding="utf-8")
+    backdrop = Path(qml_path("SetupBackdrop.qml")).read_text(encoding="utf-8")
     assert "asynchronous: true" in backdrop and "sourceSize.width" in backdrop and "mipmap" not in backdrop
-    sessions = (QML / "ResultsSessionList.qml").read_text(encoding="utf-8")
-    assert "running: backend.busy && pageState.active" in sessions
+    sessions = Path(qml_path("ResultsSessionList.qml")).read_text(encoding="utf-8")
+    # Spinner of the list header (TpCardHeader busy): turns only while the page is shown
+    header = Path(qml_path("TpCardHeader.qml")).read_text(encoding="utf-8")
+    assert "busy: backend.busy" in sessions and "running: visible && pageState.active" in header

@@ -57,6 +57,7 @@ from PySide6.QtQuick import (
 POINT2D = QSGGeometry.defaultAttributes_Point2D()
 COLORED_POINT2D = QSGGeometry.defaultAttributes_ColoredPoint2D()
 COLORED_VERTEX = struct.Struct("<ff4B")  # x, y, premultiplied rgba
+COLORED_VERTEX_BYTES = struct.Struct("<ff4s")  # same record, rgba packed as 4 bytes
 
 LINE_STRIP = QSGGeometry.DrawingMode.DrawLineStrip
 LINES = QSGGeometry.DrawingMode.DrawLines
@@ -256,7 +257,8 @@ class GpuShape(QQuickItem):
 
 class ArcItem(QQuickItem):
     """Arc around item center from top, clockwise for a positive sweep (degrees), round caps: scene graph geometry
-    instead of a Canvas painted on the GUI thread (steering wheel rotation of simple view)
+    instead of a Canvas painted on the GUI thread (steering wheel rotation of simple view), edges faded over one
+    device pixel (smooth without a multisampled layer, see smooth_arc_vertices)
 
     QML: ArcItem { sweep: 90; radius: 40; thickness: 4; color: "red" }
     """
@@ -319,30 +321,29 @@ class ArcItem(QQuickItem):
     color = Property(QColor, _get_color, _set_color, notify=colorChanged)
 
     def updatePaintNode(self, old: QSGNode | None, _data) -> QSGNode | None:  # type: ignore[override]
-        state = (self._sweep, self._radius, self._thickness, self.width(), self.height())
+        window = self.window()
+        fringe = 1 / window.effectiveDevicePixelRatio() if window is not None else 1.0  # one device pixel
+        state = (self._sweep, self._radius, self._thickness, self.width(), self.height(), self._color.rgba(), fringe)
         if old is None:
             node = QSGGeometryNode()
-            geometry = QSGGeometry(POINT2D, 0)
+            geometry = QSGGeometry(COLORED_POINT2D, 0)
             geometry.setDrawingMode(TRIANGLES)
             node.setGeometry(geometry)
             node.setFlag(QSGNode.Flag.OwnsGeometry, True)
-            node.setMaterial(QSGFlatColorMaterial())
+            node.setMaterial(QSGVertexColorMaterial())  # color in vertices (faded edges)
             node.setFlag(QSGNode.Flag.OwnsMaterial, True)
             self._uploaded = ()
         else:
             node = cast(QSGGeometryNode, old)
-        material = cast(QSGFlatColorMaterial, node.material())
-        if material.color() != self._color:
-            material.setColor(self._color)
-            node.markDirty(QSGNode.DirtyStateBit.DirtyMaterial)
         if state != self._uploaded:
-            data = arc_triangles(self.width() / 2, self.height() / 2, self._radius, self._sweep, self._thickness)
+            data = smooth_arc_vertices(self.width() / 2, self.height() / 2, self._radius, self._sweep,
+                                       self._thickness, self._color, fringe)
             geometry = node.geometry()
-            count = len(data) // 2
+            count = len(data) // COLORED_VERTEX.size
             if geometry.vertexCount() != count:
                 geometry.allocate(count)
             if count:
-                ctypes.memmove(int(geometry.vertexData()), _address(data), count * 8)
+                ctypes.memmove(int(geometry.vertexData()), _address(data), len(data))
             node.markDirty(QSGNode.DirtyStateBit.DirtyGeometry)
             self._uploaded = state
         return node
@@ -376,6 +377,63 @@ def arc_triangles(center_x: float, center_y: float, radius: float, sweep: float,
         for first, second in pairwise(rim):
             data.extend((cap_x, cap_y, cap_x + math.cos(first) * half, cap_y + math.sin(first) * half,
                          cap_x + math.cos(second) * half, cap_y + math.sin(second) * half))
+    return data
+
+
+def smooth_arc_vertices(center_x: float, center_y: float, radius: float, sweep: float, thickness: float,
+                        color: QColor, fringe: float = 1.0) -> bytearray:
+    """Arc of arc_triangles with its edges faded to nothing over fringe (vertex antialiasing: smooth without a
+    multisampled layer), as triangles of COLORED_VERTEX records (premultiplied color), none under half a degree
+
+    Band: fade in, solid & fade out rings at each step; round caps: solid half disc, then faded rim. Thinner than
+    fringe: no solid core, drawn fainter (like a hairline).
+    """
+    data = bytearray()
+    if abs(sweep) < 0.5 or radius <= 0 or thickness <= 0:
+        return data
+    sweep = max(min(sweep, 359.9), -359.9)
+    half = thickness / 2
+    core = max(half - fringe / 2, 0.0)  # solid half width
+    edge = half + fringe / 2  # faded out
+    strength = min(thickness / fringe, 1.0) * color.alphaF()
+    solid = bytes(round(min(max(value, 0.0), 1.0) * strength * 255)
+                  for value in (color.redF(), color.greenF(), color.blueF(), 1.0))
+    clear = bytes(4)
+    pack = COLORED_VERTEX_BYTES.pack
+
+    def band(rings: list[tuple[float, bytes]], x: float, y: float, cos0: float, sin0: float, cos1: float,
+             sin1: float):
+        """Quads between following rings (distance from x, y & its color) along directions 0 & 1"""
+        for (inner, inner_color), (outer, outer_color) in pairwise(rings):
+            if outer <= inner:
+                continue
+            a0 = pack(x + cos0 * inner, y + sin0 * inner, inner_color)
+            b0 = pack(x + cos0 * outer, y + sin0 * outer, outer_color)
+            a1 = pack(x + cos1 * inner, y + sin1 * inner, inner_color)
+            b1 = pack(x + cos1 * outer, y + sin1 * outer, outer_color)
+            data.extend(a0 + b0 + a1 + b0 + b1 + a1)
+
+    rings = [(max(radius - edge, 0.0), clear), (max(radius - core, 0.0), solid), (radius + core, solid),
+             (radius + edge, clear)]
+    start = -math.pi / 2
+    span = math.radians(sweep)
+    steps = max(math.ceil(abs(sweep) / 4), 2)
+    angles = [start + span * index / steps for index in range(steps + 1)]
+    cosines, sines = [math.cos(angle) for angle in angles], [math.sin(angle) for angle in angles]
+    for index in range(steps):
+        band(rings, center_x, center_y, cosines[index], sines[index], cosines[index + 1], sines[index + 1])
+    cap_rings = [(0.0, solid), (edge, clear)] if core <= 0 else [(core, solid), (edge, clear)]
+    direction = 1.0 if sweep > 0 else -1.0
+    for angle, facing in ((angles[0], -direction), (angles[-1], direction)):  # half disc beyond each end
+        cap_x, cap_y = center_x + math.cos(angle) * radius, center_y + math.sin(angle) * radius
+        middle = pack(cap_x, cap_y, solid)
+        rim = [angle + facing * math.pi * index / 8 for index in range(9)]
+        for first, second in pairwise(rim):
+            cos0, sin0, cos1, sin1 = math.cos(first), math.sin(first), math.cos(second), math.sin(second)
+            if core > 0:  # solid half disc
+                data.extend(middle + pack(cap_x + cos0 * core, cap_y + sin0 * core, solid)
+                            + pack(cap_x + cos1 * core, cap_y + sin1 * core, solid))
+            band(cap_rings, cap_x, cap_y, cos0, sin0, cos1, sin1)
     return data
 
 

@@ -473,9 +473,13 @@ def other_class_vehicles(max_cls_veh: int) -> int:
     return max(int(max_cls_veh), 0)
 
 
+_class_key_separators = re.compile(r"[\s_\-]+")
+
+
+@lru_cache(maxsize=64)  # few classes, looked up per class at every standings update
 def class_key(class_name: str) -> str:
     """Class name compared in class order: case, spaces, underscores & hyphens left out ("LMP2 ELMS" = "LMP2_ELMS")"""
-    return re.sub(r"[\s_\-]+", "", class_name).casefold()
+    return _class_key_separators.sub("", class_name).casefold()
 
 
 def class_order_rank(class_order: str) -> dict[str, int]:

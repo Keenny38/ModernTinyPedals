@@ -39,7 +39,10 @@ def test_view_set_at_once_and_cursor_panels(opener, warnings):  # noqa: F811
             expected = sum(1 for text in texts[:series] if text)
             assert evaluate(view, chart, f"valueRow({index}, {series})") == expected
         colors = [series["color"] for series in backend.panels[index]["series"]]  # values carry no color
-        compact = [f"<font color='{color}'>{text}</font>" for text, color in zip(texts, colors) if text]
+        # lap mark first (laps told apart without color), then the value in its lap color
+        marks = [js(view, chart, f"seriesMark({index}, {series})") for series in range(len(texts))]
+        compact = [f"{mark}<font color='{color}'>{text}</font>" for text, color, mark in zip(texts, colors, marks) if text]
+        assert any(marks) == (len(backend.legend) > 1)
         assert evaluate(view, chart, f"compactValues({index})") == " ".join(compact[:4])
     evaluate(view, chart, "setCursor(NaN)")
     assert evaluate(view, chart, "cursorPanels.length") == 0 and evaluate(view, chart, "valueCount(0)") == 0

@@ -70,6 +70,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTim
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
+from . import realtime_state
 from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_file import ConfigType, FontFile
 from .formatter import driver_display_name
@@ -98,6 +99,13 @@ FONT_NAME = re.compile(r"^[A-Za-z0-9-]{1,64}\.ttf$")
 # Game picture (car brand & circuit logos cached from game, own brand logos): /pictures/<kind>/<file>
 PICTURE_PATH = re.compile(r"^(own|[a-z_]{1,32})/[A-Za-z0-9 ._=-]{1,96}\.(svg|png|webp)$")
 PICTURE_TYPES = {"svg": "image/svg+xml", "png": "image/png", "webp": "image/webp"}
+# Content security policy: overlay pages run their own inline scripts, every other response (SVG pictures
+# of user logo folders opened as a page, data) never runs any script
+PAGE_POLICY = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; "
+    "font-src 'self'; connect-src 'self'"
+)
+FILE_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
 OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
@@ -210,11 +218,13 @@ def active_overlays_key() -> tuple | None:
 
 
 def stream_opacity(widget: QWidget) -> float:
-    """Opacity on stream: overlay opacity (fading on screen too), set opacity for stream only overlays"""
+    """Opacity on stream: overlay opacity (fading on screen too), set opacity for stream only overlays and
+    while auto hidden on screen only (see overlay_control)"""
     wcfg = getattr(widget, "wcfg", None)
-    if stream_only(wcfg):
+    if stream_only(wcfg) or realtime_state.screen_hidden:
         try:
-            return min(max(float(wcfg["opacity"]), 0.0), 1.0)  # type: ignore[index]
+            scale = getattr(widget, "opacity_scale", 1.0)  # global overlay opacity, see widget._base
+            return min(max(float(wcfg["opacity"]) * scale, 0.0), 1.0)  # type: ignore[index]
         except (KeyError, TypeError, ValueError):
             return 1.0
     return min(max(widget.windowOpacity(), 0.0), 1.0)
@@ -839,11 +849,7 @@ class StreamHandler(BoundedRequestHandler):
         self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")  # token in page address
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; "
-            "font-src 'self'; connect-src 'self'",
-        )
+        self.send_header("Content-Security-Policy", PAGE_POLICY if content_type.startswith("text/html") else FILE_POLICY)
         self.end_headers()
         self.wfile.write(body)
 

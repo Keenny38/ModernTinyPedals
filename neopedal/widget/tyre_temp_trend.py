@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen, QPolygonF
 
-from .. import units
+from .. import realtime_state, units
 from ..api_control import api
 from ..i18n import tr_overlay as tr
 from ._base import Overlay
@@ -74,6 +74,15 @@ class TemperatureTrend:
         self.sums = [0.0] * 4
         self.count = 0
         self.version = 0  # changed when samples change
+        self.owner: tuple | None = None  # session & car of samples
+
+    def follow(self, owner: tuple):
+        """Samples of one car in one session: cleared when session or car changes"""
+        if self.owner != owner:
+            self.owner = owner
+            self.clear()
+            self.last_time = -1.0
+            self.last_lap = -1
 
     def clear(self):
         for samples in self.samples:
@@ -138,6 +147,8 @@ class TyreTrendMixin:
         self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
         self.sign = "°" if wcfg["show_degree_sign"] else ""
         self.compounds = TyreCompounds(wcfg["enable_heatmap_auto_matching"], wcfg["heatmap_name"])
+        self.vehicle_resets = -1  # vehicle reset of vehicle name below
+        self.vehicle_name = ""
         self.chart_key: tuple = ()
         self.chart_serial = 0  # changed when charts rebuilt (samples, optimal temperature, heatmap)
         self.charts: tuple[WheelChart, ...] = (WheelChart(),) * 4
@@ -147,6 +158,10 @@ class TyreTrendMixin:
         """Sample temperatures, charts if changed; state: (chart serial, texts, heat colors)"""
         self.compounds.update()
         temperatures = api.read.tyre.surface_temperature_avg()
+        if self.vehicle_resets != realtime_state.resets:  # car may change only with a vehicle reset (garage)
+            self.vehicle_resets = realtime_state.resets
+            self.vehicle_name = api.read.vehicle.vehicle_name()
+        self.trend.follow((api.read.session.identifier()[0], api.read.vehicle.slot_id(), self.vehicle_name))
         self.trend.update(api.read.timing.elapsed(), api.read.lap.completed_laps(), temperatures)
         optimal: tuple[float, ...] = (0.0,) * 4
         if self.show_optimal:  # 0 = unknown

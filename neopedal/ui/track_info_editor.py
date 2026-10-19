@@ -52,6 +52,7 @@ HEADER_TRACKS = (
     "Pit exit (m)",
     "Pit speed (m/s)",
     "Speed trap (m)",
+    "Orient (°)",
     "Sunrise",
     "Sunset",
     "Primary preset",
@@ -77,13 +78,13 @@ class TrackInfoEditor(BaseEditor):
     def __init__(self, parent):
         super().__init__(parent)
         self.set_utility_title(tr("Track Info Editor"))
-        self.setMinimumSize(UIScaler.size(64), UIScaler.size(35))
+        self.setMinimumSize(UIScaler.size(68), UIScaler.size(35))
 
         self.tracks_temp = copy_setting(cfg.user.tracks)
 
-        # Set table
+        # Set table: narrow orientation & clock columns
         self.table_tracks = self.editor_table(HEADER_TRACKS, {
-            column_index: 5 if 5 <= column_index <= 6 else 8 for column_index in range(1, len(HEADER_TRACKS))})
+            column_index: 5 if 5 <= column_index <= 7 else 8 for column_index in range(1, len(HEADER_TRACKS))})
         self.table_tracks.cellChanged.connect(self.verify_input)
 
         self.table_tracks.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

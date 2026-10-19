@@ -397,7 +397,6 @@ def test_stats_driver_card_ranks(backend, monkeypatch, tmp_path):  # noqa: F811
     """Driver & safety ranks of game menu file on driver card, change since previous rank of history"""
     from neopedal import rank_info
     from neopedal.process import driver_ranks as dr
-    from neopedal.ui.quick import stats_backend
 
     settle(backend)
     history = tmp_path / dr.HISTORY_FILE
@@ -406,7 +405,6 @@ def test_stats_driver_card_ranks(backend, monkeypatch, tmp_path):  # noqa: F811
     dr.append_history(str(history), dr.HistoryEntry(1_700_000_100, dr.Rank("Gold", 3, 10), dr.Rank("Bronze", 1, 0),
                                                     steam_id="2"))  # other Steam account: left out
     monkeypatch.setattr(rank_info, "history_path", lambda: str(history))
-    monkeypatch.setattr(stats_backend, "ranks_history_path", lambda: str(history))
     monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
     monkeypatch.setattr(rank_info.ranks, "updated", 1_700_000_000.0)
     monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(

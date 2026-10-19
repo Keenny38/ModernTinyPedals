@@ -100,9 +100,11 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
     combo_name = ""
     session_id: tuple[float, ...] = ()  # session token
     last_lap_stime = -1.0  # last lap start time
-    is_bad_lap = False  # lap with pit visit or invalidated by game (no best S1/S2)
-    last_lap_bad = False  # lap before current lap was bad (no best S3 nor personal best sectors from it)
+    lap_invalid = False  # lap in progress invalidated by game (no best sector from it)
+    sector_pits = [False, False, False]  # pit lane visited in each sector of lap in progress (no best of that sector)
+    last_lap_bad = (False, False)  # S3 bad, lap bad of lap before current lap (no best S3, no personal best sectors)
     s3_lap_stime = -1.0  # start time of lap last seen in sector 3 (S3 of lap still in progress or just finished)
+    lap_sector2 = -1.0  # sector 1+2 time of lap in sector 3 (lap just finished until its S3 is set), -1 if unknown
 
     def save_data():
         """Best sectors saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
@@ -144,7 +146,8 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                     curr_sector1=-1.0,
                     curr_sector2=-1.0,
                     last_sector2=last_sector2,
-                    is_last_lap_bad=lap.data,
+                    is_last_s3_bad=lap.data[0],
+                    is_last_lap_bad=lap.data[1],
                 )
             if not lap_state.delayed_save and last_sector_idx == 0:
                 lap_state.delayed_save = valid_sectors(output_alltime.sectorPrev)
@@ -164,8 +167,11 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             output_alltime.reset()
             last_sector_idx = -1  # sector index of reset outputs (-1) set again from current sector
             last_lap_stime = -1.0
-            is_bad_lap = last_lap_bad = False
+            lap_invalid = False
+            sector_pits[:] = (False, False, False)
+            last_lap_bad = (False, False)
             s3_lap_stime = -1.0
+            lap_sector2 = -1.0
             combo_name = api.read.session.combo_name()
             session_id = session_token(api.read.session.identifier())
             (
@@ -181,25 +187,30 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 backup=True,  # own sector file, replaced by next save
             )
 
-        # Pit visit & track limits of lap in progress (flag of lap just completed may stay a moment)
+        # Pit visit (per sector: out & in lap sectors on track still count) & track limits of lap in progress
+        # (flag of lap just completed may stay a moment)
         lap_stime = api.read.timing.start()
         if last_lap_stime != lap_stime:
+            lap_flags = (lap_invalid or sector_pits[2], lap_invalid or any(sector_pits))
             # Line crossed after sector 3 of lap (not back to garage): lap kept until its S3 is set
             if lap_state.pending is None and 0 <= s3_lap_stime == last_lap_stime < lap_stime and last_sector_idx == 2:
-                lap_state.pending = PendingLap(lap_stime - last_lap_stime, lap_stime, is_bad_lap)
+                lap_state.pending = PendingLap(lap_stime - last_lap_stime, lap_stime, lap_flags)
             last_lap_stime = lap_stime
-            last_lap_bad = is_bad_lap  # line crossed: flag of finished lap kept for its S3 (computed later)
-            is_bad_lap = False
-        is_bad_lap |= api.read.vehicle.in_pits()
+            last_lap_bad = lap_flags  # line crossed: flags of finished lap kept for its S3 (computed later)
+            lap_invalid = False
+            sector_pits[:] = (False, False, False)
         pending = lap_state.pending
         if pending is not None and not pending.deadline and api.read.timing.elapsed() - pending.finish > 10:
             lap_state.pending = None  # no S3 for lap just completed (no valid lap time)
         lap_started = api.read.timing.current_laptime() > 1
         if lap_started:
-            is_bad_lap |= api.read.lap.invalidated()
+            lap_invalid |= api.read.lap.invalidated()
 
         # Update previous & best sector time
         sector_idx = api.read.lap.sector_index()
+        if api.read.vehicle.in_pits():
+            # Sector index of lap before may stay a moment after line: start of lap is in S1
+            sector_pits[sector_idx if lap_started else 0] = True
         if sector_idx == 2 and lap_started:
             s3_lap_stime = lap_stime
         if last_sector_idx != sector_idx:  # keep checking until conditions met
@@ -213,8 +224,16 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             curr_sector1 = api.read.timing.current_sector1()
             curr_sector2 = api.read.timing.current_sector2()
             last_sector2 = api.read.timing.last_sector2()
+            # Lap finished: game last lap data still of lap before (sector index reported first) never taken as S3
+            if sector_idx == 0 and lap_sector2 > 0 and abs(last_sector2 - lap_sector2) > 0.001:
+                laptime_valid = -1.0
             # Lap finished (S3): still lap in progress until game updates lap start time, else lap before
-            finished_bad = is_bad_lap if s3_lap_stime == lap_stime else last_lap_bad
+            if s3_lap_stime == lap_stime:
+                finished_s3_bad, finished_bad = lap_invalid or sector_pits[2], lap_invalid or any(sector_pits)
+            else:
+                finished_s3_bad, finished_bad = last_lap_bad
+            # S1 (in S2) or S2 (in S3) just finished
+            sector_bad = lap_invalid or sector_pits[sector_idx - 1]
 
             # Session sectors
             last_sector_idx = calc_sector_time(
@@ -225,7 +244,8 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 curr_sector1=curr_sector1,
                 curr_sector2=curr_sector2,
                 last_sector2=last_sector2,
-                is_bad_lap=is_bad_lap,
+                is_bad_sector=sector_bad,
+                is_last_s3_bad=finished_s3_bad,
                 is_last_lap_bad=finished_bad,
             )
 
@@ -238,13 +258,16 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 curr_sector1=curr_sector1,
                 curr_sector2=curr_sector2,
                 last_sector2=last_sector2,
-                is_bad_lap=is_bad_lap,
+                is_bad_sector=sector_bad,
+                is_last_s3_bad=finished_s3_bad,
                 is_last_lap_bad=finished_bad,
             )
 
-            # Save if recorded new valid data
-            if not lap_state.delayed_save and last_sector_idx == sector_idx:
-                lap_state.delayed_save = valid_sectors(output_alltime.sectorPrev)
+            if last_sector_idx == sector_idx:  # sector just finished recorded
+                lap_sector2 = curr_sector2 if sector_idx == 2 else -1.0
+                # Save if recorded new valid data
+                if not lap_state.delayed_save:
+                    lap_state.delayed_save = valid_sectors(output_alltime.sectorPrev)
 
             # S3 of lap just completed set (sector 1), or skipped (sector 2 of next lap)
             if lap_state.pending is not None and last_sector_idx == sector_idx != 2:
@@ -259,12 +282,14 @@ def calc_sector_time(
     curr_sector1: float,
     curr_sector2: float,
     last_sector2: float,
-    is_bad_lap: bool = False,
+    is_bad_sector: bool = False,
+    is_last_s3_bad: bool = False,
     is_last_lap_bad: bool = False,
 ) -> int:
-    """Calculate sector time (is_bad_lap: lap in progress, is_last_lap_bad: lap just finished, S3 & personal best
-    sectors)"""
+    """Calculate sector time (is_bad_sector: S1 or S2 just finished, is_last_s3_bad: S3 of lap just finished,
+    is_last_lap_bad: lap just finished, personal best sectors; bad = pit visit or invalidated by game)"""
     no_delta_sector = None
+    no_delta_pb = None
 
     prev_s = output.sectorPrev
     delta_s_tb = output.deltaSectorBestTB
@@ -279,7 +304,8 @@ def calc_sector_time(
         prev_s[2] = laptime_valid - last_sector2
 
         # Update (time gap) deltabest bestlap sector 3
-        if valid_sectors(best_s_pb[2]):
+        no_delta_pb = not valid_sectors(best_s_pb[2])
+        if not no_delta_pb:
             delta_s_pb[2] = prev_s[2] - best_s_pb[2]
 
         # Update deltabest sector 3
@@ -290,11 +316,13 @@ def calc_sector_time(
             no_delta_sector = True
 
         # Save best sector 3 time (not from pit or invalidated lap)
-        if prev_s[2] < best_s_tb[2] and not is_last_lap_bad:
+        if prev_s[2] < best_s_tb[2] and not is_last_s3_bad:
             best_s_tb[2] = prev_s[2]
 
-        # Save sector time from personal best laptime (not from pit or invalidated lap)
-        if laptime_valid < sum(best_s_pb) and valid_sectors(prev_s) and not is_last_lap_bad:
+        # Save sector time from personal best laptime (not from pit or invalidated lap), all sectors of this lap
+        # (sum is lap time: S1 & S2 not missed)
+        if (laptime_valid < sum(best_s_pb) and valid_sectors(prev_s) and not is_last_lap_bad
+                and abs(sum(prev_s) - laptime_valid) < 0.002):
             best_s_pb[:] = prev_s
 
     # While vehicle in S2, update S1 data
@@ -304,7 +332,8 @@ def calc_sector_time(
         prev_s[0] = curr_sector1
 
         # Update (time gap) deltabest bestlap sector 1
-        if valid_sectors(best_s_pb[0]):
+        no_delta_pb = not valid_sectors(best_s_pb[0])
+        if not no_delta_pb:
             delta_s_pb[0] = prev_s[0] - best_s_pb[0]
 
         # Update deltabest sector 1
@@ -315,7 +344,7 @@ def calc_sector_time(
             no_delta_sector = True
 
         # Save best sector 1 time (not from pit or invalidated lap)
-        if prev_s[0] < best_s_tb[0] and not is_bad_lap:
+        if prev_s[0] < best_s_tb[0] and not is_bad_sector:
             best_s_tb[0] = prev_s[0]
 
     # While vehicle in S3, update S2 data
@@ -325,7 +354,8 @@ def calc_sector_time(
         prev_s[1] = curr_sector2 - curr_sector1
 
         # Update (time gap) deltabest bestlap sector 2
-        if valid_sectors(best_s_pb[1]):
+        no_delta_pb = not valid_sectors(best_s_pb[1])
+        if not no_delta_pb:
             delta_s_pb[1] = prev_s[1] - best_s_pb[1]
 
         # Update deltabest sector 2
@@ -336,12 +366,15 @@ def calc_sector_time(
             no_delta_sector = True
 
         # Save best sector 2 time (not from pit or invalidated lap)
-        if prev_s[1] < best_s_tb[1] and not is_bad_lap:
+        if prev_s[1] < best_s_tb[1] and not is_bad_sector:
             best_s_tb[1] = prev_s[1]
 
     # Output sectors data
-    output.sectorIndex = sector_idx
     if no_delta_sector is not None:
         output.noDeltaSector = no_delta_sector
+    if no_delta_pb is not None:
+        output.noDeltaSectorPB = no_delta_pb
+    output.recordedIndex = last_sector_idx
+    output.sectorIndex = sector_idx
 
     return last_sector_idx

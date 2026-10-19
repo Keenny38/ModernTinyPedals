@@ -103,11 +103,11 @@ SESSION_ROLES = (
 CLASSIFICATION_ROLES = (
     "key", "posText", "gridDelta", "classText", "classPosText", "classColor", "classAlias", "number", "driver", "team",
     "drivers", "car", "laps", "gapText", "gapTone", "reasonText", "bestText", "bestTone", "pits", "contacts",
-    "penalties", "player", "selected", "brandLogo",
+    "penalties", "player", "selected", "brandLogo", "accessibleText",
 )
 LAP_ROLES = (
     "key", "lap", "posText", "timeText", "timeTone", "deltaText", "s1", "s2", "s3", "s1Tone", "s2Tone",
-    "s3Tone", "speedText", "compound", "pit", "usageText", "wearText",
+    "s3Tone", "speedText", "compound", "pit", "usageText", "wearText", "accessibleText",
 )
 EVENT_ROLES = ("key", "clock", "kind", "glyph", "title", "detail", "mine")
 EVENT_GLYPHS = {  # Segoe Fluent Icons / MDL2 Assets
@@ -302,6 +302,8 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str,
             if name != entry.name:
                 extra = contacts.get(name, (0, 0))
                 cars, objects = cars + extra[0], objects + extra[1]
+        team = entry.team or entry.vehicle
+        best = lap_text(entry.best_lap) if entry.best_lap > 0 else "-"
         rows.append({
             "key": str(index),
             "posText": str(position),
@@ -311,7 +313,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str,
             "classColor": class_color(entry.car_class), "classAlias": class_alias(entry.car_class),
             "number": entry.number,
             "driver": entry.name,
-            "team": entry.team or entry.vehicle,
+            "team": team,
             "drivers": ", ".join(names) if len(names) > 1 else "",
             "car": entry.car,
             "laps": entry.laps_completed,
@@ -319,7 +321,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str,
             "gapTone": tone,
             "reasonText": game_text(entry.dnf_reason) if race and entry.status == "DNF" and entry.dnf_reason != "DNF"
             else "",
-            "bestText": lap_text(entry.best_lap) if entry.best_lap > 0 else "-",
+            "bestText": best,
             "bestTone": "purple" if entry.best_lap > 0 and entry.best_lap == fastest else "",
             "pits": entry.pitstops,
             "contacts": cars + objects,
@@ -327,6 +329,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str,
             "player": entry.player,
             "selected": str(index) == selected,
             "brandLogo": brand_logo(entry.vehicle, entry.car),
+            "accessibleText": spoken(str(position), entry.name, team, gap, best),  # screen readers: row read
         })
     return rows
 
@@ -440,6 +443,7 @@ def lap_rows(result: SessionResult, entry: Entry) -> list[dict[str, Any]]:
     own_sectors = rf.best_sectors((entry,))
     valid = [lap.time for lap in entry.laps if lap.time > 0]
     best = entry.best_lap if entry.best_lap > 0 else min(valid, default=0.0)
+    lap_word, records, pit_word = tr("Lap"), {"purple": tr("Session best"), "gain": tr("Personal best")}, tr("PIT")
     rows = []
     for lap in entry.laps:
         row: dict[str, Any] = {
@@ -462,8 +466,15 @@ def lap_rows(result: SessionResult, entry: Entry) -> list[dict[str, Any]]:
             row[key] = f"{sector:.3f}" if sector > 0 else ""
             row[f"{key}Tone"] = ("purple" if sector > 0 and abs(sector - overall_sectors[number]) < SAME_TIME else
                                  "gain" if sector > 0 and abs(sector - own_sectors[number]) < SAME_TIME else "")
+        row["accessibleText"] = spoken(f"{lap_word} {lap.number}", row["timeText"], records.get(row["timeTone"], ""),
+                                       pit_word if lap.pit else "")  # screen readers: row read
         rows.append(row)
     return rows
+
+
+def spoken(*parts: str) -> str:
+    """Text of a row read by screen readers: its parts that are not empty, separated by commas"""
+    return ", ".join(part for part in parts if part)
 
 
 def usage_text(lap: rf.Lap) -> str:
@@ -688,8 +699,12 @@ class RaceResultsBackend(PageBackend):
     filterChanged = Signal()
     selectionChanged = Signal()  # session picked: header, tiles, classes
     classificationChanged = Signal()
-    driverChanged = Signal()  # car picked for laps (and highlighted)
-    lapsChanged = Signal()
+    driverChanged = Signal()  # car picked for laps (and highlighted): key & info
+    driverOptionsChanged = Signal()  # cars to pick: other session or class filter only
+    driverIndexChanged = Signal()
+    lapSummaryChanged = Signal()
+    speedUnitChanged = Signal()
+    lapsChanged = Signal()  # lap columns
     chartChanged = Signal()
     eventsChanged = Signal()
     tabChanged = Signal()
@@ -720,6 +735,7 @@ class RaceResultsBackend(PageBackend):
         self.selected_key = ""  # session picked in list
         self.shown_key = ""  # session shown (picked one being read meanwhile)
         self.reading = ""  # session picked being read in background
+        self.failed_key = ""  # session picked whose file could not be read (kept selected, error shown)
         self.result: SessionResult | None = None  # released while page hidden a while (shown again when read)
         self.kept: OrderedDict[str, tuple[FileStamp, SessionResult]] = OrderedDict()  # last sessions shown
         self._kept_bytes: dict[str, int] = {}  # memory estimate of full results kept
@@ -732,7 +748,11 @@ class RaceResultsBackend(PageBackend):
         self.lap_summary: list[dict[str, str]] = []
         self.lap_columns: dict[str, bool] = {"usage": False, "wear": False}
         self.drivers: list[dict[str, str]] = []
-        self.driver_pictures: tuple[str, str] = ("", "")  # brand logo & car picture of car picked
+        self.driver_index = -1  # car picked in drivers
+        self.driver_info: dict[str, Any] = {}  # car picked: names, class, brand logo & picture
+        self.speed_unit = speed_converter()[1]
+        self._laps_of: tuple[str, str] = ("", "")  # session & car of lap rows
+        self._driver_told: tuple[str, dict[str, Any]] = ("", {})  # car picked & info last told
         self.chart: dict[str, Any] = {"laps": 0, "places": 0, "series": []}
         self.chart_series: dict[str, Any] = self.chart  # with line points (chart has places & line keys)
         self.chart_view: ChartView | None = None
@@ -849,11 +869,7 @@ class RaceResultsBackend(PageBackend):
                 self.header = header
                 self.selectionChanged.emit()
             self.refresh_classification(keep_rows=True)
-            entry = self.entry()
-            pictures = (self.logos.brand(entry.vehicle, entry.car), car_picture_url(entry.vehicle)) if entry else ("", "")
-            if pictures != self.driver_pictures:
-                self.driver_pictures = pictures
-                self.driverChanged.emit()
+            self.publish_driver()
 
     # Reading
     @Slot()
@@ -1029,6 +1045,13 @@ class RaceResultsBackend(PageBackend):
             self.search = text
             self.filter_changed(save=False)
 
+    @Slot()
+    def clearFilters(self):
+        """Every session listed again: kind, search & sessions without laps filters cleared"""
+        if self.kind_filter or self.search or self.hide_empty:
+            self.kind_filter, self.search, self.hide_empty = 0, "", False
+            self.filter_changed()
+
     def filter_changed(self, save: bool = True):
         if save:
             self.save_settings()
@@ -1168,6 +1191,11 @@ class RaceResultsBackend(PageBackend):
     def hasSession(self) -> bool:
         return bool(self.shown_key)
 
+    @Property(str, notify=selectionChanged)
+    def failedFile(self) -> str:
+        """File name of session picked that could not be read (damaged, not a results file), "" if none"""
+        return os.path.basename(self.failed_key)
+
     @Property(dict, notify=selectionChanged)
     def sessionHeader(self) -> dict:
         return self.header
@@ -1247,14 +1275,17 @@ class RaceResultsBackend(PageBackend):
             return
         if path == self.reading:
             self.reading = ""
-            self.show_session("", None)
+            self.show_session("", None, failed=path)  # row stays selected, error shown in place of session
         elif not self._read_timer.isActive():
             self.start_read()  # other session picked meanwhile
 
-    def show_session(self, key: str, result: SessionResult | None):
+    def show_session(self, key: str, result: SessionResult | None, failed: str = ""):
+        """Session shown, none if result is None (failed: session picked whose file could not be read)"""
         self.reading = ""
         changed_session = key != self.shown_key
-        self.selected_key = self.shown_key = key if result is not None else ""
+        self.shown_key = key if result is not None else ""
+        self.selected_key = self.shown_key or failed
+        self.failed_key = failed
         self.result = result
         self.is_race = result is not None and result.kind == "Race"
         if changed_session or result is None:
@@ -1318,7 +1349,10 @@ class RaceResultsBackend(PageBackend):
 
     @Property(dict, notify=driverChanged)
     def driverInfo(self) -> dict:
-        entry = self.entry()
+        return self.driver_info
+
+    def entry_info(self, entry: Entry | None) -> dict[str, Any]:
+        """Car shown above its laps: names, class color, brand logo & car picture ({} if none)"""
         if entry is None:
             return {}
         names = driver_names(entry)
@@ -1336,15 +1370,15 @@ class RaceResultsBackend(PageBackend):
             "carPicture": car_picture_url(entry.vehicle),
         }
 
-    @Property(list, notify=driverChanged)
+    @Property(list, notify=driverOptionsChanged)
     def driverOptions(self) -> list:
         return self.drivers
 
-    @Property(int, notify=driverChanged)
+    @Property(int, notify=driverIndexChanged)
     def driverIndex(self) -> int:
-        return next((number for number, option in enumerate(self.drivers) if option["key"] == self.selected_entry), -1)
+        return self.driver_index
 
-    @Property(list, notify=driverChanged)
+    @Property(list, notify=lapSummaryChanged)
     def lapSummary(self) -> list:
         return self.lap_summary
 
@@ -1357,15 +1391,21 @@ class RaceResultsBackend(PageBackend):
         """Columns shown only when a lap has a value (own car): {"usage": bool, "wear": bool}"""
         return self.lap_columns
 
-    @Property(str, notify=driverChanged)
+    @Property(str, notify=speedUnitChanged)
     def speedUnit(self) -> str:
-        return speed_converter()[1]
+        return self.speed_unit
 
     def entry(self) -> Entry | None:
         if self.result is None or not self.selected_entry:
             return None
         index = int(self.selected_entry)
         return self.result.entries[index] if 0 <= index < len(self.result.entries) else None
+
+    @Slot(int)
+    def selectEntryAt(self, index: int):
+        """Car picked in combo (index in driverOptions)"""
+        if 0 <= index < len(self.drivers):
+            self.selectEntry(self.drivers[index]["key"])
 
     @Slot(str)
     def selectEntry(self, key: str):
@@ -1375,22 +1415,54 @@ class RaceResultsBackend(PageBackend):
             return
         self.selected_entry = key
         self._classification_model.update_rows(lambda row: {"selected": row["key"] == key})
-        self.refresh_driver()
+        self.refresh_driver(options=False)  # same session & class: same cars to pick
         if self.event_mine:
             self.refresh_events()
 
-    def refresh_driver(self):
+    def refresh_driver(self, options: bool = True):
+        """Car picked: laps & figures, cars to pick made again if options (other session or class filter); each
+        part told only if it changed (combo list kept while picking cars)"""
         entry = self.entry()
         result = self.result
-        self.drivers = driver_options(result, self.class_filter) if result is not None else []
+        replaced = False
+        if options:
+            drivers = driver_options(result, self.class_filter) if result is not None else []
+            if drivers != self.drivers:
+                self.drivers = drivers
+                self.driverOptionsChanged.emit()
+                replaced = True  # combo model replaced (combo index reset): index told even if the same
+        index = next((number for number, option in enumerate(self.drivers) if option["key"] == self.selected_entry), -1)
+        if replaced or index != self.driver_index:
+            self.driver_index = index
+            self.driverIndexChanged.emit()
         rows = lap_rows(result, entry) if entry is not None and result is not None else []
-        self.lap_summary = lap_stats(result, entry) if entry is not None and result is not None else []
-        self.lap_columns = {"usage": any(row["usageText"] for row in rows), "wear": any(row["wearText"] for row in rows)}
-        self.driver_pictures = ((self.logos.brand(entry.vehicle, entry.car), car_picture_url(entry.vehicle))
-                                if entry is not None else ("", ""))
-        self._lap_model.reset(rows)
-        self.driverChanged.emit()
-        self.lapsChanged.emit()
+        laps_of = (self.shown_key, self.selected_entry)
+        if laps_of == self._laps_of:
+            self._lap_model.sync(rows)  # same car read again: rows changed in place (scroll & current lap kept)
+        else:
+            self._laps_of = laps_of
+            self._lap_model.reset(rows)  # other car: list from the top
+        summary = lap_stats(result, entry) if entry is not None and result is not None else []
+        if summary != self.lap_summary:
+            self.lap_summary = summary
+            self.lapSummaryChanged.emit()
+        columns = {"usage": any(row["usageText"] for row in rows), "wear": any(row["wearText"] for row in rows)}
+        if columns != self.lap_columns:
+            self.lap_columns = columns
+            self.lapsChanged.emit()
+        unit = speed_converter()[1]
+        if unit != self.speed_unit:
+            self.speed_unit = unit
+            self.speedUnitChanged.emit()
+        self.publish_driver()
+
+    def publish_driver(self):
+        """Car picked & its info (names, class, logo & picture) told only if changed (logos fetched meanwhile)"""
+        info = self.entry_info(self.entry())
+        if (self.selected_entry, info) != self._driver_told:
+            self._driver_told = (self.selected_entry, info)
+            self.driver_info = info
+            self.driverChanged.emit()
 
     # Positions chart
     @Property(dict, notify=chartChanged)

@@ -41,7 +41,7 @@ class BroadcastDirector(BaseDialog):
 
         super().__init__(parent)
         self.set_utility_title(tr("Broadcast Director"))
-        self.setMinimumSize(UIScaler.size(72), UIScaler.size(38))
+        self.setMinimumSize(self.page_minimum_size())
         self.backend = DirectorBackend(self)
         self.view = create_quick_view(self, "BroadcastDirector.qml", {"backend": self.backend}, samples=0)
         layout = QVBoxLayout(self)
@@ -51,8 +51,8 @@ class BroadcastDirector(BaseDialog):
 
     @staticmethod
     def page_minimum_size() -> QSize:
-        """Three columns & toolbar never cut (QML pages do not scroll)"""
-        return QSize(UIScaler.size(72), UIScaler.size(38))
+        """Toolbar never cut (QML pages do not scroll): under 70 em the three columns are stacked in tabs"""
+        return QSize(UIScaler.size(52), UIScaler.size(38))
 
     def keep_when_hidden(self) -> bool:
         """Director off: freed while hidden like any page"""

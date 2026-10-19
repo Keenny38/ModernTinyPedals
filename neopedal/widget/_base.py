@@ -49,7 +49,7 @@ from ._layout_guide import end_layout_guide, layout_guide
 from ._painter import OverlayStyle, RawImage, RawText
 from ._snapping import centered, fit_on_screens, step_on_grid
 from ._snapping import move_to_screen as place_on_screen
-from ._style import StyledConfig, overlay_theme, scale_overrides, theme_overrides
+from ._style import StyledConfig, overlay_opacity_scale, overlay_theme, scale_overrides, theme_overrides
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import WidgetConfig
@@ -145,6 +145,7 @@ class Base(QWidget):
 
         # Overlay style
         style = self.cfg.user.config["overlay_style"]
+        self.opacity_scale = overlay_opacity_scale(style)
         self.modern_style = overlay_theme(style).modern
         if self.modern_style:
             OverlayStyle.corner_scale = min(max(style["corner_radius_scale"], 0), 0.5)
@@ -229,10 +230,13 @@ class Base(QWidget):
 
     def screen_opacity(self) -> float:
         """Window opacity on screen: none for overlay shown on stream only while locked (see stream_overlay),
-        visible while unlocked for positioning"""
+        visible while unlocked for positioning, none while auto hidden on screen only (garage or spectating
+        streamed, see overlay_control) unless edited"""
         if self.cfg.overlay["fixed_position"] and self.wcfg.get("stream_visibility") == "Stream Only":
             return 0.0
-        return self.wcfg["opacity"]
+        if realtime_state.screen_hidden and not realtime_state.editing:
+            return 0.0
+        return self.wcfg["opacity"] * self.opacity_scale  # times global overlay opacity (overlay style)
 
     def __set_window_attributes(self):
         """Set window attributes"""
@@ -668,7 +672,9 @@ class Base(QWidget):
         add(menu, tr("Lock Overlay"), lock_overlay)
 
         callback = actions.get(exec_menu(menu, event.globalPos()))
-        if callback is not None:
+        # Overlay stopped while menu was open (reload, preset auto-load in its event loop): attributes cleared,
+        # action of a widget no longer shown dropped
+        if callback is not None and self.__dict__:
             callback()
 
     def menu_actions(self):

@@ -25,7 +25,8 @@ class) or race status color, player larger with ring, proximity ring around play
 pill, pit out prediction rings (accent: estimated stop) with stop duration badges. Temporary
 circle map until track is recorded. Sector performance: road of each sector colored by player's
 most recent time in it, as game live timing (purple: best of class in session, green: personal best,
-orange: slower). Cars close to player on track (time gap within threshold) ringed.
+orange: slower). Cars close to player on track (time gap within threshold) ringed. Official corner numbers (or
+names) in small badges outside their bend.
 """
 
 from __future__ import annotations
@@ -83,7 +84,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         "pitout_duration_minimum", "pitout_duration_increment", "enable_auto_pitout_prediction",
         "auto_prediction_additional_pitstop_time", "enable_fixed_pitout_prediction",
         *(f"fixed_pitstop_duration_{index}" for index in range(1, 11)), "show_pitstop_duration",
-        "show_sector_performance", "show_nearby_vehicle_highlight", "nearby_vehicle_threshold",
+        "show_sector_performance", "show_nearby_vehicle_highlight", "nearby_vehicle_threshold", "show_corner_numbers",
     )
 
     def __init__(self, config, widget_name):
@@ -153,18 +154,20 @@ class Realtime(TrackMapMixin, ModernOverlay):
 
     def update_map(self, data):
         """Map update: paths & static layer"""
-        if self.last_modified != data:
-            self.last_modified = data
+        if self.map_changed(data):
             raw_data = minfo.mapping.coordinates if data != -1 else None
             sector_paths, map_full_path = self.create_map_path(raw_data)
             self.map_paths = (map_full_path,)
             self.sector_paths = tuple(sector_paths) if self.map_scaled else ()
+            self.map_corners = None  # placed again on new map
             self.car_positions = None  # map scale changed
             self.redraw_static()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         self.update_map(minfo.mapping.lastModified)
+        if self.update_corners():
+            self.redraw_static()
         if self.show_sector_performance:
             vehicles = minfo.vehicles
             index = vehicles.playerIndex
@@ -227,8 +230,24 @@ class Realtime(TrackMapMixin, ModernOverlay):
             if self.wcfg["show_start_line"] and len(self.map_scaled) > 1:
                 (x1, y1), (x2, y2) = self.map_scaled[0], self.map_scaled[1]
                 self.draw_start_line(painter, QPointF(x1, y1), degrees(atan2(y2 - y1, x2 - x1)))
+            if self.show_corner_numbers:
+                self.draw_corner_numbers(painter)
         elif self.wcfg["show_start_line"]:
             self.draw_start_line(painter, QPointF(self.area_margin, self.area_size * 0.5), 90.0)
+
+    def draw_corner_numbers(self, painter: QPainter):
+        """Official corner numbers (or names) in badges outside their bend"""
+        theme = self.theme
+        unit = self.unit
+        height = self.metrics["place"].height() + unit * 0.1
+
+        def size_of(text: str) -> tuple[float, float]:
+            return max(self.text_width("place", text) + unit * 0.4, height), height
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for text, rect in self.corner_labels(size_of, self.pen_edge.widthF() / 2 + unit * 0.1):
+            rounded(painter, rect, self.radius(0.25), theme.tint(theme.surface, 230))
+            self.draw_text(painter, rect, text, "place", theme.text, CENTER, elide=False)
 
     def draw_sector_performance(self, painter: QPainter):
         """Road of each sector timed in its sector performance color"""

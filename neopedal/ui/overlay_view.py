@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Slot
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from ..i18n import tr
 from ..module_control import ModuleControl, wctrl
@@ -88,12 +88,9 @@ class OverlayView(QWidget):
         open_overlay_options(self, name)
 
     def confirm(self, text: str) -> bool:
-        answer = QMessageBox.question(
-            self, tr("Confirm"), text,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        return answer == QMessageBox.StandardButton.Yes
+        from ._common import confirm_action
+
+        return confirm_action(self, tr("Confirm"), text, tr("Confirm"))
 
     def export_settings(self, names: list[str]):
         """Settings of picked overlays saved as package file (saved values)"""

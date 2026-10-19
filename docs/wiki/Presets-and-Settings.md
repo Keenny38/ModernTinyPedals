@@ -84,7 +84,7 @@ Global options are in `config.json`, in the global config folder: `%APPDATA%\Neo
 
 - One category per section of `config.json`, options in groups with their description, and an editor matching each option: switch, choice list, number with its limits, color with a picker, folder with `Choose Folder...` and `Open Folder`.
 - `Search settings` (`Ctrl+F` on the page) looks through every category; the count of matches shows next to each category.
-- Changes stay pending until `Apply` (`Ctrl+S`): the bar at the bottom counts them, with `Undo`, `Redo` (`Ctrl+Z`, `Ctrl+Y`) and `Discard`. Invalid values are shown in red with the reason and block `Apply`. The circular arrow next to an option puts it back to default, `Reset Section` the whole category.
+- Changes stay pending until `Apply` (`Ctrl+S`): the bar at the bottom counts them, with `Undo`, `Redo` (`Ctrl+Z`, `Ctrl+Y`) and `Discard`. Undo also goes back past `Apply`: the change undone is pending again, to apply. Invalid values are shown in red with the reason and block `Apply`. The circular arrow next to an option puts it back to default, `Reset Section` the whole category.
 - The `Web Dashboard` category shows the addresses to open and the access code (with copy buttons), `Remote Control` the command and stream addresses, `Notification` a preview of each notice. The `Stream Overlay` category holds the server settings of the `Stream Overlays` page, which lists the browser source addresses (see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)).
 - Units, global font override and API options belong to the loaded preset: they open their own page from `In the loaded preset`.
 
@@ -92,12 +92,12 @@ The menus open the matching category:
 
 | Menu | Settings |
 |---|---|
-| `Config` > `Application` | Startup, tray, updates (`number_of_hours_between_update_checks`), language, window theme, setup wizard, auto load, backups, trash, snapping, layout guides |
+| `Config` > `Application` | Startup, tray, updates (`number_of_hours_between_update_checks`), language, window theme, setup wizard, auto load, backups, trash |
 | `Config` > `Compatibility` | Linux window manager bypass, translucent background, window position correction, X11 override |
 | `Config` > `Notification` | Notices shown in the main window |
 | `Config` > `Units` | Distance, fuel, speed, temperature, pressures, power, weight |
 | `Config` > `Global Font Override` | Font name, size, weight and offset for every overlay |
-| `Config` > `Overlay Style` | Modern design, theme, fonts, corners, depth effects, overlay scale, fade |
+| `Config` > `Overlay Style` | Modern design, theme, fonts, corners, depth effects, overlay scale, fade, overlay editing (edit mode, snapping, grid, layout guides, layout per screen setup) |
 | `Config` > `Remote Control`, `Web Dashboard`, `VR Overlay (Experimental)` | See [Connections](Connections.md) |
 | `Config` > `User Path` | Folders for presets, data and recorded laps |
 | `API` > `Options` | Game connection, see [Game Setup](Game-Setup.md) |

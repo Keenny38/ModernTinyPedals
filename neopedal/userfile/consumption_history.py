@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 from collections.abc import Sequence
 
 from ..const_file import FileExt
@@ -113,6 +114,26 @@ def convert_line(data: dict, default_data: dict) -> ConsumptionDataSet | None:
         return ConsumptionDataSet(**dict_value_type(data, default_data))
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def rewrite_consumption_history(
+    laps: Sequence, filepath: str, filename: str, extension: str = FileExt.CONSUMPTION
+) -> bool:
+    """History file holding laps only: removed when none, a placeholder row added to a single lap (skipped on
+    load, a file needs 2 rows), returns True if file now holds laps (error logged)"""
+    if invalid_save_name(filename):
+        return False
+    if not laps:
+        try:
+            os.remove(f"{filepath}{filename}{extension}")
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            logger.error("USERDATA: %s%s not removed: %s", filename, extension, error)
+            return False
+        return True
+    dataset = list(laps) if len(laps) > 1 else [*laps, ConsumptionDataSet()]
+    return save_consumption_history_file(dataset=dataset, filepath=filepath, filename=filename, extension=extension)
 
 
 def save_consumption_history_file(

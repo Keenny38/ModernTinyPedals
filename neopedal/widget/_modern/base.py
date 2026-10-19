@@ -295,10 +295,10 @@ class ModernOverlay(Overlay):
         return self.fonts[self.font_role(role, text)]
 
     def text_width(self, role: str, text: str) -> float:
-        """Text advance width with role font"""
-        if self.fonts[role].capitalization() == QFont.Capitalization.AllUppercase:
+        """Text advance width with role font (cached)"""
+        if role in self._caps_roles:
             text = text.upper()
-        return self.metrics[self.font_role(role, text)].horizontalAdvance(text)
+        return self.advance(role, text)
 
     def widest(self, role: str, texts: Iterable[str]) -> str:
         """Widest of texts with role font (sizing sample of values that vary by unit or language)"""

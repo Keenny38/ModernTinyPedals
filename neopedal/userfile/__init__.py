@@ -27,6 +27,7 @@ import io
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -42,12 +43,35 @@ REPLACE_ATTEMPTS = 5  # attempts of replacing file locked for a moment (antiviru
 REPLACE_RETRY_DELAY = 0.05  # seconds before 2nd attempt, longer before each next one
 
 
+def app_root_folder() -> str:
+    """APP root folder: folder of executable (installed app) or of run.py (source),
+    the working folder run.py sets at start"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+APP_ROOT = app_root_folder()
+
+
+def app_path(filepath: str) -> str:
+    """Relative path resolved against APP root folder instead of working folder
+
+    Same folder as before when started from run.py (working folder is APP root), so a relative
+    user path keeps pointing to the same place. Empty or absolute path returned unchanged.
+    """
+    if not filepath or os.path.isabs(filepath):
+        return filepath
+    return os.path.join(APP_ROOT, filepath)
+
+
 def set_user_data_path(filepath: str) -> str:
-    """Set user data path, create if not exist"""
-    if not os.path.exists(filepath):
+    """Set user data path (relative to APP root folder), create if not exist"""
+    full_path = app_path(filepath)
+    if not os.path.exists(full_path):
         logger.info("%s folder does not exist, attempt to create", filepath)
         try:
-            os.makedirs(filepath, exist_ok=True)
+            os.makedirs(full_path, exist_ok=True)
         except OSError:  # also invalid path (Windows "<" in name: WinError 123)
             logger.error("failed to create %s folder", filepath)
             return ""
@@ -188,6 +212,26 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
         raise
 
 
+@contextmanager
+def atomic_path(filename: str) -> Iterator[str]:
+    """Temporary file name to write (writer taking a file name: csv, picture), replaces target once written
+
+    Existing file is never left half-written (file open in a spreadsheet, full disk), temporary file never
+    left on error.
+
+    Raises:
+        OSError: unable to replace target (target untouched), or error of writer.
+    """
+    temp_filename = temp_file_name(filename)
+    try:
+        yield temp_filename
+        replace_retry(temp_filename, filename)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_filename)
+        raise
+
+
 def write_text_file(filename: str, text: str) -> bool:
     """Write text file atomically, returns True if saved"""
     try:
@@ -244,7 +288,7 @@ def write_json(
 def set_relative_path(filepath: str) -> str:
     """Convert absolute path to relative if path is inside APP root folder"""
     try:
-        rel_path = os.path.relpath(filepath)
+        rel_path = os.path.relpath(app_path(filepath), APP_ROOT)
         if rel_path.startswith(".."):
             output_path = filepath
         else:

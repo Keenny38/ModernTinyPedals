@@ -1,4 +1,6 @@
+# Runtime dependencies (compatible ranges), also the package dependencies of pyproject.toml
 cryptography>=43
 psutil>=6.1
-PySide6>=6.8,<6.12  # 6.12.0: refcount error on Python 3.11 (fatal "deallocating True or False")
+# PySide6 6.12.0: refcount error on Python 3.11 (fatal "deallocating True or False")
+PySide6>=6.8,<6.12
 pyxdg; sys_platform == 'linux'

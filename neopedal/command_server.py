@@ -32,7 +32,8 @@ as browsers cannot send custom header to other site without CORS approval.
 Host header is also verified, to block DNS rebinding (malicious domain resolved to 127.0.0.1).
 WebSocket is not covered by CORS, so /stream also rejects browser pages from other origins,
 and "null" origin (sandboxed frame of any web site, page opened from a local file): only pages
-served from http://localhost or http://127.0.0.1 (and clients without Origin) can read telemetry.
+of the app's own local servers (remote control, web dashboard, stream overlay ports, on
+http(s)://localhost or 127.0.0.1) and clients without Origin can read telemetry.
 """
 
 from __future__ import annotations
@@ -43,13 +44,14 @@ import io
 import ipaddress
 import json
 import logging
+import re
 import select
 import socket
 import socketserver
 import struct
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import chain
@@ -333,6 +335,15 @@ def available_commands() -> dict[str, Callable]:
     return dict(chain(COMMANDS_GENERAL, COMMANDS_PRESET, COMMANDS_MODULE, COMMANDS_WIDGET))
 
 
+# Secret values of a request query (web dashboard access code, stream overlay token): never logged
+SECRET_QUERY = re.compile(r"([?&](?:code|token|access_code|access_token)=)[^&\s#\"']*", re.IGNORECASE)
+
+
+def redact_secret_query(text: str) -> str:
+    """Text (request line, URL) with access code & token query values replaced"""
+    return SECRET_QUERY.sub(r"\1<redacted>", text)
+
+
 def bind_error_text(error: Exception) -> str:
     """Server bind error reason (OverflowError has no strerror)"""
     return getattr(error, "strerror", None) or str(error)
@@ -345,14 +356,63 @@ def is_allowed_host(host: str | None, port: int) -> bool:
     return host.strip().lower() in {f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost"}
 
 
-def is_allowed_origin(origin: str | None) -> bool:
-    """Allow non-browser clients (no Origin) and pages served from local host only
+# Local servers of the app whose pages may read the stream: setting section, port option
+OWN_PAGE_PORTS = (
+    ("remote_control", "remote_control_port"),
+    ("web_dashboard", "web_dashboard_port"),
+    ("stream_overlay", "stream_overlay_port"),
+)
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
-    Origin "null" (sandboxed frame of any site, local file) is refused.
+
+# Server object of each page server (module, instance): its port allowed only while it runs
+PAGE_SERVERS = {
+    "web_dashboard": ("web_dashboard", "webdashboard"),
+    "stream_overlay": ("stream_overlay", "streamoverlay"),
+}
+
+
+def own_server_running(section: str) -> bool:
+    """Server of section running: remote control (serving the stream itself) always, others while listening (a
+    server turned off or not started leaves its port to any other program, its pages never allowed)"""
+    names = PAGE_SERVERS.get(section)
+    if names is None:
+        return True
+    module = sys.modules.get(f"{__package__}.{names[0]}")  # never imported: never started
+    return bool(getattr(getattr(module, names[1], None), "running", False))
+
+
+def own_page_ports() -> set[int]:
+    """Ports of the app's own local servers running (current setting)"""
+    config = getattr(cfg.user, "config", None) or {}
+    ports = set()
+    for section, key in OWN_PAGE_PORTS:
+        if not own_server_running(section):
+            continue
+        with suppress(KeyError, TypeError, ValueError):
+            ports.add(int(config[section][key]))
+    return ports
+
+
+def is_allowed_origin(origin: str | None, ports: Collection[int] | None = None) -> bool:
+    """Allow non-browser clients (no Origin) and pages of the app's own local servers only
+
+    Origin "null" (sandboxed frame of any site, local file) and other local pages (any program
+    serving a page on another port of this computer) are refused.
+
+    Args:
+        ports: allowed ports, None for ports of own servers in current setting.
     """
     if origin is None:
         return True
-    return urlsplit(origin.strip().lower()).hostname in {"127.0.0.1", "localhost"}
+    try:
+        parts = urlsplit(origin.strip().lower())
+        port = parts.port or DEFAULT_PORTS.get(parts.scheme)
+    except ValueError:  # invalid port
+        return False
+    if parts.scheme not in DEFAULT_PORTS or parts.hostname not in {"127.0.0.1", "localhost"}:
+        return False
+    return port in (own_page_ports() if ports is None else ports)
 
 
 def websocket_accept(key: str) -> str:
@@ -586,7 +646,8 @@ class CommandHandler(BoundedRequestHandler):
 
     def log_message(self, format, *args):
         """Silence default stderr access log"""
-        logger.debug("REMOTE CONTROL: %s", format % args)
+        if logger.isEnabledFor(logging.DEBUG):  # every request: no formatting while not logged
+            logger.debug("REMOTE CONTROL: %s", format % args)
 
 
 class CommandServer:

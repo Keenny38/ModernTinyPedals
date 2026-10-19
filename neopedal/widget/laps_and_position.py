@@ -22,12 +22,11 @@ Laps and position Widget
 
 from typing import TYPE_CHECKING
 
-from .. import calculation as calc
 from ..api_control import api
 from ..formatter import format_points
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import player_vehicle
+from ._common import player_race_laps, player_vehicle
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import LapsAndPositionConfig
@@ -90,6 +89,7 @@ class Realtime(Overlay):
             self.bar_style_laps = (
                 self.wcfg["background_color_laps"],
                 self.wcfg["warning_color_maximum_laps"],
+                self.wcfg["warning_color_invalid_lap"],  # lap invalidated by game, before last laps warning
             )
             self.bar_laps = self.set_rawtext(
                 text=text_laps,
@@ -190,8 +190,7 @@ class Realtime(Overlay):
         """Update when vehicle on track"""
         # Lap number
         if self.wcfg["show_laps"]:
-            lap_into = calc.lap_progress_correction(api.read.lap.progress(), api.read.timing.current_laptime())
-            self.update_laps(self.bar_laps, lap_into)
+            self.update_laps(self.bar_laps)
 
         # Position update
         plr_place = api.read.vehicle.place()
@@ -238,29 +237,31 @@ class Realtime(Overlay):
             self.update_position_change(self.bar_pos_change, pos_diff)
 
     # GUI update methods
-    def update_laps(self, target, data):
+    def update_laps(self, target):
         """Lap number, predicted lap total (changes while lap progress does not: pit stop of a timed race)"""
         lap_num = api.read.lap.number()
         lap_max = api.read.lap.maximum()
+        laps_done, lap_total = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
 
         if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-            text_lap_total = f"{lap_max:.2f}"
+            text_lap_total = f"{lap_total:.2f}"
         else:
-            session_time = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
-            lap_total = lap_num + calc.end_timer_laps_remain(data, minfo.delta.lapTimePace, session_time)
             text_lap_total = f"~{lap_total:.2f}"
 
-        text_laps_done = f"{lap_num + data:.2f}"
+        text_laps_done = f"{laps_done:.2f}"
         if self.wcfg["show_predicted_extra_laps"]:
             text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}({minfo.vehicles.finishLapOffset:+.0f})"
         else:
             text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}"
         text = f"{self.prefix_laps}{text_laps:>{self.just_laps}.{self.just_laps}}"
-        is_last_laps = lap_num - lap_max >= -1
-        if target.last != (text, is_last_laps):
-            target.last = (text, is_last_laps)
+        if self.wcfg["show_invalid_lap_highlight"] and api.read.lap.invalidated():
+            color_index = 2
+        else:
+            color_index = int(lap_num - lap_max >= -1)  # last laps
+        if target.last != (text, color_index):
+            target.last = (text, color_index)
             target.text = text
-            target.bg = self.bar_style_laps[is_last_laps]
+            target.bg = self.bar_style_laps[color_index]
             target.update()
 
     def update_position_overall(self, target, place, total):

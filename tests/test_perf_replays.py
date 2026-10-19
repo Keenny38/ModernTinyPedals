@@ -38,7 +38,7 @@ def test_folder_info_cached_and_copy_progress_signal(replays_page, monkeypatch, 
 def test_signals_only_when_changed(replays_page):  # noqa: F811
     backend = answered(replays_page, GAME_ANSWERS)
     incidents = counter(backend.incidentsChanged)
-    standings = counter(backend.standingsChanged)
+    standings = counter(backend.classFilterChanged)
     laps = counter(backend.lapsChanged)
     backend.update_incidents()
     backend.update_standings()
@@ -58,11 +58,11 @@ def test_signals_only_when_changed(replays_page):  # noqa: F811
 
 def test_timeline_markers_cached(replays_page):  # noqa: F811
     backend = answered(replays_page, GAME_ANSWERS)
-    first = backend.timeline
-    assert len(first["markers"]) == 2 and first["end"] == pytest.approx(3600.0)
-    assert backend.timeline["markers"] is first["markers"]  # not made again per read
-    backend.setIncidentFilter(2)  # incident rows changed: shown flags made again
-    markers = backend.timeline["markers"]
-    assert markers is not first["markers"] and [marker["shown"] for marker in markers].count(True) == 1
+    markers = backend.incidentMarkers.rows
+    assert len(markers) == 2 and backend.timelineEnd == pytest.approx(3600.0)
+    first = list(markers)
+    backend.setIncidentFilter(2)  # incident rows changed: shown roles changed in place
+    assert [marker["shown"] for marker in backend.incidentMarkers.rows].count(True) == 1
+    assert backend.incidentMarkers.rows[0] is first[0]  # markers model synced, rows not made again
     backend.setIncidentFilter(0)
-    assert all(marker["shown"] for marker in backend.timeline["markers"])
+    assert all(marker["shown"] for marker in backend.incidentMarkers.rows)

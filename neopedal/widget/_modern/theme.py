@@ -54,6 +54,14 @@ TOKEN_COLORS = {
     "lap_behind": "#66CCFF",  # car one lap or more behind
 }
 
+# Neutral surfaces of dark themes with "enable_black_background" (instead of slate tinted ones)
+BLACK_SURFACES = {
+    "surface": "#000000",
+    "surface_alt": "#141414",
+    "surface_raised": "#1F1F1F",
+    "surface_strong": "#2E2E2E",
+}
+DEFAULT_BACKGROUND_OPACITY = 92  # percent: panel alpha 235 of 255
 BORDER_ALPHA = 20  # panel hairline border (white)
 LIGHT_BORDER_ALPHA = 28  # panel hairline border on light themes (black)
 HIGHLIGHT_ALPHA = 46  # player row tint
@@ -101,19 +109,29 @@ class Theme(NamedTuple):
         return tinted
 
 
-def build_theme(style: dict, surface_alpha: int = 235) -> Theme:
+def background_alpha(style: dict) -> int:
+    """Panel background alpha (0-255) of overlay style "background_opacity_percentage" (invalid: default)"""
+    percent = style.get("background_opacity_percentage", DEFAULT_BACKGROUND_OPACITY)
+    if isinstance(percent, bool) or not isinstance(percent, (int, float)) or percent != percent:  # NaN
+        percent = DEFAULT_BACKGROUND_OPACITY
+    return round(min(max(percent, 0), 100) * 255 / 100)
+
+
+def build_theme(style: dict, surface_alpha: int | None = None) -> Theme:
     """Theme colors of overlay theme
 
     Args:
         style: global overlay style setting.
-        surface_alpha: panel background alpha (0-255).
+        surface_alpha: panel background alpha (0-255), None: background opacity of overlay style.
     """
     theme = overlay_theme(style)
     colors = {
         name: QColor(f"#{theme_rgb(value[1:], theme, BACKGROUND if name.startswith('surface') else FOREGROUND)}")
         for name, value in TOKEN_COLORS.items()
     }
-    colors["surface"].setAlpha(surface_alpha)
+    if not theme.light and style.get("enable_black_background", False):  # light themes: kept
+        colors.update((name, QColor(value)) for name, value in BLACK_SURFACES.items())
+    colors["surface"].setAlpha(background_alpha(style) if surface_alpha is None else surface_alpha)
     if theme.light:
         border = QColor(0, 0, 0, LIGHT_BORDER_ALPHA)
     else:

@@ -1321,6 +1321,8 @@ class MapView(BackendBase):
         if mode == "consistency":  # spreads found again (laps read in background meanwhile)
             self._consistency = self.consistency()
             return (mode, reference, tuple(self._consistency.get("spreads", [])), line, self._map_angle)
+        if mode == "pedals":
+            return (mode, reference, colorblind, line, self._map_angle)
         return (mode, reference, line, self._map_angle)
 
     def line_colors(self, mode: str, lines: list[tuple[lap_map.MapLine, PlotLap]],
@@ -1386,7 +1388,7 @@ class MapView(BackendBase):
             elif mode == "gear":
                 colors = lap_map.gear_colors(lap.data, line)
             else:
-                colors = lap_map.pedal_colors(lap.data, line)
+                colors = lap_map.pedal_colors(lap.data, line, bool(self._map_options.get("colorblind")))
         return line, colors
 
     def line_offsets(self, reference_line: lap_map.MapLine, reference: PlotLap, line: lap_map.MapLine,
@@ -1408,7 +1410,7 @@ class MapView(BackendBase):
                 self.build_map()
                 self.bump_revision()
                 self.chartChanged.emit()
-            elif self._map and name == "colorblind" and self._map_mode in ("gain", "corners"):
+            elif self._map and name == "colorblind" and self._map_mode in ("gain", "corners", "pedals"):
                 self.build_colored_line(self._map_view[2])
                 self.bump_revision()
             self.mapChanged.emit()

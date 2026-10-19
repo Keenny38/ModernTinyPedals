@@ -141,19 +141,17 @@ def copy_setting(dict_user: dict) -> dict:
 
 def load_setting_json_file(
     filename: str, filepath: str, dict_def: dict, file_info: str = "user preset",
-    validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, max_attempts: int = 5,
-    access_timeout: float = 2.0,
+    validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, access_timeout: float = 2.0,
 ) -> dict:
     """Load setting json file & verify
 
     A file that cannot be accessed (locked, no permission) is retried up to access_timeout
     seconds, then defaults are used without saving them over the file this session.
+    A corrupted file (invalid JSON or values) is never read again: kept as backup, defaults used at once.
     """
     filename_source = f"{filepath}{filename}"
-    # Start loading attempts
-    attempts = max_attempts
     access_deadline = monotonic() + access_timeout
-    while attempts > 0:
+    while True:
         try:
             with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM of Notepad, PowerShell
                 setting_user = json.load(jsonfile)
@@ -174,14 +172,12 @@ def load_setting_json_file(
             _unreadable_files.add(_file_key(filename_source))
             setting_user = copy_setting(dict_def)
             break
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-            logger.error("USERDATA: %s failed loading, %s attempt(s) left", filename, attempts - 1, exc_info=(attempts <= 1))
-        attempts -= 1
-        sleep(0.05)
-    else:
-        logger.error("USERDATA: %s failed loading, fall back to default", filename)
-        create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
-        setting_user = copy_setting(dict_def)
+        # corrupted (RecursionError: nested too deep, never a crash at start): same result if read again
+        except (AttributeError, IndexError, KeyError, RecursionError, TypeError, ValueError):
+            logger.error("USERDATA: %s failed loading, fall back to default", filename, exc_info=True)
+            create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
+            setting_user = copy_setting(dict_def)
+            break
 
     logger.info("USERDATA: %s loaded (%s)", filename, file_info)
     return setting_user
@@ -189,16 +185,13 @@ def load_setting_json_file(
 
 def load_style_json_file(
     filename: str, filepath: str, dict_def: dict, file_info: str = "style preset",
-    validator: Callable[[dict], bool] | None = None, max_attempts: int = 5,
-    access_timeout: float = 2.0,
+    validator: Callable[[dict], bool] | None = None, access_timeout: float = 2.0,
 ) -> dict:
-    """Load style json file & verify (optional), see load_setting_json_file for locked file"""
+    """Load style json file & verify (optional), see load_setting_json_file for locked & corrupted file"""
     filename_source = f"{filepath}{filename}"
     msg_text = "loaded"
-    # Start loading attempts
-    attempts = max_attempts
     access_deadline = monotonic() + access_timeout
-    while attempts > 0:
+    while True:
         try:
             with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM of Notepad, PowerShell
                 style_user = json.load(jsonfile)
@@ -225,15 +218,13 @@ def load_style_json_file(
             style_user = copy_setting(dict_def)
             msg_text = "fall back to default"
             break
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-            logger.error("USERDATA: %s failed loading, %s attempt(s) left", filename, attempts - 1, exc_info=(attempts <= 1))
-        attempts -= 1
-        sleep(0.05)
-    else:
-        logger.error("USERDATA: %s failed loading, fall back to default", filename)
-        create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
-        style_user = copy_setting(dict_def)
-        msg_text = "updated"
+        # corrupted (RecursionError: nested too deep, never a crash at start): same result if read again
+        except (AttributeError, IndexError, KeyError, RecursionError, TypeError, ValueError):
+            logger.error("USERDATA: %s failed loading, fall back to default", filename, exc_info=True)
+            create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
+            style_user = copy_setting(dict_def)
+            msg_text = "updated"
+            break
 
     if msg_text == "updated":
         save_json_file(style_user, filename, filepath)
@@ -293,7 +284,7 @@ def verify_json_file(
             return saved == loaded
     except FileNotFoundError:
         logger.error("USERDATA: not found %s", filename_source)
-    except (AttributeError, TypeError, ValueError, OSError):
+    except (AttributeError, RecursionError, TypeError, ValueError, OSError):
         logger.error("USERDATA: unable to verify %s", filename_source)
     return False
 

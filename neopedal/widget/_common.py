@@ -29,6 +29,7 @@ from typing import Any, NamedTuple
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .. import calculation as calc
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import VehicleDataSet, minfo
@@ -45,6 +46,18 @@ def player_vehicle() -> VehicleDataSet:
     index = vehicles.playerIndex
     data_set = vehicles.dataSet
     return data_set[index] if 0 <= index < len(data_set) else NO_PLAYER
+
+
+def player_race_laps(est_remaining: float) -> tuple[float, float]:
+    """Player laps done (completed laps + lap progress) & race finish lap, same count in Laps and position and
+    Session overlays. Both from game scoring, updated together (telemetry lap number is the lap being driven, one
+    more than completed laps). Timed race ends on crossing the line after the timer: finish lap rounded up"""
+    lap_into = api.read.lap.progress()
+    laps_completed = api.read.lap.completed_laps()
+    if api.read.session.finish_type(minfo.vehicles.finishAsLap):
+        return laps_completed + lap_into, api.read.lap.maximum()
+    laps_timer = calc.end_timer_laps_remain(lap_into, minfo.delta.lapTimePace, est_remaining)
+    return laps_completed + lap_into, laps_completed + calc.ceil(laps_timer)
 
 
 class FontMetrics(NamedTuple):

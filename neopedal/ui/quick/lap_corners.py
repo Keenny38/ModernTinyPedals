@@ -45,6 +45,7 @@ from ...userfile.corner_analysis import (
     straights_delta,
     total_lap_time,
 )
+from ...userfile.corner_coach import corner_name, official_inside, official_text
 from ...userfile.telemetry_lap import LapData
 from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
@@ -436,27 +437,18 @@ class CornerTable(PagePart):
 
     def official_text(self, label: str) -> str:
         """Official corner shown: "T5" ("V5" in French), or translated name"""
-        return trm(f"T{label}") if self.official_numbered else tr(label)
+        return official_text(label, self.official_numbered)
 
     def official_in(self, row: CornerComparison) -> list[TrackCorner]:
         """Official corners inside corner found on reference lap"""
-        return [corner for corner in self.official if row.corner.start <= corner.distance <= row.corner.end]
+        return official_inside(self.official, row.corner.start, row.corner.end)
 
     def row_label(self, row: CornerComparison) -> str:
         """Corner found on reference lap named after official corners it covers: "T5", "T5-6" """
         if not self.official:
             return corner_label(row.corner.number)
-        inside = self.official_in(row)
-        if not inside:
-            nearest = min(self.official, key=lambda corner: abs(corner.distance - row.corner.apex))
-            if abs(nearest.distance - row.corner.apex) > 200:
-                return "—"
-            inside = [nearest]
-        if len(inside) == 1:
-            return self.official_text(inside[0].label)
-        if self.official_numbered:
-            return trm(f"T{inside[0].label}-{inside[-1].label}")
-        return " / ".join(tr(corner.label) for corner in inside)
+        corner = row.corner
+        return corner_name(self.official, self.official_numbered, corner.start, corner.apex, corner.end) or "—"
 
     @Slot(int, result=list)
     def range(self, index: int) -> list[float]:

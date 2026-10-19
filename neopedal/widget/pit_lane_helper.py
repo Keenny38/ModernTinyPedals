@@ -130,7 +130,7 @@ class PitLaneMixin:
     @staticmethod
     def limiter_on() -> bool:
         """Speed limiter switched on"""
-        return bool(api.read.switch.speed_limiter() or api.read.switch.speed_limiter_active())
+        return bool(api.read.switch.speed_limiter())
 
     def read_pit(self) -> PitReading:
         """Readings & visibility"""

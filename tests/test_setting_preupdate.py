@@ -192,3 +192,18 @@ def test_options_read_by_no_overlay_removed_in_2_51_1():
             "standings": {"column_pitstop_count": True, "column_pit_status": True}}
     preupdate_user_setting((2, 51, 0), user)
     assert user == {"deltabest": {"decimal_places": 3}, "standings": {"column_pit_status": True}}
+
+
+def test_standings_pitstop_duration_while_requested_off_in_2_51_3():
+    from neopedal.setting_preupdate import preupdate_user_setting
+    from neopedal.template.widget.standings import WIDGET_STANDINGS
+
+    assert WIDGET_STANDINGS["standings"]["show_pitstop_duration_while_requested_pitstop"] is False
+    user = {"standings": {"show_pitstop_duration_while_requested_pitstop": True},
+            "relative": {"show_pitstop_duration_while_requested_pitstop": True}}
+    preupdate_user_setting((2, 51, 2), user)
+    assert user["standings"]["show_pitstop_duration_while_requested_pitstop"] is False
+    assert user["relative"]["show_pitstop_duration_while_requested_pitstop"] is True  # other overlays kept
+    user["standings"]["show_pitstop_duration_while_requested_pitstop"] = True  # turned on again: kept
+    preupdate_user_setting((2, 51, 3), user)
+    assert user["standings"]["show_pitstop_duration_while_requested_pitstop"] is True

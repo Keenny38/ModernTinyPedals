@@ -227,7 +227,7 @@ def test_lmu_extra_data():
     data.scoring.vehScoringInfo[0].mUnderYellow = True
     scor_info.mSessionTimeRemaining = 600.0
     scor_info.mYellowFlagState = b"\xff"
-    scor_info.mSectorFlag[0] = 1  # game index 0 = sector 3
+    scor_info.mSectorFlag[2] = 1  # game index 2 = sector 3
     scor_info.mWind.x, scor_info.mWind.z = 2.0, -3.0
     scor_info.mDarkCloud = 0.4
     scor_info.mIsFixedSetup = True
@@ -262,7 +262,7 @@ def test_rf2_extra_data_fallbacks():
         scor.mVehicles[index].mPlace = place
         scor.mVehicles[index].mTimeBehindNext = behind
     scor.mScoringInfo.mYellowFlagState = b"\x02"
-    scor.mScoringInfo.mSectorFlag[1] = 1  # sector 1
+    scor.mScoringInfo.mSectorFlag[0] = 1  # sector 1
     scor.mVehicles[0].mIsPlayer = True
     assert reader.timing.gap_place_behind() == 1.5  # car placed 2nd, behind player placed 1st
     assert reader.timing.gap_place_ahead(1) == 4.0

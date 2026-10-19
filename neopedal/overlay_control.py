@@ -36,9 +36,11 @@ FROZEN_WAIT = 1.0  # longest wait while game data frozen (game closed, menus), w
 
 def stream_on_air() -> bool:
     """Stream overlay on air (see StreamOverlay.on_air): its module (http.server...) imported only once used,
-    never imported means never started"""
+    never imported means never started; module listed but still importing (main thread) has no instance yet:
+    not started either"""
     module = sys.modules.get(f"{__package__}.stream_overlay")
-    return module is not None and module.streamoverlay.on_air()
+    overlay = getattr(module, "streamoverlay", None)
+    return overlay is not None and overlay.on_air()
 
 
 class OverlayToggle:
@@ -157,6 +159,8 @@ class OverlayControl:
             # Overlays shown & updated: driving, or spectating / replay streamed (overlays only, see on_air)
             shown = active or (not paused and api.read.vehicle.total_vehicles() > 0 and stream_on_air())
             hidden = cfg.overlay["auto_hide"] and not shown
+            # Shown for stream only (garage, spectating): auto hide still applies on screen, sources keep them
+            screen_hidden = cfg.overlay["auto_hide"] and shown and not active
             if active:
                 session_type = api.read.session.session_type()
                 in_pits = api.read.vehicle.in_pits() or api.read.vehicle.in_garage()
@@ -173,9 +177,10 @@ class OverlayControl:
                 last_activity = activity
                 realtime_state.notify_change()
             # Auto hide state check
-            if self._last_hide_state != hidden:
-                self._last_hide_state = hidden
+            if self._last_hide_state != (hidden, screen_hidden):
+                self._last_hide_state = (hidden, screen_hidden)
                 realtime_state.hidden = hidden
+                realtime_state.screen_hidden = screen_hidden
                 overlay_signal.hidden.emit(hidden)
             # Visibility context check (per widget "visibility_context" option)
             if realtime_state.session_type != session_type or realtime_state.in_pits != in_pits:

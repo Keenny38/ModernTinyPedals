@@ -195,6 +195,12 @@ def show_toast(
     """
     if widget is None:
         return None
+    window = widget.window()
+    # One toast at a time: the new message replaces the shown one (same place, never stacked over it)
+    shown: list[Toast | ActionToast] = [*window.findChildren(Toast), *window.findChildren(ActionToast)]
+    for previous in shown:
+        if previous.parent() is window:
+            previous.hide_toast()
     if action_text and action is not None:
-        return ActionToast(widget.window(), text, action_text, action, duration)
-    return Toast(widget.window(), text, duration)
+        return ActionToast(window, text, action_text, action, duration)
+    return Toast(window, text, duration)

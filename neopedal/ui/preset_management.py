@@ -486,10 +486,13 @@ class RestoreBackup(BaseEditor):
                 basename = selected_filename[:selected_filename.find(FileExt.JSON)]
                 filepath = cfg.path.settings
                 try:
-                    shutil.move(
-                        f"{filepath}{selected_filename}",
-                        f"{filepath}{basename}{FileExt.JSON}"
-                    )
+                    # Saving paused & queued style saves (older styles) dropped meanwhile, styles reloaded:
+                    # a pending save or a refused reload would write old styles over the restored file
+                    with cfg.styles_replaced():
+                        shutil.move(
+                            f"{filepath}{selected_filename}",
+                            f"{filepath}{basename}{FileExt.JSON}"
+                        )
                 except OSError as error:  # locked file (cloud sync, antivirus), permission
                     QMessageBox.warning(self, tr("Error"), trm(f"Unable to restore backup file:<br>{error}"))
                     return
@@ -746,12 +749,15 @@ class PresetTransfer(BaseEditor):
         # Copy setting
         self.copy_setting(dest_dict, setting_selection, options_selection)
         # Save setting
-        save_and_verify_json_file(
+        saved = save_and_verify_json_file(
             dict_user=dest_dict,
             filename=dest_preset_name,
             filepath=cfg.path.settings,
             max_attempts=cfg.max_saving_attempts,
         )
+        if not saved:  # locked (cloud sync, antivirus) or not readable at load: never told transferred
+            QMessageBox.warning(self, tr("Error"), trm(f"Settings could not be saved to <b>{dest_preset_name}</b>."))
+            return
         msg_text = (
             f"Settings are transferred from <b>{loaded_preset_name}</b>"
             f" to <b>{dest_preset_name}</b>."
@@ -769,13 +775,18 @@ class PresetTransfer(BaseEditor):
         Writing to loaded preset would be overwritten by its next save, a locked preset must not change.
         If refused, loaded preset & destination list are refreshed and why is shown.
         """
-        if (os.path.normcase(dest_preset_name) != os.path.normcase(cfg.filename.setting)
+        exists = os.path.isfile(f"{cfg.path.settings}{dest_preset_name}")
+        if (exists and os.path.normcase(dest_preset_name) != os.path.normcase(cfg.filename.setting)
                 and dest_preset_name not in cfg.user.filelock):
             return True
         self.refresh_loaded_preset()
         self.dest_selector.clear()
         self.dest_selector.addItems(self.set_selector_list())
-        QMessageBox.warning(self, tr("Error"), tr("Destination preset is now loaded or locked, choose another preset."))
+        if not exists:  # renamed or deleted since list was made: saving would make it again from defaults
+            QMessageBox.warning(self, tr("Error"), tr("Preset not found, it may have been renamed or deleted."))
+        else:
+            QMessageBox.warning(self, tr("Error"),
+                                tr("Destination preset is now loaded or locked, choose another preset."))
         return False
 
     def copy_setting(self, dest_dict: dict, setting_selection: tuple[str, ...], options_selection: tuple[str, ...]):

@@ -82,7 +82,6 @@ def test_load_user_keeps_valid_values_and_repairs_missing(config):
 
 
 def test_load_user_corrupted_preset_recovers(config):
-    config.user.config["application"]["maximum_loading_attempts"] = 1
     with open(f"{config.path.settings}default.json", "w", encoding="utf-8") as file:
         file.write('{"overlay": ')
     config.load_user()
@@ -208,9 +207,7 @@ def test_api_name_from_global_or_preset(config):
 
 def test_attempt_limits_have_minimum(config):
     config.application["maximum_saving_attempts"] = 0
-    config.application["maximum_loading_attempts"] = 0
     assert config.max_saving_attempts == 3
-    assert config.max_loading_attempts == 1
 
 
 # Snapshot

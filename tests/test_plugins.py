@@ -109,7 +109,7 @@ def test_plugin_manager(ui_env, tmp_path, monkeypatch):
     from neopedal.module_control import wctrl
     from neopedal.ui.plugin_manager import PluginManager, reload_plugin
 
-    monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
+    monkeypatch.setattr(plugin_loader, "PLUGIN_FOLDER", str(tmp_path / "plugins"))  # no plugin shipped with the app
     make_plugin(tmp_path / "plugins", "gauge", "from neopedal.widget._base import Overlay\n\n\n"
                 "class Realtime(Overlay):\n    pass\n")
     monkeypatch.setitem(wctrl._module_pack, "plugin_gauge", load_plugin_widget("neopedal.widget", "plugin_gauge"))
@@ -421,7 +421,7 @@ def test_plugin_manager_trusts_reviewed_code_only(ui_env, tmp_path, monkeypatch)
 
     from neopedal.ui.plugin_manager import PluginManager
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(plugin_loader, "PLUGIN_FOLDER", str(tmp_path / "plugins"))
     make_plugin(tmp_path / "plugins", "gauge", "Realtime = object", trusted=False)
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda parent, title, text, *a, **k: warnings.append(text)))
@@ -436,7 +436,7 @@ def test_plugin_manager_trusts_reviewed_code_only(ui_env, tmp_path, monkeypatch)
     try:
         manager.trust_selected()
         assert warnings and "changed" in warnings[0]
-        assert not is_trusted("plugin_gauge", "plugins")
+        assert not is_trusted("plugin_gauge")
     finally:
         manager.close()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

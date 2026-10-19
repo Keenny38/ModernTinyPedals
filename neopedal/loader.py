@@ -49,7 +49,12 @@ from .setting import cfg
 from .vr_overlay import vroverlay
 
 logger = logging.getLogger(__name__)
+
+# Settings changed in memory & saved later by their owner (car followed by the Director): written before preset
+# reload, restart & quit, else lost (preset file loaded again) or written late, see write_pending
+_pending_writers: list[Callable[[], object]] = []
 LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for lap files being written before restart
+REPLAY_CLOSE_TIMEOUT = 10.0  # seconds to wait more for a replay recording still closing (quit, restart)
 # Objects of a started app (window, overlays, settings) moved out of garbage collection: full collections scan
 # only objects made since, shorter pauses while driving. Done once start finished, again after each reload.
 _gc_frozen = False
@@ -232,15 +237,33 @@ def show_safe_mode_notice(window):
         restart()
 
 
+def on_pending_write(writer: Callable[[], object]):
+    """Writer called before reload, restart & quit: queues its unsaved settings (cfg.save), registered once"""
+    if writer not in _pending_writers:
+        _pending_writers.append(writer)
+
+
+def write_pending():
+    """Unsaved settings of every writer queued for saving now (see on_pending_write)"""
+    for writer in tuple(_pending_writers):
+        try:
+            writer()
+        except Exception:  # one writer failing never stops reload or quit
+            logger.exception("USERDATA: pending setting write failed")
+
+
 def close():
     """Close api, modules, widgets. Call before quit APP."""
     logger.info("CLOSING............")
+    write_pending()
     # 0 reload in progress never finished (modules still stopping waited below)
     cancel_reload()
     # 1 unload modules (recorder module saves last lap)
     unload_modules()
     # 2 finish replay recording (manual recording is not stopped by recorder module)
     replay.stop_recording()
+    if not replay.wait_closed(REPLAY_CLOSE_TIMEOUT):  # slow drive: never cut by the process end
+        logger.warning("CLOSING: replay recording not closed")
     # 3 stop & close api
     api.stop()
     api.close()
@@ -355,6 +378,7 @@ def reload(reload_preset: bool = False, wait: bool | None = None):
             logger.info("RELOADING: queued after reload in progress")
         return
     logger.info("RELOADING............")
+    write_pending()  # settings saved later by their owner written before preset file loaded again
     # 1 unload modules (servers kept listening: browser sources, dashboard, stream clients stay connected)
     if wait:
         cfg.flush()  # 0 wait unfinished saving

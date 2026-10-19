@@ -43,7 +43,7 @@ from ..i18n import tr, trm
 from ..setting import cfg
 from ..userfile.preset_package import export_preset_package, import_preset_package
 from ..userfile.preset_trash import TrashEntry, purge_trash
-from ._common import translate_filter
+from ._common import confirm_action, translate_filter
 from .preset_compare import PresetCompare
 from .preset_management import (
     PresetTransfer,
@@ -116,14 +116,9 @@ class PresetList(QWidget):
         self.backend.refresh()
 
     # Messages
-    def confirm_operation(self, title: str = "Confirm", message: str = "") -> bool:
-        """Confirm operation"""
-        confirm = QMessageBox.question(
-            self, tr(title), trm(message),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        return confirm == QMessageBox.StandardButton.Yes
+    def confirm_operation(self, title: str = "Confirm", message: str = "", action_text: str = "") -> bool:
+        """Confirm operation: Cancel, then the action button (see _common.confirm_action)"""
+        return confirm_action(self, tr(title), trm(message), action_text or tr(title))
 
     def warn(self, text: str):
         QMessageBox.warning(self, tr("Error"), text)
@@ -167,12 +162,9 @@ class PresetList(QWidget):
     # Packages
     def export_package(self, preset_filename: str):
         """Export preset, style presets and notes to single zip file"""
-        include_notes = QMessageBox.question(
-            self, tr("Export Package"),
-            tr("Include track notes & pace notes in package?"),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes
+        include_notes = confirm_action(
+            self, tr("Export Package"), tr("Include track notes & pace notes in package?"),
+            tr("Include Notes"), cancel_text=tr("Without Notes"))
         zip_filename, _ = QFileDialog.getSaveFileName(
             self,
             dir=os.path.join(os.path.expanduser("~"), f"{preset_filename[:-5]}.zip"),
@@ -205,13 +197,11 @@ class PresetList(QWidget):
 
             import_overlay_file(self, zip_filename)
             return
-        overwrite_styles = QMessageBox.question(
+        overwrite_styles = confirm_action(
             self, tr("Import Package"),
             tr("Also import style presets (brakes, brands, classes, compounds, heatmap, tracks)?<br><br>"
             "This will <b>overwrite</b> your existing style presets."),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes
+            tr("Import Style Presets"), cancel_text=tr("Keep My Style Presets"), danger=True)
         # Styles: saving paused across import (no save written over imported styles), then reloaded
         # in memory (also styles imported before an error), so later style saves keep imported ones
         try:

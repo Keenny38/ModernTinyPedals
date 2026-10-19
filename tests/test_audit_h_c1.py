@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # demo_data.py, tools_view.py, nav_rail.py, app.py & setting_global.py
 OLD_DISPLAY_ORDER = (
     "acceleration", "battery", "brake_bias", "brake_performance", "brake_pressure", "brake_temperature", "brake_wear",
-    "chat", "cruise", "damage", "damage_stats", "delta_graph", "deltabest", "deltabest_extended", "differential",
+    "chat", "corner_coach", "cruise", "damage", "damage_stats", "delta_graph", "deltabest", "deltabest_extended",
+    "differential",
     "driver_rank", "drs", "electric_motor", "elevation", "engine", "engine_temperature", "flag", "force",
     "friction_circle", "fuel", "fuel_energy_saver", "gap_trend", "gear", "heading", "instrument",
     "laps_and_position", "lap_time_history", "lift_and_coast_led", "navigation", "onboard_setting", "pace_notes",
@@ -28,7 +29,8 @@ OLD_DISPLAY_ORDER = (
     "suspension_travel", "system_performance", "telemetry_compare", "timing", "track_clock", "track_map",
     "track_notes", "traffic", "trailing", "tyre_carcass", "tyre_deflection", "tyre_inner_layer", "tyre_load",
     "tyre_overview", "tyre_pressure", "tyre_temp_trend", "tyre_temperature", "tyre_wear", "virtual_energy", "weather",
-    "weather_forecast", "weight_distribution", "wheel_camber", "black_box", "wheel_toe",
+    "weather_forecast", "weight_distribution", "wheel_camber", "black_box", "wheel_dimension", "wheel_toe",
+    "wind_direction",
 )
 OLD_CATEGORY_PREFIXES = (
     ("Timing", (
@@ -38,7 +40,7 @@ OLD_CATEGORY_PREFIXES = (
     )),
     ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
     ("Brakes", ("brake_",)),
-    ("Driver Inputs", ("onboard_setting", "pedal", "steering_", "trailing", "telemetry_compare")),
+    ("Driver Inputs", ("onboard_setting", "pedal", "steering_", "trailing", "telemetry_compare", "corner_coach")),
     ("Engine & Energy", (
         "battery", "cruise", "drs", "electric_motor", "engine", "fuel", "gear", "instrument", "lift_and_coast",
         "push_to_pass", "rpm_led", "speedometer", "virtual_energy",
@@ -50,7 +52,7 @@ OLD_CATEGORY_PREFIXES = (
     ("Track & Traffic", (
         "black_box", "chat", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
         "weather",
-        "pit_lane_helper", "race_notifications", "spotter",
+        "pit_lane_helper", "race_notifications", "spotter", "wind_direction",
     )),
 )
 OLD_CATEGORY_COLORS = {
@@ -118,7 +120,7 @@ OLD_KEYWORD_TOOLS = {
 }
 OLD_RAIL_ITEMS = (
     "home,widget,driver_stats_viewer,race_results_viewer,"  # game replays merged in results & replays
-    "broadcast_director,lap_viewer,race_calculator,preset"
+    "broadcast_director,stream_overlay_view,lap_viewer,race_calculator,preset"
 )
 OLD_PAGE_SWITCHES = {
     ("BroadcastDirector", "neopedal.ui.quick.director_backend", "director_status"),
@@ -141,7 +143,7 @@ def dummy_overlay(**kwargs):
 
 DUMMY_PAGE = pages.PageSpec(
     "dummy_tool", "Dummy Tool", "", "Editors", "dummy_tool.DummyTool",
-    short_label="Dummy", rail=8, keywords="dummy words", status="neopedal.ui.quick.dummy_backend:dummy_status",
+    short_label="Dummy", rail=9, keywords="dummy words", status="neopedal.ui.quick.dummy_backend:dummy_status",
 )
 
 

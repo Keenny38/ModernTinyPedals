@@ -20,13 +20,14 @@
 Traffic Widget
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from .. import units
 from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_PLACEHOLDER
 from ..formatter import random_color_class, shorten_driver_name
-from ..module_info import minfo
+from ..module_info import VehicleDataSet, minfo
 from ._base import Overlay
 from ._common import player_vehicle
 
@@ -213,18 +214,18 @@ class Realtime(Overlay):
 
         if self.wcfg["show_class"]:
             if self.show_slower_ahead:
-                veh_info = veh_data[ahead_overtake_index]
-                self.update_class(self.bar_classes[0], veh_info.vehicleClass, veh_info.driverName)
+                self.update_class(self.bar_classes[0], *class_and_driver(veh_data, ahead_overtake_index))
             if self.show_race_leader:
-                veh_info = veh_data[leader_overtake_index]
-                self.update_class(self.bar_classes[1], veh_info.vehicleClass, veh_info.driverName)
+                self.update_class(self.bar_classes[1], *class_and_driver(veh_data, leader_overtake_index))
             if self.show_faster_behind:
-                veh_info = veh_data[behind_overtake_index]
-                self.update_class(self.bar_classes[2], veh_info.vehicleClass, veh_info.driverName)
+                self.update_class(self.bar_classes[2], *class_and_driver(veh_data, behind_overtake_index))
 
         if self.wcfg["show_estimated_laps"]:
             plr_lap_progress = 1 - player_vehicle().currentLapProgress
-            opt_lap_progress = 1 - veh_data[ahead_overtake_index].currentLapProgress
+            if ahead_overtake_index >= 0:
+                opt_lap_progress = 1 - veh_data[ahead_overtake_index].currentLapProgress
+            else:
+                opt_lap_progress = 1.0
             if self.show_slower_ahead:
                 self.update_laps(self.bar_laps[0], ahead_overtake_laps, opt_lap_progress)
             if self.show_race_leader:
@@ -305,3 +306,11 @@ class Realtime(Overlay):
         layout.addWidget(bar_temp[2], row_index, self.wcfg["display_order_faster"])
         if not self.show_faster_behind:
             bar_temp[2].hide()
+
+
+def class_and_driver(veh_data: Sequence[VehicleDataSet], index: int) -> tuple[str, str]:
+    """Class & driver name of car, empty if no car (index -1: no leader, no car ahead or behind)"""
+    if index < 0:
+        return "", ""
+    veh_info = veh_data[index]
+    return veh_info.vehicleClass, veh_info.driverName

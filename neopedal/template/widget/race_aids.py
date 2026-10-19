@@ -17,7 +17,8 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Default setting of race aid widgets: trends, pit lane, stint, spotter, notifications & telemetry comparison
+Default setting of race aid widgets: trends, pit lane, stint, spotter, notifications, telemetry comparison &
+corner coach
 
 Widget key name must match corresponding file name in 'widget' folder
 """
@@ -255,5 +256,31 @@ WIDGET_RACE_AIDS = {
         "line_color_brake": "#FF2200",
         "line_color_steering": "#FFAA00",
         "line_color_gear": "#EEEEEE",
+    },
+    "corner_coach": {
+        "enable": False,
+        "update_interval": 50,
+        "position_x": 760,
+        "position_y": 520,
+        "font_name": "Consolas",
+        "font_size": 15,
+        "font_weight": "Bold",
+        "enable_auto_font_offset": True,
+        "font_offset_vertical": 0,
+        "opacity": 0.9,
+        "bar_padding": 0.2,
+        "bar_gap": 2,
+        "reference_lap_source": "Viewer",
+        "show_next_corner": True,
+        "show_braking_point": True,
+        "show_apex_speed": True,
+        "braking_point_tolerance": 3,
+        "font_color_caption": "#AAAAAA",
+        "background_color_caption": "#CC111111",
+        "font_color_reading": "#EEEEEE",
+        "background_color": "#CC222222",
+        "font_color_time_gain": "#44FF00",
+        "font_color_time_loss": "#FF4400",
+        "font_color_warning": "#FFAA00",
     },
 }

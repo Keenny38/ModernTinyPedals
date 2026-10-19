@@ -31,6 +31,8 @@ from ._base import Overlay
 if TYPE_CHECKING:
     from ..template.widget_config_types import EngineConfig
 
+ENERGY_RATE_SMOOTHING = 0.2  # EMA factor of energy consumption rate (power estimate without torque)
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -198,6 +200,7 @@ class Realtime(Overlay):
     def post_update(self):
         self.ema_power = 0.0
         self.max_power_kw = 0.0
+        self.ema_energy_rate = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -210,18 +213,20 @@ class Realtime(Overlay):
             # Calculate power & torque based on energy consumption if torque n/a
             max_ve = api.read.engine.max_virtual_energy()
             if max_ve > 0:
-                power_kw = minfo.energy.rateOfConsumption * max_ve / 100_000
+                self.ema_energy_rate = smoothed_energy_rate(self.ema_energy_rate, minfo.energy.rateOfConsumption)
+                power_kw = self.ema_energy_rate * max_ve / 100_000
                 torque = calc.engine_torque(power_kw, rpm)
+        overheating = bool(self.wcfg["show_game_overheating_highlight"] and api.read.engine.overheating())
 
         # Oil temperature
         if self.wcfg["show_oil_temperature"]:
             temp_oil = round(api.read.engine.oil_temperature(), 2)
-            self.update_oil(self.bar_oil, temp_oil)
+            self.update_oil(self.bar_oil, temp_oil, overheating)
 
         # Water temperature
         if self.wcfg["show_water_temperature"]:
             temp_water = round(api.read.engine.water_temperature(), 2)
-            self.update_water(self.bar_water, temp_water)
+            self.update_water(self.bar_water, temp_water, overheating)
 
         # Turbo pressure
         if self.wcfg["show_turbo_pressure"]:
@@ -254,20 +259,20 @@ class Realtime(Overlay):
             self.update_power_ratio(self.bar_pwratio, self.max_power_kw, total_static_weight)
 
     # GUI update methods
-    def update_oil(self, target, data):
-        """Oil temperature"""
-        if target.last != data:
-            target.last = data
+    def update_oil(self, target, data, overheating):
+        """Oil temperature, overheat color above threshold or while game warns of overheating"""
+        if target.last != (data, overheating):
+            target.last = (data, overheating)
             target.text = f"O{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_oil[data >= self.wcfg["overheat_threshold_oil"]]
+            target.bg = self.bar_style_oil[overheating or data >= self.wcfg["overheat_threshold_oil"]]
             target.update()
 
-    def update_water(self, target, data):
-        """Water temperature"""
-        if target.last != data:
-            target.last = data
+    def update_water(self, target, data, overheating):
+        """Water temperature, overheat color above threshold or while game warns of overheating"""
+        if target.last != (data, overheating):
+            target.last = (data, overheating)
             target.text = f"W{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_water[data >= self.wcfg["overheat_threshold_water"]]
+            target.bg = self.bar_style_water[overheating or data >= self.wcfg["overheat_threshold_water"]]
             target.update()
 
     def update_turbo(self, target, data):
@@ -319,3 +324,8 @@ class Realtime(Overlay):
             text = f"{ratio:.3f}"
             target.text = f"{text:.5}p/w"
             target.update()
+
+
+def smoothed_energy_rate(ema: float, rate: float) -> float:
+    """Energy consumption rate smoothed (EMA), refill in pit (negative rate) counted as no consumption"""
+    return ema + ENERGY_RATE_SMOOTHING * (max(rate, 0.0) - ema)

@@ -46,7 +46,7 @@ from PySide6.QtCore import QTimerEvent
 from pyLMUSharedMemory import lmu_data
 
 from . import api_connector
-from .const_common import MAX_SECONDS
+from .const_common import MAX_SECONDS, SECTOR_FLAG_ORDER
 from .demo_state import demo_drawing
 from .module_info import ConsumptionDataSet, ModuleInfo, StintDataSet, VehicleDataSet
 from .penalty_info import NO_PENALTY, Penalty
@@ -105,6 +105,17 @@ UPDATES = 3  # updates before a picture, so smoothed values settle
 # Widgets drawing a sample of every item before their first update (nothing to show on this data),
 # feeds of widgets declared in template.widget.registry.OVERLAYS
 SAMPLE_WIDGETS = frozenset(demo_names(DEMO_SAMPLE))
+# Corner coach: corners of reference lap (official number, start, apex, end, braking point or -1, minimum speed km/h)
+# & last corner driven (official number, minimum speed, reference minimum speed)
+COACH_CORNERS = (
+    ("1", 300.0, 490.0, 640.0, 345.0, 112.0), ("2", 640.0, 740.0, 860.0, -1.0, 158.0),
+    ("3", 860.0, 950.0, 1030.0, 880.0, 131.0), ("4", 1030.0, 1105.0, 1250.0, -1.0, 165.0),
+    ("5", 1250.0, 1405.0, 1700.0, 1300.0, 98.0), ("6", 1700.0, 1985.0, 2080.0, 1845.0, 104.0),
+    ("7", 2080.0, 2155.0, 2700.0, 2095.0, 82.0), ("10a", 2700.0, 3515.0, 3545.0, 3400.0, 89.0),
+    ("10b", 3545.0, 3575.0, 3700.0, -1.0, 95.0), ("11", 3700.0, 3758.0, 3860.0, -1.0, 175.0),
+    ("12", 3860.0, 3925.0, 4080.0, 3870.0, 141.0),
+)
+COACH_LAST = ("5", 95.0, 98.0)
 
 
 def car_distance(index: int) -> float:
@@ -162,6 +173,7 @@ def set_telemetry(sim, data):
     tele.mGear = 5
     tele.mMaxGears = 6
     tele.mEngineRPM = 7150
+    tele.mIgnitionStarter = 1  # engine running (ignition off reads as engine off)
     tele.mEngineMaxRPM = 8250
     tele.mEngineTorque = 612
     tele.mTurboBoostPressure = 1.85 * 100000
@@ -262,6 +274,7 @@ def set_telemetry(sim, data):
     scoring.mCloudCoverage = 3
     scoring.mMinPathWetness = scoring.mMaxPathWetness = scoring.mAvgPathWetness = 0.0
     scoring.mTrackGripLevel = 4
+    scoring.mWind.x, scoring.mWind.z = 3.0, -2.0  # light breeze (3.6 m/s)
     scoring.mTrackLimitsStepsPerPoint = 2
     scoring.mTrackLimitsStepsPerPenalty = 8
     for index, (driver, vehicle, vclass, best) in enumerate(FIELD):
@@ -629,8 +642,8 @@ def set_modules(minfo: ModuleInfo):
 
     best_sectors = [PLAYER_BEST * 0.122, PLAYER_BEST * 0.527, PLAYER_BEST * 0.351]
     for sector_data, offset in ((minfo.sectors.sessionBest, 0.0), (minfo.sectors.allTimeBest, -0.12)):
-        sector_data.noDeltaSector = False
-        sector_data.sectorIndex = 1
+        sector_data.noDeltaSector = sector_data.noDeltaSectorPB = False
+        sector_data.sectorIndex = sector_data.recordedIndex = 1
         sector_data.sectorPrev = [best_sectors[0] - 0.041, best_sectors[1] + 0.118, best_sectors[2] + 0.062]
         sector_data.sectorBestTB = [value + offset / 3 for value in best_sectors]
         sector_data.sectorBestPB = [value + offset / 3 for value in best_sectors]
@@ -712,6 +725,8 @@ def set_modules(minfo: ModuleInfo):
     wheels.maxSuspensionPosition = [52.4, 54.1, 60.2, 61.7]
     wheels.motionRatio = [0.92, 0.92, 0.88, 0.88]
     wheels.wheelRadius = [0.338, 0.338, 0.351, 0.351]
+    wheels.wheelRadiusFront = 338.0
+    wheels.wheelRadiusRear = 351.0
     wheels.minimumStaticWeight = 1300.0
     wheels.totalStaticWeight = 1330.0
     wheels.totalDynamicWeight = 1478.0
@@ -845,7 +860,7 @@ def set_scenario(sim, data, minfo: ModuleInfo, scenario: str):
     player = data.scoring.vehScoringInfo[PLAYER]
     rest = sim._restapi_dataset
     if scenario == "flags":  # yellow in next sector (car stopped ahead), faster car behind (blue flag)
-        scoring.mSectorFlag[2] = 1
+        scoring.mSectorFlag[SECTOR_FLAG_ORDER[2]] = 1  # cars in sector 2: yellow in next sector
         player.mFlag = 6
         minfo.vehicles.nearestYellowAhead = 180.0
     elif scenario == "pits":  # pit lane, limiter on, stop asked

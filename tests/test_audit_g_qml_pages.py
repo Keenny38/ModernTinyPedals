@@ -324,7 +324,8 @@ def test_driver_stats_focus_back_to_table(page):  # noqa: F811
     assert wait_until(lambda: not table.property("activeFocus"))
     QTest.keyClick(page.view, Qt.Key.Key_Escape)
     assert wait_until(lambda: table.property("activeFocus"))
-    menus = [menu for menu in objects_of_type(root, "TpMenu") if menu.property("title") in ("", None)]
+    menus = [menu for menu in objects_of_type(root, "TpMenu") if menu.property("title") in ("", None)
+             and "TpMenuItem" not in menu.metaObject().className()]  # menus, not their entries
     assert len(menus) >= 6  # toolbar menus, row & header menus
     for menu in menus:
         assert menu_closes_to(page.view, menu, table), menu

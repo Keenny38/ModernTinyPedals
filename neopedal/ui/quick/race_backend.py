@@ -36,13 +36,14 @@ import logging
 import os
 import time
 import weakref
+from collections import Counter, deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from functools import partial
 from typing import Any, Protocol
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
 from ... import app_signal, game_rest, units
@@ -79,7 +80,7 @@ from ...race_live import read_race_state as read_live
 from ...race_live_data import GARAGE_RESOURCES, GarageData, LiveValue, collect_rain, parse_garage
 from ...race_live_data import collect as collect_live
 from ...setting import cfg
-from ...userfile import atomic_write, write_text_file
+from ...userfile import atomic_path, atomic_write, write_text_file
 from ...userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
 from ...userfile.tyre_strategy import (
     DEFAULT_TYRE_SET,
@@ -89,6 +90,7 @@ from ...userfile.tyre_strategy import (
     save_tyre_strategy_file,
     validate_tyre_strategy,
 )
+from ..file_drop import DROP_HISTORY, DROP_RACE_PLAN, DROP_TYRE_PLAN, race_file_kind
 from . import race_results as results
 from .formatting import clock_seconds
 from .game_pictures import LogoCache, notifier
@@ -176,6 +178,13 @@ TEAM_ROLES = ("key", "number", "enabled", "cells", "selected")  # number: of sti
 LIVE_ROLES = ("key", "header", "title", "game", "calc", "source", "tip", "known", "auto", "followed", "differs")
 LIVE_PART_SIGNALS = {"status": "liveDataStatusChanged", "busy": "liveBusyChanged", "differing": "liveDifferingChanged",
                      "tyres": "liveTyresChanged", "race": "liveRaceChanged"}
+RECENT_OPTIONS = {  # files opened or saved last (newest first), option of config "fuel_calculator" by kind
+    DROP_HISTORY: "recent_history_file_names",
+    DROP_RACE_PLAN: "recent_race_plan_file_names",
+    DROP_TYRE_PLAN: "recent_tyre_plan_file_names",
+}
+MAX_RECENT = 8
+RECENT_SEPARATOR = "|"  # never in a Windows file name
 
 
 class RaceHost(Protocol):
@@ -183,6 +192,7 @@ class RaceHost(Protocol):
 
     def warn(self, text: str) -> None: ...
     def toast(self, text: str) -> None: ...
+    def toast_file(self, text: str, path: str) -> None: ...  # toast of a file written: its folder opened on click
     def confirm(self, text: str) -> bool: ...
     def open_file(self, directory: str, file_filter: str) -> str: ...
     def save_file(self, directory: str, file_filter: str) -> str: ...
@@ -223,6 +233,36 @@ def write_history(filepath: str, filename: str, extension: str, laps: Sequence[C
 
 def history_signature(dataset: Sequence[ConsumptionDataSet]) -> tuple:
     return (len(dataset), dataset[0] if dataset else None)
+
+
+def without_laps(history: Sequence[ConsumptionDataSet], removed: Sequence[ConsumptionDataSet],
+                 ) -> deque[ConsumptionDataSet]:
+    """Live history (newest lap first) less removed laps (each once) as a new data set: stint module & overlays
+    may be iterating current one (copy on write, never changed in place), same length limit, placeholder if no
+    lap left (stint module reads first entry: never empty)"""
+    left = Counter(removed)
+    kept = []
+    for lap in history:
+        if left[lap] > 0:
+            left[lap] -= 1
+        else:
+            kept.append(lap)
+    return deque(kept if history_laps(kept) else [ConsumptionDataSet()],
+                 history.maxlen if isinstance(history, deque) else None)
+
+
+def same_file(path: str, other: str) -> bool:
+    return os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(other))
+
+
+def network_path(path: str) -> bool:
+    """UNC path (network share): checking it may wait seconds for a server gone (never on the UI thread)"""
+    return path.startswith(("\\\\", "//"))
+
+
+def missing_files_of(serial: int, paths: Sequence[str]) -> tuple[int, set[str]]:
+    """Paths that are not files, with the serial given (worker thread: network shares)"""
+    return serial, {path for path in paths if not os.path.isfile(path)}
 
 
 _active: weakref.ReferenceType | None = None  # backend of the open Race Calculator page (hotkey, palette, rail)
@@ -281,6 +321,8 @@ class RaceBackend(PageBackend):
     liveDataStatusChanged = Signal()
     liveBusyChanged = Signal()
     liveDifferingChanged = Signal()
+    recentChanged = Signal()
+    undoChanged = Signal()  # undo / redo available (Undo & Redo buttons)
 
     def __init__(self, parent: QObject, host: RaceHost):
         global _active
@@ -313,6 +355,10 @@ class RaceBackend(PageBackend):
         self.sections: dict = {}  # results shown, by QML property name (see publish)
         self._last_calculation = 0.0
         self._plan_file_data: dict = {}
+        self.save_failed: set[str] = set()  # automatic saves failing ("plan", "tyres"): told once per failure streak
+        self._recent = self.read_recent()
+        self._recent_serial = 0  # files remembered: network check started before one dropped (stale)
+        self.check_network_recent()
         self.calculations = 0  # calculations made (tests)
 
         # Notes of actions: fill in source, estimate, history
@@ -333,6 +379,7 @@ class RaceBackend(PageBackend):
         self.history_serials: list[int] = []
         self.history_selection: set[int] = set()  # serials
         self._history_anchor = -1
+        self._history_cursor = -1  # lap moved to with Up / Down
         self.sort_column = -1  # newest first until a column is clicked
         self.sort_ascending = True
         self._live_signature: tuple = ()
@@ -665,6 +712,15 @@ class RaceBackend(PageBackend):
             self.setInput("input_lap_time", seconds)
         return laptime_text(self.values["input_lap_time"])
 
+    @Slot(str, result=bool)
+    def lapTimeValid(self, text: str) -> bool:
+        """Lap time text understood (field shown invalid while typing otherwise)"""
+        return parse_laptime(text) is not None
+
+    @Slot(str, result=bool)
+    def startTimeValid(self, text: str) -> bool:
+        return parse_start_time(text) is not None
+
     @Slot(float, result=str)
     def stepLapTime(self, seconds: float) -> str:
         """Lap time up or down (never below zero)"""
@@ -732,6 +788,7 @@ class RaceBackend(PageBackend):
         self.fill_source = ""
         self.history_added = ""
         self.notesChanged.emit()
+        self.toast_undo(tr("Every input reset to zero"))
 
     # Calculation
     def strategy_input(self) -> StrategyInput:
@@ -752,6 +809,7 @@ class RaceBackend(PageBackend):
             self.inputsChanged.emit()
         self.save_inputs()
         self.host.record_change()
+        self.undoChanged.emit()
 
     def set_race_state(self, state: RaceState | None):
         """Live race under way: plan of the rest of the race from now (None: whole race)"""
@@ -1043,20 +1101,153 @@ class RaceBackend(PageBackend):
     def loadFile(self):
         """Laps of a consumption history file (or CSV file)"""
         filename_full = self.host.open_file(cfg.path.fuel_delta, ";;".join((FileFilter.CONSUMPTION, FileFilter.CSV)))
-        if not filename_full:
-            return
+        if filename_full:
+            self.load_history_file(filename_full)
+
+    def load_history_file(self, filename_full: str) -> bool:
+        """Laps of a consumption history file (or CSV file) in table & filled in, True once loaded"""
         filepath = os.path.dirname(filename_full) + "/"
         filename, extension = os.path.splitext(os.path.basename(filename_full))
         history_data = history_laps(load_consumption_history_file(
             filepath=filepath, filename=filename, extension=extension))
         if not history_data:
+            self.forget_recent(DROP_HISTORY, filename_full)
             self.host.warn(trm(f"Unable to read consumption history: {filename}{extension}"))
-            return
+            return False
         self.fill_in_data(history_data, live=False)
         self.refresh_history(history_data)
         self.history_file = (filepath, filename, extension)
         self.set_source(False, filename)
         self.set_plan_inputs(False)
+        self.remember_recent(DROP_HISTORY, filename_full)
+        return True
+
+    # Files opened or saved last (Recent menus), files dropped on page
+    @staticmethod
+    def read_recent() -> dict[str, list[str]]:
+        """Recent files of each kind kept in config (newest first), missing files left out (network shares kept:
+        checked in background, see check_network_recent)"""
+        config = cfg.user.config["fuel_calculator"]
+        recent = {}
+        for kind, option in RECENT_OPTIONS.items():
+            value = config.get(option, "")
+            paths = value.split(RECENT_SEPARATOR) if isinstance(value, str) else []
+            recent[kind] = [path for path in paths
+                            if path and (network_path(path) or os.path.isfile(path))][:MAX_RECENT]
+        return recent
+
+    def check_network_recent(self):
+        """Files of Recent menus on network shares checked on a worker thread, missing ones then left out"""
+        paths = tuple({path for paths in self._recent.values() for path in paths if network_path(path)})
+        if paths:
+            # Serial in the result: done callback a bound method (held weakly, never keeps the page alive)
+            self.jobs.run("recent files", partial(missing_files_of, self._recent_serial, paths),
+                          self.network_recent_checked, key="recent")
+
+    def network_recent_checked(self, result: tuple[int, set[str]]):
+        """Network check over: missing files out of their menu (unless a file was opened or saved meanwhile:
+        checked again at next menu opening)"""
+        serial, missing = result
+        if not missing or serial != self._recent_serial:
+            return
+        for kind, paths in list(self._recent.items()):
+            kept = [path for path in paths if path not in missing]
+            if kept != paths:
+                self.keep_recent(kind, kept)
+
+    def keep_recent(self, kind: str, paths: list[str]):
+        """Recent files of a kind kept for next time, Recent menus told if changed"""
+        paths = paths[:MAX_RECENT]
+        changed = paths != self._recent.get(kind)
+        self._recent[kind] = paths
+        config = cfg.user.config["fuel_calculator"]
+        value = RECENT_SEPARATOR.join(paths)
+        if config.get(RECENT_OPTIONS[kind]) != value:
+            config[RECENT_OPTIONS[kind]] = value
+            cfg.save(config_type=ConfigType.CONFIG)
+        if changed:
+            self.recentChanged.emit()
+
+    def remember_recent(self, kind: str, filename_full: str):
+        """File opened or saved: first of its Recent menu"""
+        path = os.path.abspath(filename_full).replace("\\", "/")
+        self._recent_serial += 1  # network check running: may have missed this file (saved meanwhile)
+        self.keep_recent(kind, [path, *(item for item in self._recent.get(kind, []) if not same_file(item, path))])
+
+    def forget_recent(self, kind: str, filename_full: str):
+        """File missing or unreadable: out of its Recent menu"""
+        paths = self._recent.get(kind, [])
+        if any(same_file(item, filename_full) for item in paths):
+            self.keep_recent(kind, [item for item in paths if not same_file(item, filename_full)])
+
+    @Property(dict, notify=recentChanged)
+    def recentFiles(self) -> dict:
+        """Recent files of each kind (history, race_plan, tyre_plan): list of path & name, newest first"""
+        return {kind: [{"path": path, "name": os.path.basename(path)} for path in paths]
+                for kind, paths in self._recent.items()}
+
+    @Slot()
+    def refreshRecent(self):
+        """Recent menu about to open: files deleted or moved meanwhile left out (network shares: once checked)"""
+        recent = self.read_recent()
+        for kind, paths in recent.items():
+            if paths != self._recent.get(kind):
+                self.keep_recent(kind, paths)
+        self.check_network_recent()
+
+    @Slot(str, str)
+    def openRecent(self, kind: str, path: str):
+        """File of a Recent menu opened (removed from menu if missing or unreadable)"""
+        if not os.path.isfile(path):
+            self.forget_recent(kind, path)
+            self.host.warn(trm(f"File not found: {path}"))
+            return
+        self.open_file_of_kind(kind, path)
+
+    def open_file_of_kind(self, kind: str, path: str) -> bool:
+        if kind == DROP_HISTORY:
+            return self.load_history_file(path)
+        if kind == DROP_RACE_PLAN:
+            return self.load_race_plan(path)
+        if kind == DROP_TYRE_PLAN:
+            return self.open_tyre_plan_file(path)
+        return False
+
+    @Slot(list, result=bool)
+    def canDrop(self, urls: list) -> bool:
+        """Files dragged over page: True if any can be opened (consumption history, race plan, tyre plan)"""
+        return any(race_file_kind(path) for path in self.local_paths(urls))
+
+    @Slot(list)
+    def dropFiles(self, urls: list):
+        """Files dropped on page opened like their Open action"""
+        self.open_dropped(self.local_paths(urls))
+
+    def open_dropped(self, paths: Sequence[str]) -> int:
+        """Consumption history, race plan & tyre plan files opened, other files told; files opened returned"""
+        if self.game_data_refused():
+            return 0
+        opened = 0
+        unsupported = []
+        for path in paths:
+            kind = race_file_kind(path)
+            if not kind:
+                unsupported.append(os.path.basename(path))
+            elif self.open_file_of_kind(kind, path):
+                opened += 1
+        if unsupported:
+            self.host.toast(trm(f"Unsupported file: <b>{', '.join(unsupported)}</b>"))
+        return opened
+
+    @staticmethod
+    def local_paths(urls: Sequence) -> list[str]:
+        """Local file paths of file urls (QML drop urls)"""
+        paths = []
+        for item in urls:
+            url = item if isinstance(item, QUrl) else QUrl(str(item))
+            if url.isLocalFile():
+                paths.append(url.toLocalFile())
+        return paths
 
     @staticmethod
     def set_plan_inputs(from_plan: bool):
@@ -1264,8 +1455,9 @@ class RaceBackend(PageBackend):
         self.save_race_plan()
 
     def save_race_plan(self, filename_full: str = ""):
-        """Save race plan file (asked when no file name given)"""
-        if not filename_full:
+        """Save race plan file (asked when no file name given, then first of Recent menu)"""
+        chosen = not filename_full
+        if chosen:
             name = self.tyres.name or tr("Untitled plan")
             filename_full = self.host.save_file(set_tyre_strategy_file_path(f"{name}{FileExt.RACEPLAN}"),
                                                 FileFilter.RACEPLAN)
@@ -1275,6 +1467,8 @@ class RaceBackend(PageBackend):
         if not write_text_file(filename_full, json.dumps(self.race_plan_data(), indent=4)):
             self.host.warn(trm(f"Unable to save race plan:<br><b>{filename_full}</b>"))
             return
+        if chosen:
+            self.remember_recent(DROP_RACE_PLAN, filename_full)
         self.host.toast(trm(f"Race plan saved at:<br><b>{filename_full}</b>"))
 
     @Slot()
@@ -1283,7 +1477,7 @@ class RaceBackend(PageBackend):
 
     def load_race_plan(self, filename_full: str = "", quiet: bool = False) -> bool:
         """Open race plan file (asked when no file name given): race setup, fuel & tyre plan
-        replaced (undoable), True once opened"""
+        replaced (undoable), True once opened. Opened by user (not quiet): first of Recent menu"""
         if not filename_full:
             filename_full = self.host.open_file(set_tyre_strategy_file_path(), FileFilter.RACEPLAN)
             if not filename_full:
@@ -1296,8 +1490,11 @@ class RaceBackend(PageBackend):
             data = None
         if not self.apply_race_plan(data, os.path.splitext(os.path.basename(filename_full))[0]):
             if not quiet:
+                self.forget_recent(DROP_RACE_PLAN, filename_full)
                 self.host.warn(trm(f"Invalid race plan file: {os.path.basename(filename_full)}"))
             return False
+        if not quiet:
+            self.remember_recent(DROP_RACE_PLAN, filename_full)
         return True
 
     def apply_race_plan(self, data, name: str) -> bool:
@@ -1382,11 +1579,13 @@ class RaceBackend(PageBackend):
             return
         header, rows = self.visible_plan()
         try:
-            write_plan_csv(filename, header, rows)
+            with atomic_path(filename) as temp_filename:  # file open in a spreadsheet: left whole
+                write_plan_csv(temp_filename, header, rows)
         except OSError as error:  # file open in a spreadsheet, read-only folder
             self.host.warn(trm(f"Unable to export: {error}"))
             return
         self.keep_export_folder(filename)
+        self.host.toast_file(trm(f"Exported: <b>{os.path.basename(filename)}</b>"), filename)
 
     def plan_image(self):
         """Strategy timeline & pit stop plan as a picture"""
@@ -1406,10 +1605,16 @@ class RaceBackend(PageBackend):
                                        FileFilter.PNG)
         if not filename:
             return
-        if not self.plan_image().save(filename, "PNG"):
+        image = self.plan_image()
+        try:
+            with atomic_path(filename) as temp_filename:
+                if not image.save(temp_filename, "PNG"):
+                    raise OSError(f"unable to write {temp_filename}")
+        except OSError:
             self.host.warn(trm(f"Unable to save picture: {filename}"))
             return
         self.keep_export_folder(filename)
+        self.host.toast_file(trm(f"Exported: <b>{os.path.basename(filename)}</b>"), filename)
 
     @Slot()
     def copyPlanImage(self):
@@ -1436,10 +1641,23 @@ class RaceBackend(PageBackend):
 
     def write_plan_file(self):
         try:
-            with atomic_write(f"{cfg.path.config}{PLAN_FILE}") as file:
+            with atomic_write(f"{cfg.path.config}{PLAN_FILE}", raise_error=True) as file:  # error logged
                 file.write(json.dumps(self._plan_file_data))
-        except OSError:
-            pass
+        except OSError as error:
+            self.save_failure("plan", trm(f"Unable to update the Race Plan overlay: {error}"))
+            return
+        self.save_success("plan")
+
+    def save_failure(self, kind: str, text: str):
+        """Automatic save failed: told once per failure streak (saves retried at each change)"""
+        if kind not in self.save_failed:
+            self.save_failed.add(kind)
+            self.host.toast(text)
+
+    def save_success(self, kind: str):
+        if kind in self.save_failed:
+            self.save_failed.discard(kind)
+            logger.info("RACE CALCULATOR: %s saved again", kind)
 
     # Consumption history
     def refresh_history(self, dataset: Sequence[ConsumptionDataSet]):
@@ -1582,7 +1800,28 @@ class RaceBackend(PageBackend):
         else:
             selection = {serial}
             self._history_anchor = serial
+        self._history_cursor = serial
         self.set_history_selection(selection)
+
+    @Slot(int, bool, result=int)
+    def moveLapSelection(self, step: int, extend: bool) -> int:
+        """Up / Down (Shift: range from the lap clicked first) in the history table: row index shown, -1 if none"""
+        shown = self.shown_serials()
+        if not shown:
+            return -1
+        cursor: int | None = self._history_cursor
+        if cursor not in shown:
+            cursor = self._history_anchor if self._history_anchor in shown else None
+        if cursor is None:
+            index = 0 if step > 0 else len(shown) - 1
+        else:
+            index = max(0, min(shown.index(cursor) + step, len(shown) - 1))
+        anchor = self._history_anchor
+        self.selectLap(shown[index], 2 if extend and anchor in shown else 0)
+        if extend and anchor in shown:  # range kept from the anchor, never added to an older selection
+            first, last = sorted((shown.index(anchor), index))
+            self.set_history_selection(set(shown[first:last + 1]))
+        return index
 
     @Slot()
     def selectAllLaps(self):
@@ -1647,18 +1886,18 @@ class RaceBackend(PageBackend):
         if not self.host.confirm(message + "<br><br>" + trm("This cannot be undone!")):
             return
         if self.live_source:
-            history = minfo.history.consumptionDataSet
-            history.append(ConsumptionDataSet())  # never empty while module reads it
-            for lap in removed:
-                if lap in history:
-                    history.remove(lap)
-            while len(history) > 1 and not history_laps([history[-1]]):
-                history.pop()  # placeholder no longer needed
-            minfo.history.consumptionDataVersion += 1
-            filepath, filename, extension = cfg.path.fuel_delta, api.read.session.combo_name(), FileExt.CONSUMPTION
+            filename, extension = api.read.session.combo_name(), FileExt.CONSUMPTION
+            # Replaced in one step, never changed in place (stint module & overlays read it from other threads),
+            # saved under the lock stint module adds laps & saves with: lap added meanwhile kept, none saved back
+            with minfo.history.consumptionLock:
+                history = without_laps(minfo.history.consumptionDataSet, removed)
+                minfo.history.consumptionDataSet = history
+                minfo.history.consumptionDataVersion += 1
+                saved = not filename or write_history(cfg.path.fuel_delta, filename, extension, history_laps(history))
         else:
             filepath, filename, extension = self.history_file
-        if filename and not write_history(filepath, filename, extension, kept):
+            saved = not filename or write_history(filepath, filename, extension, kept)
+        if not saved:
             self.host.warn(trm(f"Unable to save consumption history: {filename}{extension}"))
             if not self.live_source:
                 return  # file unchanged: laps still listed
@@ -1689,12 +1928,20 @@ class RaceBackend(PageBackend):
         filepath, filename = self.autosave_path()
         try:
             save_tyre_strategy_file(dict_user=self.tyres.capture_data(), filename=filename, filepath=filepath)
-        except OSError:
+        except OSError as error:  # logged by write_json
+            self.save_failure("tyres", trm(f"Unable to save tyre plan automatically: {error}"))
             return
+        self.save_success("tyres")
         config = cfg.user.config["tyre_strategy_planner"]
         if config.get("last_file_name") != self.tyres.name:
             config["last_file_name"] = self.tyres.name
             cfg.save(config_type=ConfigType.CONFIG)
+
+    def tyres_kept(self) -> bool:
+        """Page closing: change waiting or last autosave failed saved now, True if tyre plan is kept"""
+        if self._autosave_timer.isActive() or "tyres" in self.save_failed:
+            self.autosave_tyres()
+        return "tyres" not in self.save_failed
 
     def load_tyre_autosave(self):
         """Tyre plan of last time, new plan if none"""
@@ -1746,11 +1993,13 @@ class RaceBackend(PageBackend):
     def clearTyre(self, row: int, corner: int):
         self.tyres.clear_cells([(row, corner)])
         self.tyre_plan_changed()
+        self.toast_undo(tr("Tyre taken off"))
 
     @Slot(int)
     def clearRow(self, row: int):
         self.tyres.clear_cells([(row, corner) for corner in range(WHEELS)])
         self.tyre_plan_changed()
+        self.toast_undo(tr("Row cleared"))
 
     @Slot(int, bool)
     def insertRow(self, row: int, above: bool):
@@ -1808,6 +2057,17 @@ class RaceBackend(PageBackend):
         if unused:
             self.tyres.remove_tyres(unused)
             self.tyre_plan_changed()
+            self.toast_undo(tr("Unused tyres removed"))
+        else:
+            self.host.toast(tr("No unused tyre in stock"))
+
+    def toast_undo(self, text: str):
+        """Change done without confirmation: toast with an Undo button (host without one: plain toast)"""
+        toast_undo = getattr(self.host, "toast_undo", None)
+        if callable(toast_undo):
+            toast_undo(text)
+        else:
+            self.host.toast(text)
 
     @Slot(bool)
     def sortStock(self, by_stints: bool):
@@ -1825,16 +2085,22 @@ class RaceBackend(PageBackend):
     def openTyrePlan(self):
         """Tyre strategy file opened"""
         filename_full = self.host.open_file(set_tyre_strategy_file_path(), FileFilter.TYRESTRATEGY)
-        if not filename_full:
-            return
+        if filename_full:
+            self.open_tyre_plan_file(filename_full)
+
+    def open_tyre_plan_file(self, filename_full: str) -> bool:
+        """Tyre strategy file replacing tyre plan (first of Recent menu), True once opened"""
         filepath = os.path.dirname(filename_full) + "/"
         filename = os.path.basename(filename_full)
         user_data = load_tyre_strategy_file(filepath=filepath, filename=filename)
         if user_data is None:
+            self.forget_recent(DROP_TYRE_PLAN, filename_full)
             self.host.warn(trm("Cannot open selected file.<br><br>Invalid tyre strategy file."))
-            return
+            return False
         save_tyre_strategy_file_path(filepath)
         self.apply_tyre_strategy(user_data, os.path.splitext(filename)[0])
+        self.remember_recent(DROP_TYRE_PLAN, filename_full)
+        return True
 
     def apply_tyre_strategy(self, user_data: dict, name: str):
         """Tyre strategy (validated file) replacing tyre plan"""
@@ -1856,6 +2122,7 @@ class RaceBackend(PageBackend):
             self.host.warn(trm(f"Unable to save tyre strategy file:<br><br>{error}"))
             return
         save_tyre_strategy_file_path(filepath)
+        self.remember_recent(DROP_TYRE_PLAN, filename_full)
         self.tyres.name = os.path.splitext(filename)[0]
         self.tyresChanged.emit()
         self.host.set_unmodified()
@@ -1954,10 +2221,23 @@ class RaceBackend(PageBackend):
     @Slot()
     def undo(self):
         self.host.undo()
+        self.undoChanged.emit()
 
     @Slot()
     def redo(self):
         self.host.redo()
+        self.undoChanged.emit()
+
+    @Property(bool, notify=undoChanged)
+    def canUndo(self) -> bool:
+        """Undo history has a step (host without history query: always offered)"""
+        can_undo = getattr(self.host, "can_undo", None)
+        return bool(can_undo()) if callable(can_undo) else True
+
+    @Property(bool, notify=undoChanged)
+    def canRedo(self) -> bool:
+        can_redo = getattr(self.host, "can_redo", None)
+        return bool(can_redo()) if callable(can_redo) else True
 
     # Live game data (live tab): every input value the game gives, see race_live_data
     @Property(dict, notify=liveDataChanged)

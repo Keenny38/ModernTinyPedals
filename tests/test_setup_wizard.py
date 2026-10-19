@@ -432,6 +432,8 @@ def wait_popup(view, opened: bool):
         return False
 
     assert wait_for(lambda: shown() == opened), opened
+    if opened:  # fade & scale in over, buttons laid out at their place (clicked by position)
+        QTest.qWait(400)
 
 
 def test_buttons_of_qml_page_close_and_jump_without_crash(ui_env, renders, monkeypatch):

@@ -47,6 +47,8 @@ OPTION_LIMITS: tuple[tuple[str, OptionLimit], ...] = (
     ("^display_order_", NO_LIMIT),
     ("^opacity$", OptionLimit(0, 1)),
     ("_percentage_threshold$", OptionLimit(0, 100)),
+    ("^background_opacity_percentage$", OptionLimit(0, 100)),
+    ("^overlay_opacity_percentage$", OptionLimit(10, 100)),  # 0 would hide every overlay
     ("_port$", OptionLimit(1, 65535, True)),
     ("^minimum_update_interval$", OptionLimit(1, 1000, True)),
     ("update_interval$", OptionLimit(1, 60000, True)),
@@ -67,6 +69,7 @@ OPTION_LIMITS: tuple[tuple[str, OptionLimit], ...] = (
     ("^number_of_days_to_keep_deleted_presets$", OptionLimit(1, 3650, True)),
     ("^number_of_hours_between_update_checks$", OptionLimit(0, 168, True)),  # 0 = startup only
     ("^(snap_distance|snap_gap|grid_move_size)$", OptionLimit(0, 1000, True)),
+    ("^minimum_node_distance$", OptionLimit(0.1, 50)),  # track map recording: meters between nodes
     ("_samples$", OptionLimit(1, 10000, True)),
     ("_history_count$", OptionLimit(1, 100, True)),  # rows of history overlays (designs show 100 at most)
     ("(^|_)(bar|horizontal|vertical|inner|split|led)_gap$", OptionLimit(0, 2000)),

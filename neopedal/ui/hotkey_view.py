@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -59,7 +58,7 @@ from ..template.setting_shortcuts import (
     SHORTCUTS_PRESET,
     SHORTCUTS_WIDGET,
 )
-from ._common import BaseDialog, UIScaler
+from ._common import BaseDialog, UIScaler, confirm_action
 
 
 class HotkeyList(QWidget):
@@ -183,12 +182,7 @@ class HotkeyList(QWidget):
     def reset_hotkey(self):
         """Reset hotkey"""
         msg_text = "Clear all key bindings?<br><br>This cannot be undone!"
-        confirm_msg = QMessageBox.question(
-            self, tr("Confirm"), trm(msg_text),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        if confirm_msg == QMessageBox.StandardButton.Yes:
+        if confirm_action(self, tr("Confirm"), trm(msg_text), tr("Clear All"), danger=True):
             # Clear all shortcuts
             for options in cfg.user.shortcuts.values():
                 options["bind"] = ""
@@ -376,12 +370,7 @@ class ConfigHotkey(BaseDialog):
                 f"<b>{option_label(option_name)}</b>.<br><br>"
                 "Are you sure to assign the same key anyway?"
             )
-            confirm_msg = QMessageBox.question(
-                self, tr("Confirm"), trm(msg_text),
-                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                defaultButton=QMessageBox.StandardButton.Cancel,
-            )
-            return confirm_msg != QMessageBox.StandardButton.Yes
+            return not confirm_action(self, tr("Confirm"), trm(msg_text), tr("Assign Anyway"))
         return False
 
     def reject(self):

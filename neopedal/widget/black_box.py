@@ -314,6 +314,8 @@ class Realtime(
         if (setting["position_x"], setting["position_y"]) != (x, y):
             setting["position_x"], setting["position_y"] = x, y
             self.position_unsaved = True
+        # Widget config (styled copy) too: placement applied again later (opacity, undo) uses its position
+        self.wcfg["position_x"], self.wcfg["position_y"] = x, y
 
     def save_position(self):
         """Write position moved by auto resize to file"""

@@ -51,7 +51,7 @@ class Realtime(ModernOverlay):
 
     options = (
         "font_size", "enable_all_time_best_sectors", "target_laptime", "freeze_duration",
-        "show_formatted_sector_time",
+        "show_formatted_sector_time", "extra_digits",
     )
 
     def __init__(self, config, widget_name):
@@ -60,11 +60,13 @@ class Realtime(ModernOverlay):
         unit = self.unit
         self.theoretical = wcfg["target_laptime"] == "Theoretical"
         self.target_label = "TB" if self.theoretical else "PB"
+        # Characters of times as classic design: sector 7, lap 8, gap 9, plus extra digits (default 2: whole times)
+        self.extra = max(int(wcfg["extra_digits"]), 0)
         self.add_font("time", 1.2, "bold")
 
         pad = unit * 0.3
         gap = unit * 0.2
-        tile_w = self.text_width("value", "+8:88.888") + unit * 0.9
+        tile_w = self.text_width("value", self.sector_text("+8:88.888")) + unit * 0.9
         width = pad * 2 + tile_w * 3 + gap * 2
         top_h = unit * 1.75
         tile_h = unit * 2.2
@@ -81,11 +83,15 @@ class Realtime(ModernOverlay):
         self.last_sector_index = -1
         self.last_target_time = MAX_SECONDS
         self.freeze_timer_start = 0.0
+        self.sector_start = 0.0  # game time when sector index changed
+        self.sector_shown = True  # time of sector just finished shown (or not given by game)
 
     def post_update(self):
         self.last_sector_index = -1
         self.last_target_time = MAX_SECONDS
         self.freeze_timer_start = 0.0
+        self.sector_start = 0.0
+        self.sector_shown = True
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -99,43 +105,75 @@ class Realtime(ModernOverlay):
         delta_best = data.deltaSectorBestTB if self.theoretical else data.deltaSectorBestPB
 
         if self.last_sector_index != data.sectorIndex:  # sector changed
-            self.freeze_timer_start = lap_elapsed
             self.last_sector_index = data.sectorIndex
-            prev_index = PREV_SECTOR_INDEX[data.sectorIndex]
-            self.last_target_time = calc.accumulated_sum(sector_best, data.sectorIndex)
-            gap = calc.accumulated_sum(delta_best, prev_index)
-            self.target = (self.target_label, f"{gap:+.3f}", GAIN if gap < 0 else LOSS)
-            if not data.noDeltaSector:
-                sector_gap = delta_best[prev_index]
-                self.tiles[prev_index] = (SECTOR_ABBR_ID[prev_index], f"{sector_gap:+.3f}", GAIN if sector_gap < 0 else LOSS)
-            if valid_sectors(data.sectorPrev[prev_index]):  # freeze previous sector time
-                total = calc.accumulated_sum(data.sectorPrev, prev_index)
-                if total < MAX_SECONDS:
-                    laptime_current = total
-            self.current = (SECTOR_ABBR_ID[prev_index], calc.sec2laptime(laptime_current))
+            self.sector_start = lap_elapsed
+            self.sector_shown = False
+            self.freeze_timer_start = 0.0
+
+        if not self.sector_shown:
+            if data.recordedIndex == data.sectorIndex:  # time of sector just finished set by game: show & freeze
+                self.sector_shown = True
+                self.freeze_timer_start = lap_elapsed
+                self.show_sector_gap(data, sector_best, delta_best)
+                prev_index = PREV_SECTOR_INDEX[data.sectorIndex]
+                if valid_sectors(data.sectorPrev[prev_index]):  # freeze previous sector time
+                    total = calc.accumulated_sum(data.sectorPrev, prev_index)
+                    if total < MAX_SECONDS:
+                        laptime_current = total
+                self.current = (SECTOR_ABBR_ID[prev_index], self.lap_text(laptime_current))
+            elif lap_elapsed - self.sector_start >= self.freeze_time(data.sectorPrev[data.sectorIndex]):
+                # No sector time from game (lap without valid time): no gap shown, best sectors back at line
+                self.sector_shown = True
+                self.last_target_time = calc.accumulated_sum(sector_best, data.sectorIndex)
+                self.end_freeze(data.sectorIndex, sector_best)
 
         if self.freeze_timer_start:
             if lap_elapsed - self.freeze_timer_start >= self.freeze_time(data.sectorPrev[data.sectorIndex]):
                 self.freeze_timer_start = 0.0
-                target = self.last_target_time
-                self.target = (self.target_label, calc.sec2laptime(target) if target < MAX_SECONDS else TEXT_NOLAPTIME, NEUTRAL)
-                if data.sectorIndex == 0:  # crossed finish line: show best sectors again
-                    self.restore_best_sectors(sector_best)
+                self.end_freeze(data.sectorIndex, sector_best)
         else:
-            self.current = (SECTOR_ABBR_ID[data.sectorIndex], calc.sec2laptime(laptime_current))
+            self.current = (SECTOR_ABBR_ID[data.sectorIndex], self.lap_text(laptime_current))
         self.refresh((self.target, self.current, tuple(self.tiles)))
+
+    def end_freeze(self, sector_index: int, sector_best):
+        """Target time of current sector, best sectors back once finish line crossed"""
+        target = self.last_target_time
+        self.target = (self.target_label, self.lap_text(target) if target < MAX_SECONDS else TEXT_NOLAPTIME, NEUTRAL)
+        if sector_index == 0:
+            self.restore_best_sectors(sector_best)
+
+    def show_sector_gap(self, data, sector_best, delta_best):
+        """Gap to target at sector just finished, gap to its best sector on its tile (none without best)"""
+        prev_index = PREV_SECTOR_INDEX[data.sectorIndex]
+        self.last_target_time = calc.accumulated_sum(sector_best, data.sectorIndex)
+        if data.noDeltaSector if self.theoretical else data.noDeltaSectorPB:  # no best to compare with
+            self.end_freeze(-1, sector_best)
+            return
+        gap = calc.accumulated_sum(delta_best, prev_index)
+        self.target = (self.target_label, f"{gap:+.3f}"[:9 + self.extra], GAIN if gap < 0 else LOSS)
+        sector_gap = delta_best[prev_index]
+        self.tiles[prev_index] = (SECTOR_ABBR_ID[prev_index], self.sector_text(f"{sector_gap:+.3f}"),
+                                  GAIN if sector_gap < 0 else LOSS)
 
     def restore_best_sectors(self, sector_time):
         """Best sector times"""
         for index in range(3):
             if valid_sectors(sector_time[index]):
                 if self.wcfg["show_formatted_sector_time"]:
-                    text = calc.sec2laptime(sector_time[index])
+                    text = self.sector_text(calc.sec2laptime(sector_time[index]))
                 else:
-                    text = f"{sector_time[index]:.3f}"
+                    text = self.sector_text(f"{sector_time[index]:.3f}")
             else:
                 text = ""
             self.tiles[index] = (SECTOR_ABBR_ID[index], text, NEUTRAL)
+
+    def lap_text(self, seconds: float) -> str:
+        """Lap time, cut as classic design (8 characters plus extra digits)"""
+        return calc.sec2laptime(seconds)[:8 + self.extra]
+
+    def sector_text(self, text: str) -> str:
+        """Sector time or gap, cut as classic design (7 characters plus extra digits)"""
+        return text[:7 + self.extra]
 
     def freeze_time(self, seconds: float) -> float:
         """Freeze duration, at most half of sector time"""

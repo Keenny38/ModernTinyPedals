@@ -136,7 +136,7 @@ def test_overlays_page_picture_before_update(widgets, name):
     widget = widgets(name)
     assert visible_pixels(render(widget)) > 0
     if name == "flag":
-        assert len(widget.samples) == len(widget.keys) == 12
+        assert len(widget.samples) == len(widget.keys) == 15
 
 
 @pytest.mark.parametrize("name", ["flag", "race_notifications", "spotter"])
@@ -199,6 +199,16 @@ def test_race_notifications_icons_and_time_left(widgets):
 
 
 # --- Flag
+def test_flag_limiter_chip_ignores_rev_limiter_cut(widgets, monkeypatch):
+    """LMU sets mSpeedLimiterActive at the rev limiter too: only the pit limiter switch shows the chip"""
+    widget = widgets("flag")
+    reader(monkeypatch, "switch", "speed_limiter", 0)
+    reader(monkeypatch, "switch", "speed_limiter_active", True)
+    assert widget.read_speed_limiter(0.0, False, True) is None
+    reader(monkeypatch, "switch", "speed_limiter", 1)
+    assert widget.read_speed_limiter(0.0, False, True) is not None
+
+
 def test_flag_chips_only_while_active(widgets, monkeypatch):
     minfo.fuel.amountCurrent = 50.0
     minfo.fuel.estimatedLaps = 15.0
@@ -214,12 +224,12 @@ def test_flag_chips_only_while_active(widgets, monkeypatch):
     reader(monkeypatch, "vehicle", "repair_time", 31.6)
     image = update(widget)
     chips = {chip.caption: chip for chip in widget.state}
-    assert chips["Limiter"].value == "79.92" and chips["Limiter"].color == "negative"
+    assert chips["Limiter"].value == "79.92" and chips["Limiter"].color == "positive"  # pit speed limit unknown
     assert chips["Sector yellow"].value == "S1 S3"
     assert chips["FCY"].value == "Pits open" and chips["Repairs"].value == "32s"
     order = [chip.caption for chip in widget.state]
     assert order.index("Limiter") < order.index("Repairs") < order.index("Sector yellow") < order.index("FCY")
-    assert has_color(image, widget.theme.negative)
+    assert has_color(image, widget.theme.positive)
     reader(monkeypatch, "session", "yellow_flag_state", 7)
     update(widget)
     assert widget.state[-1].value == "Red flag" and widget.state[-1].color == "negative"
@@ -238,7 +248,7 @@ def test_flag_yellow_blue_low_fuel_and_custom_text(widgets, monkeypatch):
     widget = widgets("flag", yellow_flag_text="YEL", layout=1)
     update(widget)
     chips = {chip.caption: chip for chip in widget.state}
-    assert chips["YEL"].value == "+250m"  # custom text replaces design caption
+    assert chips["YEL"].value == "▲ 250m"  # custom text replaces design caption, arrow: ahead
     assert chips["Blue flag"].value.endswith("s")
     assert chips["Low fuel"].value == "3.50L"
     assert widget.width() > widget.height()  # horizontal layout

@@ -20,8 +20,10 @@
 Weather Widget
 """
 
+from math import atan2, hypot
 from typing import TYPE_CHECKING
 
+from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ..const_common import TEXT_TREND_SIGN
@@ -30,6 +32,9 @@ from ._base import Overlay
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import WeatherConfig
+
+WIND_CALM = 0.3  # m/s, no direction shown below
+WIND_ARROWS = "↑→↓←"  # where wind blows relative to car: up (tailwind), right, down, left
 
 
 class Realtime(Overlay):
@@ -190,6 +195,26 @@ class Realtime(Overlay):
                 )
                 layout_wetness.addWidget(self.bar_wetness_trend, 0, 1)
 
+        # Wind speed & direction
+        if self.wcfg["show_wind_speed"]:
+            self.unit_speed = units.set_unit_speed(self.cfg.units["wind_speed_unit"])
+            self.symbol_speed = units.set_symbol_speed(self.cfg.units["wind_speed_unit"])
+            text_wind = f"{self.wcfg['prefix_wind']} {WIND_ARROWS[0]}888{self.symbol_speed}"
+            self.bar_wind = self.set_rawtext(
+                text=text_wind,
+                width=font_m.width * len(text_wind) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_wind"],
+                bg_color=self.wcfg["background_color_wind"],
+            )
+            self.set_primary_orient(
+                target=self.bar_wind,
+                column=self.wcfg["display_order_wind"],
+                option=None,
+                default=1,
+            )
+
         # Last data
         self.temp_trend = TrendTimer(self.wcfg["temperature_trend_interval"])
         self.rain_trend = TrendTimer(self.wcfg["raininess_trend_interval"])
@@ -241,6 +266,12 @@ class Realtime(Overlay):
                 wetness = wet_min + wet_max + wet_avg
                 wet_trend = self.wet_trend.update(wetness, lap_etime)
                 self.update_wetness_trend(self.bar_wetness_trend, wet_trend)
+
+        # Wind speed & direction
+        if self.wcfg["show_wind_speed"]:
+            speed, angle = wind_reading()
+            arrow = "-" if angle is None else WIND_ARROWS[round(angle / 90) % 4]
+            self.update_wind(self.bar_wind, f"{self.unit_speed(speed):>3.0f}", arrow)
 
     # GUI update methods
     def update_temperature(self, target, data, track, air):
@@ -299,6 +330,26 @@ class Realtime(Overlay):
             target.text = TEXT_TREND_SIGN[data]
             target.fg = self.bar_style_trend[data]
             target.update()
+
+    def update_wind(self, target, speed, arrow):
+        """Wind speed, arrow of where wind blows relative to car"""
+        if target.last != (speed, arrow):
+            target.last = (speed, arrow)
+            target.text = f"{self.wcfg['prefix_wind']} {arrow}{speed:.3}{self.symbol_speed}"
+            target.update()
+
+
+def wind_reading(calm: float = WIND_CALM) -> tuple[float, float | None]:
+    """Wind speed (m/s) & angle of where wind blows relative to car (degrees clockwise from car front),
+    None while calm (speed below calm, m/s)"""
+    wind_x, _, wind_z = api.read.session.wind_velocity()
+    speed = hypot(wind_x, wind_z)
+    if speed < calm:
+        return speed, None
+    # Same view as radar: world plane rotated to car heading (x right, y behind)
+    yaw = api.read.vehicle.orientation_yaw_radians()
+    right, behind = calc.rotate_coordinate(yaw - 3.14159265, wind_x, -wind_z)
+    return speed, calc.degrees(atan2(right, -behind))
 
 
 def laps_to_rubber(value: float, median_laps: int = 2000) -> float:

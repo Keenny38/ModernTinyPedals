@@ -138,6 +138,7 @@ class SpectateBackend(PageBackend):
         """Page shown or hidden: drivers read only while shown"""
         self._active = active
         if active:
+            self.run_deferred()  # spectate mode changed while hidden: known before drivers are read
             self.poll()
             self._timer.start()
         else:
@@ -333,15 +334,25 @@ class SpectateBackend(PageBackend):
         self._filter_changed()
 
     # Actions
-    @Slot()
-    def refresh(self):
-        """Spectate mode or driver changed elsewhere (hotkey, API menu): shown state only, nothing saved"""
+    def changed_elsewhere(self):
+        """Spectate mode or driver changed elsewhere (app refresh & spectate_changed signals): spectate mode read
+        now (cheap, followed driver checked with it), rows & cards made again once shown if hidden (see set_active)"""
+        self.read_enabled()
+        self.when_shown(self.refresh)
+
+    def read_enabled(self):
+        """Spectate mode as set now"""
         enabled = bool(cfg.api["enable_player_index_override"])
         if enabled != self._enabled:
             self._enabled = enabled
             logger.info("%s: spectate mode", "ENABLED" if enabled else "DISABLED")
             if not enabled:
                 self._followed = ""
+
+    @Slot()
+    def refresh(self):
+        """Spectate mode or driver changed elsewhere (hotkey, API menu): shown state only, nothing saved"""
+        self.read_enabled()
         self.stateChanged.emit()
         self._sync_rows()
         self._update_spectated()

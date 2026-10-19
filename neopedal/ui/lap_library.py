@@ -26,7 +26,9 @@ from __future__ import annotations
 import html
 import logging
 import os
+import weakref
 from collections.abc import Callable
+from typing import Any
 
 import shiboken6
 from PySide6.QtCore import Qt
@@ -47,6 +49,7 @@ from PySide6.QtWidgets import (
 from ..i18n import tr, trm
 from ..userfile.lap_cache import indexed_infos, info_index_path, read_infos, save_info_index
 from ..userfile.lap_library import (
+    Deletion,
     delete_laps,
     group_name_error,
     import_folder,
@@ -58,13 +61,24 @@ from ..userfile.lap_library import (
 from ..userfile.motec_ld import import_ld_job
 from ..userfile.telemetry_lap import IMPORT_FOLDER, LapFile
 from ._common import BaseDialog, TextInputDialog, UIScaler
-from .quick.background import BackgroundJobs
+from .quick.background import BackgroundJobs, weak_callback
 from .quick.formatting import file_stamp, iso_minutes
 from .toast import show_toast
 
 logger = logging.getLogger(__name__)
 
 LibraryLap = tuple[LapFile, dict, float]  # lap file, lap info, time imported (file time, 0 if unknown)
+
+_file_jobs: BackgroundJobs | None = None
+
+
+def file_jobs() -> BackgroundJobs:
+    """App-lifetime jobs moving library files (rename, delete, undo): not owned by a library, so a library closed
+    meanwhile still has its lap viewer told of moved laps (created on the UI thread, first use)"""
+    global _file_jobs
+    if _file_jobs is None or not shiboken6.isValid(_file_jobs):
+        _file_jobs = BackgroundJobs(None, "Lap library")
+    return _file_jobs
 
 
 def imported_time(path: str) -> float:
@@ -126,6 +140,7 @@ class LapLibrary(BaseDialog):
         page = getattr(on_add, "__self__", None)  # lap viewer page, on_add is one of its methods
         self._import_motec = import_motec or getattr(page, "import_motec", None)
         self._importing = False
+        self._writing = False  # files renamed, deleted or restored in background (buttons changing files disabled)
         self._undo: list[tuple[str, str]] = []  # deleted files: path, path in trash
         self._jobs = BackgroundJobs(self, "Lap library")
         self._expand: set[str] = set()  # groups shown expanded once listed (refresh asked meanwhile)
@@ -152,12 +167,12 @@ class LapLibrary(BaseDialog):
         button_add = QPushButton(tr("Add to Viewer"))
         button_add.setToolTip(tr("Show selected laps in lap viewer (double-click also)"))
         button_add.clicked.connect(lambda: self.add_to_viewer(self.tree.selectedItems()))
-        button_rename = QPushButton(tr("Rename..."))
-        button_rename.setToolTip(tr("Rename selected imported log"))
-        button_rename.clicked.connect(self.rename)
-        button_delete = QPushButton(tr("Delete"))
-        button_delete.setToolTip(tr("Move selected laps to trash"))
-        button_delete.clicked.connect(self.delete)
+        self.button_rename = QPushButton(tr("Rename..."))
+        self.button_rename.setToolTip(tr("Rename selected imported log"))
+        self.button_rename.clicked.connect(self.rename)
+        self.button_delete = QPushButton(tr("Delete"))
+        self.button_delete.setToolTip(tr("Move selected laps to trash"))
+        self.button_delete.clicked.connect(self.delete)
         self.button_undo = QPushButton(tr("Undo Delete"))
         self.button_undo.clicked.connect(self.undo_delete)
         self.button_undo.setVisible(False)
@@ -165,8 +180,8 @@ class LapLibrary(BaseDialog):
         button_close.clicked.connect(self.close)
         layout_button = QHBoxLayout()
         layout_button.addWidget(button_add)
-        layout_button.addWidget(button_rename)
-        layout_button.addWidget(button_delete)
+        layout_button.addWidget(self.button_rename)
+        layout_button.addWidget(self.button_delete)
         layout_button.addWidget(self.button_undo)
         layout_button.addStretch(1)
         layout_button.addWidget(button_close)
@@ -188,8 +203,37 @@ class LapLibrary(BaseDialog):
         self._jobs.run("refresh", lambda: read_library(filepath), self.fill_tree, key="refresh")
 
     def is_refreshing(self) -> bool:
-        """Imported laps being listed in background"""
-        return self._jobs.is_busy("refresh")
+        """Imported laps being listed, or their files moved, in background"""
+        return self._writing or self._jobs.is_busy("refresh")
+
+    def set_writing(self, writing: bool):
+        """Files being moved in background: buttons changing files disabled meanwhile"""
+        self._writing = writing
+        for button in (self.button_rename, self.button_delete, self.button_undo):
+            button.setEnabled(not writing)
+
+    def run_write(self, name: str, work: Callable[[], Any], done: Callable[[LapLibrary | None, Any], None],
+                  failed: Callable[[LapLibrary | None, BaseException], None]) -> bool:
+        """Move files on a worker thread (a lap file still open is retried for up to a second), one write at a time
+
+        done(library, result) or failed(library, error) called on the UI thread even once library closed (library
+        None then: lap viewer still told of moved laps). Returns False if a write still runs (nothing started).
+        """
+        if self._writing:
+            return False
+        self.set_writing(True)
+        library_ref = weakref.ref(self)
+
+        def finished() -> LapLibrary | None:
+            """Library (buttons enabled again), None if closed meanwhile"""
+            library = library_ref()
+            if library is None or not shiboken6.isValid(library):
+                return None
+            library.set_writing(False)
+            return library
+
+        file_jobs().run(name, work, lambda result: done(finished(), result), lambda error: failed(finished(), error))
+        return True
 
     def fill_tree(self, groups: list[tuple[str, list[LibraryLap]]]):
         """Imported logs & their laps listed (lap infos read in background), expanded state kept"""
@@ -327,52 +371,83 @@ class LapLibrary(BaseDialog):
             self._on_add(paths)
 
     def rename(self):
+        """Rename log of selected item (in background, see run_write), lap viewer told of moved laps"""
         items = self.tree.selectedItems()
-        if not items:
+        if not items or self._writing:
             return
         old = self.group_of(items[0])
+        filepath = self.filepath
+        changed = weak_callback(self._on_changed)  # never keeps lap viewer page alive
+
+        def renamed(library: LapLibrary | None, moved: dict[str, str]):
+            if library is not None:
+                library.refresh()
+            on_changed = changed()
+            if on_changed is not None:
+                on_changed(moved)
+
+        def rename_failed(library: LapLibrary | None, error: BaseException):
+            logger.error("LAP LIBRARY: unable to rename %s: %s", old, error,
+                         exc_info=None if isinstance(error, OSError) else error)
+            if library is not None:
+                library.refresh()
+                QMessageBox.warning(library, tr("Error"), trm(f"Unable to rename: {error}"))
 
         def renaming(new: str) -> bool:
             new = new.strip()
             if new == old:
                 return True
-            error = group_name_error(self.filepath, old, new)
+            error = group_name_error(filepath, old, new)
             if error:
                 message = (
                     "Name already used by another imported log." if error == "exists"
                     else 'Invalid name, characters \\ / : * ? " < > | not allowed.')
                 QMessageBox.warning(self, tr("Error"), tr(message))
                 return False
-            try:
-                moved = rename_group(self.filepath, old, new)
-            except OSError as error:
-                logger.error("LAP LIBRARY: unable to rename %s: %s", old, error)
-                QMessageBox.warning(self, tr("Error"), trm(f"Unable to rename: {error}"))
-                return False
-            self.refresh()
-            self._on_changed(moved)
-            return True
+            # Input kept open while another write runs (buttons disabled meanwhile)
+            return self.run_write("rename", lambda: rename_group(filepath, old, new), renamed, rename_failed)
 
         TextInputDialog(self, tr("Rename"), tr("Imported log name:"), renaming, old).show()
 
     def delete(self):
-        """Move selected laps to trash (lap viewer trash, kept 30 days), undo offered, laps that can not be deleted
-        (file open elsewhere) told"""
+        """Move selected laps to trash (lap viewer trash, kept 30 days, in background, see run_write), undo offered,
+        laps that can not be deleted (file open elsewhere) told"""
         from .quick.lap_backend import TRASH_FOLDER
 
+        if self._writing:
+            return
         paths = self.lap_paths(self.tree.selectedItems())
         if not paths:
             return
         if not self.confirm_operation("Delete", f"Move {len(paths)} laps to trash?"):
             return
-        trash = os.path.join(self.filepath, TRASH_FOLDER, file_stamp())
-        deletion = delete_laps(self.filepath, paths, trash)
-        if deletion.trashed:
-            self._undo = deletion.trashed
-            self.button_undo.setVisible(True)
-        self.refresh()
-        if deletion.deleted:
-            self._on_changed(dict.fromkeys(deletion.deleted, ""))
+        filepath = self.filepath
+        trash = os.path.join(filepath, TRASH_FOLDER, file_stamp())
+        changed = weak_callback(self._on_changed)  # never keeps lap viewer page alive
+
+        def deleted(library: LapLibrary | None, deletion: Deletion):
+            if library is not None:
+                if deletion.trashed:
+                    library._undo = deletion.trashed
+                    library.button_undo.setVisible(True)
+                library.refresh()
+            on_changed = changed()
+            if deletion.deleted and on_changed is not None:
+                on_changed(dict.fromkeys(deletion.deleted, ""))
+            if library is not None:
+                library.tell_deleted(deletion)
+
+        def delete_failed(library: LapLibrary | None, error: BaseException):
+            logger.error("LAP LIBRARY: unable to delete laps: %s", error, exc_info=error)
+            if library is not None:
+                library.refresh()
+                QMessageBox.warning(library, tr("Error"), trm(
+                    f"Unable to delete lap: {html.escape(os.path.basename(paths[0]))} ({html.escape(str(error))})"))
+
+        self.run_write("delete", lambda: delete_laps(filepath, paths, trash), deleted, delete_failed)
+
+    def tell_deleted(self, deletion: Deletion):
+        """Laps that could not be deleted told, else laps moved to trash (with undo)"""
         if deletion.failed:
             QMessageBox.warning(self, tr("Error"), "<br>".join(
                 trm(f"Unable to delete lap: {html.escape(os.path.basename(path))} ({html.escape(reason)})")
@@ -382,10 +457,20 @@ class LapLibrary(BaseDialog):
             show_toast(self, trm(f"{count} lap(s) moved to trash"), action_text=tr("Undo"), action=self.undo_delete)
 
     def undo_delete(self):
-        """Restore laps deleted last from trash, restored groups shown expanded"""
-        if not self._undo or not shiboken6.isValid(self):
+        """Restore laps deleted last from trash (in background, see run_write), restored groups shown expanded"""
+        if not shiboken6.isValid(self) or not self._undo or self._writing:  # (undo kept while a write runs)
             return
-        restored = restore_laps(self._undo)
-        self._undo = []
-        self.button_undo.setVisible(False)
-        self.refresh({os.path.basename(os.path.dirname(path)) for path in restored})
+        trashed = self._undo
+
+        def restored(library: LapLibrary | None, paths: list[str]):
+            if library is not None:
+                library.refresh({os.path.basename(os.path.dirname(path)) for path in paths})
+
+        def restore_failed(library: LapLibrary | None, error: BaseException):
+            logger.error("LAP LIBRARY: unable to restore laps: %s", error, exc_info=error)
+            if library is not None:
+                library.refresh()
+
+        if self.run_write("restore", lambda: restore_laps(trashed), restored, restore_failed):
+            self._undo = []
+            self.button_undo.setVisible(False)

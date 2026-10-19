@@ -277,6 +277,6 @@ def apply_pending_import(config_folder: str, data_folder: str = "") -> bool:
             changed = rewrite_config_paths(config_file, path_map)
             if changed:
                 _record(logging.INFO, f"IMPORT: {changed} user path(s) updated in {CONFIG_FILE}")
-        except (OSError, ValueError) as error:  # invalid json: loader resets it as usual
+        except (OSError, RecursionError, ValueError) as error:  # invalid json: loader resets it as usual
             _record(logging.WARNING, f"IMPORT: user paths not updated in {CONFIG_FILE}: {error}")
     return True

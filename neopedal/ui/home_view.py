@@ -872,7 +872,7 @@ class HomeView(QWidget):
 
     def refresh_driver(self):
         """Driver card: ranks checked in background (game menu file changed), made again only when changed"""
-        from ..rank_info import history_path, ranks
+        from ..rank_info import ranks
 
         ranks.poll()
         if monotonic() - self._driver_read_time >= DRIVER_DATA_SECONDS:
@@ -882,11 +882,10 @@ class HomeView(QWidget):
         if key == self._driver_key:
             return
         self._driver_key = key
-        from ..process import driver_ranks as dr
         from .home_driver import driver_card_text
 
         player = ranks.player
-        history = dr.account_history(dr.read_history(history_path()), player.steam_id) if player is not None else []
+        history = ranks.history_of(player.steam_id) if player is not None else ()  # in memory: no file read here
         text = driver_card_text(player, ranks.remembered, ranks.updated, history, self._driver_data, light,
                                 ranks.others)
         hidden = text is None

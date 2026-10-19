@@ -1,4 +1,4 @@
-"""App startup & reload: single instance PID file, environment, restart command, load order"""
+"""App startup & reload: single instance check, environment, restart command, load order"""
 
 import os
 import sys
@@ -10,65 +10,24 @@ from neopedal import loader, main, realtime_state
 from neopedal.setting import cfg
 
 
-# --- Single instance (PID file)
-def test_pid_file_of_running_app(ui_env):
-    main.save_pid_file()
-    assert main.is_pid_exist()  # this process, same creation time
-
-
-@pytest.mark.parametrize("content", ["", "not a pid", "999999999,0,NeoPedal", f"{os.getpid()},12345.0,NeoPedal"],
-                         ids=["empty", "not_a_pid", "gone", "reused_pid"])  # ids without pid: same in every worker
-def test_pid_file_stale_or_invalid(ui_env, content):
-    from neopedal.const_file import LogFile
-
-    with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
-        file.write(content)
-    assert not main.is_pid_exist()  # other process, reused PID or broken file
-
-
-def test_pid_file_of_other_app_ignored(ui_env):
-    """PID saved by another app (no or other app name): never blocks this app"""
-    import psutil
-
-    from neopedal.const_file import LogFile
-
-    create_time = psutil.Process(os.getpid()).create_time()
-    for content in (f"{os.getpid()},{create_time}", f"{os.getpid()},{create_time},OtherApp"):
-        with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
-            file.write(content)
-        assert not main.is_pid_exist()
-
-
-def test_pid_file_unwritable_or_locked(ui_env, monkeypatch, caplog):
-    """Locked pid file or read-only config folder: no crash at launch"""
-    def locked(*args, **kwargs):
-        raise PermissionError("locked")
-
-    monkeypatch.setattr(main, "open", locked, raising=False)
-    with caplog.at_level("WARNING", logger="neopedal"):
-        main.save_pid_file()
-    assert "PID file not saved" in caplog.text
-    assert not main.is_pid_exist()
-
-
+# --- Single instance (OS lock, see test_core_bugfixes_2026_10_18 for the lock itself)
 def test_single_instance_modes(ui_env, monkeypatch):
-    from neopedal.const_file import LogFile
-
-    pid_file = f"{cfg.path.config}{LogFile.PID}"
+    waits = []
+    monkeypatch.setattr(main, "acquire_instance_lock", lambda wait=0.0: waits.append(wait) or True)
     monkeypatch.setattr(realtime_state, "singleton", False)
     main.single_instance_check(False)
-    assert not realtime_state.singleton and not os.path.exists(pid_file)
-    monkeypatch.setenv("NEOPEDAL_RESTART", "TRUE")  # restarted: no check, PID saved
+    assert not realtime_state.singleton and waits == []  # no lock taken
+    monkeypatch.setenv("NEOPEDAL_RESTART", "TRUE")  # restarted: waits for previous instance to exit
     main.single_instance_check(True)
-    assert realtime_state.singleton and os.path.exists(pid_file) and "NEOPEDAL_RESTART" not in os.environ
-    os.remove(pid_file)
+    assert realtime_state.singleton and waits == [main.INSTANCE_LOCK_RESTART_WAIT]
+    assert "NEOPEDAL_RESTART" not in os.environ
     main.single_instance_check(True)  # first instance
-    assert os.path.exists(pid_file)
+    assert waits[-1] == 0.0
 
 
 def test_second_instance_exits(ui_env, monkeypatch):
     shown = []
-    monkeypatch.setattr(main, "is_pid_exist", lambda: True)
+    monkeypatch.setattr(main, "acquire_instance_lock", lambda wait=0.0: False)
     monkeypatch.setattr(main, "QApplication", lambda args: SimpleNamespace(setWindowIcon=lambda icon: None,
                                                                             setDesktopFileName=lambda name: None))
     monkeypatch.setattr(main.QMessageBox, "warning", lambda *args: shown.append(args[2]))

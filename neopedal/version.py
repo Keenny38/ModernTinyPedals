@@ -12,7 +12,7 @@ DEVELOPMENT = ""
 # Setting format version, stored in presets and used by setting_preupdate migrations.
 # Independent from app version (2.x numbering of presets made by older versions), so they
 # keep loading. Raise it only with a new migration in setting_preupdate.
-SETTING_VERSION = "2.51.1"
+SETTING_VERSION = "2.51.3"
 
 
 def source_version(default: tuple[str, str]) -> tuple[str, str]:

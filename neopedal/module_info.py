@@ -22,6 +22,7 @@ Module info
 
 from __future__ import annotations
 
+import threading
 from array import array
 from collections import deque
 from collections.abc import Mapping
@@ -876,9 +877,12 @@ class HistoryInfo:
     """History output data
 
     Data sets (deque) are iterated by GUI thread: never changed in place, replaced by a new one.
+    Consumption data set is replaced & saved holding consumptionLock (stint module adds laps, Race Calculator
+    deletes laps): no lap added at the same time lost, no deleted lap saved back.
     """
 
     __slots__ = (
+        "consumptionLock",
         "consumptionDataVersion",
         "consumptionDataSet",
         "stintDataVersion",
@@ -887,6 +891,7 @@ class HistoryInfo:
     )
 
     def __init__(self):
+        self.consumptionLock = threading.Lock()
         self.consumptionDataVersion: int = 0
         self.consumptionDataSet: deque[ConsumptionDataSet] = deque([ConsumptionDataSet()], 100)
         self.stintDataVersion: int = 0
@@ -894,8 +899,8 @@ class HistoryInfo:
         self.stintDataSet: deque[StintDataSet] = deque([StintDataSet()], 100)
 
     def reset_stint(self):
-        """Reset stint data"""
-        self.stintDataVersion = 0
+        """Reset stint data (version changed, never back to a value overlays already drew)"""
+        self.stintDataVersion += 1
         self.stintDataCurrent.reset()
         self.stintDataSet = deque([StintDataSet()], self.stintDataSet.maxlen)
 
@@ -946,6 +951,7 @@ class MappingInfo:
         "pitSpeedLimit",
         "pitPassTime",
         "sunlightPhases",
+        "orientation",
     )
 
     def __init__(self):
@@ -961,6 +967,7 @@ class MappingInfo:
         self.pitSpeedLimit: float = 0.0
         self.pitPassTime: float = 0.0
         self.sunlightPhases: tuple[tuple[float, int], ...] | None = None
+        self.orientation: float = 0.0  # track map overlay orientation of track (degrees, track info)
 
     def reset_map(self):
         """Reset track map only (track info fields owned by track info recording)"""
@@ -1034,7 +1041,9 @@ class SectorData:
 
     __slots__ = (
         "noDeltaSector",
+        "noDeltaSectorPB",
         "sectorIndex",
+        "recordedIndex",
         "sectorPrev",
         "sectorBestTB",
         "sectorBestPB",
@@ -1047,8 +1056,12 @@ class SectorData:
 
     def reset(self):
         """Reset"""
-        self.noDeltaSector: bool = True
+        self.noDeltaSector: bool = True  # no theoretical best of last sector recorded (no gap to it)
+        self.noDeltaSectorPB: bool = True  # no personal best lap sector of last sector recorded
         self.sectorIndex: int = -1
+        # Sector index when time of sector before it was last recorded (equal to sectorIndex once
+        # sector just finished is recorded: game may report its time after the sector index)
+        self.recordedIndex: int = -1
         self.sectorPrev: list[float] = [MAX_SECONDS] * 3
         self.sectorBestTB: list[float] = [MAX_SECONDS] * 3
         self.sectorBestPB: list[float] = [MAX_SECONDS] * 3
@@ -1101,6 +1114,8 @@ class VehiclesInfo:
         dataSetVersion: changes only when vehicles module updated dataSet with new game data (overlays skip
             redraw while unchanged), -1 after reset.
         scoringSnapshot: scoring data of last low priority update (None until then, see ScoringSnapshot).
+        leaderIndex: index of overall leader (place 1) in last scoring update, -1 if none (new session,
+            no place 1 in scoring).
     """
 
     __slots__ = (
@@ -1133,7 +1148,7 @@ class VehiclesInfo:
         )
         self.dataSetVersion: int = -1
         self.scoringSnapshot: ScoringSnapshot | None = None
-        self.leaderIndex: int = 0
+        self.leaderIndex: int = -1
         self.playerIndex: int = -1
         self.totalOutPits: int = 0
         self.totalInPits: int = 0
@@ -1180,6 +1195,8 @@ class WheelsInfo:
         "maxSuspensionPosition",
         "motionRatio",
         "wheelRadius",
+        "wheelRadiusFront",
+        "wheelRadiusRear",
         "minimumStaticWeight",
         "totalStaticWeight",
         "totalDynamicWeight",
@@ -1229,6 +1246,9 @@ class WheelsInfo:
         self.maxSuspensionPosition: list[float] = list(WHEELS_ZERO)
         self.motionRatio: list[float] = list(WHEELS_ZERO)
         self.wheelRadius: list[float] = list(WHEELS_ZERO)  # rolling radius (meters), 0 until learned
+        # Measured tyre radius per axle (millimeters), 0 until learned or measurement disabled
+        self.wheelRadiusFront: float = 0.0
+        self.wheelRadiusRear: float = 0.0
         # Weight
         self.minimumStaticWeight: float = 0.0
         self.totalStaticWeight: float = 0.0

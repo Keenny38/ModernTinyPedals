@@ -25,9 +25,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from .. import calculation as calc
+from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
 from ._common import delta_shown, game_deltabest, lap_delta_shown
@@ -105,9 +106,15 @@ class Realtime(Overlay):
             self.resize(self.delta_width, delta_height)
 
         self.pen_text = QPen()
+        # Lap invalidated by game: outline of delta box in time loss color
+        outline_width = max(round(font_m.capital * 0.15), 2)
+        self.pen_invalid = QPen(QColor(self.delta_color[1]), outline_width)
+        self.pen_invalid.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        self.outline_inset = outline_width / 2
 
         # Last data
         self.delta_best: float | None = 0.0  # None: no delta (no reference lap, or out lap)
+        self.invalid = False
         self.last_laptime = 0
         self.new_lap = True
 
@@ -129,8 +136,10 @@ class Realtime(Overlay):
             else:
                 temp_best = None
 
-        if self.delta_best != temp_best:
+        invalid = self.wcfg["show_invalid_lap_highlight"] and api.read.lap.invalidated()
+        if self.delta_best != temp_best or self.invalid != invalid:
             self.delta_best = temp_best
+            self.invalid = invalid
             self.update()
 
     # GUI update methods
@@ -173,6 +182,11 @@ class Realtime(Overlay):
         else:
             text = f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
         painter.drawText(self.rect_text_delta, Qt.AlignmentFlag.AlignCenter, text)
+        if self.invalid:
+            inset = self.outline_inset
+            painter.setPen(self.pen_invalid)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(self.rect_delta.adjusted(inset, inset, -inset, -inset))
 
     # Additional methods
     def delta_position(self, rng, delta, length):

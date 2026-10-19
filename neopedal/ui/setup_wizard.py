@@ -60,6 +60,7 @@ UNIT_SYSTEMS = {
         "turbo_pressure_unit": "bar",
         "tyre_pressure_unit": "kPa",
         "weight_unit": "Kilogram",
+        "wind_speed_unit": "m/s",
     },
     "Imperial": {
         "distance_unit": "Feet",
@@ -71,6 +72,7 @@ UNIT_SYSTEMS = {
         "turbo_pressure_unit": "psi",
         "tyre_pressure_unit": "psi",
         "weight_unit": "Pound",
+        "wind_speed_unit": "MPH",
     },
 }
 UNITS_KEEP = ""  # units of the preset kept

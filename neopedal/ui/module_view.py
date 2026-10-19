@@ -85,14 +85,18 @@ class ModuleList(QWidget):
 
     def showEvent(self, event):
         self.ensure_view()
-        self.backend.refresh()  # overlays switched on other pages: who depends on what
+        self.backend.page_shown()  # states read again: overlays switched on other pages, modules started
         self.backend.loadDependenciesLater()
         super().showEvent(event)
 
+    def hideEvent(self, event):
+        self.backend.page_hidden()  # app refresh signals no longer read every module & overlay while hidden
+        super().hideEvent(event)
+
     @Slot(bool)  # type: ignore[operator]
     def refresh(self, *_):
-        """Setting, preset or module state changed elsewhere (hotkey, tray, other page)"""
-        self.backend.refresh()
+        """Setting, preset or module state changed elsewhere (hotkey, tray, other page): once shown if hidden"""
+        self.backend.settings_changed()
 
     def open_config(self, name: str):
         from functools import partial
@@ -121,16 +125,10 @@ class ModuleList(QWidget):
             self.backend.refresh()
 
     def confirm(self, text: str) -> bool:
-        from PySide6.QtWidgets import QMessageBox
-
         from ..i18n import tr
+        from ._common import confirm_action
 
-        answer = QMessageBox.question(
-            self, tr("Confirm"), text,
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        return answer == QMessageBox.StandardButton.Yes
+        return confirm_action(self, tr("Confirm"), text, tr("Confirm"))
 
     def show_log(self):
         from .log_info import LogInfo

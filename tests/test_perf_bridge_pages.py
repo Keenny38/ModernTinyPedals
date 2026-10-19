@@ -1,7 +1,6 @@
 """Bridge granularity of pages: option rows, overlay cards, option finder, replay clocks, live race header, messages
 with a time (few model reads, reused rows not animated from the previous row, cached translations)"""
 
-import os
 import re
 from contextlib import suppress
 
@@ -20,9 +19,9 @@ def flush():
 
 
 def qml_text(name: str) -> str:
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
 
-    with open(os.path.join(QML_FOLDER, name), encoding="utf-8") as file:
+    with open(qml_path(name), encoding="utf-8") as file:
         return file.read()
 
 

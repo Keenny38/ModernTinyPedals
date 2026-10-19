@@ -44,7 +44,7 @@ class Realtime(StatsMixin, ModernOverlay):
     wcfg: SpeedometerConfig
 
     options = (
-        "font_size", "layout", "decimal_places", "off_throttle_threshold", "on_throttle_threshold",
+        "font_size", "layout", "leading_zero", "decimal_places", "off_throttle_threshold", "on_throttle_threshold",
         "speed_minimum_reset_cooldown", "speed_maximum_reset_cooldown", "show_speed", "show_speed_minimum",
         "show_speed_maximum", "show_speed_fastest",
         *display_order_options("speedometer"),
@@ -56,6 +56,8 @@ class Realtime(StatsMixin, ModernOverlay):
         theme = self.theme
         self.unit_speed = units.set_unit_speed(self.cfg.units["speed_unit"])
         self.decimals = max(int(wcfg["decimal_places"]), 0)
+        # Whole digits padded with zeros (1 to 3, as classic design), then decimal point & decimals
+        self.digits = min(max(int(wcfg["leading_zero"]), 1), 3) + (self.decimals + 1 if self.decimals else 0)
         sample = "888." + "8" * self.decimals if self.decimals else "888"
         items = (
             ("speed", units.set_symbol_speed(self.cfg.units["speed_unit"]), "strong", None),
@@ -110,4 +112,4 @@ class Realtime(StatsMixin, ModernOverlay):
         self.speed_fast = max(self.speed_fast, speed)
         speeds = {"speed": speed, "speed_minimum": self.speed_min, "speed_maximum": self.speed_max,
                   "speed_fastest": max(self.speed_fast, 0.0)}
-        self.refresh(tuple(Value(f"{self.unit_speed(speeds[key]):.{self.decimals}f}") for key in self.keys))
+        self.refresh(tuple(Value(f"{self.unit_speed(speeds[key]):0{self.digits}.{self.decimals}f}") for key in self.keys))

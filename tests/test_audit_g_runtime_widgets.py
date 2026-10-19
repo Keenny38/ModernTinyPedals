@@ -140,9 +140,9 @@ def test_non_ascii_session_cookie(monkeypatch):
     now = time.monotonic()
     monkeypatch.setattr(DashboardHandler, "sessions", {token: [now, now]})
     handler = DashboardHandler.__new__(DashboardHandler)
-    handler.headers = {"Cookie": "tp_session=été"}  # type: ignore[assignment]
+    handler.headers = {"Cookie": "np_session=été"}  # type: ignore[assignment]
     assert not handler.has_session()
-    handler.headers = {"Cookie": f"tp_session={token}"}  # type: ignore[assignment]
+    handler.headers = {"Cookie": f"np_session={token}"}  # type: ignore[assignment]
     assert handler.has_session()
 
 

@@ -28,7 +28,8 @@ The switch at the top of the list shows the **sessions** of the results files or
 Newest first, grouped by day, with the session kind (`R`, `Q`, `P`, `W`), track, start time, number of cars, `Online`, and your result: overall position, or class position with several classes, or `DNF`.
 
 - **Search**: every word must match the track, layout, server, car or class.
-- **Filter**: `All`, `Races`, `Qualifying`, `Practice`. Sessions where nobody completed a lap are hidden unless you turn off `Hide sessions without laps`.
+- **Filter**: `All`, `Races`, `Qualifying`, `Practice`. Sessions where nobody completed a lap are hidden unless you turn off `Hide sessions without laps`. When nothing matches, `Clear Filters` shows every session again.
+- `/` jumps to the search. A results file that cannot be read (damaged, or not a results file) stays selected with `This results file can't be read`.
 - `Up` / `Down` keys move from session to session.
 
 ## Session

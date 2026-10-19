@@ -23,7 +23,7 @@ Application UI, style
 import re
 import sys
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -221,6 +221,34 @@ class UIScaler:
         return round(cls.FONT_DPI_SCALE * pixel)
 
 
+class ColorblindState(QObject):
+    """App wide "colorblind safe colors" state of pages (QML theme status colors follow it)"""
+
+    changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.enabled = False
+
+
+_COLORBLIND: list[ColorblindState] = []
+
+
+def colorblind_state() -> ColorblindState:
+    """Shared state object, created on first use"""
+    if not _COLORBLIND:
+        _COLORBLIND.append(ColorblindState())
+    return _COLORBLIND[0]
+
+
+def set_colorblind(enabled: bool):
+    """Status colors of app pages (gain, loss, warning, purple) in colorblind safe colors or not"""
+    state = colorblind_state()
+    if state.enabled != bool(enabled):
+        state.enabled = bool(enabled)
+        state.changed.emit()
+
+
 def resolve_color_theme(color_theme: str) -> str:
     """Colors of window theme (see regex_pattern.THEME_NAMES): "Dark" or "Light" """
     return "Light" if color_theme.endswith("Light") else "Dark"
@@ -272,7 +300,7 @@ def palette_light():
         ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.ToolTipBase),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.ToolTipText),
-        ("#6B7079", "#6B7079", "#6B7079", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window
+        ("#5B6068", "#5B6068", "#5B6068", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window, hover & selected rows
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.Text),
         ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Button),
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.ButtonText),
@@ -282,7 +310,7 @@ def palette_light():
         ("#A3A7AD", "#A3A7AD", "#A3A7AD", QPalette.ColorRole.Dark),
         ("#D0D3D8", "#D0D3D8", "#D0D3D8", QPalette.ColorRole.Mid),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.Shadow),
-        ("#2F6FEB", "#2B63D1", "#DADDE2", QPalette.ColorRole.Highlight),
+        ("#2A63D4", "#2559BE", "#DADDE2", QPalette.ColorRole.Highlight),  # 4.5:1 as text on window
         ("#FFFFFF", "#FFFFFF", "#5F6368", QPalette.ColorRole.HighlightedText),
         ("#1A7FE0", "#1A7FE0", "#8C9096", QPalette.ColorRole.Link),
         ("#8E44AD", "#8E44AD", "#8C9096", QPalette.ColorRole.LinkVisited),
@@ -299,7 +327,7 @@ def palette_dark():
         ("#1C1F26", "#1C1F26", "#1A1C22", QPalette.ColorRole.AlternateBase),
         ("#23262E", "#23262E", "#23262E", QPalette.ColorRole.ToolTipBase),
         ("#E8EAED", "#E8EAED", "#E8EAED", QPalette.ColorRole.ToolTipText),
-        ("#8A8D93", "#8A8D93", "#8A8D93", QPalette.ColorRole.PlaceholderText),
+        ("#9CA0A8", "#9CA0A8", "#9CA0A8", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on hover & selected rows
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.Text),
         ("#20232B", "#20232B", "#1A1C22", QPalette.ColorRole.Button),
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.ButtonText),
@@ -326,7 +354,7 @@ def palette_legacy_light():
         ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.ToolTipBase),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.ToolTipText),
-        ("#6B7079", "#6B7079", "#6B7079", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window
+        ("#5B6068", "#5B6068", "#5B6068", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on window, hover & selected rows
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.Text),
         ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Button),
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.ButtonText),
@@ -336,7 +364,7 @@ def palette_legacy_light():
         ("#A3A7AD", "#A3A7AD", "#A3A7AD", QPalette.ColorRole.Dark),
         ("#D0D3D8", "#D0D3D8", "#D0D3D8", QPalette.ColorRole.Mid),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.Shadow),
-        ("#1A7FE0", "#2B6CB0", "#DADDE2", QPalette.ColorRole.Highlight),
+        ("#1468C0", "#2B6CB0", "#DADDE2", QPalette.ColorRole.Highlight),  # 4.5:1 as text on window
         ("#FFFFFF", "#FFFFFF", "#5F6368", QPalette.ColorRole.HighlightedText),
         ("#1A7FE0", "#1A7FE0", "#8C9096", QPalette.ColorRole.Link),
         ("#8E44AD", "#8E44AD", "#8C9096", QPalette.ColorRole.LinkVisited),
@@ -353,17 +381,17 @@ def palette_legacy_dark():
         ("#1D1E22", "#1D1E22", "#222327", QPalette.ColorRole.AlternateBase),
         ("#2B2D31", "#2B2D31", "#2B2D31", QPalette.ColorRole.ToolTipBase),
         ("#E8EAED", "#E8EAED", "#E8EAED", QPalette.ColorRole.ToolTipText),
-        ("#8A8D93", "#8A8D93", "#8A8D93", QPalette.ColorRole.PlaceholderText),
+        ("#A8ABB1", "#A8ABB1", "#A8ABB1", QPalette.ColorRole.PlaceholderText),  # 4.5:1 on hover & selected rows
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.Text),
         ("#2B2D31", "#2B2D31", "#25262A", QPalette.ColorRole.Button),
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.ButtonText),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.BrightText),
         ("#5A5D63", "#5A5D63", "#3A3C40", QPalette.ColorRole.Light),
-        ("#45484D", "#45484D", "#303236", QPalette.ColorRole.Midlight),
+        ("#3C3F44", "#3C3F44", "#303236", QPalette.ColorRole.Midlight),  # hover: dim text stays 4.5:1
         ("#121315", "#121315", "#101113", QPalette.ColorRole.Dark),
         ("#3A3C41", "#3A3C41", "#2A2B2F", QPalette.ColorRole.Mid),
         ("#0B0B0C", "#0B0B0C", "#0B0B0C", QPalette.ColorRole.Shadow),
-        ("#2D8CF0", "#1F6FC5", "#3A3C41", QPalette.ColorRole.Highlight),
+        ("#4A9DF5", "#1F6FC5", "#3A3C41", QPalette.ColorRole.Highlight),  # 4.5:1 as text on raised
         ("#FFFFFF", "#FFFFFF", "#9AA0A6", QPalette.ColorRole.HighlightedText),
         ("#5AAEFF", "#5AAEFF", "#7A7D83", QPalette.ColorRole.Link),
         ("#C58AF9", "#C58AF9", "#7A7D83", QPalette.ColorRole.LinkVisited),

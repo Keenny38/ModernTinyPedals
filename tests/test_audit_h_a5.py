@@ -10,15 +10,13 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from neopedal.ui.quick import QML_FOLDER
+from neopedal.ui.quick import qml_folder_imports, qml_path
 from tests.test_lap_viewer_features import laps  # noqa: F401
 from tests.test_lap_viewer_fix_qml import chart_of, evaluate, find, items, opener, wait, warnings  # noqa: F401
 
-QML = Path(QML_FOLDER)
-
 
 def qml(name: str) -> str:
-    return (QML / name).read_text(encoding="utf-8")
+    return Path(qml_path(name)).read_text(encoding="utf-8")
 
 
 def pump(seconds: float = 0.05):
@@ -60,7 +58,7 @@ def harness(ui_env, tmp_path, monkeypatch):
 
     def load(text: str, context: dict | None = None):
         path = tmp_path / f"Harness{len(loaded)}.qml"
-        path.write_text(f'import QtQuick\nimport "{QML.as_uri()}"\n{text}', encoding="utf-8")
+        path.write_text(f'import QtQuick\n{qml_folder_imports()}\n{text}', encoding="utf-8")
         view = create_quick_view(parent, str(path), context or {}, samples=0)
         loaded.append((view, context))
         assert not view.errors(), [error.toString() for error in view.errors()]
@@ -150,8 +148,9 @@ def test_value_bubble_width_measured_once(opener, warnings):  # noqa: F811
         assert widest - 1 <= measured <= widest + 2
     text = qml("TraceChart.qml")
     assert "valueRows.itemAt" not in text and "bubble.visible ? chart.valueWidth(bubble.panelIndex) : 0" in text
-    assert 'ToolTip.text: chipArea.containsMouse ? model.full' in text
-    assert 'ToolTip.text: chipArea.containsMouse ? model.full' in qml("LapFilter.qml")
+    # Chip tooltips (LapChip): full lap name only while hovered or focused (not bound for every chip)
+    assert 'tip: chip.hovered || chip.activeFocus ? model.full' in text
+    assert 'tip: chip.hovered || chip.activeFocus ? model.full' in qml("LapFilter.qml")
 
 
 # --- 3. Axis ticks: as many as grid & label repeaters (40) on wide charts
@@ -198,12 +197,16 @@ def test_number_field_decimal_comma_in_french(french, harness):
 # --- 5, 6, 7. Animations off honoured, ValueRow tip read from the row, no redeclared property
 def test_animations_follow_theme_and_small_fixes():
     assert "duration: theme.animate ? 650 : 0" in qml("ResultsPositions.qml")
-    assert "pageState.active && theme.animate" in qml("ReplayList.qml")
+    replays = qml("ReplayList.qml")  # waiting for the game: shared spinner (runs only while the page is shown)
+    assert "TpLoadingState" in replays and "loops: Animation.Infinite" not in replays
+    assert "running: state.visible && pageState.active" in qml("TpLoadingState.qml")
     for name in ("SettingRow.qml", "OverlayOptionRow.qml"):
         text = qml(name)
         assert "duration: theme.animate ? 350 : 0" in text and "duration: theme.animate ? 700 : 0" in text, name
     fuel = qml("RaceFuelTab.qml")
-    assert "enabled: valueRow.tip !== \"\"" in fuel and "parent.tip" not in fuel
+    # Label & value rows: TpKeyValue (tooltip only when there is one)
+    assert "TpKeyValue {" in fuel and "parent.tip" not in fuel
+    assert 'enabled: pair.tip !== "" || labelText.truncated' in qml("TpKeyValue.qml")
     assert "property bool danger" not in qml("PresetDetails.qml")
 
 
@@ -290,7 +293,8 @@ def test_pages_use_shared_components():
     for name in ("BroadcastDirector.qml", "DriverStats.qml", "ReplayView.qml", "RaceCalculator.qml",
                  "StreamOverlays.qml"):
         text = qml(name)
-        assert "loops: 3" not in text and "TpPulseDot {" in text, name
+        # Status dot of its own, or Pill { dot: true; pulsing: ... } (TpPulseDot inside)
+        assert "loops: 3" not in text and ("TpPulseDot {" in text or "pulsing:" in text), name
     stats = qml("DriverStats.qml")
     assert "component EmptyState" not in stats and "StatsEmpty {" in stats
 

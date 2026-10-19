@@ -43,6 +43,7 @@ CHANNEL_COLORS = {  # theme color of each channel
     "speed_kph": "accent", "throttle": "positive", "brake": "negative", "steering": "warning", "gear": "text",
 }
 FILLED_CHANNELS = ("speed_kph", "throttle", "brake")  # reference lap drawn as area under its line
+DEFAULT_REFERENCE_OPACITY = 0.45  # reference_line_opacity template default: reference lap at design opacity
 
 
 class Realtime(TelemetryCompareMixin, ModernOverlay):
@@ -53,7 +54,7 @@ class Realtime(TelemetryCompareMixin, ModernOverlay):
     options = (
         "font_size", "display_width", "display_height", "distance_behind", "distance_ahead", "reference_lap_source",
         "decimal_places", "show_reference_lap_time", "show_delta", "show_speed_difference", "show_speed",
-        "show_throttle", "show_brake", "show_steering", "show_gear",
+        "show_throttle", "show_brake", "show_steering", "show_gear", "reference_line_opacity",
     )
 
     def __init__(self, config, widget_name):
@@ -96,8 +97,12 @@ class Realtime(TelemetryCompareMixin, ModernOverlay):
         line_w = max(unit * 0.09, 1.2)
         colors = {channel: getattr(theme, color) for channel, color in CHANNEL_COLORS.items()}
         self.pens_current = {channel: QPen(color, line_w) for channel, color in colors.items()}
-        self.pens_reference = {channel: QPen(theme.tint(color, 130), line_w * 0.8) for channel, color in colors.items()}
-        self.fills = {channel: theme.tint(colors[channel], 50) for channel in FILLED_CHANNELS}
+        # Reference lap line & area opacity follow option (design opacity at default)
+        fade = min(max(float(wcfg["reference_line_opacity"]), 0.0), 1.0) / DEFAULT_REFERENCE_OPACITY
+        line_alpha, fill_alpha = min(round(130 * fade), 255), min(round(50 * fade), 255)
+        self.pens_reference = {channel: QPen(theme.tint(color, line_alpha), line_w * 0.8)
+                               for channel, color in colors.items()}
+        self.fills = {channel: theme.tint(colors[channel], fill_alpha) for channel in FILLED_CHANNELS}
         self.pen_mark = QPen(theme.tint(theme.text, 190), max(unit * 0.07, 1.0))
         self.chart_clip = QRectF(self.chart_left, 0, self.chart_right - self.chart_left, self.height())
         self.panel_labels = {key: tr(PANEL_LABELS[key]) for key in self.boxes}

@@ -162,6 +162,13 @@ def clock_text(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
+def timeline_end(last_incident: float, replay_time: float, session_end: float) -> float:
+    """Session span of incidents timeline (seconds): session length if known, else up to last incident or replay
+    time in whole minutes (span not changed by every replay time answer), a minute at least, a little room after"""
+    end = max(last_incident, replay_time, session_end / 1.02, 60.0) * 1.02
+    return end if session_end > 0 else math.ceil(end / 60) * 60.0
+
+
 def size_text(size: float) -> str:
     """File size in MB, GB from 1 GB, with decimal separator & unit symbols of app language"""
     from ..lap_viewer import localized
@@ -230,6 +237,14 @@ def energy_text(car: Standing) -> tuple[str, float]:
     return (f"{round(level * 100)}%", level) if level >= 0 else ("", -1.0)
 
 
+def move_selection(model: DictListModel, old: str, new: str):
+    """Selected role moved from row of key old to row of key new (rows found by index, other rows untouched)"""
+    for key, selected in ((old, False), (new, True)):
+        number = model.index_of(key) if key else -1
+        if number >= 0:
+            model.update_row(number, {"selected": selected})
+
+
 def lap_seconds(car: Standing) -> float:
     """Lap time of car to estimate lap starts: last, else best, else estimated by game, 0 if none"""
     return next((value for value in (car.last, car.best, car.estimated) if value > 0), 0.0)
@@ -242,27 +257,27 @@ def load_page_settings() -> dict[str, Any]:
 
 
 class _CopyProgress(QObject):
-    """Copy progress handed from the copy thread to its page on the UI thread (page held weakly: a page closed
-    during a copy is never touched by the copy thread)"""
+    """Copy (or recycle bin) progress handed from the file thread to its page on the UI thread (page held weakly: a
+    page closed during a copy is never touched by the copy thread)"""
 
-    progressed = Signal(object, float)
+    progressed = Signal(object, str, float)
 
     def __init__(self):
         super().__init__()
         self.progressed.connect(self.hand_over, Qt.ConnectionType.QueuedConnection)
 
-    @Slot(object, float)
-    def hand_over(self, page: weakref.ReferenceType, progress: float):
+    @Slot(object, str, float)
+    def hand_over(self, page: weakref.ReferenceType, setter: str, progress: float):
         backend = page()
         if backend is not None and isValid(backend):
-            backend.set_copy_progress(progress)
+            getattr(backend, setter)(progress)
 
 
 _copy_progress: _CopyProgress | None = None
 
 
-def copy_reporter(backend: GameReplaysBackend) -> Callable[[float], None]:
-    """Progress callback of a copy thread (made on the UI thread)"""
+def copy_reporter(backend: GameReplaysBackend, setter: str = "set_copy_progress") -> Callable[[float], None]:
+    """Progress callback of a copy thread (made on the UI thread), setter: page method given the progress"""
     global _copy_progress
     if _copy_progress is None or not isValid(_copy_progress):
         _copy_progress = _CopyProgress()
@@ -270,7 +285,7 @@ def copy_reporter(backend: GameReplaysBackend) -> Callable[[float], None]:
 
     def progress(value: float):
         with suppress(RuntimeError):  # app closing: courier deleted, progress dropped
-            courier.progressed.emit(page, value)
+            courier.progressed.emit(page, setter, value)
     return progress
 
 
@@ -363,6 +378,9 @@ def leave_replay(connection: GameConnection) -> bool:
     return connection.send("POST", TOGGLE_REPLAY_RESOURCE)
 
 
+MAX_GO_TO_LAP = 9999  # lap asked by Go to lap at most
+
+
 def go_to_lap(slot: int, lap: int, seconds_before: int) -> Command:
     """Replay goes to start of lap of car (seconds before), camera on car: lap start estimated from lap times
     of car, then replay moved until car is in that lap"""
@@ -393,9 +411,16 @@ class GameReplaysBackend(PageBackend):
     updatedChanged = Signal()
     replaysChanged = Signal()
     filterChanged = Signal()
-    selectionChanged = Signal()
-    incidentsChanged = Signal()
-    standingsChanged = Signal()
+    selectionChanged = Signal()  # replay picked (every click: results page follows it), not incidents or cars
+    checkedChanged = Signal()  # replays selected (count & size)
+    selectedProtectedChanged = Signal()
+    incidentSelectionChanged = Signal()
+    incidentsChanged = Signal()  # counts, player, car followed by camera
+    timelineEndChanged = Signal()
+    carCountChanged = Signal()
+    energyColumnChanged = Signal()
+    classFilterChanged = Signal()
+    selectedCarChanged = Signal()
     classesChanged = Signal()
     playbackChanged = Signal()
     replayTimeChanged = Signal()
@@ -405,6 +430,7 @@ class GameReplaysBackend(PageBackend):
     settingsChanged = Signal()
     filesChanged = Signal()
     copyProgressChanged = Signal()  # progress of copy alone (often), filesChanged when copy starts & ends
+    trashProgressChanged = Signal()  # progress of recycle bin moves alone, filesChanged when they start & end
     noticeChanged = Signal()
     mapChanged = Signal()
     mapLiveChanged = Signal()
@@ -429,6 +455,7 @@ class GameReplaysBackend(PageBackend):
         self.play_command: Command | None = None  # replay open command of action, until game answered it
         self.sending: tuple[Command, ...] = ()  # batch of commands being sent
         self.playing = ""  # replay opened from page (game tells no name): open again only if another one
+        self.play_sent: Command | None = None  # open command of playing, until game answered it (refused: forgotten)
         self.results_links: dict[str, str] = {}  # replay name: results file of its session (race results page)
         self.folder = ""  # replay folder of game, kept when game closes
         self.temp: list[str] = []  # temporary files of game in replay folder
@@ -478,13 +505,25 @@ class GameReplaysBackend(PageBackend):
         self.selected_car = ""  # slot of standings row
         self.copy_progress = -1.0  # replays being copied: 0 to 1, -1 if none
         self._folder_info: tuple[tuple, dict] | None = None  # (replays, temp, protected) it was made from, info
-        self._incident_revision = 0  # incident rows changed (timeline markers made again)
-        self._incident_view: tuple | None = None  # what incidentsChanged last told (emitted only when it changes)
-        self._timeline: tuple[tuple, list[dict], float] | None = None  # (made from, markers, last incident time)
-        self._standing_view: tuple | None = None  # what standingsChanged last told
+        # Values told to QML, made when what they come from changes (getters only return them, signals only
+        # emitted when they change)
+        self.checked_summary = ""  # replays selected & their size: "3 · 412 MB"
+        self.selected_protected = False
+        self._counts: dict[str, int] = {"all": 0, "cars": 0, "walls": 0, "mine": 0, "shown": 0}
+        self._incident_view: tuple | None = None  # what incidentsChanged last told
+        self._incident_counts: tuple[tuple, dict[str, int]] = ((), {})  # (incidents counted, incidents of drivers)
+        self._markers_from: tuple | None = None  # (incidents, player, keys listed) timeline markers made from
+        self._last_incident: tuple[tuple, float] = ((), 0.0)  # (incidents, time of last one)
+        self.timeline_end = timeline_end(0.0, -1.0, -1.0)  # seconds: session span of timeline
+        self.car_count = 0
+        self.has_energy = False
         self._lap_view: tuple | None = None  # what lapsChanged last told
         self.copy_kind = "add"  # add (to game folder) or export
         self.copy_cancel = threading.Event()
+        self.trash_progress = -1.0  # files being moved to the recycle bin: 0 to 1, -1 if none
+        self.trash_kind = "replays"  # replays or temp (temporary files of game)
+        self.trash_kept = 0  # protected replays left out of the deletion running (told once done)
+        self.trash_cancel = threading.Event()
         self.notice = ""
         self.notice_error = False
         self.notice_count = 0
@@ -494,16 +533,20 @@ class GameReplaysBackend(PageBackend):
         self.meters_per_pixel = 1.0
         self.revision = 0
         self._shown = False
+        # Selection is a role of rows (changed rows told), never compared to the selected key in every delegate
         self._replays_model = DictListModel(
             ("key", "track", "code", "session", "sessionLabel", "event", "eventType", "section", "date",
-             "size", "tip", "checked", "isProtected", "trackLogo", "hasResults"), self)
+             "size", "tip", "checked", "selected", "isProtected", "trackLogo", "hasResults"), self)
         self._incidents_model = DictListModel(
             ("key", "time", "timeText", "driver", "other", "wall", "mine", "count", "driverCar", "otherCar",
-             "focused"), self)
+             "focused", "selected"), self)
+        # Timeline markers (every incident, hundreds in long races) & driver chips: synced in place, markers kept
+        self._markers_model = DictListModel(("key", "time", "wall", "mine", "shown", "label", "selected"), self)
+        self._chips_model = DictListModel(("name", "incidents", "mine", "car"), self)
         self._standings_model = DictListModel(
             ("key", "position", "classPosition", "number", "driver", "vehicle", "carClass", "classColor", "classAlias", "laps",
              "best", "last", "gap", "pits", "status", "statusTone", "penalties", "onCamera", "player", "fastest",
-             "incidents", "energy", "energyLevel", "brandLogo"), self)
+             "incidents", "energy", "energyLevel", "brandLogo", "selected"), self)
         self._map_model = DictListModel(
             ("key", "mapX", "mapY", "color", "number", "driver", "position", "onCamera", "player", "inPit",
              "onTrack", "pathS", "speed", "sampleTime", "correction", "receivedMs"), self)
@@ -520,6 +563,7 @@ class GameReplaysBackend(PageBackend):
         self.request_state = GameRequest(self, (), self.received_state, self.schedule_state)
         self.request_command = GameRequest(self, (), self.command_done, self.command_failed)
         self.request_copy = GameRequest(self, (), self.copy_done, self.copy_failed)
+        self.request_trash = GameRequest(self, (), self.trash_done, self.trash_failed)
         self.command_queue: list[tuple[Command, ...]] = []  # commands waiting for the one sent
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -666,7 +710,7 @@ class GameReplaysBackend(PageBackend):
         if state["end"] != self.session_end or state["track"] != self.track or state["session"] != self.session_name:
             self.session_end, self.track, self.session_name = state["end"], state["track"], state["session"]
             self.replayTimeChanged.emit()
-            self.incidentsChanged.emit()  # timeline length
+            self.update_timeline_end()
         if "map" in state:
             self.set_map(state["track"], state["map"])
         changed = "standings" in state and state["standings"] != self.standings
@@ -711,7 +755,7 @@ class GameReplaysBackend(PageBackend):
             self.playing = ""
             self.playbackChanged.emit()
         if previous in (SESSION, REPLAY) and state == MENU:  # session ended: game saved its replay
-            QTimer.singleShot(SESSION_END_DELAY_MS, self.ask_replays)
+            QTimer.singleShot(SESSION_END_DELAY_MS, self, self.ask_replays)  # context: never after page freed
         self.update_live_timer()
         self.statusChanged.emit()
 
@@ -735,8 +779,13 @@ class GameReplaysBackend(PageBackend):
             return
         self.replay_time, self.replay_rate, self.time_received = replay_time, rate, now
         self.replayTimeChanged.emit()
+        self.update_timeline_end()
 
     def command_done(self, accepted: bool):
+        if self.play_sent is not None and self.play_sent in self.sending:
+            self.play_sent = None
+            if not accepted:  # replay not opened: never taken as open by a later action (done without asking)
+                self.playing = ""
         if self.play_command is not None and self.play_command in self.sending:  # replay of action opening
             self.play_command = None
             if accepted:
@@ -853,18 +902,18 @@ class GameReplaysBackend(PageBackend):
     def selectedReplay(self) -> str:
         return self.selected_replay
 
-    @Property(int, notify=selectionChanged)
+    @Property(int, notify=checkedChanged)
     def checkedCount(self) -> int:
         return len(self.checked)
 
-    @Property(str, notify=selectionChanged)
+    @Property(str, notify=checkedChanged)
     def checkedSummary(self) -> str:
-        """Replays selected & their size: "3 · 412 MB" """
-        return f"{len(self.checked)} · {size_text(sum(replay.size for replay in self.checked_replays()))}"
+        """Replays selected & their size: "3 · 412 MB" (made once selection or replays changed)"""
+        return self.checked_summary
 
-    @Property(bool, notify=selectionChanged)
+    @Property(bool, notify=selectedProtectedChanged)
     def selectedProtected(self) -> bool:
-        return self.selected_replay in self.protected
+        return self.selected_protected
 
     @Slot(int)
     def setSessionFilter(self, index: int):
@@ -879,6 +928,17 @@ class GameReplaysBackend(PageBackend):
         words = text.lower().split()
         if words != self.search_words:
             self.search_words = words
+            self.update_replays()
+
+    @Slot()
+    def clearFilters(self):
+        """Every replay listed again: search & session filter cleared"""
+        if self.search_words or self.session_filter:
+            self.search_words = []
+            if self.session_filter:
+                self.session_filter = 0
+                self.filterChanged.emit()
+                self.save_settings()
             self.update_replays()
 
     @Slot(str)
@@ -903,20 +963,42 @@ class GameReplaysBackend(PageBackend):
             checked = set(keys[first:last + 1])
         elif modifiers & CTRL and key:
             checked = self.checked ^ {key}
-            self.selected_replay = key
+            self.set_selected_replay(key)
         else:
             checked = {key} if key else set()
-            self.selected_replay = key
+            self.set_selected_replay(key)
         self.set_checked(checked)
+        self.selectionChanged.emit()  # every click told, same replay too: results page shows its session again
 
     @Slot()
     def selectAllReplays(self):
         self.set_checked({row["key"] for row in self._replays_model.rows})
 
+    def set_selected_replay(self, key: str):
+        """Current replay row: selected role of former & new rows changed (selectionChanged emitted by caller)"""
+        old, self.selected_replay = self.selected_replay, key
+        if old != key:
+            move_selection(self._replays_model, old, key)
+        self.update_selected_protected()
+
+    def update_selected_protected(self):
+        protected = self.selected_replay in self.protected
+        if protected != self.selected_protected:
+            self.selected_protected = protected
+            self.selectedProtectedChanged.emit()
+
     def set_checked(self, checked: set[str]):
-        self.checked = checked
-        self._replays_model.update_rows(lambda row: {"checked": row["key"] in self.checked})
-        self.selectionChanged.emit()
+        if checked != self.checked:  # rows made with the selection have it already
+            self.checked = checked
+            self._replays_model.update_rows(lambda row: {"checked": row["key"] in checked})
+        self.update_checked()
+
+    def update_checked(self):
+        """Count & size of replays selected told once changed (sizes summed once, not per read)"""
+        summary = f"{len(self.checked)} · {size_text(sum(replay.size for replay in self.checked_replays()))}"
+        if summary != self.checked_summary:  # count is part of it
+            self.checked_summary = summary
+            self.checkedChanged.emit()
 
     @Slot(int)
     def moveReplaySelection(self, step: int):
@@ -928,7 +1010,7 @@ class GameReplaysBackend(PageBackend):
     @Slot(str, result=int)
     def replayIndex(self, key: str) -> int:
         """Row of replay (list scrolled to it), -1 if not shown"""
-        return next((index for index, row in enumerate(self._replays_model.rows) if row["key"] == key), -1)
+        return self._replays_model.index_of(key)  # cached row index
 
     @Slot(str)
     def watchReplay(self, key: str):
@@ -957,6 +1039,7 @@ class GameReplaysBackend(PageBackend):
             self.action, self.action_deadline = action, time.monotonic() + ACTION_WAIT
             self.action_generation = self.state_generation + 1  # state asked once game accepted the replay
             self.play_command = command if action is not None else None
+            self.play_sent = command
             self.send(command)
 
     def watch_named(self, name: str, action: ReplayAction | None = None):
@@ -1063,7 +1146,9 @@ class GameReplaysBackend(PageBackend):
 
     @Slot()
     def pictures_changed(self):
-        """Logos fetched from game meanwhile"""
+        """Logos fetched from game meanwhile (once shown again if hidden: hidden pages never rebuild)"""
+        if self.defer_while_hidden(self.pictures_changed):
+            return
         if self.replays:
             self.update_replays()
         if self.standings:
@@ -1094,6 +1179,7 @@ class GameReplaysBackend(PageBackend):
                 "size": size_text(replay.size),
                 "tip": f"{replay.name}\n{date_text(replay.time)}".strip(),
                 "checked": replay.name in self.checked,
+                "selected": replay.name == self.selected_replay,
                 "isProtected": replay.name in self.protected,
                 "trackLogo": self.logos.track(track, replay.track),
                 "hasResults": replay.name in self.results_links,
@@ -1104,6 +1190,7 @@ class GameReplaysBackend(PageBackend):
             self.set_checked(self.checked & shown)
         if self.selected_replay not in shown:
             self.selectReplay(rows[0]["key"] if rows else "")
+        self.update_checked()  # sizes of selected replays told by game
         self.replaysChanged.emit()
 
     # Replay files
@@ -1115,6 +1202,16 @@ class GameReplaysBackend(PageBackend):
     def copyProgress(self) -> float:
         """Replays being copied: 0 to 1"""
         return max(self.copy_progress, 0.0)
+
+    @Property(bool, notify=filesChanged)
+    def trashing(self) -> bool:
+        """Files being moved to the recycle bin (in background)"""
+        return self.request_trash.busy
+
+    @Property(float, notify=trashProgressChanged)
+    def trashProgress(self) -> float:
+        """Files being moved to the recycle bin: 0 to 1"""
+        return max(self.trash_progress, 0.0)
 
     @Property(str, notify=filesChanged)
     def copyKind(self) -> str:
@@ -1144,6 +1241,11 @@ class GameReplaysBackend(PageBackend):
         if progress != self.copy_progress:
             self.copy_progress = progress
             self.copyProgressChanged.emit()
+
+    def set_trash_progress(self, progress: float):
+        if progress != self.trash_progress:
+            self.trash_progress = progress
+            self.trashProgressChanged.emit()
 
     def update_files(self):
         """Temporary files of replay folder looked up again"""
@@ -1246,9 +1348,13 @@ class GameReplaysBackend(PageBackend):
             self.save_settings()
         replay = self.replay_of(key)
         self.replays = [entry._replace(name=name, id=-1) if entry is replay else entry for entry in self.replays]
-        if self.selected_replay == key:
-            self.selected_replay = name
+        renamed = self.selected_replay == key
+        if renamed:
+            self.selected_replay = name  # row of new name made selected
         self.refresh_files()
+        if renamed:
+            self.update_selected_protected()
+            self.selectionChanged.emit()
 
     @Slot(str)
     def toggleProtected(self, key: str):
@@ -1258,7 +1364,7 @@ class GameReplaysBackend(PageBackend):
             return
         self.protected = self.protected - names if key in self.protected else self.protected | names
         self._replays_model.update_rows(lambda row: {"isProtected": row["key"] in self.protected})
-        self.selectionChanged.emit()
+        self.update_selected_protected()
         self.filesChanged.emit()
         self.save_settings()
 
@@ -1268,7 +1374,9 @@ class GameReplaysBackend(PageBackend):
         self.delete_replays(self.chosen_replays(key))
 
     def delete_replays(self, replays: list[GameReplay], title: str = "Delete Replays"):
-        """Replays (protected ones kept) moved to the recycle bin, after confirmation"""
+        """Replays (protected ones kept) moved to the recycle bin in background, after confirmation"""
+        if self.trash_busy():
+            return
         folder = self.replay_folder()
         kept = [replay for replay in replays if replay.name in self.protected]
         replays = [replay for replay in replays if replay.name not in self.protected]
@@ -1281,15 +1389,54 @@ class GameReplaysBackend(PageBackend):
                    else f"Move <b>{len(replays)}</b> replays ({size}) to the recycle bin?")
         if not self._window.confirm_operation(title, message):
             return
-        errors = replay_files.trash_replays([replay_files.replay_path(folder, replay.name) for replay in replays])
-        deleted = [replay.name for replay in replays if f"{replay.name}{replay_files.REPLAY_EXTENSION}" not in errors]
-        if errors:
-            self.notify(trm(f"Unable to delete (replay open in game?): {', '.join(errors)}"), True)
+        self.start_trash([replay_files.replay_path(folder, replay.name) for replay in replays], "replays", len(kept))
+
+    def trash_busy(self) -> bool:
+        """Files still being moved to the recycle bin (told): one deletion at a time"""
+        if self.request_trash.busy:
+            self.notify(tr("Files are still being moved to the recycle bin, try again once done."), True)
+        return self.request_trash.busy
+
+    def start_trash(self, paths: list[str], kind: str, kept: int = 0):
+        """Files moved to the recycle bin in background (hundreds of large replays take a while), progress shown,
+        list refreshed once done"""
+        self.trash_progress, self.trash_kind, self.trash_kept = 0.0, kind, kept
+        self.trash_cancel = cancelled = threading.Event()
+        progress = copy_reporter(self, "set_trash_progress")
+        self.request_trash.start(lambda: replay_files.trash_replays(paths, progress, cancelled))
+        self.filesChanged.emit()
+        self.trashProgressChanged.emit()
+
+    @Slot()
+    def cancelTrash(self):
+        """Files not moved yet left in place"""
+        self.trash_cancel.set()
+
+    def trash_done(self, result: replay_files.TrashResult):
+        self.trash_progress = -1.0
+        self.filesChanged.emit()
+        self.trashProgressChanged.emit()
+        count = len(result.moved)
+        if result.errors:
+            self.notify(trm(f"Unable to delete (replay open in game?): {', '.join(result.errors)}"), True)
+        elif result.cancelled:
+            self.notify(trm(f"Deletion stopped, {count} file(s) moved to the recycle bin"), True)
+        elif self.trash_kind == "temp":
+            self.notify(trm(f"{count} temporary file(s) moved to the recycle bin"))
         else:
-            self.notify(trm(f"{len(deleted)} replay(s) moved to the recycle bin")
-                        + (f" · {trm(f'{len(kept)} protected replay(s) kept')}" if kept else ""))
-        if deleted:
-            self.refresh_files(deleted=deleted)
+            kept = self.trash_kept
+            self.notify(trm(f"{count} replay(s) moved to the recycle bin")
+                        + (f" · {trm(f'{kept} protected replay(s) kept')}" if kept else ""))
+        if self.trash_kind == "temp":
+            self.update_files()
+        elif result.moved:
+            extension = len(replay_files.REPLAY_EXTENSION)
+            self.refresh_files(deleted=[os.path.basename(path)[:-extension] for path in result.moved])
+
+    def trash_failed(self):
+        """Recycle bin moves ended by an unexpected error (logged): progress hidden, list read again"""
+        self.trash_done(replay_files.TrashResult([], ["unexpected error, see log file"]))
+        self.refresh_files()
 
     @Slot()
     def deleteOlderThan(self):
@@ -1306,12 +1453,16 @@ class GameReplaysBackend(PageBackend):
         count, accepted = QInputDialog.getInt(self._window, tr("Keep Latest Replays"),
                                               tr("Number of latest replays kept:"), 20, 1, 1000)
         if accepted:
-            latest = sorted(self.replays, key=lambda replay: replay.time, reverse=True)
+            # Replays of unknown time (0) kept, as Delete Older Than does: their age is unknown
+            dated = [replay for replay in self.replays if replay.time > 0]
+            latest = sorted(dated, key=lambda replay: replay.time, reverse=True)
             self.delete_replays(latest[count:], "Keep Latest Replays")
 
     @Slot()
     def deleteTempFiles(self):
         """Temporary files left by the game in replay folder moved to the recycle bin, after confirmation"""
+        if self.trash_busy():
+            return
         self.update_files()
         if not self.temp:
             self.notify(tr("No temporary file left by the game."))
@@ -1320,12 +1471,7 @@ class GameReplaysBackend(PageBackend):
         if not self._window.confirm_operation(
                 "Delete Temporary Files", f"Move <b>{len(self.temp)}</b> temporary files ({size}) to the recycle bin?"):
             return
-        errors = replay_files.trash_replays(self.temp)
-        if errors:
-            self.notify(trm(f"Unable to delete (replay open in game?): {', '.join(errors)}"), True)
-        else:
-            self.notify(trm(f"{len(self.temp)} temporary file(s) moved to the recycle bin"))
-        self.update_files()
+        self.start_trash(list(self.temp), "temp")
 
     def refresh_files(self, added: list[str] | None = None, deleted: list[str] | None = None):
         """Replays list updated after files changed: at once from files, then from game (ids, metadata)"""
@@ -1507,7 +1653,7 @@ class GameReplaysBackend(PageBackend):
             self.notify(tr("Game window not found: LMU must be running on this computer."), True)
             return
         if self._shown:  # game shows or hides its HUD parts too: asked again once done
-            QTimer.singleShot(700, self.refresh_state)
+            QTimer.singleShot(700, self, self.refresh_state)  # context: never after page freed
 
     @Slot(str)
     def toggleHudComponent(self, key: str):
@@ -1535,50 +1681,33 @@ class GameReplaysBackend(PageBackend):
 
     @Property(dict, notify=incidentsChanged)
     def counts(self) -> dict:
-        """Incidents by kind: all, cars, walls, of player (mine), shown"""
-        walls = sum(1 for incident in self.incidents if incident.other == IMMOVABLE)
-        player = self.player_name()
-        return {
-            "all": len(self.incidents), "cars": len(self.incidents) - walls, "walls": walls,
-            "mine": sum(1 for incident in self.incidents if player in (incident.driver, incident.other)) if player else 0,
-            "shown": len(self._incidents_model.rows),
-        }
+        """Incidents by kind: all, cars, walls, of player (mine), shown (made once incidents or rows changed)"""
+        return self._counts
 
-    @Property(list, notify=incidentsChanged)
-    def drivers(self) -> list[dict]:
-        """Drivers with most incidents (filter chips): name, count, player, car"""
-        counts = self.incident_counts()
-        player = self.player_name()
-        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))[:TOP_DRIVERS]
-        if self.driver_filter and self.driver_filter not in dict(ranked):
-            ranked.append((self.driver_filter, counts.get(self.driver_filter, 0)))
-        return [{"name": name, "count": count, "mine": name == player, "car": car_text(self.cars.get(name))}
-                for name, count in ranked]
+    @Property(QObject, constant=True)
+    def driverChips(self) -> DictListModel:
+        """Drivers with most incidents (filter chips): name, incidents, mine (player), car (synced by name)"""
+        return self._chips_model
 
-    @Property(dict, notify=incidentsChanged)
-    def timeline(self) -> dict:
-        """Session time span (session length if known) & incident markers: key, time, wall, mine, shown, label
+    @Property(QObject, constant=True)
+    def incidentMarkers(self) -> DictListModel:
+        """Timeline markers of every incident: key, time, wall, mine, shown (listed), label, selected
+        (synced by incident: a new incident adds its marker, others stay)"""
+        return self._markers_model
 
-        Markers made again only once incidents, incident rows (filters) or player changed.
-        """
-        player = self.player_name()
-        made_from = (self.incidents, player, self._incident_revision)
-        cached = self._timeline
-        if cached is None or cached[0][0] is not self.incidents or cached[0][1:] != made_from[1:]:
-            shown = {row["key"] for row in self._incidents_model.rows}
-            markers = [{
-                "key": incident_key(incident), "time": incident.time, "wall": incident.other == IMMOVABLE,
-                "mine": bool(player) and player in (incident.driver, incident.other),
-                "shown": incident_key(incident) in shown,
-                "label": f"{clock_text(incident.time)}  {incident.driver} ↔ "
-                         f"{tr('Wall') if incident.other == IMMOVABLE else incident.other}",
-            } for incident in self.incidents]
-            last = max((incident.time for incident in self.incidents), default=0.0)
-            cached = self._timeline = (made_from, markers, last)
-        end = max(cached[2], self.replay_time, self.session_end / 1.02, 60.0) * 1.02
-        if self.session_end <= 0:  # length unknown: whole minutes, span not changed by every replay time answer
-            end = math.ceil(end / 60) * 60
-        return {"end": end, "markers": cached[1]}
+    @Property(float, notify=timelineEndChanged)
+    def timelineEnd(self) -> float:
+        """Session span of timeline (seconds), see timeline_end"""
+        return self.timeline_end
+
+    def update_timeline_end(self):
+        """Timeline span told once changed (replay time answers: whole minutes, rarely)"""
+        if self._last_incident[0] is not self.incidents:  # incidents replaced (never changed in place)
+            self._last_incident = (self.incidents, max((incident.time for incident in self.incidents), default=0.0))
+        end = timeline_end(self._last_incident[1], self.replay_time, self.session_end)
+        if end != self.timeline_end:
+            self.timeline_end = end
+            self.timelineEndChanged.emit()
 
     @Property(int, notify=filterChanged)
     def incidentFilter(self) -> int:
@@ -1596,7 +1725,7 @@ class GameReplaysBackend(PageBackend):
     def playerName(self) -> str:
         return self.player_name()
 
-    @Property(str, notify=selectionChanged)
+    @Property(str, notify=incidentSelectionChanged)
     def selectedIncident(self) -> str:
         return self.selected_incident
 
@@ -1662,9 +1791,14 @@ class GameReplaysBackend(PageBackend):
 
     @Slot(str)
     def selectIncident(self, key: str):
-        if key != self.selected_incident:
-            self.selected_incident = key
-            self.selectionChanged.emit()
+        """Incident row & timeline marker selected: selected role of former & new ones changed"""
+        old = self.selected_incident
+        if key == old:
+            return
+        self.selected_incident = key
+        move_selection(self._incidents_model, old, key)
+        move_selection(self._markers_model, old, key)
+        self.incidentSelectionChanged.emit()
 
     @Slot(int)
     def moveIncidentSelection(self, step: int):
@@ -1675,7 +1809,7 @@ class GameReplaysBackend(PageBackend):
 
     @Slot(str, result=int)
     def incidentIndex(self, key: str) -> int:
-        return next((index for index, row in enumerate(self._incidents_model.rows) if row["key"] == key), -1)
+        return self._incidents_model.index_of(key)  # cached row index
 
     @Slot(str, str)
     def jumpTo(self, key: str, driver: str):
@@ -1745,13 +1879,15 @@ class GameReplaysBackend(PageBackend):
         return next((car.driver for car in self.cars.values() if car.player), "")
 
     def incident_counts(self) -> dict[str, int]:
-        """Incidents of each driver"""
-        counts: dict[str, int] = {}
-        for incident in self.incidents:
-            for name in (incident.driver, incident.other):
-                if name != IMMOVABLE:
-                    counts[name] = counts.get(name, 0) + 1
-        return counts
+        """Incidents of each driver (counted once per incidents list: chips & standings rows)"""
+        if self._incident_counts[0] is not self.incidents:  # incidents replaced (never changed in place)
+            counts: dict[str, int] = {}
+            for incident in self.incidents:
+                for name in (incident.driver, incident.other):
+                    if name != IMMOVABLE:
+                        counts[name] = counts.get(name, 0) + 1
+            self._incident_counts = (self.incidents, counts)
+        return self._incident_counts[1]
 
     def incident_shown(self, incident: Incident, player: str) -> bool:
         kind = INCIDENT_FILTERS[self.incident_filter]
@@ -1766,13 +1902,14 @@ class GameReplaysBackend(PageBackend):
         """Incident rows filtered, newest last (session order)"""
         player = self.player_name()
         focused = self.focusedDriver
-        rows = []
+        rows: list[dict[str, Any]] = []
         for incident in self.incidents:
             if not self.incident_shown(incident, player):
                 continue
             wall = incident.other == IMMOVABLE
+            key = incident_key(incident)
             rows.append({
-                "key": incident_key(incident),
+                "key": key,
                 "time": incident.time,
                 "timeText": clock_text(incident.time),
                 "driver": incident.driver,
@@ -1784,55 +1921,103 @@ class GameReplaysBackend(PageBackend):
                 "otherCar": "" if wall else car_text(self.cars.get(incident.other)),
                 "focused": "driver" if focused and focused == incident.driver
                 else "other" if focused and focused == incident.other else "",
+                "selected": key == self.selected_incident,
             })
-        rows_changed = self._incidents_model.sync(rows)
-        if rows_changed:
-            self._incident_revision += 1
-        if self.selected_incident and self.selected_incident not in {row["key"] for row in rows}:
-            self.selectIncident("")
-        view = (self.incidents, player, focused, self.drivers, self.counts)
-        if rows_changed or view != self._incident_view:  # counts, chips, timeline & names: only when changed
+        shown = {row["key"] for row in rows}
+        cleared = bool(self.selected_incident) and self.selected_incident not in shown
+        if cleared:  # selected incident filtered out: no longer selected (no row has it)
+            self.selected_incident = ""
+        self._incidents_model.sync(rows)
+        made_from = self._markers_from
+        if cleared or made_from is None or made_from[0] is not self.incidents or made_from[1:] != (player, shown):
+            self.update_markers(player, shown)
+        self.update_chips(player)
+        walls = sum(1 for incident in self.incidents if incident.other == IMMOVABLE)
+        counts = {
+            "all": len(self.incidents), "cars": len(self.incidents) - walls, "walls": walls,
+            "mine": sum(1 for incident in self.incidents if player in (incident.driver, incident.other)) if player else 0,
+            "shown": len(rows),
+        }
+        view = (counts, player, focused)
+        if view != self._incident_view:  # counts & names told only when changed
             self._incident_view = view
+            self._counts = counts
             self.incidentsChanged.emit()
+        if cleared:
+            self.incidentSelectionChanged.emit()
+        self.update_timeline_end()
+
+    def update_markers(self, player: str, shown: set[str]):
+        """Timeline markers of every incident (shown: incidents listed), synced in place by incident"""
+        self._markers_from = (self.incidents, player, shown)
+        wall_text = tr("Wall")
+        markers = []
+        for incident in self.incidents:
+            key = incident_key(incident)
+            wall = incident.other == IMMOVABLE
+            markers.append({
+                "key": key, "time": incident.time, "wall": wall,
+                "mine": bool(player) and player in (incident.driver, incident.other),
+                "shown": key in shown,
+                "label": f"{clock_text(incident.time)}  {incident.driver} ↔ {wall_text if wall else incident.other}",
+                "selected": key == self.selected_incident,
+            })
+        self._markers_model.sync(markers)
+
+    def update_chips(self, player: str):
+        """Drivers with most incidents (filter chips), driver filtered kept, synced in place by name"""
+        counts = self.incident_counts()
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))[:TOP_DRIVERS]
+        if self.driver_filter and self.driver_filter not in dict(ranked):
+            ranked.append((self.driver_filter, counts.get(self.driver_filter, 0)))
+        self._chips_model.sync([{"name": name, "incidents": count, "mine": name == player,
+                                 "car": car_text(self.cars.get(name))} for name, count in ranked], "name")
 
     # Standings
     @Property(QObject, constant=True)
     def standingRows(self) -> DictListModel:
         return self._standings_model
 
-    @Property(int, notify=standingsChanged)
+    @Property(int, notify=carCountChanged)
     def carCount(self) -> int:
-        return len(self.standings)
+        return self.car_count
 
     @Property(list, notify=classesChanged)
     def classes(self) -> list[dict]:
         """Vehicle classes of session (filter chips): name, color, count, in order of best position"""
         return self.class_list
 
-    @Property(bool, notify=standingsChanged)
+    @Property(bool, notify=energyColumnChanged)
     def hasEnergy(self) -> bool:
-        """Energy (or fuel) of some cars told by game (own team): column shown"""
-        return any(car.energy >= 0 or car.fuel >= 0 for car in self.standings)
+        """Energy (or fuel) of some cars told by game (own team): column shown (found once per game answer)"""
+        return self.has_energy
 
-    @Property(str, notify=standingsChanged)
+    @Property(str, notify=classFilterChanged)
     def classFilter(self) -> str:
         return self.class_filter
 
-    @Property(str, notify=standingsChanged)
+    @Property(str, notify=selectedCarChanged)
     def selectedCar(self) -> str:
         return self.selected_car
 
     @Slot(str)
     def setClassFilter(self, name: str):
         """Cars of a class only ("" all), same class again: filter removed"""
-        self.class_filter = "" if name == self.class_filter else name
-        self.update_standings()
+        name = "" if name == self.class_filter else name
+        if name != self.class_filter:
+            self.class_filter = name
+            self.classFilterChanged.emit()
+            self.update_standings()
 
     @Slot(str)
     def selectCar(self, key: str):
-        if key != self.selected_car:
-            self.selected_car = key
-            self.standingsChanged.emit()
+        """Standings row selected: selected role of former & new rows changed"""
+        old = self.selected_car
+        if key == old:
+            return
+        self.selected_car = key
+        move_selection(self._standings_model, old, key)
+        self.selectedCarChanged.emit()
 
     @Slot(int)
     def moveCarSelection(self, step: int):
@@ -1843,7 +2028,7 @@ class GameReplaysBackend(PageBackend):
 
     @Slot(str, result=int)
     def carIndex(self, key: str) -> int:
-        return next((index for index, row in enumerate(self._standings_model.rows) if row["key"] == key), -1)
+        return self._standings_model.index_of(key)  # cached row index
 
     @Slot(str)
     def watchCar(self, key: str):
@@ -1909,8 +2094,9 @@ class GameReplaysBackend(PageBackend):
         car = self.car_of(key)
         if car is None or self.state != REPLAY:
             return
+        # Any lap, also ahead of replay time (go_to_lap searches forward): not ahead of current lap only
         lap, accepted = QInputDialog.getInt(self._window, tr("Go to lap"), trm(f"Lap of {car.driver}:"),
-                                            car.laps + 1, 1, max(car.laps + 1, 1))
+                                            car.laps + 1, 1, max(car.laps + 1, MAX_GO_TO_LAP))
         if accepted:
             self.selectCar(key)
             self.send(go_to_lap(car.slot, lap, self.seconds_before))
@@ -1929,6 +2115,14 @@ class GameReplaysBackend(PageBackend):
             self.classesChanged.emit()
         if self.class_filter and self.class_filter not in counts:
             self.class_filter = ""
+            self.classFilterChanged.emit()
+        if len(self.standings) != self.car_count:
+            self.car_count = len(self.standings)
+            self.carCountChanged.emit()
+        has_energy = any(car.energy >= 0 or car.fuel >= 0 for car in self.standings)
+        if has_energy != self.has_energy:
+            self.has_energy = has_energy
+            self.energyColumnChanged.emit()
         focused = self.focused_slot()
         incidents = self.incident_counts()
         race = self.session_name.upper().startswith("RACE")
@@ -1967,14 +2161,14 @@ class GameReplaysBackend(PageBackend):
                 "fastest": car.best > 0 and car.best == fastest.get(car.car_class),
                 "incidents": incidents.get(car.driver, 0),
                 "brandLogo": self.logos.brand(car.vehicle),
+                "selected": str(car.slot) == self.selected_car,
             })
-        rows_changed = self._standings_model.sync(rows)
-        if self.selected_car and self.selected_car not in {row["key"] for row in rows}:
+        cleared = bool(self.selected_car) and not any(row["selected"] for row in rows)
+        if cleared:  # car selected left the session or filtered out
             self.selected_car = ""
-        view = (len(self.standings), self.hasEnergy, self.class_filter, self.selected_car)
-        if rows_changed or view != self._standing_view:
-            self._standing_view = view
-            self.standingsChanged.emit()
+        self._standings_model.sync(rows)
+        if cleared:
+            self.selectedCarChanged.emit()
         self.laps_changed()  # car followed by camera may have changed
         if PANELS[self.panel] == "map":  # hidden map refreshed once shown
             self.update_map_cars()

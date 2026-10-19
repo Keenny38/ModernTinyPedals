@@ -34,6 +34,7 @@ from typing import overload
 
 from PySide6.QtGui import QColor
 
+from ...i18n import tr
 from ...userfile.corner_analysis import resample_sorted
 from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapLine...)
     CAR_HALF_WIDTH,
@@ -77,7 +78,15 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
     track_limits,
 )
 from ...userfile.telemetry_lap import LapData, compute_delta, distance_scale, interpolate
-from ..lap_viewer import GAIN_FULL_SCALE, GAIN_WINDOW, gain_color
+from ..lap_viewer import (
+    COLORBLIND_GAIN,
+    COLORBLIND_LOSS,
+    GAIN_COLOR,
+    GAIN_FULL_SCALE,
+    GAIN_WINDOW,
+    LOSS_COLOR,
+    gain_color,
+)
 from .lines import (
     COLORED_VERTEX,
     TRIANGLE_STRIP,
@@ -103,6 +112,13 @@ LINE_SAME = 0.4  # meters off reference line counted as same line
 PEDAL_COLORS = {
     "throttle": QColor("#22C55E"), "brake": QColor("#EF4444"), "both": QColor("#F59E0B"), "coast": QColor("#9CA3AF"),
 }
+# Pedals told apart with red-green color blindness (map "Colorblind colors" option): blue throttle, orange brake
+PEDAL_COLORS_COLORBLIND = {
+    "throttle": QColor("#3B82F6"), "brake": QColor("#F97316"), "both": QColor("#FACC15"), "coast": QColor("#9CA3AF"),
+}
+# Gain / loss as text on the page (corner labels, sector gaps, corner card) with colorblind colors:
+# (dark theme, light theme) shades readable on the page background
+COLORBLIND_TEXT = {"loss": ("#FB923C", "#C2410C"), "gain": ("#60A5FA", "#1D4ED8")}
 BRAKE_ON = 0.1  # brake pedal fraction counted as braking
 BRAKE_GAP = 60.0  # meters, braking points closer than this to previous braking end are the same braking
 SLIP_RATIO = 0.12  # wheel speed this much off car speed: locked or spinning wheel
@@ -238,22 +254,52 @@ def speed_colors(lap: LapData, line: MapLine) -> tuple[list[QColor], float, floa
     return [blend(SPEED_COLORS, (speed - low) / span) for speed in speeds], low, high
 
 
-def pedal_colors(lap: LapData, line: MapLine) -> list[QColor]:
-    """Line colored by pedals: throttle green, brake red, both amber, coasting grey"""
+def pedal_colors(lap: LapData, line: MapLine, colorblind: bool = False) -> list[QColor]:
+    """Line colored by pedals: throttle green, brake red, both amber, coasting grey (colorblind: blue throttle,
+    orange brake, yellow both)"""
     throttles, brakes = channel_at(lap, "throttle", line), channel_at(lap, "brake", line)
     if not throttles or not brakes:
         return []
+    palette = PEDAL_COLORS_COLORBLIND if colorblind else PEDAL_COLORS
     colors = []
     for throttle, brake in zip(throttles, brakes):
         if brake > BRAKE_ON and throttle > 0.1:
-            colors.append(PEDAL_COLORS["both"])
+            colors.append(palette["both"])
         elif brake > BRAKE_ON:
-            colors.append(PEDAL_COLORS["brake"])
+            colors.append(palette["brake"])
         elif throttle > 0.1:
-            colors.append(blend((PEDAL_COLORS["coast"], PEDAL_COLORS["throttle"]), throttle))
+            colors.append(blend((palette["coast"], palette["throttle"]), throttle))
         else:
-            colors.append(PEDAL_COLORS["coast"])
+            colors.append(palette["coast"])
     return colors
+
+
+def legend_items(mode: str, colorblind: bool = False) -> list[dict]:
+    """Legend of a map coloring mode: label & color of each color (gain / loss, pedals, racing line, gear)"""
+    if mode in ("gain", "corners"):
+        loss, gain = lap_viewer_colors(colorblind)
+        return [{"label": tr("Losing time"), "color": loss}, {"label": tr("Gaining time"), "color": gain}]
+    if mode == "pedals":
+        palette = PEDAL_COLORS_COLORBLIND if colorblind else PEDAL_COLORS
+        return [{"label": tr(text), "color": palette[name].name()} for name, text in (
+            ("throttle", "Throttle"), ("brake", "Brake"), ("both", "Both"), ("coast", "Coasting"))]
+    if mode == "line":
+        return [{"label": tr(text), "color": LINE_COLORS[name].name()} for name, text in (
+            ("inside", "Inside"), ("same", "Same line"), ("outside", "Outside"))]
+    if mode == "gear":
+        return [{"label": str(gear), "color": color.name()} for gear, color in enumerate(GEAR_COLORS, 1)]
+    return []
+
+
+def lap_viewer_colors(colorblind: bool) -> tuple[str, str]:
+    """Loss & gain line colors (normal or colorblind palette)"""
+    return (COLORBLIND_LOSS.name(), COLORBLIND_GAIN.name()) if colorblind else (LOSS_COLOR.name(), GAIN_COLOR.name())
+
+
+def zone_colors(colorblind: bool) -> dict[str, str]:
+    """Braking & throttle application zones (map option), as drawn over lines"""
+    palette = PEDAL_COLORS_COLORBLIND if colorblind else PEDAL_COLORS
+    return {"brake": palette["brake"].name(), "throttle": palette["throttle"].name()}
 
 
 def gear_colors(lap: LapData, line: MapLine) -> list[QColor]:

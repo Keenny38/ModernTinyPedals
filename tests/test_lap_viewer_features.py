@@ -208,7 +208,9 @@ def test_map_color_modes(viewer):
         backend.setMapMode(mode)
         vertices = VertexStore.get(colored)
         assert vertices.colored and vertices.vertex_count > 10, mode
-    assert backend.mapLegend == {}  # pedals: fixed colors
+    legend = backend.mapLegend  # pedals: fixed colors (named in legend items), no scale
+    assert [item["label"] for item in legend["items"]] == ["Throttle", "Brake", "Both", "Coasting"]
+    assert {key: value for key, value in legend.items() if key not in ("items", "zones", "tones")} == {}
     backend.setMapMode("speed")
     legend = backend.mapLegend
     assert legend["low"] == "120" and legend["high"] == "250" and legend["unit"] == "km/h"

@@ -22,7 +22,7 @@ Default setting of tyre & wheel widgets
 Widget key name must match corresponding file name in 'widget' folder
 """
 
-from ..setting_heatmap import HEATMAP_DEFAULT_TYRE
+from ..setting_heatmap import HEATMAP_DEFAULT_BRAKE, HEATMAP_DEFAULT_TYRE
 
 WIDGET_TYRES = {
     "tyre_carcass": {
@@ -413,7 +413,7 @@ WIDGET_TYRES = {
         "show_tyre_camber_spread": False,
         "show_tyre_surface_overheat": True,
         "enable_heatmap_auto_matching": True,
-        "heatmap_name_tyre": "tyre_default",
+        "heatmap_name_tyre": HEATMAP_DEFAULT_TYRE,
         "tyre_temperature_warning_threshold": 110,
         "font_color_tyre_temperature_warning": "#FF3D3D",
         "tyre_temperature_cold_threshold": 70,
@@ -458,7 +458,7 @@ WIDGET_TYRES = {
         "show_wheel_camber": False,
         "show_ride_height": False,
         "show_brake_temperature": True,
-        "heatmap_name_brake": "brake_default",
+        "heatmap_name_brake": HEATMAP_DEFAULT_BRAKE,
         "brake_temperature_cold_threshold": 0,
         "brake_temperature_hot_threshold": 0,
         "brake_target_by_class": "Hypercar=400-950; LMP2=400-950; GTE=400-950; LMP3=250-650; GT3=250-650",
@@ -809,5 +809,28 @@ WIDGET_TYRES = {
         "caption_text": "slip ratio",
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
+    },
+    "wheel_dimension": {
+        "enable": False,
+        "update_interval": 20,
+        "position_x": 524,
+        "position_y": 500,
+        "font_name": "Consolas",
+        "font_size": 15,
+        "font_weight": "Bold",
+        "enable_auto_font_offset": True,
+        "font_offset_vertical": 0,
+        "opacity": 0.9,
+        "layout": 0,
+        "bar_padding": 0.2,
+        "bar_gap": 2,
+        "show_front_tyre_radius": True,
+        "font_color_front_tyre_radius": "#FFCC00",
+        "background_color_front_tyre_radius": "#222222",
+        "show_rear_tyre_radius": True,
+        "font_color_rear_tyre_radius": "#FFCC00",
+        "background_color_rear_tyre_radius": "#222222",
+        "display_order_front_tyre_radius": 1,
+        "display_order_rear_tyre_radius": 2,
     },
 }

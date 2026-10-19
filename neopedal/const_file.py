@@ -131,4 +131,3 @@ class LogFile:
     """Log file name constants"""
 
     APP_LOG = "neopedal.log"
-    PID = "pid.log"

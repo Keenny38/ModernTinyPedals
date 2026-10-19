@@ -78,12 +78,13 @@ from . import (
     draw_focus_ring,
     install_message_icons,
     resolve_color_theme,
+    set_colorblind,
     set_style_palette,
     set_style_window,
     status_color,
     system_dark_mode,
 )
-from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler
+from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler, confirm_action
 from .lazy_page import IdlePageRelease, LazyPage, PageRelease, release_quick_views
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
@@ -259,7 +260,7 @@ class NavButton(QAbstractButton):
         palette = self.palette()
         accent = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
         text = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
-        muted = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText)
+        muted = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.PlaceholderText)  # 4.5:1 on window
         area = QRectF(self.rect()).adjusted(4, 2, -4, -2)
         radius = area.height() * 0.22
         if self.isChecked():
@@ -683,6 +684,10 @@ class TabView(QWidget):
         app_signal.refresh.connect(self.pace_notes.refresh)
         for page in self._lazy_pages.values():
             app_signal.refresh.connect(page.refresh)
+        # Spectated car changed (Broadcast Director cuts): Spectate page only, not the whole GUI
+        spectate = self._lazy_pages.get("spectate")
+        if spectate is not None:
+            app_signal.spectate_changed.connect(spectate.refresh)
         app_signal.refresh.connect(self.refresh_rail)
 
     @property
@@ -1566,12 +1571,7 @@ class StatusButtonBar(QStatusBar):
             f"{state} <b>High DPI Scaling</b> and restart <b>NeoPedal</b>?<br><br>"
             f"<b>Window</b> and <b>Overlay</b> size and position will {desc}"
         )
-        restart_msg = QMessageBox.question(
-            self, tr("High DPI Scaling"), trm(msg_text),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        if restart_msg != QMessageBox.StandardButton.Yes:
+        if not confirm_action(self, tr("High DPI Scaling"), trm(msg_text), tr("Restart")):
             return
 
         cfg.application["enable_high_dpi_scaling"] = not cfg.application["enable_high_dpi_scaling"]
@@ -1770,6 +1770,8 @@ class AppWindow(QMainWindow):
             if isinstance(app_instance, QApplication):
                 app_instance.setStyleSheet(set_style_window(QApplication.font().pointSize()))
             logger.info("GUI: loading window color theme: %s", style)
+        # Status colors of QML pages follow the overlay "colorblind safe colors" option
+        set_colorblind(bool(cfg.user.config["overlay_style"].get("enable_colorblind_colors", False)))
         # App icon (window, taskbar, tray): follow OS taskbar light / dark mode
         icon_dark = system_dark_mode()
         if self.last_icon_dark != icon_dark:

@@ -449,11 +449,11 @@ def test_qml_imports_bundled_modules():
     """Release build bundles only QML_MODULES: page files import nothing else (checked statically)"""
     import re
 
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
     from neopedal.ui.quick.qml_modules import QML_MODULES
 
     for name in ("Modules.qml", "ModuleCard.qml"):
-        with open(f"{QML_FOLDER}/{name}", encoding="utf-8") as file:
+        with open(qml_path(name), encoding="utf-8") as file:
             imported = re.findall(r"^import ([A-Za-z.]+)", file.read(), flags=re.MULTILINE)
         assert imported and all(module.replace(".", "/") in QML_MODULES for module in imported), (name, imported)
 

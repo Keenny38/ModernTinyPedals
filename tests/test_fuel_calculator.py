@@ -404,10 +404,12 @@ def test_delete_live_history(calculator, monkeypatch, tmp_path):
     calculator.loadLive()
     select(calculator, "12")
     calculator.deleteSelectedLaps()
+    history = minfo.history.consumptionDataSet  # replaced, not changed in place (copy on write)
     assert len(history) == 2 and len(history_rows(calculator)) == 2
     saved = tmp_path / "fuel_delta" / "Spa - GT3.consumption"
     assert saved.exists()
     calculator.deleteAllLaps()  # whole history
+    history = minfo.history.consumptionDataSet
     assert not history_rows(calculator) and calculator.history["empty"]
     assert len(history) == 1 and history[0] == ConsumptionDataSet()  # placeholder: module keeps reading [0]
     assert not saved.exists()

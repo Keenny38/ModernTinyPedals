@@ -39,7 +39,7 @@ import urllib.request
 import zipfile
 from collections.abc import Callable
 from contextlib import suppress
-from typing import NamedTuple
+from typing import IO, NamedTuple
 
 from . import app_signal, realtime_state, version
 from .async_request import get_response, set_header_get
@@ -430,6 +430,9 @@ def parse_sha256(text: str) -> str:
     return value
 
 
+DOWNLOAD_FOLDER_PREFIX = "neopedal-update-"  # private temporary folder of a download
+
+
 class DownloadCancelled(Exception):
     """Download cancelled by user"""
 
@@ -453,27 +456,59 @@ def download_installer(
     """Download installer, verify sha256, return installer path (raise OSError or ValueError)
 
     Data is downloaded to a ".part" file first, removed if download fails, hash mismatches
-    or download is cancelled. Setup ZIP: installer is extracted next to it, ZIP removed.
+    or download is cancelled. Default folder: new private temporary folder (never a predictable
+    name in shared temporary folder). Hash is checked again on the file actually used (installer
+    run, or setup ZIP the installer is extracted from, through the same open file), ZIP then removed.
 
     Args:
         progress: called with received & total bytes (0 if unknown) after each chunk, from download thread.
         cancelled: download stopped (raise DownloadCancelled) once set.
     """
     expected = parse_sha256(asset.sha256)
-    folder = folder or tempfile.gettempdir()
+    own_folder = not folder
+    if own_folder:
+        folder = tempfile.mkdtemp(prefix=DOWNLOAD_FOLDER_PREFIX)
     path = os.path.join(folder, os.path.basename(asset.name))
+    try:
+        _download_verified(asset.url, path, expected, timeout, progress, cancelled)
+        if not path.lower().endswith(".zip"):
+            return path
+        try:
+            return extract_installer(path, folder, expected)
+        finally:
+            with suppress(OSError):
+                os.remove(path)
+    except BaseException:
+        if own_folder:  # nothing kept in private folder after a failure
+            shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def _download_verified(
+    url: str,
+    path: str,
+    expected: str,
+    timeout: float,
+    progress: Callable[[int, int], object] | None,
+    cancelled: threading.Event | None,
+) -> None:
+    """Download to path through ".part" file, sha256 checked while downloading and again on final file"""
     part_path = f"{path}.part"
     digest = hashlib.sha256()
+    replaced = False
     try:
-        with urllib.request.urlopen(asset.url, timeout=timeout) as response, open(part_path, "wb") as file:
+        with urllib.request.urlopen(url, timeout=timeout) as response, open(part_path, "wb") as file:
             total = content_length(response)
             received = 0
             while chunk := response.read(1 << 16):
                 if cancelled is not None and cancelled.is_set():
                     raise DownloadCancelled("download cancelled")
+                received += len(chunk)
+                # Bounded: a wrong asset (endless or chunked answer) never fills the disk before its hash fails
+                if received > (total or MAX_INSTALLER_SIZE):
+                    raise ValueError("downloaded installer is larger than announced")
                 digest.update(chunk)
                 file.write(chunk)
-                received += len(chunk)
                 if progress is not None:
                     progress(received, total)
             if cancelled is not None and cancelled.is_set():
@@ -481,22 +516,30 @@ def download_installer(
         if digest.hexdigest() != expected:
             raise ValueError("downloaded installer does not match its sha256 hash")
         os.replace(part_path, path)
+        replaced = True
+        if not path.lower().endswith(".zip"):  # setup ZIP: checked while extracting
+            with open(path, "rb") as file:
+                verify_file_sha256(file, expected)
     except BaseException:  # partial or invalid download never left behind
         with suppress(OSError):
-            os.remove(part_path)
+            os.remove(path if replaced else part_path)
         raise
-    if not path.lower().endswith(".zip"):
-        return path
-    try:
-        return extract_installer(path, folder)
-    finally:
-        with suppress(OSError):
-            os.remove(path)
+
+
+def verify_file_sha256(file: IO[bytes], expected: str) -> None:
+    """Check sha256 of open file from its start (raise ValueError), file left at its start"""
+    file.seek(0)
+    digest = hashlib.sha256()
+    while chunk := file.read(1 << 20):
+        digest.update(chunk)
+    if digest.hexdigest() != expected:
+        raise ValueError("downloaded installer changed after its sha256 hash was verified")
+    file.seek(0)
 
 
 def discard_installer(path: str) -> None:
     """Remove installer downloaded by download_installer (not run: declined or failed to start),
-    never left in temporary folder"""
+    never left in temporary folder (its private download folder removed too)"""
     if not path:
         return
     try:
@@ -505,35 +548,52 @@ def discard_installer(path: str) -> None:
         pass
     except OSError as error:
         logger.warning("UPDATES: unable to remove downloaded installer: %s", error)
+        return
+    folder = os.path.dirname(path)
+    if os.path.basename(folder).startswith(DOWNLOAD_FOLDER_PREFIX):
+        with suppress(OSError):  # not empty: left as is
+            os.rmdir(folder)
 
 
 MAX_INSTALLER_SIZE = 1 << 30  # extracted installer size limit
 
 
-def extract_installer(zip_path: str, folder: str) -> str:
-    """Extract the installer (only executable) of setup ZIP to folder, return its path (raise OSError or ValueError)"""
+def extract_installer(zip_path: str, folder: str, expected: str = "") -> str:
+    """Extract the installer (only executable) of setup ZIP to folder, return its path (raise OSError or ValueError)
+
+    Args:
+        expected: sha256 of setup ZIP, checked on the open file installer is extracted from.
+    """
     try:
-        with zipfile.ZipFile(zip_path) as archive:
-            members = [info for info in archive.infolist()
-                       if not info.is_dir() and info.filename.lower().endswith(".exe")]
-            if len(members) != 1:
-                raise ValueError("setup archive does not contain one installer")
-            info = members[0]
-            if info.file_size > MAX_INSTALLER_SIZE:
-                raise ValueError("installer in setup archive is too large")
-            # File name only: never a path from the archive
-            path = os.path.join(folder, os.path.basename(info.filename.replace("\\", "/")))
-            part_path = f"{path}.part"
-            try:
-                with archive.open(info) as source, open(part_path, "wb") as target:
-                    shutil.copyfileobj(source, target, 1 << 16)
-                os.replace(part_path, path)
-            except BaseException:
-                with suppress(OSError):
-                    os.remove(part_path)
-                raise
+        with open(zip_path, "rb") as zip_file:
+            if expected:
+                verify_file_sha256(zip_file, expected)
+            return _extract_installer(zip_file, folder)
     except zipfile.BadZipFile as error:  # also CRC mismatch while reading
         raise ValueError(f"invalid setup archive: {error}") from error
+
+
+def _extract_installer(zip_file: IO[bytes], folder: str) -> str:
+    """Extract the installer of open setup ZIP file to folder, return its path"""
+    with zipfile.ZipFile(zip_file) as archive:
+        members = [info for info in archive.infolist()
+                   if not info.is_dir() and info.filename.lower().endswith(".exe")]
+        if len(members) != 1:
+            raise ValueError("setup archive does not contain one installer")
+        info = members[0]
+        if info.file_size > MAX_INSTALLER_SIZE:
+            raise ValueError("installer in setup archive is too large")
+        # File name only: never a path from the archive
+        path = os.path.join(folder, os.path.basename(info.filename.replace("\\", "/")))
+        part_path = f"{path}.part"
+        try:
+            with archive.open(info) as source, open(part_path, "wb") as target:
+                shutil.copyfileobj(source, target, 1 << 16)
+            os.replace(part_path, path)
+        except BaseException:
+            with suppress(OSError):
+                os.remove(part_path)
+            raise
     return path
 
 

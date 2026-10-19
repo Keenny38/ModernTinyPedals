@@ -559,8 +559,9 @@ class DataReader:
         if self.need_lift_coast:
             self.lift_coast = api.read.engine.lift_and_coast_progress()
         if self.need_engine:
-            self.ignition = api.read.switch.ignition_starter() * (
-                1 + (tick_read(self, "rpm", api.read.engine.rpm) > self.wcfg["stalling_rpm_threshold"]))
+            # 0 off, 1 ignition on & engine off, 2 running (game ignition value 2 while starter cranks)
+            self.ignition = (1 + (tick_read(self, "rpm", api.read.engine.rpm) > self.wcfg["stalling_rpm_threshold"])
+                             if api.read.switch.ignition_starter() else 0)
             self.oil_temp = tick_read(self, "oil", api.read.engine.oil_temperature)
             self.water_temp = tick_read(self, "water", api.read.engine.water_temperature)
         if self.need_gear:

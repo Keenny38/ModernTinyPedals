@@ -20,8 +20,8 @@
 Elevation Widget, modern design
 
 Track elevation profile over one lap on a chart: soft area under the line, part already driven
-in accent color, car as a dot on the profile; faint start, sector & zero elevation lines.
-Header with current elevation and chart scale.
+in accent color, car as a dot on the profile; faint start, sector & zero elevation lines, official corner
+numbers (or names) along chart bottom with a mark on the profile. Header with current elevation and chart scale.
 """
 
 from __future__ import annotations
@@ -35,9 +35,11 @@ from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPat
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
+from ...demo_state import drawing_demo
 from ...i18n import tr_overlay as tr
 from ...module_info import minfo
-from .base import LEFT, RIGHT, ModernOverlay
+from ...userfile.corner_coach import MapCorners, map_corners
+from .base import CENTER, LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
 if TYPE_CHECKING:
@@ -56,7 +58,7 @@ class Realtime(ModernOverlay):
         "font_size", "display_width", "display_height", "display_margin_top", "display_margin_bottom",
         "display_detail_level", "show_elevation_reading", "show_elevation_scale", "show_elevation_background",
         "show_elevation_progress", "show_elevation_progress_line", "show_elevation_line", "show_zero_elevation_line",
-        "show_start_line", "show_sector_line", "show_position_mark",
+        "show_start_line", "show_sector_line", "show_position_mark", "show_corner_numbers",
     )
 
     def __init__(self, config, widget_name):
@@ -96,6 +98,9 @@ class Realtime(ModernOverlay):
         self.sector_xs: tuple[float, ...] = ()
         self.zero_y: float | None = None
         self.scale_text = ""
+        self.show_corner_numbers = bool(wcfg["show_corner_numbers"])
+        self.distance_scale = (0.0, 0.0)  # first node distance & chart x per meter
+        self.map_corners: MapCorners | None = None  # official corners of recorded map (None: not placed yet)
 
     def fade(self, color: QColor, alphas: tuple[int, int]) -> QBrush:
         """Area fill fading toward chart bottom"""
@@ -110,7 +115,13 @@ class Realtime(ModernOverlay):
         if modified != self.last_modified:
             self.last_modified = modified
             self.build_profile(minfo.mapping.elevations, minfo.mapping.sectors)
+            self.map_corners = None  # placed again on new map
             self.redraw_static()
+        if self.show_corner_numbers and self.xs:
+            corners = map_corners(api.read.session.track_name(), minfo.mapping, drawing_demo())
+            if corners is not None and corners is not self.map_corners:
+                self.map_corners = corners
+                self.redraw_static()
         progress = api.read.lap.progress()
         x = self.chart.left() + self.chart.width() * min(max(progress, 0.0), 1.0) if progress == progress else self.chart.left()
         reading = ""
@@ -130,6 +141,7 @@ class Realtime(ModernOverlay):
             return
         plot = self.plot
         scaled, map_range, map_scale = calc.scale_elevation(elevations, plot.width(), plot.height())
+        self.distance_scale = (map_range[0], map_scale[0])
         total = len(scaled) - 1
         skip = calc.skip_map_nodes(total, max(int(plot.width()), 1), max(int(self.wcfg["display_detail_level"]), 0))
         start_y = (scaled[0][1] + scaled[-1][1]) / 2  # start & finish nodes meet
@@ -210,7 +222,33 @@ class Realtime(ModernOverlay):
             if wcfg["show_elevation_line"]:
                 painter.setPen(self.pen_line)
                 painter.drawPolyline(self.line)
+            if self.show_corner_numbers and self.map_corners:
+                self.draw_corner_numbers(painter, self.map_corners)
         painter.restore()
+
+    def draw_corner_numbers(self, painter: QPainter, corners: MapCorners):
+        """Official corner numbers (or names) along chart bottom, a label over previous one left out; mark on
+        profile at each corner"""
+        theme = self.theme
+        chart = self.chart
+        start, scale = self.distance_scale
+        height = self.metrics["small"].height()
+        mark = max(self.unit * 0.12, 1.5)
+        last_right = -float("inf")
+        for corner, text in zip(corners.corners, corners.texts()):
+            x = self.plot.left() + (corner.distance - start) * scale
+            y = self.profile_y(x)
+            if y is not None:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(theme.text_dim)
+                painter.drawEllipse(QPointF(x, y), mark, mark)
+            width = self.text_width("small", text) + self.unit * 0.2
+            left = min(max(x - width / 2, chart.left()), chart.right() - width)
+            if left < last_right:
+                continue
+            last_right = left + width
+            self.draw_text(painter, QRectF(left, chart.bottom() - height, width, height), text, "small",
+                           theme.text_dim, CENTER, elide=False)
 
     def paint(self, painter: QPainter):
         wcfg = self.wcfg

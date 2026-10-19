@@ -296,12 +296,10 @@ class ResetDataMenu(QMenu):
             f"<b>{filename}</b> ?<br><br>"
             "This cannot be undone!"
         )
-        delete_msg = QMessageBox.question(
-            self._parent, trm(f"Reset {data_name if translated else data_name.title()}"), trm(msg_text),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        if delete_msg != QMessageBox.StandardButton.Yes:
+        from ._common import confirm_action
+
+        if not confirm_action(self._parent, trm(f"Reset {data_name if translated else data_name.title()}"),
+                              trm(msg_text), tr("Reset"), danger=True):
             return False
         # Delete file
         try:

@@ -3,6 +3,100 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.26.0 (2026-10-19)
+
+A corner coach, the Driver Rank and Safety Rank of every driver online, new flag alerts, darker panels, two overlays from TinyPedal 2.51, and three audits of bugs, performance and interface.
+
+### New
+
+#### Corner Coach overlay
+
+- **Coaching corner by corner** against the same reference lap as Telemetry Compare (`reference_lap_source`: `Viewer`, `Best` or `Last`), off by default, `Driver Inputs` category:
+  - **Next**: the next corner, with its official number or name (`T5`, `Tertre Rouge`), and the distance to its apex (`show_next_corner`).
+  - **Brake**: distance to the braking point of the reference lap, then once you brake `On point`, `8 m early` or `8 m late` (`show_braking_point`, `braking_point_tolerance` 3 m by default), or `No braking` for a corner taken flat.
+  - **Apex**: minimum speed of the corner you just left and its difference to the reference lap, green when faster (`show_apex_speed`).
+
+![Corner Coach overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-coach.png)
+
+#### Online Driver Rank and Safety Rank (Le Mans Ultimate)
+
+- Recent game versions no longer keep ranks in their menu file while the game runs: with `enable_online_driver_ranks` (`Config` > `Application` > `Online`, on by default) the app reads them from **RaceControl** the way the game menu does (Steam ticket of the running game, ranks only, nothing saved), at start, after each session and every 5 minutes.
+- On an online server (practice, race, private server), the **ranks of every driver of the session** are read too, by name:
+  - **`Driver & Safety Rank` column** in Relative, Standings and Rivals (`column_driver_ranks`, off by default): `S2 P3` in rank colors, with the game badge of each driver;
+  - **strength of field** of each class in Standings class headers (`show_class_sof`) and field average in the Session overlay (`show_field_level`);
+  - Driver Rank and Safety Rank on the **Broadcast Director** driver cards.
+
+![Driver & Safety Rank column](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-17-driver-ranks-column.png)
+
+#### Flag: new alerts
+
+- **Penalty to serve** (`DT`, `SG10`, `PEN×2`), **last lap** (timed races too) and **heavy damage** (aero %), both designs.
+- Under **blue flag**, the gap of the car lapping you.
+- **Speed limiter** against the pit speed limit: green when on, red when over the limit in the pit lane, and an alert when the pit lane is driven without it.
+- Modern design: `enable_new_flag_flash` (alerts flash when raised), `enable_urgency_order` (most urgent first), and the overlay takes only the room of the alerts shown.
+- `show_sector_yellow_flags_for_race_only`: sector yellow flags have their own race only option (taken from the yellow flag one in your presets).
+
+#### Darker panels and opacity of all overlays
+
+- **`enable_black_background`**: panels of the modern dark themes in neutral black instead of blue-tinted slate ([issue #5](https://github.com/Keenny38/ModernTinyPedals/issues/5)).
+- **`background_opacity_percentage`**: opacity of the modern panels (92 by default, as before; 100 solid).
+- **`overlay_opacity_percentage`**: every overlay more see-through at once, on screen, stream and VR. It multiplies the opacity of each overlay, which keeps its own.
+
+![Solid black background](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-black-background.png)
+
+#### From TinyPedal 2.51
+
+- **Wind Direction** overlay: compass turning with your car and arrow of where the wind blows (up: tailwind), colored by wind strength; a dot while calm. `wind_speed_unit` (`m/s`, `KPH`, `MPH`) also used by Weather.
+- **Wheel Dimension** overlay: front and rear tyre radius measured while driving (Wheels module `enable_wheel_dimension_measurement`).
+- **Track Map**: `Orient (°)` column of the Track info editor turns the map of one track. **Mapping**: `minimum_node_distance` between recorded points (5 m by default), a lap with a jump (back to the garage) is no longer recorded.
+- **Instrument**: `warning_color_engine_off`, ignition red while ignition and engine are off.
+- **Heatmaps**: new default heatmaps `tyre_optimal_80` (new compounds) and `brake_optimal_400` (new brakes); `tyre_default` is now `thermal_infrared`. Your heatmaps and choices are kept.
+
+#### Overlays
+
+- **Corner numbers**: the official corner numbers (or names) on the Track Map and under the Elevation profile (`show_corner_numbers`, off by default).
+- **Relative**: lap time delta column (`column_delta_laptime`), as in Standings and Rivals.
+
+![Corner numbers on the track map](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-numbers.png)
+
+#### App
+
+- **Undo everywhere**: lap trash with 20 levels and `Recently Deleted Laps...` to restore older laps (kept 30 days); `Ctrl+Z` / `Ctrl+Y` for the switches of Find Option; `Config` undo goes back past `Apply`.
+- **Recent files** in the race calculator (`Load File`, `Open Recent` for race plans and tyre plans), and `.consumption`, `.race-plan` and `.tyre-strategy` files dropped on the page or the main window. `.svg` maps dropped on the Track Map Viewer, with a search in the recorded maps.
+- **`Stream`** page in the navigation bar, after `Broadcast` (added to customized bars too).
+- **Overlay Editing** options (edit mode, snapping, grid, guides) moved to `Config` > `Overlay Style` (still saved in the same place).
+- Keyboard: `/` jumps to the search, `Delete` deletes the selection.
+- Actions that erase something ask first, with a button named after the action; toolbars of the lap viewer, track map viewer, stats, replays and results fold into a menu when the window is narrow.
+- Exports name their file with `Show in Folder`; `Clear Filters` on the Results page when nothing matches; a results file that can't be read is flagged.
+
+### Improvements
+
+- **Sectors**: times and gaps wait for the sector time given by the game, so they match the game HUD; the out lap and in lap count for best sectors (only the sectors through the pit lane are left out), personal best sectors never come from a lap through the pits.
+- **Standings**: `show_pitstop_duration_while_requested_pitstop` off by default (the Time column keeps lap times when a pit stop is requested), also in existing presets.
+- **One copy of the app per settings folder** with a system lock, released even after a crash (no more `pid.log`); a restart waits for the previous copy to close.
+- **Lighter and smoother**: hidden pages no longer refresh, fewer refreshes when the followed car changes (Broadcast Director, spectate), lap viewer playback texts at 10 Hz, lighter lists, charts and gauges.
+- **Replays**: deleted replays go to the recycle bin in the background, with progress and `Stop`.
+- **Updates**: the installer is downloaded into a private temporary folder and checked again as it is extracted; it is deleted when you decline the install or when it fails to start.
+- **Interface review**: consistent sizes, spacings and colors, French labels fitting at every width (Race Calculator header), focus and keys in the Broadcast Director.
+
+### Fixes
+
+- **Auto Hide**: overlays hide again in the garage while stream overlays are on air (OBS keeps them); while spectating they stay on the stream only.
+- **Web dashboard**: sign-in cookie per port (`np_session_<port>`): **sign in once again** after the update.
+- **Stream overlays**: WebSocket only accepted from NeoPedal's own pages while their server runs; a new access token asks first; a layout reset can be undone.
+- **VR overlay**: shared layer folders protected (owner check and access rights).
+- **Instrument & Dashboard HUD**: ignition read correctly while cranking.
+- **Wheels module**: radius measurement no longer shows a fake wheel lock while it starts.
+- **Wind Direction & Weather**: wind arrow exact at 0° and 360°.
+- **Stint timer**: overlay previews no longer change the live driving times.
+- **Standings**: strength of field counted on the cars of the session only.
+- **Race calculator**: consumption history saved and deleted safely while the live session writes to it.
+- **More than 100 fixes** from three audits (bugs, performance, interface), across overlays, pages and connections.
+
+### Removed
+
+- `maximum_loading_attempts`: a damaged settings file is no longer read again and again: it is kept as a backup and defaults are used at once (a file locked by an antivirus or cloud sync is still retried).
+
 ## 0.25.0 (2026-10-17)
 
 Safer options everywhere: every number has limits you can see, presets are repaired as they load, and the Overlay Options page shows race situations and both designs.

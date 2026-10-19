@@ -41,6 +41,8 @@ class RealtimeState:
         resets: number of player vehicle resets.
         shown: whether overlays are shown & updated (active, or spectating while streamed, see overlay_control).
         hidden: whether overlay is hidden.
+        screen_hidden: whether overlay is auto hidden on screen only (kept shown on stream while not driving,
+            window fully transparent, see overlay_control).
         editing: whether overlay edit mode is on (toolbar & outlines shown, see widget._edit_mode).
         session_type: session type of player, for widget visibility context.
         in_pits: whether player is in pit lane or garage.
@@ -60,6 +62,7 @@ class RealtimeState:
         "resets",
         "shown",
         "hidden",
+        "screen_hidden",
         "editing",
         "session_type",
         "in_pits",
@@ -78,6 +81,7 @@ class RealtimeState:
         self.resets: int = 0
         self.shown: bool = False
         self.hidden: bool = False
+        self.screen_hidden: bool = False
         self.editing: bool = False
         self.session_type: int = -1  # 0 testday, 1 practice, 2 qualify, 3 warmup, 4 race, -1 unknown
         self.in_pits: bool = False  # player in pit lane or garage
@@ -166,6 +170,9 @@ class ApplicationSignal(QObject):
         saving: signal for saving state changes (True = started, False = finished).
         addresses: signal for LAN addresses of this computer changed (looked up in background).
         servers: signal for a server listening again (port unavailable before, tried again in background).
+        spectate_changed: signal for spectated car changed (slot id), spectate mode still on (Broadcast Director
+            cuts): Spectate page follows, without the whole GUI refreshed (refresh is still emitted when spectate
+            mode is turned on or off: notification bar).
     """
 
     reload = Signal(bool)
@@ -177,6 +184,7 @@ class ApplicationSignal(QObject):
     saving = Signal(bool)
     addresses = Signal()
     servers = Signal()
+    spectate_changed = Signal(int)
     __slots__ = ()
 
 

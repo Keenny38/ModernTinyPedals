@@ -165,6 +165,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         self.labels = tuple(tr(label) for label in WHEELS)
         self.alert_labels = {key: tr(label) for key, label in ALERTS.items()}
         self.laps_label = tr("Laps").lower()
+        self._band_shapes: dict[tuple[int, int], tuple[tuple[QRectF, QPainterPath, QLinearGradient | None], ...]] = {}
         self.set_size(width, pad * 2 + card_h * 2 + row_gap)
 
     # Static: panel, chassis & axles, cards
@@ -236,7 +237,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         theme = self.theme
         unit = self.unit
         tyre = self.tyres[index]
-        radius = min(tyre.width() * 0.32, unit * 0.7) * min(self.corner, 1.0) + unit * 0.12
+        radius = self.tyre_radius(index)
         # Rubber: dark tyre with sidewall rim
         rounded(painter, tyre, radius, QColor(24, 25, 28) if not theme.light else QColor(46, 48, 54))
         if card.alert == "detached":  # no tyre: dashed outline
@@ -247,34 +248,20 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
             painter.setPen(Qt.PenStyle.NoPen)
             self.draw_text(painter, tyre, self.alert_labels["detached"], "tiny", theme.text_dim, CENTER, elide=False)
             return
-        tread = tyre.adjusted(self.band_inset, self.band_inset * 1.6, -self.band_inset, -self.band_inset * 1.6)
+        tread, band_radius = self.tread_of(index)
         temps = card.temps if self.show_surface else ()
-        bands = max(len(temps), 1)
-        band_w = tread.width() / bands
-        band_radius = max(radius - self.band_inset, unit * 0.1)
-        for part in range(bands):
+        for part, (rect, path, gradient) in enumerate(self.band_shapes(index, max(len(temps), 1))):
             value = temps[part] if part < len(temps) else -273.0
             fill = self.heat(index, value)
-            rect = QRectF(tread.left() + band_w * part, tread.top(), band_w, tread.height())
             color = fill if fill is not None else theme.surface_alt
-            if self.depth_effects:
+            if gradient is not None:
                 top, bottom = tile_shades(color)
-                gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)  # rounded rubber: lit in the middle
-                gradient.setColorAt(0.0, bottom)
+                gradient.setColorAt(0.0, bottom)  # stops replaced (same positions)
                 gradient.setColorAt(0.5, top)
                 gradient.setColorAt(1.0, bottom)
                 brush: QColor | QBrush = QBrush(gradient)
             else:
                 brush = color
-            # Bands joined: only outer corners rounded
-            path = QPainterPath()
-            path.addRoundedRect(rect, band_radius, band_radius)
-            if bands > 1:
-                square = QPainterPath()
-                inner_side = rect.adjusted(band_w / 2 if part == 0 else 0, 0,
-                                           -band_w / 2 if part == bands - 1 else 0, 0)
-                square.addRect(inner_side)
-                path = path.united(square) if part in (0, bands - 1) else square
             painter.fillPath(path, brush)
             if temps:
                 self.draw_text(painter, rect, self.temperature_text(value), "band",
@@ -294,6 +281,44 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
             dot = QRectF(tyre.center().x() - mark / 2, tyre.bottom() - mark - unit * 0.25, mark, mark)
             rounded(painter, dot, mark / 2, color)
             self.draw_text(painter, dot, "!", "strong", readable_on(color), CENTER, elide=False)
+
+    def tyre_radius(self, index: int) -> float:
+        """Corner radius of tyre drawing"""
+        unit = self.unit
+        return min(self.tyres[index].width() * 0.32, unit * 0.7) * min(self.corner, 1.0) + unit * 0.12
+
+    def tread_of(self, index: int) -> tuple[QRectF, float]:
+        """Tread area inside tyre drawing & corner radius of its bands"""
+        inset = self.band_inset
+        tread = self.tyres[index].adjusted(inset, inset * 1.6, -inset, -inset * 1.6)
+        return tread, max(self.tyre_radius(index) - inset, self.unit * 0.1)
+
+    def band_shapes(self, index: int, bands: int) -> tuple[tuple[QRectF, QPainterPath, QLinearGradient | None], ...]:
+        """Rect, shape & gradient (depth effects on, colors set when drawn) of each tread band, built once per tyre &
+        band count (fixed size: a boolean union of paths in every paint was the costliest part of the drawing)"""
+        key = (index, bands)
+        shapes = self._band_shapes.get(key)
+        if shapes is not None:
+            return shapes
+        tread, band_radius = self.tread_of(index)
+        band_w = tread.width() / bands
+        built = []
+        for part in range(bands):
+            rect = QRectF(tread.left() + band_w * part, tread.top(), band_w, tread.height())
+            # Bands joined: only outer corners rounded
+            path = QPainterPath()
+            path.addRoundedRect(rect, band_radius, band_radius)
+            if bands > 1:
+                square = QPainterPath()
+                inner_side = rect.adjusted(band_w / 2 if part == 0 else 0, 0,
+                                           -band_w / 2 if part == bands - 1 else 0, 0)
+                square.addRect(inner_side)
+                path = path.united(square) if part in (0, bands - 1) else square
+            # Rounded rubber: lit in the middle
+            gradient = QLinearGradient(rect.left(), 0, rect.right(), 0) if self.depth_effects else None
+            built.append((rect, path, gradient))
+        shapes = self._band_shapes[key] = tuple(built)
+        return shapes
 
     def draw_gauge(self, painter: QPainter, index: int, card: WheelCard):
         """Tread left: vertical gauge along tyre, filled from bottom"""
@@ -341,8 +366,8 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         color = (theme.blue if card.pressure_state == PRESSURE_LOW
                  else theme.negative if card.pressure_state == PRESSURE_HIGH else theme.text)
         value = self.pressure_text(card.pressure)
-        value_w = self.text_width("big", value)
-        symbol_w = self.text_width("small", self.symbol_pres) if self.show_pressure_unit else 0.0
+        value_w = self.advance("big", value)  # cached (big & small roles not in capitals)
+        symbol_w = self.advance("small", self.symbol_pres) if self.show_pressure_unit else 0.0
         gap = self.unit * 0.2 if self.show_pressure_unit else 0.0
         if index % 2:
             symbol = QRectF(rect.right() - symbol_w, rect.top(), symbol_w, rect.height())
@@ -432,7 +457,8 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
         if not parts:
             return
         # Justified: measured texts with even spaces between them
-        widths = [self.text_width(role, text) for text, role, _ in parts]
+        widths = [self.advance(role, text.upper() if role in self._caps_roles else text)  # cached
+                  for text, role, _ in parts]
         space = (rect.width() - sum(widths)) / max(len(parts) - 1, 1)
         left = rect.left()
         for (text, role, color), width in zip(parts, widths, strict=True):

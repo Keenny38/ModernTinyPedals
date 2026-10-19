@@ -226,6 +226,9 @@ class AppSettings(BaseDialog):
         else:
             run_after_saving(menu_reload_preset)  # overlays, modules & servers restarted
 
+    def toast(self, text: str):
+        show_toast(self, text)
+
     def open_link(self, name: str):
         """Settings kept in the loaded preset, edited on their own page"""
         from .menu import open_preset_config

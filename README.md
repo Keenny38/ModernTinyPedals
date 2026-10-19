@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>Telemetry overlays and analysis tools for Le Mans Ultimate and rFactor 2</b><br>
-  90 overlays with a modern design, a telemetry viewer, race strategy, driver stats and a broadcast director.<br>
+  93 overlays with a modern design, a telemetry viewer, race strategy, driver stats and a broadcast director.<br>
   Free and open source, in English and French.
 </p>
 
@@ -29,12 +29,12 @@
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
 
-![The 90 overlays with the modern design on a simulated race at Road Atlanta](images/readme_preview.png)
+![The 93 overlays with the modern design on a simulated race at Road Atlanta](images/readme_preview.png)
 
 NeoPedal is a telemetry overlay and analysis app: a modern design, a clear interface, many tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.25.0**: new **`Tyre Overview`** overlay, every tyre reading in one card per tyre placed as on the car (temperatures on the tyre, compound or alert, pressure on its target scale, carcass & inner layer, tread gauge, wear and laps left). **Safer options**: every number has limits shown in its tooltip, out of range values are repaired as the preset loads, `Check Preset` lists and repairs a preset, an overlay too big is cut instead of freezing the computer. The **Overlay Options** preview shows race situations (flags, pits, damage, rain) and the other design, `Test on Screen` shows them on the overlays on screen, `Used only` hides the options doing nothing. French translation reviewed in full and many overlay fixes. All the details, with screenshots, in the [changelog](CHANGELOG.md).
+> **New in 0.26.0**: new **`Corner Coach`** overlay, the next corner, your braking point and your apex speed against the reference lap. **Driver Rank and Safety Rank of every driver** on online servers, read from RaceControl (rank column in Relative, Standings and Rivals, strength of field per class, Broadcast Director cards). **Flag** alerts for penalties, last lap, heavy damage, the car lapping you and the pit limiter. **Darker panels** (solid black background, background opacity) and one **opacity for every overlay**. **Wind Direction** and **Wheel Dimension** overlays from TinyPedal 2.51, corner numbers on the map, Sectors matching the game, and more than 100 fixes from three audits. All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -47,7 +47,7 @@ NeoPedal is a telemetry overlay and analysis app: a modern design, a clear inter
 
 Then:
 
-- **Move the overlays**: unlock the overlay (`Unlock Overlay` on the Home page, or notification area icon menu > `Lock Overlay`): move the mouse over an overlay and drag it: it snaps to the screen and to each other overlay, arrow keys move the selected one and `Ctrl+Z` undoes. The edit mode toolbar (snapping, grid, guides, undo) is in the right-click menu of an overlay (`Edit Mode`), or shown at each unlock with `Config > Application > Overlay Editing > enable_edit_mode_on_unlock`. Or use `Tools > Layout Editor` on a screenshot of the game.
+- **Move the overlays**: unlock the overlay (`Unlock Overlay` on the Home page, or notification area icon menu > `Lock Overlay`): move the mouse over an overlay and drag it: it snaps to the screen and to each other overlay, arrow keys move the selected one and `Ctrl+Z` undoes. The edit mode toolbar (snapping, grid, guides, undo) is in the right-click menu of an overlay (`Edit Mode`), or shown at each unlock with `Config > Overlay Style > Overlay Editing > enable_edit_mode_on_unlock`. Or use `Tools > Layout Editor` on a screenshot of the game.
 - **Configure an overlay**: gear of its card in the `Overlays` tab (or right-click the overlay) opens the Overlay Options page, where every overlay is one click away. `Ctrl+F` searches for an option by name.
 - **Updates**: the app tells you about a new version (checked at startup, then every 12 hours while it runs), shows its release notes in your language and can download and install it (`Download And Install`).
 
@@ -70,22 +70,24 @@ With Le Mans Ultimate, the app also reads the game's local REST API (nothing to 
 
 ### Overlays with a modern design
 
-89 configurable overlays: tyres, brakes, fuel and energy, delta, speed delta, timing, standings, radar, map, weather, engine, suspension, chat…
+93 configurable overlays: tyres, brakes, fuel and energy, delta, speed delta, timing, standings, radar, map, weather, engine, suspension, chat…
 
 - **One rounded panel per overlay**, Barlow font, short translated labels above the values.
 - **Values colored by meaning**, the same in every overlay, app page and stream source: purple best, green gain or personal best, red loss or penalty, orange pit, yellow slower sector, gray garage.
-- **Standings, Relative and Rivals like a timing tower**: running lap time with sector bars, then the completed lap with its colors, pit status and pit stops in one column, the **real penalties** of the game (`DT`, `SG10`), column labels, gaps in class timed like a timing screen, tyre compound badges, `Energy per Lap` and `Track limits` columns, a header per class and classes in the order you choose. **Relative** with a gap trend column (gaining or losing per lap).
+- **Standings, Relative and Rivals like a timing tower**: running lap time with sector bars, then the completed lap with its colors, pit status and pit stops in one column, the **real penalties** of the game (`DT`, `SG10`), column labels, gaps in class timed like a timing screen, tyre compound badges, `Energy per Lap` and `Track limits` columns, a header per class and classes in the order you choose. Gap trend (gaining or losing per lap), `Track limits`, `Energy per Lap`, lap time delta and Driver Rank columns in Relative, Standings and Rivals alike.
 - **Driver Rank** (Le Mans Ultimate): your Driver Rank and Safety Rank as the game menu shows them, with the progress to the next tier and your track limits points.
-- **Track map** with each sector colored like the game live timing (purple class best, green personal best, yellow slower) and a ring on cars less than 1 s ahead or behind.
+- **Track map** with each sector colored like the game live timing (purple class best, green personal best, yellow slower) and a ring on cars less than 1 s ahead or behind. Official corner numbers (or names) on the track map and the elevation profile (`show_corner_numbers`).
 - **Speed Delta**: your speed difference to your best, session best, stint best and last lap at the same place of the lap.
 - **Fuel and energy** with gauge and marks, **tyres and brakes** as tiles in the heatmap colors with the compound as a badge, **LEDs** as glowing dots, **Trailing** with pedal bars beside the plots.
 - **Real logos & pictures of the game** (Le Mans Ultimate): car brand logos in Relative, Standings and Rivals, circuit and brand logos, car and circuit pictures on the Home, Results & Replays, Driver Stats, Spectate, Race Calculator and Telemetry pages and in the stream overlay of race results. They are taken from the game running on your computer and kept in the `gameimage` folder (your own logos in `brandlogo` come first).
 - **Graphic overlays drawn for the design**: round radar fading at its edge, track map with numbered car dots and a checkered start line, navigation view, friction circle with a fading trace, compass heading, steering wheel, instrument and weather icons drawn as shapes in the theme colors.
-- **Flags as colored chips** (caption above value, only while active), **chat** feed with sender colors, **elevation** profile with the driven part highlighted, **race notifications** with icons and a time bar, **steering meter** growing from center, **RPM LEDs** showing their color zones before they light up.
-- **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay (Legacy themes) or just one.
-- **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (classic look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable.
+- **Flags as colored chips** (caption above value, only while active): penalty to serve, last lap, heavy damage, gap of the car lapping you, pit limiter against the pit speed limit, alerts flashing when raised, **chat** feed with sender colors, **elevation** profile with the driven part highlighted, **race notifications** with icons and a time bar, **steering meter** growing from center, **RPM LEDs** showing their color zones before they light up.
+- **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay (Legacy themes) or just one, and each design reads the options of the other (trace fade, extra digits, wind, invalid lap...).
+- **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (classic look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable. **Darker panels** for the modern dark themes: background opacity and a solid black background, and one opacity for every overlay at once, on screen, stream and VR (`Overlay Style`).
 - **Visibility by session** (practice, qualifying, race) and pit lane, with fade.
 - **Race aids**: delta graph over the lap, gap trend ahead and behind, pit lane helper (speed limit, pit limiter, distance to the box), stint timer and driving time per driver, spotter on the screen edges, race notifications, tyre temperature trend, and **telemetry compare**: your live speed, pedals, steering and gear over the reference lap of the telemetry viewer, with the next braking point ahead of the car, delta and speed difference.
+- **Corner Coach**: the next corner (official number or name) and its distance, your braking point against the reference lap (on point, early or late, in meters) and the apex speed of the last corner against the reference.
+- **Wind Direction**: compass turning with your car and an arrow showing where the wind blows, colored by its strength. **Wheel Dimension**: front and rear tyre radius measured while driving.
 
 ![Standings: lap time like a timing tower, pit & stops column, real penalties](docs/changes/2026-10-13-standings-timing.png)
 
@@ -112,7 +114,7 @@ Every lap is recorded and analyzed in a GPU-drawn viewer: smooth zoom, laps grou
 - **Corners**: time, entry, minimum and exit speeds, gear, brake pressure, ideal lap, and **where the time is lost** with the reason in plain words ("Brakes 6 m earlier").
 - **Session**: long run pace and lap time trend, fuel and wear of each lap. **XY**: scatter plot or histogram of any channels.
 - **Simple View** (switch with `Advanced View`, the charts): the shown channels at the cursor drawn like the overlays: pedal gauges and a turning steering wheel for each lap, then engine, tyres (4-wheel tiles colored by temperature), brakes, chassis (G circle, suspension), electronics (TC and ABS lights), track and math channels, other laps as marks of their color. The steering wheel turns by its real angle (recorded with each lap). One `Show` menu picks the channels of both views, and one playback bar plays the lap in both.
-- **Tools**: search, trash with undo, lap used as delta best, open the replay at the cursor, **MoTeC `.ld`**, CSV and image export, MoTeC log import to compare with another driver's lap.
+- **Tools**: search, trash with undo (20 levels) and `Recently Deleted Laps` to restore older ones, lap used as delta best, open the replay at the cursor, **MoTeC `.ld`**, CSV and image export, MoTeC log import to compare with another driver's lap.
 - **On track**: the Telemetry Compare overlay draws your live speed and inputs over the reference lap chosen in the viewer.
 - **In-depth analysis**: values fitted to the visible part, math channels from a formula, laps aligned on braking, consistency per mini-sector, teammate laps, best lap in similar conditions, setup differences, corner report as HTML or PDF.
 
@@ -122,7 +124,7 @@ Every lap is recorded and analyzed in a GPU-drawn viewer: smooth zoom, laps grou
 | **Session: long run and trend** | **XY: speed / lateral G** |
 | ![Session tab](docs/changelog/0.19.0-session.png) | ![XY tab](docs/changelog/0.19.0-xy.png) |
 
-The **track map viewer** also shows each track by sectors with the real corner numbers, the curvature and slope at each point, the altitude profile and an animated run.
+The **track map viewer** also shows each track by sectors with the real corner numbers, the curvature and slope at each point, the altitude profile and an animated run. Recorded maps are listed with a search, `.svg` maps can be dropped on the page, and a map that fails to load keeps the one shown.
 
 ### Race calculator
 
@@ -135,7 +137,8 @@ Fuel, energy and tyres on one page, to prepare a race and follow it live.
 - **Live race**: the plan for the rest of the race is recalculated every lap from the car, with the driver of each stint.
 - **Live tab**: every value the game gives next to the calculator, filled in one by one or all at once: race length, formation, start time, drivers, lap time, consumption, tank, compound, starting amounts on the grid, pit lane time, refuel and energy rates, tyre and driver change times (LMU pit stop times), tyre allocation, rain forecast. Race under way (flags, penalties, pending repair, class position) and the tyres the pit menu offers, used tyres added to the tyre stock with their tread.
 - **Team tab (LMU)**: stints of each driver of the car read from the game, teammates included.
-- **Sharing**: export for Discord, CSV or image, plan saved per car and track.
+- **Sharing**: export for Discord, CSV or image (`Show in Folder` once exported), plan saved per car and track.
+- **Recent files** for consumption histories, race plans and tyre plans, and these files dropped on the page or the window.
 - **On / off switch**: turned off, the page asks the game nothing and frees its memory when hidden.
 - The **Race plan** overlay shows the next stop of the plan on track, the distance to the pit entry and the target consumption.
 
@@ -161,12 +164,12 @@ Your numbers per track and per car, compared with the LMU community times (sheet
 
 Every session you played, online or single player, read from the results files of Le Mans Ultimate and rFactor 2 (no setup, the game does not need to run), and the replays saved by Le Mans Ultimate, on one page.
 
-- **Sessions** by day with your result, search and filter (races, qualifying, practice); a session that ends while the page is open shows up at once.
+- **Sessions** by day with your result, search and filter (races, qualifying, practice, `Clear Filters` when nothing matches); a session that ends while the page is open shows up at once, a results file that can't be read is flagged.
 - **Your key figures**: position and class position, places gained from the grid, best lap and its rank, laps and pit stops, contacts, track limits and penalties.
 - **Classification** by class, with race time and gaps (also for a race left before its end), best laps, pit stops and contacts.
 - **Positions lap by lap**, the **laps of any car** (sectors, top speed, tyres, energy used and tread left for your car) and the **events** of the session: contacts, penalties, track limits and chat.
 - **Replays linked to their results** (LMU): a flag on each replay that has a results file, `Watch Replay` on the session, and a **play button on every event and lap** that opens the replay a few seconds before that moment, camera on the car concerned.
-- **Replays list**: replays by day with search and filters, add / export / rename / protect / delete, playback, camera and HUD controls, drivers standings, track map with the cars, incident timeline.
+- **Replays list**: replays by day with search and filters, add / export / rename / protect / delete (moved to the recycle bin in the background, with progress and stop), playback, camera and HUD controls, drivers standings, track map with the cars, incident timeline.
 
 ![Results & Replays: replays linked to their results](docs/changes/2026-10-14-results-replays.png)
 
@@ -180,7 +183,7 @@ Every session you played, online or single player, read from the results files o
 
 - In-game **chat** as an overlay, handy in VR.
 - **Game replays** linked to the race results, see [Results & Replays](#results--replays).
-- **Driver Rank & Safety Rank** of the game menu, kept with their history per Steam account (last ones shown when the game forgets them).
+- **Driver Rank & Safety Rank** of the game menu, kept with their history per Steam account (last ones shown when the game forgets them), or read live from RaceControl after each session (`enable_online_driver_ranks`, on by default), with every driver's ranks on online servers (Relative & Standings column, strength of field of each class, field average, Broadcast Director cards).
 - **Broadcast Director** to cast a race, see [below](#broadcast-director-le-mans-ultimate).
 - **Contacts** written to the Dashboard HUD incident log, with the other driver's name.
 - **Fuel consumption estimated by the game** until a lap is recorded on the track.
@@ -220,12 +223,12 @@ Cast a race live (driving or spectating an online race) or in a replay, from the
 - **Everything opens inside the app window**: tools, editors and settings are pages, with back navigation (`Alt+←` or the mouse back button). A page you leave closes by itself (unless it has unsaved changes), so pages never pile up. Navigation bar tools stay as you left them and come back on next start, even after a crash.
 - **Window size handled for you**: comfortable size centered on screen at first launch, size, position and maximized state remembered (even after a crash), wide pages grow the window only while open and keep it on screen, window brought back on screen when a monitor is unplugged, never shrunk below the size where pages show correctly (more for the telemetry viewer and driver stats), `Window` > `Reset Window Size and Position`.
 - **Overlay Options page**: the options of every overlay in one page, overlays listed by category. Options in sections (general, position and layout, font, then one per item shown with its on/off switch, display order as a list), options of an item that is off dimmed, only the options of the design in use. Search this overlay or every overlay, `Changed only`, `Apply to All Overlays` for a shared option (font, opacity...), live preview with the unsaved values on a simulated race (sample race for Relative, Standings and Rivals, whose columns are one list to switch on or off and reorder), zoomed from 50 % to 300 % and drawn sharp at that size, in a panel you can widen, in a race situation (flags, pit, damage, rain) or with the other design, `Test on Screen` on the overlays shown, changes to several overlays kept pending with undo and applied at once (only the edited overlays restart).
-- **Config page** (navigation bar, `Ctrl+,`): every global option in one page by category (Application, Overlay Style, Notification, Compatibility, Remote Control, Web Dashboard, Stream Overlay, VR Overlay, User Path), with descriptions, a search through every category, changes kept pending with undo, discard and apply, notice previews, the web dashboard address and access code.
-- **Find Option** (`Ctrl+F`): best matches first with the current value of each option, options changed from default marked (`Changed only` lists them all), on / off options switched right in the list.
+- **Config page** (navigation bar, `Ctrl+,`): every global option in one page by category (Application, Overlay Style, Notification, Compatibility, Remote Control, Web Dashboard, Stream Overlay, VR Overlay, User Path), with descriptions, a search through every category, changes kept pending with undo (also after `Apply`), discard and apply, notice previews, the web dashboard address and access code.
+- **Find Option** (`Ctrl+F`): best matches first with the current value of each option, options changed from default marked (`Changed only` lists them all), on / off options switched right in the list, with undo / redo (`Ctrl+Z`, `Ctrl+Y`).
 - **Presets page**: loaded preset and auto load on top, every preset with its last change, the overlays and modules it turns on, its car class and track tags and hotkeys, details of the selected preset, name checked as you type for new, duplicate and rename.
 - **Spectate page**: drivers of the session with place, class, car and best lap; click a driver to follow it, previous / next by place.
 - **Setup wizard** (first launch, `Help` > `Setup Wizard`): six steps that switch language at once, running game detected, metric or imperial units, window and overlay themes previewed with real overlays, new or existing preset with overlays picked from pictures, summary before anything is applied.
-- **Keyboard everywhere**: `Tab` reaches every button and switch with a focus outline, arrow keys change segmented choices, one search box on every page (`Esc` clears then leaves).
+- **Keyboard everywhere**: `Tab` reaches every button and switch with a focus outline, arrow keys change segmented choices, one search box on every page (`/` jumps to it, `Esc` clears then leaves), `Delete` deletes the selection.
 - **Customizable navigation bar**, live overlay preview, undo / redo in editors.
 - **Hotkeys** for overlays, presets, spectate, Dashboard HUD, Broadcast Director, and `show_main_window` to bring the main window in front of the game, even from the tray.
 - **Overlay edit mode** on the game screen: toolbar (snapping, grid, guides, undo / redo, active overlays), every overlay outlined even when empty or auto hidden, magnetic snapping with alignment guides and position, arrow keys, right-click menu to move to another screen or set visibility and opacity, overlays outside every screen brought back.
@@ -241,19 +244,19 @@ Cast a race live (driving or spectating an online race) or in a replay, from the
 
 - **Remote control** for Stream Deck, Companion or SimHub, and live telemetry stream over WebSocket.
 - **Web dashboard** for phone or tablet, in your units and language, with access code and optional HTTPS.
-- **Stream overlays** for OBS Studio, Streamlabs, XSplit or vMix: the overlays as browser sources (whole layout or one by one), transparent and exactly as on screen, also with the game in exclusive fullscreen and **while you spectate a race** or watch a replay. The `Layout` source is in 16:9 by default (centre of an ultrawide or triple screen), with a **layout editor** in your browser to place overlays on the stream. Each overlay on screen and stream, stream only or screen only, and the **classification of the last race** for your viewers, classes and pages cycling.
+- **Stream overlays** for OBS Studio, Streamlabs, XSplit or vMix: the overlays as browser sources (whole layout or one by one), transparent and exactly as on screen, also with the game in exclusive fullscreen and **while you spectate a race** or watch a replay. The `Layout` source is in 16:9 by default (centre of an ultrawide or triple screen), with a **layout editor** in your browser to place overlays on the stream. Each overlay on screen and stream, stream only or screen only, and the **classification of the last race** for your viewers, classes and pages cycling. A new access token asks first (browser sources need the new address), a layout reset can be undone.
 - **VR**: experimental SteamVR overlay, and a mirror window for OpenXR games (to show in the headset with OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+).
 
 ![Race results as a browser source in a stream](docs/changelog/0.21.0-stream-race-results.png)
 
 ### Reliability
 
-- Windows installer and **updates from the app**, with a check of the downloaded file (SHA-256, and signature when the installer is signed).
-- Automatic backups of presets and stats, atomic file writes, automatic restart of crashed threads.
+- Windows installer and **updates from the app**, with a check of the downloaded file (SHA-256 checked again on the file run, private download folder, and signature when the installer is signed).
+- Automatic backups of presets and stats, atomic file writes (CSV and picture exports too), automatic restart of crashed threads, one running copy per settings folder (system lock, released even after a crash).
 - Overlay plugins with a manager, one-click bug report, performance monitor with the game data status.
 - **Light on memory, CPU and GPU**: overlays turned off and pages not opened are never loaded, tool pages hidden for 10 minutes are freed, the main window frees its pages and graphics while it waits in the tray, overlays repaint only when a value moves a pixel, background modules sleep until the game sends new data, VR and stream capture run only while used.
 - **Safe mode** offered after a crash at launch (no plugins nor overlays).
-- **More than 5,000 automated tests** (93% of the code covered), type checking and lint in continuous integration, the executable is started in test mode before each release.
+- **More than 6,000 automated tests** (93% of the code covered), type checking and lint in continuous integration, the executable is started in test mode before each release.
 
 ---
 

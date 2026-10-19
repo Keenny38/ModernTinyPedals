@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from ...template.widget_config_types import FrictionCircleConfig
 
 TRACE_PARTS = 6  # trace drawn in parts, older parts fainter
+DEFAULT_FADE_STEP = 0.2  # trace_fade_out_step template default: oldest part 1/TRACE_PARTS opaque
 
 
 class Realtime(StatsMixin, ModernOverlay):
@@ -52,7 +53,8 @@ class Realtime(StatsMixin, ModernOverlay):
 
     options = (
         "font_size", "display_size", "display_radius_g", "show_inverted_orientation", "show_readings",
-        "show_trace", "trace_maximum_samples", "show_trace_fade_out", "show_maximum_average_lateral_g_circle",
+        "show_trace", "trace_maximum_samples", "show_trace_fade_out", "trace_fade_out_step",
+        "show_maximum_average_lateral_g_circle",
         "show_reference_circle", "show_center_mark", "show_dot",
     )
 
@@ -90,7 +92,7 @@ class Realtime(StatsMixin, ModernOverlay):
         self.pen_trace.setCapStyle(Qt.PenCapStyle.RoundCap)
         self.pen_trace.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         self.trace_colors = tuple(
-            theme.tint(theme.accent, round(255 * (index + 1) / TRACE_PARTS) if self.trace_fade else 220)
+            theme.tint(theme.accent, trace_alpha(index, wcfg["trace_fade_out_step"]) if self.trace_fade else 220)
             for index in range(TRACE_PARTS)
         )
         self.pen_max = QPen(theme.tint(theme.warning, 190), max(unit * 0.09, 1.2))
@@ -194,9 +196,19 @@ class Realtime(StatsMixin, ModernOverlay):
         part = TRACE_PARTS - 1
         end = count
         while end > 1 and part >= 0:
+            color = self.trace_colors[part]
+            if not color.alpha():  # faded out: older parts too
+                break
             start = max(end - step, 0) if part else 0
-            pen.setColor(self.trace_colors[part])
+            pen.setColor(color)
             painter.setPen(pen)
             painter.drawPolyline(QPolygonF(points[start:end]))
             end = start + 1  # parts share a point: line stays continuous
             part -= 1
+
+
+def trace_alpha(index: int, fade_step: float) -> int:
+    """Opacity of trace part (0 oldest): fades faster with higher fade out step (0.1 to 0.9, as classic design),
+    every part a step fainter at default step"""
+    speed = min(max(float(fade_step), 0.1), 0.9) / DEFAULT_FADE_STEP
+    return round(255 * max(TRACE_PARTS - (TRACE_PARTS - 1 - index) * speed, 0.0) / TRACE_PARTS)

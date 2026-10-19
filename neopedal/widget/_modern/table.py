@@ -47,6 +47,7 @@ LOGO = 7  # brand logo image: text = brand name, extra = vehicle name (game car 
 TREND = 8  # gap trend: extra = (seconds per lap, gap growing or shrinking; good for player), None if steady
 PAIR = 9  # two cells side by side: extra = (left cell, right cell, width of left part)
 LAPTIME = 10  # lap time: text, role, color; extra = LapTimeExtra (sector bars, delta, trend)
+ICON = 11  # picture file (svg, png) in a square: text = file ("" while none: dot of color), color = dot
 INSIDE_CELL = (TEXT, LOGO, LAPTIME)  # kinds drawn inside their cell (elided text, logo fit, lap time parts): repainted alone
 
 SEPARATOR = "separator"  # row list item: space between class groups
@@ -101,10 +102,12 @@ class Row(NamedTuple):
 
 
 class ClassHeader(NamedTuple):
-    """Row list item: name of class above its cars"""
+    """Row list item: name of class above its cars, info at right end (strength of field)"""
 
     text: str
     color: QColor
+    info: str = ""
+    info_color: QColor | None = None
 
 
 EMPTY_CELL = Cell()
@@ -121,6 +124,7 @@ class TableLayout(NamedTuple):
     columns: tuple[Column, ...]
     x: tuple[float, ...]  # column left positions
     header: float = 0.0  # header row height, 0 = no header
+    split_scale: float = 1.0  # space between class groups, in design space
 
     @property
     def width(self) -> float:
@@ -131,7 +135,7 @@ class TableLayout(NamedTuple):
     @property
     def separator(self) -> float:
         """Space between class groups (added to row gap)"""
-        return self.row_height * 0.32
+        return self.row_height * 0.32 * self.split_scale
 
     @property
     def class_header(self) -> float:
@@ -349,6 +353,8 @@ class TableMixin:
             self.draw_logo(painter, rect, cell.text, cell.extra or "")
         elif kind == LAPTIME:
             self.draw_laptime(painter, rect, cell)
+        elif kind == ICON:
+            self.draw_icon(painter, rect, cell, column.align)
         elif kind == PAIR:
             left, right, left_width = cell.extra
             gap = self.unit * 0.3
@@ -372,12 +378,17 @@ class TableMixin:
         rounded(painter, pill, self.radius(0.25), header.color)
         self.draw_text(painter, pill, header.text, "label", readable_on(header.color), CENTER)
         line_left = pill.right() + self.unit * 0.35
-        if line_left < box.right():
+        right = box.right()
+        if header.info:  # right end: info, line stops before it
+            info_width = min(self.text_width("label", header.info), max(right - line_left, 0.0))
+            info_box = QRectF(right - info_width, box.top(), info_width, box.height())
+            self.draw_text(painter, info_box, header.info, "label", header.info_color or self.theme.text_dim, RIGHT)
+            right = info_box.left() - self.unit * 0.35
+        if line_left < right:
             line = QColor(header.color)
             line.setAlpha(150)
             thickness = max(self.unit * 0.08, 1.0)
-            painter.fillRect(QRectF(line_left, box.center().y() - thickness / 2, box.right() - line_left, thickness),
-                             line)
+            painter.fillRect(QRectF(line_left, box.center().y() - thickness / 2, right - line_left, thickness), line)
 
     def draw_class_pill(self: Any, painter: QPainter, rect: QRectF, cell: Cell):
         """Class color pill with alias, then position in class on darker part (or on cell color:
@@ -530,6 +541,39 @@ class TableMixin:
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
         painter.restore()
+
+    def draw_icon(self: Any, painter: QPainter, rect: QRectF, cell: Cell, align):
+        """Picture in a square of compound size (each file read once per size), else a dot of cell color"""
+        size = min(rect.height() * COMPOUND_SIZE, rect.width())
+        if size <= 0:
+            return
+        left = aligned_left(rect, size, align)
+        box = QRectF(left, rect.center().y() - size / 2, size, size)
+        pixmap = QPixmap()
+        if cell.text:
+            pixmaps = self.__dict__.setdefault("_icon_cache", {})
+            key = (cell.text, round(size))
+            pixmap = pixmaps.get(key)
+            if pixmap is None:
+                from ...userfile.custom_image import load_picture
+
+                pixmap = pixmaps[key] = load_picture(cell.text, size, size, 2.0)  # sharp on high DPI screen
+        if not pixmap.isNull():
+            ratio = pixmap.devicePixelRatio() or 1.0
+            width, height = pixmap.width() / ratio, pixmap.height() / ratio
+            target = QRectF(box.center().x() - width / 2, box.center().y() - height / 2, width, height)
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+            painter.restore()
+        elif cell.color is not None:
+            dot = size * 0.45
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(cell.color)
+            painter.drawEllipse(box.center(), dot / 2, dot / 2)
+            painter.restore()
 
     def brand_logo(self: Any, brand: str, vehicle: str, width: float, height: float) -> QPixmap:
         """Brand logo scaled to fit cell, null while none (brand initials drawn instead)

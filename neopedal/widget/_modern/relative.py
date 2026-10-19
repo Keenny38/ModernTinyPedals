@@ -25,24 +25,16 @@ gap change per lap to each car (averaged over about 30 seconds), green when play
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ...api_control import api
 from ...module_info import minfo
 from ...template.widget.drivers_ui import RELATIVE_COLUMNS
 from ..relative import relative_data
-from .drivers import DRIVER_OPTIONS, Context, DriverTable
-from .table import RIGHT, TEXT, TREND, Cell, Column, Row, change_width
+from .drivers import DRIVER_OPTIONS, Context, DriverTable, TrendOf, live_trends
+from .table import RIGHT, TEXT, Cell, Column, Row
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import RelativeConfig
-
-TREND_STEADY = 0.05  # seconds per lap: gap change below this shown as steady
-# Gap change per lap of sample race rows (index -> seconds), overlay pictures
-SAMPLE_TRENDS = {2: 0.3, 7: -0.2, 8: -0.4, 10: -0.3, 3: -1.8, 11: 0.5}
-
-TrendOf = Callable[[float, int], "float | None"]
 
 
 class Realtime(DriverTable):
@@ -56,8 +48,12 @@ class Realtime(DriverTable):
         "show_vehicle_in_garage",  # read by relative module
         "additional_players_front", "additional_players_behind",
         "column_time_gap", "show_time_gap_sign", "decimal_places_time_gap", "display_order_time_gap",
-        "column_gap_trend", "display_order_gap_trend",
+        "column_gap_trend", "display_order_gap_trend", "column_driver_ranks", "show_driver_badge",
+        "display_order_driver_ranks",
         "show_highlighted_nearest_time_gap", "nearest_time_gap_threshold_front", "nearest_time_gap_threshold_behind",
+        "column_delta_laptime", "number_of_delta_laptime", "show_inverted_delta_laptime_layout",
+        "display_order_delta_laptime", "column_track_limits", "display_order_track_limits",
+        "column_energy_per_lap", "show_energy_per_lap_average", "display_order_energy_per_lap",
     )
 
     def __init__(self, config, widget_name):
@@ -78,25 +74,23 @@ class Realtime(DriverTable):
         if key == "time_gap":
             sample = "+888." + "8" * self.gap_decimals if self.gap_decimals else "+888"
             return Column(key, self.text_width("strong", sample), RIGHT)
-        if key == "gap_trend":
-            return Column(key, change_width(self.unit, 1.62, self.digit_width("value"), 2) + self.text_width("value", "."))
         return None
 
     def extra_cell(self, key: str, veh, ctx: Context, extra: dict) -> Cell:
         if key == "time_gap":
             return self.gap_cell(extra["gap"], veh.isPlayer)
-        if key == "gap_trend":
-            return self.trend_cell(extra["gap"], extra.get("trend"), veh)
         return Cell()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        self.poll_columns(minfo.vehicles.dataSet)
         self.show_rows(minfo.vehicles.dataSet, minfo.relative.relativeAhead, minfo.relative.relativeBehind,
                        minfo.vehicles.playerIndex, self.context(), live_trends())
 
     def show_field(self, field, ctx: Context):
+        self.sample_columns()
         self.show_rows(field.vehicles, field.relative_ahead, field.relative_behind, field.player_index, ctx,
-                       lambda gap, index: SAMPLE_TRENDS.get(index))
+                       self.trend_of)
 
     def show_rows(self, data_set, ahead: list, behind: list, player_index: int, ctx: Context,
                   trend_of: TrendOf | None = None):
@@ -115,15 +109,6 @@ class Realtime(DriverTable):
                 rows.append(None)
         self.refresh(tuple(rows))
 
-    def trend_cell(self, gap: float, rate: float | None, veh) -> Cell:
-        """Gap change per lap: good for player when closing on car ahead or pulling away from car behind"""
-        if veh.isPlayer:
-            return Cell()
-        if rate is None or veh.inPit or abs(rate) < TREND_STEADY or not gap:
-            return Cell(TREND)
-        good = rate < 0 if gap > 0 else rate > 0
-        return Cell(TREND, extra=(round(rate, 1), good))
-
     def gap_cell(self, gap: float, is_player: bool) -> Cell:
         """Relative time gap"""
         if is_player:
@@ -134,19 +119,3 @@ class Realtime(DriverTable):
             text = f"{abs(gap):.{self.gap_decimals}f}"
         near = self.wcfg["show_highlighted_nearest_time_gap"] and self.nearest_gap[0] <= gap <= self.nearest_gap[1]
         return Cell(TEXT, text, "strong", self.theme.warning if near else self.theme.text)
-
-
-def live_trends() -> TrendOf:
-    """Gap change per lap of cars (relative module averages of gap change per second, about 30 s)"""
-    laptime = api.read.timing.estimated_laptime()
-    ahead = minfo.relative.relativeDeltaAhead
-    behind = minfo.relative.relativeDeltaBehind
-
-    def trend(gap: float, index: int) -> float | None:
-        if laptime <= 0 or not 0 <= index < len(ahead):
-            return None
-        delta = ahead[index] if gap > 0 else behind[index]
-        if not delta.short:
-            return None
-        return -delta.short * laptime  # gap shrinking (delta > 0) -> negative change
-    return trend

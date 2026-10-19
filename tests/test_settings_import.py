@@ -205,17 +205,14 @@ def test_import_waits_for_other_running_instance(tmp_path, monkeypatch):
     si.request_import(str(current), str(source))
     monkeypatch.setattr(main, "settings_import_folders", lambda: (str(current), ""))
     monkeypatch.setattr(realtime_state, "singleton", False)
-    monkeypatch.setattr(main, "is_pid_exist", lambda: True)  # multiple instances allowed, another one running
+    monkeypatch.setattr(main, "other_instance_running", lambda: True)  # multiple instances allowed, another one running
     main.apply_settings_import()
     assert json.loads((current / "config.json").read_text(encoding="utf-8")) == {"current": True}
     assert si.read_request(str(current)) == str(source)  # kept for next start
     assert any("another NeoPedal is running" in message for _, message in si._report)
-    saved = []
-    monkeypatch.setattr(main, "save_pid_file", lambda: saved.append(True))
     monkeypatch.setattr(realtime_state, "singleton", True)  # single instance check passed: only instance
     main.apply_settings_import()
     assert json.loads((current / "config.json").read_text(encoding="utf-8")) == {"application": {"x": 1}}
-    assert saved == [True]  # PID file moved aside with previous settings: saved again
 
 
 def test_every_backup_kept(tmp_path, monkeypatch):

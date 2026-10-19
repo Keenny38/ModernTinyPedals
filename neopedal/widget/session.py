@@ -27,6 +27,7 @@ from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_race_laps
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import SessionConfig
@@ -152,14 +153,8 @@ class Realtime(Overlay):
 
         # Estimated remaining laps
         if self.wcfg["show_estimated_laps"]:
-            if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-                laps_left = api.read.lap.remaining()
-            else:
-                lap_into = api.read.lap.progress()
-                lap_pace = minfo.delta.lapTimePace
-                end_timer_laps_left = calc.end_timer_laps_remain(lap_into, lap_pace, est_remaining_time)
-                laps_left = calc.time_type_laps_remain(calc.ceil(end_timer_laps_left), lap_into)
-
+            laps_done, lap_total = player_race_laps(est_remaining_time)
+            laps_left = max(lap_total - laps_done, 0)
             self.update_estimated_laps(self.bar_estimated_laps, laps_left)
 
     # GUI update methods

@@ -48,7 +48,7 @@ from ..i18n import current_language, tr, trm
 from ..jobs import Job, WorkerPool, get_courier, weak_callback
 from ..lazy_service import update_checker
 from ..setting import cfg
-from ._common import find_dialog_host
+from ._common import confirm_action, find_dialog_host
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +273,9 @@ class UpdateInstaller(QObject):
             QMessageBox.warning(window, tr("Error"), trm(f"Unable to download update: {error}"))
             return
         if not auto_install:
-            confirm = QMessageBox.question(
-                window, tr("Download And Install"),
-                tr("Update downloaded. Close NeoPedal and install it now?"),
-            )
-            if confirm != QMessageBox.StandardButton.Yes:
+            if not confirm_action(window, tr("Download And Install"),
+                                  tr("Update downloaded. Close NeoPedal and install it now?"),
+                                  tr("Install Now"), default_action=True):
                 discard_installer(path)  # declined: never left in temp folder
                 return
         install_update(window, path, self._repository)

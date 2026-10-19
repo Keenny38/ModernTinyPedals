@@ -1095,6 +1095,14 @@ class ReplayControl:
             self._rec_thread.start()
             return True
 
+    def wait_closed(self, timeout: float) -> bool:
+        """Wait for a stopped recording still closing its file (quit, restart: process ends without waiting
+        daemon threads, file cut without its summary), True if none left"""
+        closing = self._rec_closing
+        if closing is not None:
+            closing.join(timeout)
+        return not self.recording_closing
+
     def stop_recording(self) -> None:
         """Stop recording and wait for file to close"""
         with self._rec_lock:

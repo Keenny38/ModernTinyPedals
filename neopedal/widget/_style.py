@@ -397,6 +397,15 @@ def scale_overrides(wcfg: Mapping[str, Any], scale: float, widget_name: str = ""
     return overrides
 
 
+def overlay_opacity_scale(style: Mapping[str, Any]) -> float:
+    """Global overlay opacity (overlay style "overlay_opacity_percentage"), multiplies each overlay opacity:
+    1 = unchanged, invalid value: unchanged"""
+    percent = style.get("overlay_opacity_percentage", 100)
+    if isinstance(percent, bool) or not isinstance(percent, (int, float)) or percent != percent:  # NaN
+        return 1.0
+    return min(max(percent, 10), 100) / 100
+
+
 class StyledConfig(dict):
     """Widget setting with style overrides applied
 

@@ -8,7 +8,7 @@ Open it with the `Race` entry of the navigation bar, or `Tools` > `Race Calculat
 
 ## Page layout
 
-- **Top bar**: `Enabled` / `Disabled` switch, data source (live session or file), `Follow Live`, `Live Race` and its status, `Undo` / `Redo`, `Race Plan` menu, `Load Live`, `Load File`, `Reset to Zero`.
+- **Top bar**: `Enabled` / `Disabled` switch, data source (live session or file), `Follow Live`, `Live Race` and its status, `Undo` / `Redo`, `Race Plan` menu, `Load Live`, `Load File`, `Reset to Zero`. When the window is too narrow for every label (in any language), the buttons show their icon only, then the switches their label in the tooltip only.
 - **Race setup, key figures and strategy** (shared by all tabs): race type and length, formation laps, pit stop time and safety margin; race fuel and energy, pit stops and what limits the stints, longest stint, average refill per stop, tyres used; then the strategy timeline with the fuel in the tank over the race.
 - **Tabs**: `Fuel` (inputs, pit stop plan, details, scenarios, consumption history), `Tyres` (tyre wear, rules, tyre plan and stock), `Team` (LMU team stints), `Live` (every value the game gives). The page reopens on the last tab.
 
@@ -21,7 +21,8 @@ A typed value is applied when you press `Enter` or leave the field (not at every
 ## Fill in the data
 
 - `Load Live` fills lap time and consumption with the average of the last 5 valid laps at race pace of the live session (in and out laps left out), the race length of a live race, and every other value of the `Live` tab that is followed (pit stop times, tyre rules, drivers...: see [Live tab](#live-tab)). With LMU, before any valid lap, the game's own fuel and energy estimate is used.
-- `Load File` reads a consumption history file (`.consumption` or `.csv`).
+- `Load File` reads a consumption history file (`.consumption` or `.csv`). Once files were loaded, the button opens a menu with the recent ones (up to 8; files no longer there are left out). `Open Recent` in the `Race Plan` menu and in the tyre plan `File` menu does the same for race plans and tyre plans.
+- Drop a `.consumption`, `.race-plan` or `.tyre-strategy` file on the page (or on the main window: the page opens) to load it.
 - `Follow Live` updates the inputs at each new lap of the live session, and when the game data of the `Live` tab changes (values followed only).
 - `History` (next to the tabs) shows the consumption history beside the plan (below on a narrow window): lap time, fuel, energy, battery, tyre wear per lap. Click a column title to sort (again: other way), `Valid Laps Only`, optional columns. Select laps (`Ctrl` + click, `Shift` + click, `Ctrl+A`) and `Add Selected Data` puts their average in the calculator (double click: one lap). `Delete Selected` (or `Delete`) and `Delete All` remove laps from the history.
 
@@ -48,7 +49,7 @@ Both are compared with the plan without the scenario, and shown on the strategy 
 ## Strategy and pit stop plan
 
 - **Strategy**: a timeline with one block per stint (one color per driver), pit laps above (orange when tyres are changed), safety car and rain laps behind, and the **fuel in the tank** over the race below. Hover a stint or stop for details.
-- **Pit Stop Plan**: each stop with its lap, **pit window** (earliest and latest lap with the same number of stops), time, fuel and energy to add, tyres, driver and stop duration. `Export`: `Copy as Text`, `Copy for Discord`, `Export CSV...`, `Save Image...`, `Copy Picture` (strategy and plan drawn at the same size whatever the window size).
+- **Pit Stop Plan**: each stop with its lap, **pit window** (earliest and latest lap with the same number of stops), time, fuel and energy to add, tyres, driver and stop duration. `Export`: `Copy as Text`, `Copy for Discord`, `Export CSV...`, `Save Image...`, `Copy Picture` (strategy and plan drawn at the same size whatever the window size). Once a file is written, a notice names it with `Show in Folder`; a file open in another program is left whole when the export fails.
 - **Details**: totals, laps a full tank lasts, what is left at stint end, consumption needed to save one stop.
 - **Saving target**: laps per stint and consumption per lap needed for one stop less, with the time lost to saving and whether it is worth it.
 - **Strategy Comparison**: the current plan against plans with up to 2 stops less (fuel saving) and one stop more: consumption, lap time lost, time in the pits, race time and gap. The best one is in bold.

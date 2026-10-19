@@ -51,6 +51,7 @@ class Realtime(DataModule):
         gen_record_track_map = record_track_map(
             output=minfo.mapping,
             filepath=self.cfg.path.track_map,
+            min_node_distance=min(max(self.mcfg["minimum_node_distance"], 0.1), 50.0),
         )
         gen_record_track_info = record_track_info(
             output=minfo.mapping,
@@ -133,6 +134,7 @@ def record_track_info(output: MappingInfo):
             pit_exit = load_track_info(track_name, "pit_exit")
             pit_speed = load_track_info(track_name, "pit_speed")
             output.speedTrapPosition = load_track_info(track_name, "speed_trap")
+            output.orientation = load_track_info(track_name, "orientation")
             output.sunlightPhases = set_sunlight_phase(
                 load_track_info(track_name, "sunrise"),
                 load_track_info(track_name, "sunset"),
@@ -182,8 +184,8 @@ def record_track_info(output: MappingInfo):
 
 
 @generator_init
-def record_track_map(output: MappingInfo, filepath: str):
-    """Record map data"""
+def record_track_map(output: MappingInfo, filepath: str, min_node_distance: float = 5.0):
+    """Record map data, a node every min_node_distance meters at least"""
     last_reset = None  # reset check
     delayed_save = False
 
@@ -192,6 +194,7 @@ def record_track_map(output: MappingInfo, filepath: str):
     last_sector_idx = -1
     last_lap_stime = -1.0  # last lap start time
     pos_last = 0.0  # last checked player vehicle position
+    pos_recorded = 0.0  # position of last recorded node
     is_pit_lap = False  # recording lap visited pit lane
     temp_pit_lap = False  # validating lap visited pit lane
     # File info
@@ -265,7 +268,7 @@ def record_track_map(output: MappingInfo, filepath: str):
             validating = False
             last_sector_idx = -1
             last_lap_stime = -1.0
-            pos_last = 0.0
+            pos_last = pos_recorded = 0.0
             is_pit_lap = temp_pit_lap = False
 
         # Recording map data
@@ -281,8 +284,9 @@ def record_track_map(output: MappingInfo, filepath: str):
 
         # New lap
         if lap_stime > last_lap_stime:
-            # End recording
-            if recorder_data.coords:
+            # End recording: full lap only (enough nodes, both sector lines crossed in order)
+            if (recorder_data.coords and len(recorder_data.coords) >= 10
+                    and 0 < recorder_data.sectors[0] < recorder_data.sectors[1]):
                 temp_data.coords = tuple(recorder_data.coords)
                 temp_data.dists = tuple(recorder_data.dists)
                 temp_data.sectors = tuple(recorder_data.sectors)
@@ -291,7 +295,7 @@ def record_track_map(output: MappingInfo, filepath: str):
             # Reset
             recorder_data.reset()
             last_lap_stime = lap_stime
-            pos_last = 0
+            pos_last = pos_recorded = 0.0
             is_pit_lap = False
             recording = True
             #logger.info("map recording")
@@ -333,10 +337,17 @@ def record_track_map(output: MappingInfo, filepath: str):
             # Update if position value is different & positive
             pos_curr = api.read.lap.distance()
             if 0 <= pos_curr != pos_last:
-                if pos_curr > pos_last:  # position further
+                delta_pos = pos_curr - pos_recorded
+                if delta_pos > 100:
+                    if recorder_data.coords:  # teleported (back to garage, skipped part of lap): lap not recorded
+                        recording = False
+                        recorder_data.clear()
+                    # else lap distance of previous lap still read at lap start: wait for its reset
+                elif delta_pos >= min_node_distance:  # further than last node
                     pos_x = api.read.vehicle.position_longitudinal()
                     pos_y = api.read.vehicle.position_lateral()
                     pos_z = api.read.vehicle.position_vertical()
                     recorder_data.coords.append((pos_x, pos_y))
                     recorder_data.dists.append((pos_curr, pos_z))
+                    pos_recorded = pos_curr
                 pos_last = pos_curr  # reset last position

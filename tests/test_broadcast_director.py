@@ -497,16 +497,16 @@ def test_page_qml_bundled_modules_and_translated():
     import re
 
     from neopedal.i18n.fr import TRANSLATION
-    from neopedal.ui.quick import QML_FOLDER
     from neopedal.ui.quick import director_backend as db
     from neopedal.ui.quick import director_shared as ds
+    from neopedal.ui.quick import qml_path
     from neopedal.ui.quick.qml_modules import QML_MODULES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
     for name in ("BroadcastDirector", "DirectorCars", "DirectorDesk", "DirectorCommentary", "DirectorSheet", "DirectorLaps",
                  "DirectorSettings", "DirectorGraphics", "DirectorTiming"):
-        with open(f"{QML_FOLDER}/{name}.qml", encoding="utf-8") as file:
+        with open(qml_path(f"{name}.qml"), encoding="utf-8") as file:
             text = file.read()
         modules = re.findall(r"^import ([A-Za-z.]+)", text, flags=re.MULTILINE)
         assert modules and all(module.replace(".", "/") in QML_MODULES for module in modules), (name, modules)
@@ -541,7 +541,7 @@ def test_navigation_bar_broadcast_in_place_of_spectate_for_everyone():
     assert old["application"] == {"language": "Français"}  # default bar given at load
     kept = {"application": {"rail_items": "home,tools"}}
     preupdate_global_setting((2, 50, 8), kept)
-    assert kept["application"]["rail_items"] == "home,tools"
+    assert kept["application"]["rail_items"] == "home,tools,stream_overlay_view"  # not reset, Stream added (2.51.3)
 
 
 # From LMU Broadcast Control: slow cars, flags, race start, pit box time, laps & sectors, energy

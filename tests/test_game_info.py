@@ -420,12 +420,13 @@ def test_game_replays_page(replays_page):
     assert incidents[1]["focused"] == "driver" and backend.focusedDriver == "Kevin Ramirez"
     assert incidents[0]["wall"] and incidents[0]["other"] == "Wall"
     assert backend.incidentIndex(incidents[1]["key"]) == 1
-    assert backend.playerName == "Zaac Latta" and backend.drivers[0] == {
-        "name": "Gabe Poblete", "count": 1, "mine": False, "car": ""}  # same count: by name
-    assert backend.drivers[2]["mine"] and backend.drivers[2]["car"] == "#7 · Hypercar"
+    chips = backend.driverChips.rows
+    assert backend.playerName == "Zaac Latta" and chips[0] == {
+        "name": "Gabe Poblete", "incidents": 1, "mine": False, "car": ""}  # same count: by name
+    assert chips[2]["mine"] and chips[2]["car"] == "#7 · Hypercar"
     # Replay time (no lap timing in standings: session info), session length on timeline
     assert backend.replayTime == 1800.0 and backend.sessionEnd == 3600.0
-    assert len(backend.timeline["markers"]) == 2 and backend.timeline["end"] == pytest.approx(3600.0)
+    assert len(backend.incidentMarkers.rows) == 2 and backend.timelineEnd == pytest.approx(3600.0)
     # Watch replay (id looked up by name when sent), playback, camera car, timeline seek, jump
     backend.watchReplay("Algarve P1 1")
     backend.playback("VCRCOMMAND_PLAY")
@@ -450,17 +451,16 @@ def test_game_replays_page(replays_page):
 
 
 def test_game_replays_incident_markers_canvas(replays_page):
-    """Markers canvas data property never named "data" (shadows Item.data): markers given"""
+    """Incident markers: one item per row of the markers model"""
     from PySide6.QtQuick import QQuickItem
 
     answered(replays_page, GAME_ANSWERS)
     QCoreApplication.processEvents()
     view = replays_page.view
     assert not view.errors(), [error.toString() for error in view.errors()]
-    canvases = [item for item in view.rootObject().findChildren(QQuickItem)
-                if item.metaObject().indexOfProperty("markerData") >= 0]
-    assert canvases
-    assert len(canvases[0].property("markerData")["markers"]) == 2
+    layers = [item for item in view.rootObject().findChildren(QQuickItem) if item.objectName() == "incidentMarkers"]
+    assert layers
+    assert len([item for item in layers[0].childItems() if item.metaObject().indexOfProperty("centerX") >= 0]) == 2
 
 
 def test_game_replays_replay_time_from_standings(replays_page):
@@ -519,7 +519,7 @@ def test_game_replays_filters(replays_page):
     assert [row["driver"] for row in backend.incidentRows.rows] == ["Kevin Ramirez"]
     backend.setMineOnly(False)
     backend.setDriverFilter("Gabe Poblete")
-    assert backend.counts["shown"] == 1 and not backend.timeline["markers"][1]["shown"]
+    assert backend.counts["shown"] == 1 and not backend.incidentMarkers.rows[1]["shown"]
     backend.setDriverFilter("Gabe Poblete")
     assert backend.counts["shown"] == 2
     backend.jumpNext(1)  # first incident selected, replay goes there (car not in standings: camera kept)
@@ -823,6 +823,7 @@ def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
     backend.selectReplay("Bahrain R1")
     backend.clickReplay("Algarve P1 1", replays_backend.SHIFT)
     backend.deleteReplays("Algarve P1 1")
+    wait_requests(backend.request_trash)  # moved to the recycle bin in background
     assert trashed == ["Bahrain R1.Vcr"]
     assert backend.noticeText == "1 replay(s) moved to the recycle bin · 1 protected replay(s) kept"
     assert sorted(path.name for path in folder.iterdir()) == ["Algarve P1 1.Vcr", "Monza R1 3.Vcr"]
@@ -837,15 +838,20 @@ def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
                        replays_backend.GameReplay(1, "Algarve best", "", "", "", 2.0, 100)]
     monkeypatch.setattr(replays_backend.QInputDialog, "getInt", lambda *args, **kwargs: (30, True))
     backend.deleteOlderThan()
+    wait_requests(backend.request_trash)
     assert "Monza R1 3.Vcr" in trashed and "Algarve best.Vcr" not in trashed
     (folder / "_vcr1.tmp").write_bytes(b"t" * 10)
     os.utime(folder / "_vcr1.tmp", (1, 1))
     backend.deleteTempFiles()
+    wait_requests(backend.request_trash)
     assert "_vcr1.tmp" in trashed and backend.noticeText == "1 temporary file(s) moved to the recycle bin"
     # Refused by system (file open in game): left in place, told
     monkeypatch.setattr(replay_files, "QFile", SimpleNamespace(moveToTrash=lambda path: False))
+    wait_requests(backend.request_replays)  # list asked again after deletions: game list kept out below
+    backend.replays = [replays_backend.GameReplay(1, "Algarve best", "", "", "", 2.0, 100)]
     backend.toggleProtected("Algarve best")
     backend.deleteReplays("Algarve best")
+    wait_requests(backend.request_trash)
     assert backend.noticeError and "Algarve best.Vcr" in backend.noticeText
 
 

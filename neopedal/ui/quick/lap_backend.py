@@ -58,7 +58,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ... import app_signal
 from ...const_api import API_LMU_CONFIG
@@ -196,6 +196,7 @@ PANEL_ROLES = ("column", "low", "high", "ticks", "envelope", "note", "available"
 SERIES_ROLES = ("key", "lods", "color", "lap")
 LEGEND_ROLES = ("key", "label", "full", "color", "reference", "clean", "tip", "excluded", "offset")
 MAP_LAP_ROLES = ("lap", "key", "highlight", "trail", "color", "reference", "shapes", "brakeZones", "throttleZones")
+TRACK_ROLES = ("key", "label", "logo", "date", "current")  # track picker rows (same roles as TrackPicker.qml)
 LAP_ROLES = (
     "kind", "session", "path", "title", "time", "s1", "s2", "s3", "best1", "best2", "best3", "info", "note",
     "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip", "open", "hint", "logo",
@@ -214,6 +215,7 @@ LOD_LEVELS = (1500, 4500)  # buckets over whole lap
 LOD_MIN_RATIO = 2.5  # copy made only for series with this many samples per bucket or more
 TRASH_FOLDER = ".trash"  # deleted laps, in telemetry folder (hidden: not a track), restored by undo
 TRASH_DAYS = 30  # deleted laps kept in trash folder
+UNDO_DEPTH = 20  # deletions undone one after another (older ones restored from Recently Deleted)
 INFO_BACKGROUND = 0  # more lap infos to read from files than this: read in background (track shown once read)
 WORKER_IDLE = 60_000  # ms without job before worker process stops (its memory given back)
 USE_WORKER_PROCESS = True  # heavy jobs (track limits, session values) in a worker process, else in threads
@@ -482,6 +484,56 @@ def purge_trash(folder: str, days: int = TRASH_DAYS) -> int:
     return removed
 
 
+def list_trash(folder: str, days: int = TRASH_DAYS) -> list[tuple[float, str, str]]:
+    """Laps in trash (thread job): deletion time, trash path & lap path to restore, newest deletion first; laps
+    purge_trash removes (older than days) left out"""
+    root = os.path.join(folder, TRASH_FOLDER)
+    try:
+        batches = os.listdir(root)
+    except OSError:
+        return []
+    limit = time.time() - days * 86400
+    laps: list[tuple[float, str, str]] = []
+    for batch in batches:
+        made = trash_batch_time(batch)
+        if made < limit or made <= 0:
+            continue
+        try:
+            tracks = os.listdir(os.path.join(root, batch))
+        except OSError:  # not a folder, or removed meanwhile
+            continue
+        for track in tracks:
+            try:
+                names = os.listdir(os.path.join(root, batch, track))
+            except OSError:
+                continue
+            laps.extend((made, os.path.join(root, batch, track, name), os.path.join(folder, track, name))
+                        for name in names)
+    laps.sort(key=lambda lap: (lap[0], os.path.basename(lap[2])), reverse=True)
+    return laps
+
+
+def find_replay(folder: str, moment: float, replayed: str) -> tuple[str, float] | None:
+    """Replay file covering moment (real time) & position in it, None if none (background only: every replay file
+    of folder is opened), replay of name replayed (lap recorded while replaying it) looked at first"""
+    from ... import replay
+
+    candidates = replay.list_replays(folder)
+    if replayed:
+        candidates.sort(key=lambda item: os.path.basename(item.filename) != replayed)
+    for item in candidates:
+        if item.duration >= 0:
+            end = item.created + item.duration
+        else:  # interrupted recording: written until file last changed
+            try:
+                end = os.path.getmtime(item.filename)
+            except OSError:
+                continue
+        if item.created - 2 <= moment <= end + 2:
+            return item.filename, min(max(moment - item.created, 0.0), max(end - item.created, 0.0))
+    return None
+
+
 def read_limits_cache(cache: str, names: list[str], base_key: str) -> tuple | None:
     """Track limits, source & sector bounds saved for these laps, base line & algorithm (thread job), None if not
     saved for them (computed again)"""
@@ -541,6 +593,43 @@ def circuit_name(info: dict, path: str) -> str:
     return ""
 
 
+class TrackListModel(DictListModel):
+    """Track picker rows (TrackPicker.qml trackModel): tracks whose name holds the search text (any case), filtered
+    here and synced: typing only removes or inserts the rows that change, delegates of kept rows stay (no list
+    reset, no list of every track sent to QML per key)"""
+
+    def __init__(self, parent=None):
+        super().__init__(TRACK_ROLES, parent)
+        self._entries: list[dict] = []
+        self._search = ""
+
+    def set_entries(self, entries: list[dict]):
+        """Every track row (search applied)"""
+        self._entries = entries
+        self.apply_search()
+
+    @Slot(str)
+    def setSearch(self, text: str):
+        words = text.lower().strip()
+        if words != self._search:
+            self._search = words
+            self.apply_search()
+
+    def apply_search(self):
+        words = self._search
+        self.sync([entry for entry in self._entries if not words or words in entry["label"].lower()])
+
+    @Slot(str, result=int)
+    def indexOf(self, key: str) -> int:
+        """Row of track key, -1 if not shown"""
+        return self.index_of(key)
+
+    @Slot(int, result="QVariant")
+    def keyAt(self, number: int) -> str | None:
+        """Track key of row, None (QML undefined) if no such row"""
+        return self.rows[number]["key"] if 0 <= number < len(self.rows) else None
+
+
 class LapViewerBackend(MapView, PageBackend):
     """Lap telemetry viewer page state (QML context property "backend")
 
@@ -561,6 +650,8 @@ class LapViewerBackend(MapView, PageBackend):
     viewRestored = Signal(float, float)  # chart zoom to show again (laps reloaded after release)
     pageHidden = Signal()  # page in background: lap playback stopped
     undoChanged = Signal()  # deleted laps that can be restored
+    lapsTrashed = Signal(int, str)  # laps moved to trash: count, name of the lap when one (page toast)
+    trashChanged = Signal()  # recently deleted laps (trash folder) read
     mathChanged = Signal()  # math channels added, changed or removed
     gCircleChanged = Signal()  # G circle built (laps changed while its tab is hidden: built once shown)
     # Parts of charts changed alone (also sent by chartChanged): panel height or autoscale, corner table & marks
@@ -596,11 +687,16 @@ class LapViewerBackend(MapView, PageBackend):
         self.legend_model = DictListModel(LEGEND_ROLES, self)
         self.mapDataChanged.connect(self.mapCornersChanged)
         self.map_lap_model = DictListModel(MAP_LAP_ROLES, self)
+        self.track_model = TrackListModel(self)  # track picker rows, made again when tracks or circuit logos change
+        self._track_rows: tuple = ()  # tracks & logos version of track picker rows
+        self.tracksChanged.connect(self.update_track_rows)
+        self.picturesChanged.connect(self.update_track_rows)
         self._tracks: list[str] = []
         self._track = ""
         self._expanded: list[str] = []
         self._best_text = ""
         self._status = ""
+        self._status_shown: tuple[str, bool] = ("", False)  # status text & busy indicator last told to QML
         self._warning = ""
         self._revision = 0
         self._panels: list[dict] = []
@@ -654,9 +750,13 @@ class LapViewerBackend(MapView, PageBackend):
         self._labels: dict[str, str] = {}  # shown lap key: short name (told apart when two are the same)
         self._filter = ""  # lap list search text
         self._no_match = False  # search or clean only filter leaves no lap (lap list hint)
-        # Deleted laps: path, trash path, marks, checked, reference
-        self._undo: list[tuple[str, str, dict, bool, bool]] = []
+        # Deletions undone last first, each lap: path, trash path, marks, checked, reference
+        self._undo: list[list[tuple[str, str, dict, bool, bool]]] = []
         self._pending_delete: list[str] = []  # laps deleted once background loading is done
+        self._pending_batch: list[tuple[str, str, dict, bool, bool]] | None = None  # deletion they join (undone with)
+        self._trash_rows: list[dict] = []  # recently deleted laps (trash folder)
+        self._trash_loading = False
+        self._replay_lookup = False  # replay file of a lap looked for in background
         self._loaded_paths: set[str] = set()  # laps read by background loading
         self._xy_keys: set[str] = set()  # scatter vertices shown (kept when laps change)
         self._xy = {"mode": "scatter", "x": "speed_kph", "y": "accel_lat", "histogram": "throttle"}  # XY tab
@@ -769,6 +869,7 @@ class LapViewerBackend(MapView, PageBackend):
         self._watch_timer.timeout.connect(self.auto_refresh)
         self._watcher = QFileSystemWatcher(self)
         self._watched: dict[str, tuple] = {}  # folder: lap files & track folders seen (hidden files left out)
+        self._listing: set[str] = set()  # watched folders being listed in background (see list_watched)
         self._new_lap_tracks: set[str] = set()  # other track folders with new lap files (live mode: track shown)
         self._watcher.directoryChanged.connect(self.folder_changed)
         setting = load_viewer_setting(folder)
@@ -974,6 +1075,24 @@ class LapViewerBackend(MapView, PageBackend):
     tracks = Property(list, _tracks_get, notify=tracksChanged)
     currentTrack = Property(str, _track_get, _track_set, notify=tracksChanged)
 
+    @Property(QObject, constant=True)
+    def trackModel(self) -> QObject:
+        """Track picker rows, filtered by its search text (see TrackListModel)"""
+        return self.track_model
+
+    @Slot()
+    def update_track_rows(self):
+        """Track picker rows made again only when tracks or circuit logos changed (tracksChanged is sent by every
+        track load)"""
+        key = (tuple(self._tracks), self._picture_version)
+        if key == self._track_rows:
+            return
+        self._track_rows = key
+        self.track_model.set_entries([
+            {"key": track, "label": track, "logo": self.trackLogo(track), "date": "", "current": False}
+            for track in self._tracks
+        ])
+
     @Property(str, notify=tracksChanged)
     def trackLabel(self) -> str:
         """Circuit shown without track folder (laps of another circuit opened from a log or another folder, see
@@ -1170,6 +1289,10 @@ class LapViewerBackend(MapView, PageBackend):
     @Property(bool, notify=statusChanged)
     def loading(self) -> bool:
         """Laps or lap infos being read or MoTeC logs imported (busy indicator)"""
+        return self.busy()
+
+    def busy(self) -> bool:
+        """Busy indicator state (see loading), a few attribute checks: worked out on read, never a stale value"""
         return self._loader is not None or self._exports.importing() or self.reading_infos()
 
     @Property(int, notify=revisionChanged)
@@ -1352,6 +1475,15 @@ class LapViewerBackend(MapView, PageBackend):
 
     @Property(dict, notify=mapChanged)
     def mapLegend(self) -> dict:
+        """Colors of current map mode with their meaning (items: gain / loss, pedals, racing line, gear), pedal zones
+        colors, gain / loss text colors for the colorblind option (tones: dark, light theme), plus mode scale"""
+        colorblind = bool(self._map_options.get("colorblind"))
+        legend = dict(self.mode_legend())
+        legend.update({"items": lap_map.legend_items(self._map_mode, colorblind), "zones": lap_map.zone_colors(colorblind),
+                       "tones": {name: list(pair) for name, pair in lap_map.COLORBLIND_TEXT.items()} if colorblind else {}})
+        return legend
+
+    def mode_legend(self) -> dict:
         """Color scale of current map mode: speed range in user unit, elevation range in meters,
         mini-sectors won by each lap & ideal lap, spread of mini-sector times (consistency)"""
         if self._map_mode == "consistency":
@@ -1454,13 +1586,22 @@ class LapViewerBackend(MapView, PageBackend):
             return QByteArray()
 
     def set_status(self, text: str, transient: bool = True):
-        """Status line text, transient messages cleared after a while"""
+        """Status line text, transient messages cleared after a while (same message again: shown for the whole
+        while again)"""
         self._status = text
         if transient and text:
             self._status_timer.start()
         else:
             self._status_timer.stop()
-        self.statusChanged.emit()
+        self.notify_status()
+
+    def notify_status(self):
+        """statusChanged sent only when status text or busy indicator changed: loading progress sets the same status
+        every 30 ms, each signal made every status & loading binding of the page read again"""
+        shown = (self._status, self.busy())
+        if shown != self._status_shown:
+            self._status_shown = shown
+            self.statusChanged.emit()
 
     def bump_revision(self):
         """Vertex store updated: shapes showing changed keys are already told (VertexStore.notify), the global
@@ -1504,7 +1645,9 @@ class LapViewerBackend(MapView, PageBackend):
         many new lap files: their infos read in background first (unless not background)"""
         laps = list_laps(self.folder, track) if track else []
         self._infos_generation += 1  # infos read for a former load ignored
-        self._infos_track = ""
+        if self._infos_track:
+            self._infos_track = ""
+            self.notify_status()  # busy indicator of former read dropped
         indexed = self.indexed_infos(track, laps)
         if background and len(indexed[3]) > INFO_BACKGROUND:  # hundreds of new lap files (seconds): page not frozen
             self.read_track_infos(track, new_lap, [lap.path for lap in indexed[3]])
@@ -1564,6 +1707,8 @@ class LapViewerBackend(MapView, PageBackend):
             self._infos_track = ""
             if self._status == tr("Reading laps..."):
                 self.set_status(before, bool(before))
+            else:
+                self.notify_status()  # busy indicator
             self.load_track(track, new_lap, False)  # infos known now (laps failed or added meanwhile: read here)
 
         self.run_job("lap infos", lambda: read_infos(paths), done)
@@ -1837,16 +1982,52 @@ class LapViewerBackend(MapView, PageBackend):
 
     def watch_folders(self):
         """Watch telemetry & current track folders (every track folder in live mode: lap driven on another track
-        shown): new laps listed without refresh"""
-        current = set(self._watcher.directories())
-        tracks = self._tracks if self._live else [self._track] if self._track else []
-        folders = (self.folder, *(os.path.join(self.folder, track) for track in tracks))
-        wanted = {folder for folder in folders if folder and os.path.isdir(folder)}
-        if current - wanted:
-            self._watcher.removePaths(list(current - wanted))
-        if wanted - current:
-            self._watcher.addPaths(list(wanted - current))
-        self._watched = {os.path.normpath(folder): self.folder_entries(folder) for folder in wanted}
+        shown): new laps listed without refresh
+
+        Folders already watched keep their listing (kept up to date by folder_changed: a change waiting to be told
+        is never hidden by a listing made again). Folders watched from now on are listed once watched (a lap written
+        meanwhile is told by the watcher): telemetry & shown track folders at once, other track folders of live mode
+        in background (hundreds of folders never listed on page thread, see folder_changed while being listed).
+        """
+        current = {os.path.normpath(path): path for path in self._watcher.directories()}
+        shown = [folder for folder in (self.folder, os.path.join(self.folder, self._track) if self._track else "")
+                 if folder and os.path.isdir(folder)]
+        # Other track folders: listed as folders by refresh or auto_refresh (one removed since: not watched by Qt)
+        others = [os.path.join(self.folder, track) for track in self._tracks if track != self._track] if self._live else []
+        wanted = {os.path.normpath(folder): folder for folder in (*others, *shown)}
+        gone = [path for key, path in current.items() if key not in wanted]
+        if gone:
+            self._watcher.removePaths(gone)
+        added = [folder for key, folder in wanted.items() if key not in current]
+        if added:
+            self._watcher.addPaths(added)
+        # Listings of folders no longer watched, or watched again (changes missed meanwhile) forgotten
+        self._watched = {key: entries for key, entries in self._watched.items() if key in wanted and key in current}
+        self._listing &= wanted.keys()
+        listed = {os.path.normpath(folder) for folder in shown}
+        later: list[tuple[str, str]] = []
+        for key, folder in wanted.items():
+            if key in self._watched or key in self._listing:
+                continue
+            if key in listed:
+                self._watched[key] = self.folder_entries(folder)
+            else:
+                later.append((key, folder))
+        if later:
+            self.list_watched(later)
+
+    def list_watched(self, folders: list[tuple[str, str]]):
+        """Listings of watched track folders made in background (live mode): kept unless folder_changed listed one
+        meanwhile (newer), or it is no longer watched"""
+        self._listing.update(key for key, _ in folders)
+
+        def done(result):
+            for key, entries in (result or {}).items():
+                if key in self._listing:
+                    self._watched.setdefault(key, entries)
+            self._listing.difference_update(key for key, _ in folders)
+
+        self.run_job("lap folders", lambda: {key: self.folder_entries(folder) for key, folder in folders}, done)
 
     @staticmethod
     def folder_entries(folder: str) -> tuple:
@@ -1866,11 +2047,13 @@ class LapViewerBackend(MapView, PageBackend):
         seen = self._watched.get(key)
         if seen == entries:
             return
-        self._watched[key] = entries
+        self._watched[key] = entries  # newer than a background listing still running (kept, see list_watched)
+        if seen is None and key in self._listing:  # changed while first listed: what it held before is unknown
+            seen = ()
         track = os.path.basename(key)
         if (seen is not None and key != os.path.normpath(self.folder) and track != self._track
                 and set(entries) - set(seen)):  # other track folder watched in live mode: new lap there
-            self._new_lap_tracks.add(track)
+            self._new_lap_tracks.add(track)  # (newer than shown laps only, see other_track_lap)
         self._watch_timer.start()
 
     @Slot()
@@ -1923,12 +2106,12 @@ class LapViewerBackend(MapView, PageBackend):
     def read_new_infos(self, paths: list[str]):
         """Infos of lap files added to shown track read in background, then list updated again (see auto_refresh)"""
         self._infos_reading = True
-        self.statusChanged.emit()  # busy indicator
+        self.notify_status()  # busy indicator
         generation = self._infos_generation
 
         def done(result):
             self._infos_reading = False
-            self.statusChanged.emit()
+            self.notify_status()
             self.keep_infos(result)
             if generation == self._infos_generation:  # same track shown
                 self.auto_refresh()
@@ -2489,29 +2672,28 @@ class LapViewerBackend(MapView, PageBackend):
         if not paths:
             return
         if len(paths) > 1:
-            confirm = QMessageBox.question(
-                self._window, tr("Delete Laps"), trm(f"Move {len(paths)} laps to trash?"),
-                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                defaultButton=QMessageBox.StandardButton.No)
-            if confirm != QMessageBox.StandardButton.Yes:
+            from .._common import confirm_action
+
+            if not confirm_action(self._window, tr("Delete Laps"), trm(f"Move {len(paths)} laps to trash?"),
+                                  tr("Move to Trash")):
                 return
+        joined = False  # laps being read join this deletion once loaded (undone together)
         if self._loader is not None:  # file read by background loading: deleted once loaded
             reading = [path for path in paths if path in self._loaded_paths]
-            if reading and not self._pending_delete:  # undo restores this deletion (pending part added to it)
-                self._undo = []
-                self.undoChanged.emit()
+            if reading and not self._pending_delete:
+                joined, self._pending_batch = True, None
             self._pending_delete.extend(path for path in reading if path not in self._pending_delete)
             paths = [path for path in paths if path not in self._loaded_paths]
-        if paths:
-            self.apply_delete(paths)
+        if paths and self.apply_delete(paths) and joined:
+            self._pending_batch = self._undo[-1]
 
     def trash_folder(self) -> str:
         """New trash batch folder (deletion time)"""
         return os.path.join(self.folder, TRASH_FOLDER, file_stamp())
 
     def apply_delete(self, paths: list[str], pending: bool = False) -> bool:
-        """Move laps to trash, forget their caches, undo kept (pending: laps deleted while being read, restored with
-        laps of same deletion), False if none moved"""
+        """Move laps to trash, forget their caches, deletion put on undo stack (pending: laps deleted while being read,
+        restored with laps of same deletion), False if none moved"""
         batch = self.trash_folder()
         moved = []
         for path in paths:
@@ -2540,26 +2722,43 @@ class LapViewerBackend(MapView, PageBackend):
         self.checked -= gone
         if self.reference_key in gone:
             self.reference_key = ""
-        self._undo = self._undo + moved if pending else moved
+        deletion = self._pending_batch if pending else None
+        if deletion is not None and any(item is deletion for item in self._undo):
+            deletion.extend(moved)
+        else:
+            deletion = moved
+            self._undo.append(moved)
+            del self._undo[:-UNDO_DEPTH]  # older deletions stay in trash (Recently Deleted) until purged
+        if pending:
+            self._pending_batch = None
         self.undoChanged.emit()
-        self.set_status(trm(f"{len(self._undo)} lap(s) moved to trash"))
+        self.set_status(trm(f"{len(deletion)} lap(s) moved to trash"))
         self.fill_list()
         self.load_laps()
+        self.lapsTrashed.emit(len(deletion), lap_label(os.path.basename(deletion[0][0])) if len(deletion) == 1 else "")
         return True
 
     @Property(str, notify=undoChanged)
     def undoText(self) -> str:
-        """Undo button text, empty if nothing to restore"""
-        return trm(f"Undo delete ({len(self._undo)})") if self._undo else ""
+        """Undo button text (laps of last deletion), empty if nothing to restore"""
+        return trm(f"Undo delete ({len(self._undo[-1])})") if self._undo else ""
 
     @Slot()
     def undoDelete(self):
-        """Restore last deleted laps from trash (marks, check state & reference too)"""
+        """Restore last deleted laps from trash (marks, check state & reference too), deletion before it next"""
         if not self._undo:
             return
+        items = self._undo.pop()
+        self.undoChanged.emit()
+        self.restore_laps(items)
+        if self._trash_rows:
+            self.read_trash()
+
+    def restore_laps(self, items: Sequence[tuple[str, str, dict, bool, bool]]) -> list[str]:
+        """Laps moved back from trash (marks, check state & reference too), lap list & charts updated, paths restored"""
         restored = []
         marks: dict[str, dict] = {}
-        for path, target, mark, checked, reference in self._undo:
+        for path, target, mark, checked, reference in items:
             if os.path.exists(path):
                 continue
             try:
@@ -2580,8 +2779,6 @@ class LapViewerBackend(MapView, PageBackend):
                     os.rmdir(folder)
         if marks:  # marks file of each folder written once
             restore_marks(marks)
-        self._undo = []
-        self.undoChanged.emit()
         self._marks.clear()
         if self._track:
             laps = list_laps(self.folder, self._track)
@@ -2589,6 +2786,69 @@ class LapViewerBackend(MapView, PageBackend):
         self.set_status(trm(f"{len(restored)} lap(s) restored"))
         self.fill_list()
         self.load_laps()
+        return restored
+
+    # Recently deleted laps (trash folder, kept TRASH_DAYS days)
+    @Property(list, notify=trashChanged)
+    def trashRows(self) -> list:
+        return self._trash_rows
+
+    @Property(bool, notify=trashChanged)
+    def trashLoading(self) -> bool:
+        return self._trash_loading
+
+    @Property(int, constant=True)
+    def trashDays(self) -> int:
+        return TRASH_DAYS
+
+    @Slot()
+    def openTrash(self):
+        """Recently deleted laps read in background (Recently Deleted dialog)"""
+        self._trash_loading = True
+        self.trashChanged.emit()
+        self.read_trash()
+
+    def read_trash(self):
+        folder = self.folder
+        self.run_job("trash", lambda: list_trash(folder), self.trash_read)
+
+    def trash_read(self, laps: list[tuple[float, str, str]] | None):
+        self._trash_loading = False
+        self._trash_rows = [self.trash_row(*lap) for lap in laps or ()]
+        self.trashChanged.emit()
+
+    def trash_row(self, deleted: float, trashed: str, path: str) -> dict:
+        name = os.path.basename(path)
+        number = lap_number_of(name)
+        recorded = lap_timestamp_of(name)
+        return {
+            "key": trashed, "track": os.path.basename(os.path.dirname(path)),
+            "title": trm(f"Lap {number}") if number else lap_stem(name),
+            "time": format_laptime(lap_time_of(name)), "recorded": day_month_minutes(recorded) if recorded else "",
+            "deleted": day_month_minutes(deleted),
+        }
+
+    @Slot(str)
+    def restoreTrashed(self, key: str):
+        """Lap of trash restored to its track folder (marks, check state & reference too if deleted this session)"""
+        root = os.path.normcase(os.path.abspath(os.path.join(self.folder, TRASH_FOLDER)))
+        if os.path.dirname(os.path.dirname(os.path.dirname(os.path.normcase(os.path.abspath(key))))) != root:
+            return  # not a lap of trash
+        target = os.path.normcase(os.path.abspath(key))
+        item = None
+        for batch in self._undo:
+            item = next((entry for entry in batch if os.path.normcase(os.path.abspath(entry[1])) == target), None)
+            if item is not None:
+                batch.remove(item)
+                break
+        self._undo = [batch for batch in self._undo if batch]
+        self.undoChanged.emit()
+        if item is None:  # deleted before this session: lap only
+            item = (os.path.join(self.folder, os.path.basename(os.path.dirname(key)), os.path.basename(key)), key, {},
+                    False, False)
+        if not self.restore_laps([item]):
+            self.set_status(trm(f"Unable to restore lap: {html.escape(os.path.basename(key))}"))
+        self.read_trash()
 
     @Slot(bool)
     def keepChecked(self, keep: bool):
@@ -4233,14 +4493,12 @@ class LapViewerBackend(MapView, PageBackend):
         return positions
 
     # Replay
-    def replay_target(self, lap: PlotLap, x: float) -> tuple[str, float] | None:
-        """Replay file covering lap & position in it at axis position, None if no replay recorded then
+    def replay_moment(self, lap: PlotLap, x: float) -> tuple[float, str] | None:
+        """Real time of lap at axis position & replay it was recorded while replaying ("" if none), None if unknown
 
         Lap end: exact time of lap info if recorded ("finished"), else file name date (whole seconds: middle of that
         second). Imported MoTeC laps without a log date (named at import time) are never linked.
         """
-        from ...replay import list_replays
-
         meta = lap.data.meta
         finished = meta.get("finished")
         if isinstance(finished, (int, float)) and not isinstance(finished, bool) and finished > 0:
@@ -4254,34 +4512,34 @@ class LapViewerBackend(MapView, PageBackend):
             return None
         distances, times = self.data.lap_times(lap)
         at = interpolate(distances, times, self.data.lap_distance_at_x(lap, x)) if distances else 0.0
-        moment = timestamp - lap_time + at
-        replayed = str(meta.get("replay", ""))
-        candidates = list_replays(cfg.path.telemetry or ".")
-        if replayed:  # lap recorded while replaying: that replay first
-            candidates.sort(key=lambda item: os.path.basename(item.filename) != replayed)
-        for item in candidates:
-            if item.duration >= 0:
-                end = item.created + item.duration
-            else:  # interrupted recording: written until file last changed
-                try:
-                    end = os.path.getmtime(item.filename)
-                except OSError:
-                    continue
-            if item.created - 2 <= moment <= end + 2:
-                return item.filename, min(max(moment - item.created, 0.0), max(end - item.created, 0.0))
-        return None
+        return timestamp - lap_time + at, str(meta.get("replay", ""))
 
     @Slot(float, str)
     def openReplay(self, x: float, lap_key: str = ""):
-        """Open replay recorded with lap at cursor position (replay page)"""
+        """Open replay recorded with lap at cursor position (replay page), once found in background"""
         lap = next((lap for lap in self.data.laps if lap.key == lap_key), self.data.reference)
-        if lap is None:
+        if lap is None or self._replay_lookup:
             return
-        target = self.replay_target(lap, x)
+        moment = self.replay_moment(lap, x)
+        if moment is None:
+            self.set_status(tr("No replay recorded with this lap."))
+            return
+        folder = cfg.path.telemetry or "."
+        self._replay_lookup = True
+        self.set_status(tr("Looking for the replay of this lap…"), transient=False)
+        self.run_job("replay lookup", lambda: find_replay(folder, *moment), self.replay_found)
+
+    def replay_found(self, target: tuple[str, float] | None):
+        """Replay of lap found (or not) in background: opened at lap position"""
+        self._replay_lookup = False
         if target is None:
             self.set_status(tr("No replay recorded with this lap."))
             return
-        filename, position = target
+        self.set_status("")  # lookup message left (replay page tells what it does)
+        self.show_replay(*target)
+
+    def show_replay(self, filename: str, position: float):
+        """Replay page opened on replay file at position (loaded in background if not open)"""
         from ...replay import replay
         from .._common import BaseDialog
         from ..tools_view import open_tool

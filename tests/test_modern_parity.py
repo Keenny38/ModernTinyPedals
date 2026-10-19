@@ -342,7 +342,10 @@ def test_gear_readings_and_limiter(widgets, monkeypatch):
     reader(monkeypatch, "vehicle", "speed", 20.0)
     update(widget)
     assert widget.state[6] == LIMITER_REMINDER
-    reader(monkeypatch, "switch", "speed_limiter_active", True)
+    reader(monkeypatch, "switch", "speed_limiter_active", True)  # rev limiter cut only: not the pit limiter
+    update(widget)
+    assert widget.state[6] == LIMITER_REMINDER
+    reader(monkeypatch, "switch", "speed_limiter", 1)
     update(widget)
     assert widget.state[6] == LIMITER_ON
 
@@ -529,10 +532,14 @@ def test_flag_sector_yellow_and_full_course_yellow(widgets, monkeypatch):
     widget.hide()
 
 
-def test_flag_limiter_active_state(widgets, monkeypatch):
+def test_flag_limiter_ignores_rev_limiter_cut(widgets, monkeypatch):
+    """LMU sets mSpeedLimiterActive at the rev limiter too: only the pit limiter switch shows the bar"""
     reader(monkeypatch, "switch", "speed_limiter_active", True)
     widget = widgets("flag", modern=False)
     widget.show()
+    update(widget)
+    assert widget.bar_limiter.isHidden()
+    reader(monkeypatch, "switch", "speed_limiter", 1)
     update(widget)
     assert not widget.bar_limiter.isHidden()
     widget.hide()
@@ -540,6 +547,9 @@ def test_flag_limiter_active_state(widgets, monkeypatch):
 
 # --- Weather: wind speed & direction
 def test_weather_wind(widgets, monkeypatch):
+    from neopedal.setting import cfg
+
+    monkeypatch.setitem(cfg.user.setting["units"], "wind_speed_unit", "KPH")  # wind readings in own unit
     reader(monkeypatch, "session", "wind_velocity", (3.0, 0.0, 4.0))  # 5 m/s
     reader(monkeypatch, "vehicle", "orientation_yaw_radians", 0.0)
     widget = widgets("weather", show_wind=True)

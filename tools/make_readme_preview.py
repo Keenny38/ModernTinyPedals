@@ -50,6 +50,27 @@ __all__ = ("HISTORY_WIDGETS", "api", "copy_setting", "lmu_api", "load_bundled_fo
 def set_vehicles():
     """Vehicles and relative module outputs (see neopedal.demo_data)"""
     demo_data.set_vehicles(minfo, cfg.user.setting["standings"], api.read)
+    sample_driver_ranks()
+
+
+def sample_driver_ranks():
+    """Driver & Safety Rank of simulated drivers (rank column & field level, when switched on), as overlay
+    pictures of the app: nothing read from the game folder nor online"""
+    from neopedal import rank_info
+    from neopedal.process import driver_ranks as dr
+    from neopedal.process import field_ranks as fr
+    from neopedal.userfile.badge_icons import icons
+    from neopedal.widget._modern.drivers import SAMPLE_RANKS
+
+    rank_info.ranks.poll = lambda: None
+    rank_info.field.poll = lambda names: None
+    icons.request = lambda key: None  # badge icons never downloaded (dots of badge colors)
+    rank_info.field._ranks = {
+        fr.driver_key(veh.driverName): dr.DriverRanks(
+            veh.driverName, "", "", "", dr.Rank(*sample[:2], 50), dr.Rank(*sample[2:4], 50), sample[4])
+        for veh in minfo.vehicles.dataSet if veh.driverName
+        for sample in (SAMPLE_RANKS[veh.positionOverall % len(SAMPLE_RANKS)],)
+    }
 
 
 def set_modules():

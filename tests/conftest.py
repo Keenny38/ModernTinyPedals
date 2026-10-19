@@ -135,6 +135,15 @@ def offline_rest_cache(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def offline_online_ranks(monkeypatch):
+    """Online ranks (on by default) never ask a running game for a Steam ticket nor sign in to RaceControl
+    in tests (tests feed online sources themselves)"""
+    from neopedal import rank_info
+
+    monkeypatch.setattr(rank_info, "_game_get", lambda *args, **kwargs: (0, b""))
+
+
+@pytest.fixture(autouse=True)
 def offline_game_images(monkeypatch):
     """Car brand & circuit pictures never asked to a running game in tests, fetch thread ended after each test
 
@@ -208,6 +217,10 @@ def _neutral_value(annotation: str, name: str):
         else:
             length = len(args)
         return (_NEUTRAL[element],) * length
+    if annotation == "Penalty":
+        from neopedal.penalty_info import NO_PENALTY
+
+        return NO_PENALTY
     return _NEUTRAL.get(annotation, 0)
 
 

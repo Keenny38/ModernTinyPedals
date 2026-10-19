@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from ...template.widget_config_types import WeatherForecastConfig
 
 ROWS = ("estimated_time", "weather_icon", "ambient_temperature", "rain_chance_bar")
+DEFAULT_ICON_SIZE = 32.0  # icon_size template default (pixels of classic design): icon at design size
 
 
 class Slot(NamedTuple):
@@ -62,7 +63,7 @@ class Realtime(ForecastMixin, ModernOverlay):
     wcfg: WeatherForecastConfig
 
     options = (
-        "font_size", "layout", "number_of_forecasts", "show_unavailable_data", "show_estimated_time",
+        "font_size", "layout", "icon_size", "number_of_forecasts", "show_unavailable_data", "show_estimated_time",
         "show_ambient_temperature", "show_rain_chance_bar", "show_rain_chance_reading",
         *display_order_options("weather_forecast"),
     )
@@ -84,9 +85,12 @@ class Realtime(ForecastMixin, ModernOverlay):
             "rain_chance_bar": wcfg["show_rain_chance_bar"],
         }
         rows = self.display_ordered([key for key in ROWS if shown[key]], key=str)
+        # Icon size relative to its default (classic pixels, at least 16): design size at default
+        icon_scale = max(float(wcfg["icon_size"]), 16.0) / DEFAULT_ICON_SIZE
+        icon_h = unit * 2.3 * icon_scale
         heights = {
             "estimated_time": unit * 1.0,
-            "weather_icon": unit * 2.3,
+            "weather_icon": icon_h,
             "ambient_temperature": unit * 1.2,
             "rain_chance_bar": unit * (1.05 if self.show_rain_reading else 0.55),
         }
@@ -95,6 +99,7 @@ class Realtime(ForecastMixin, ModernOverlay):
         inner = unit * 0.3
         self.column_w = max(
             unit * 2.4,
+            icon_h,
             self.text_width("small", self.widest("small", (tr("now"), "88.8h", "888m"))),
             self.text_width("value", "-888°"),
             self.text_width("small", "100%") if self.show_rain_reading else 0,
@@ -106,7 +111,7 @@ class Realtime(ForecastMixin, ModernOverlay):
             self.rows[key] = QRectF(inner, top, self.column_w - inner * 2, heights[key])
             top += heights[key]
         self.tile_h = top + unit * 0.15 - self.pad
-        self.icon_stroke = max(unit * 0.12, 1.2)
+        self.icon_stroke = max(unit * 0.12 * icon_scale, 1.2)
         self.columns = 0
         self.place_columns(self.total_slot)
 

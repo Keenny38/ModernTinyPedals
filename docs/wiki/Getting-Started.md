@@ -28,13 +28,14 @@ The navigation bar on the left gives access to pages and tools:
 | `Stats` | [Driver Stats](Driver-Stats.md) |
 | `Results` | Results of past sessions: classification, laps, sectors, incidents and penalties |
 | `Broadcast` | [Broadcast Director](Broadcast-Director.md) (Le Mans Ultimate) |
+| `Stream` | [Stream Overlays](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix): overlays as OBS browser sources |
 | `Telemetry` | [Telemetry Viewer](Telemetry-Viewer.md) |
 | `Race` | [Race Calculator](Race-Calculator.md) |
 | `Preset` | Load, create and manage presets, see [Presets and Settings](Presets-and-Settings.md) |
 
 The gear button under the bar opens `Config`: every global option of the app (also `Ctrl+,`), see [Presets and Settings](Presets-and-Settings.md#global-config).
 
-- Right-click the bar and choose `Customize Navigation Bar...` to show, hide or reorder entries. The `Module` (data modules used by overlays and tools), `Hotkey` (keyboard shortcuts), `Tools` (every tool and editor), `Spectate` and `Pacenotes` pages are not in the bar by default: add them back there, or open them from the command palette (`Ctrl+K`) or the Home page quick access. In 0.23.0 the bar of every user was set once to this default (`Broadcast` in place of `Spectate`). `Ctrl+1` to `Ctrl+9` open the first nine entries.
+- Right-click the bar and choose `Customize Navigation Bar...` to show, hide or reorder entries. The `Module` (data modules used by overlays and tools), `Hotkey` (keyboard shortcuts), `Tools` (every tool and editor), `Spectate` and `Pacenotes` pages are not in the bar by default: add them back there, or open them from the command palette (`Ctrl+K`) or the Home page quick access. In 0.23.0 the bar of every user was set once to this default (`Broadcast` in place of `Spectate`); after 0.25.0, `Stream` was added after `Broadcast` in every bar. `Ctrl+1` to `Ctrl+9` open the first nine entries.
 - Tools, editors and settings open as pages inside the window. `Alt+Left` or the mouse back button goes back to the previous page. A page you leave closes by itself, unless it has unsaved changes. Navigation bar tools stay as you left them, and are reopened at the next start with the page shown last (`Window` > `Reopen Pages at Startup`).
 - `Ctrl+K` opens the **command palette**: type to find and run pages, overlays, modules, tools, presets and options.
 - A dot (`•`) marks pages with unsaved changes. `Ctrl+S` saves the page shown. Invalid values are outlined in red with the reason while you type.
@@ -61,7 +62,7 @@ Overlays appear when your car is on track and hide when you are in menus or not 
 
 While the overlay is unlocked you can move overlays with the mouse; once locked, they stay in place and clicks go through to the game. The lock state is kept between starts.
 
-1. **Unlock**: `Unlock Overlay` on the Home page, tray icon menu > uncheck `Lock Overlay`, the command palette or the `overlay_lock` hotkey. Overlays stay as they are: move the mouse over one to see its outline, name and corner handle. For the **edit mode**, right-click an overlay > `Edit Mode`: a toolbar shows up at the top of the game screen, and every overlay shows its outline and name, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or their visibility context (so you can place them from the game menus too). To start the edit mode at each unlock, turn on `enable_edit_mode_on_unlock` (`Config` > `Application` > `Overlay Editing`).
+1. **Unlock**: `Unlock Overlay` on the Home page, tray icon menu > uncheck `Lock Overlay`, the command palette or the `overlay_lock` hotkey. Overlays stay as they are: move the mouse over one to see its outline, name and corner handle. For the **edit mode**, right-click an overlay > `Edit Mode`: a toolbar shows up at the top of the game screen, and every overlay shows its outline and name, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or their visibility context (so you can place them from the game menus too). To start the edit mode at each unlock, turn on `enable_edit_mode_on_unlock` (`Config` > `Overlay Style` > `Overlay Editing`).
 2. **Drag** an overlay to move it. It snaps to screen edges, screen center and the edges and centers of the other overlays; hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. Alignment guides and the position of the overlay show while dragging. `Grid Move` moves overlays on a grid.
 3. **Fine-tune with the keyboard**: click an overlay to select it (solid outline), then arrow keys move it by one pixel (`Shift`: 10 pixels, one grid step with `Grid Move`). `Ctrl+Z` / `Ctrl+Y` undo and redo, `Delete` turns the overlay off, `Esc` unselects it.
 4. **Resize** an overlay with its corner handle: its size options (font size, bar size...) are scaled.
@@ -114,7 +115,7 @@ One page holds the options of every overlay: the overlays on the left (by catego
 Press `Ctrl+F` (`Config` > `Find Option...`) to search all options of all overlays, modules, the preset and the application, in English or in the current language (accents and case are ignored). Best matches come first, with the current value of each option; a dot marks options changed from their default.
 
 - Click a result (or `Enter`) to open it: the `Overlay Options` page or the `Config` page scrolled to the option, or a module page filtered on it.
-- On / off options have a switch in the list (or `Space`): the change is saved and applied at once.
+- On / off options have a switch in the list (or `Space`): the change is saved and applied at once, with `Undo` in the notice; `Ctrl+Z` / `Ctrl+Y` undo and redo switches and resets of the page.
 - The chips (`Overlays`, `Modules`, `Preset`, `Application`) narrow the results; `Changed only` lists every option set apart from its default, even without search words.
 - Right-click a result: `Reset to Default`, `Copy Option Key` (the name used in setting files and in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md)).
 

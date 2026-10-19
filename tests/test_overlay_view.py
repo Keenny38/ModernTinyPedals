@@ -567,11 +567,11 @@ def test_qml_imports_bundled_modules():
     """
     import re
 
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
     from neopedal.ui.quick.qml_modules import QML_MODULES
 
-    for name in ("Overlays.qml", "OverlayCard.qml", "OverlayListRow.qml", "OverlayChip.qml"):
-        with open(f"{QML_FOLDER}/{name}", encoding="utf-8") as file:
+    for name in ("Overlays.qml", "OverlayCard.qml", "OverlayListRow.qml", "TpClassStrip.qml"):
+        with open(qml_path(name), encoding="utf-8") as file:
             modules = re.findall(r"^import ([A-Za-z.]+)", file.read(), flags=re.MULTILINE)
         assert modules and all(module.replace(".", "/") in QML_MODULES for module in modules), (name, modules)
 

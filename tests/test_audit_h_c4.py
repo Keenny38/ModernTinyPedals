@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QMetaMethod, QObject
 
+from neopedal.ui.quick import qml_path
 from tests.test_lap_viewer_quick import backend  # noqa: F401
 
-QML_FOLDER = Path(__file__).resolve().parent.parent / "neopedal" / "ui" / "qml"
 # QML files of lap viewer page (backend context property is LapViewerBackend)
 LAP_VIEWER_QML = (
     "LapViewer", "CornerList", "GCircle", "LapFilter", "LapList", "MathChannels", "PlaybackBar", "RangeStats",
-    "SessionView", "SetupDiff", "ShowPicker", "SimpleView", "TraceChart", "XYView", "TrackMap",
+    "SessionView", "SetupDiff", "ShowPicker", "SimpleView", "TraceChart", "XYView", "TrackMap", "RecentlyDeleted",
 )
 
 
@@ -54,7 +54,7 @@ def test_qml_backend_names_resolve():
     parts = {name: meta_names(cls) for name, cls in part_classes().items()}
     missing = []
     for name in LAP_VIEWER_QML:
-        text = (QML_FOLDER / f"{name}.qml").read_text(encoding="utf-8")
+        text = Path(qml_path(f"{name}.qml")).read_text(encoding="utf-8")
         for match in re.finditer(r"\bbackend\.(\w+)(?:\.(\w+))?", text):
             member, sub = match.groups()
             if member not in root:

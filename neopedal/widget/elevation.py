@@ -23,12 +23,14 @@ Elevation Widget
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap
 
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
+from ..demo_state import drawing_demo
 from ..module_info import minfo
+from ..userfile.corner_coach import MapCorners, map_corners
 from ._base import Overlay
 from ._painter import fill_pixmap
 
@@ -94,6 +96,10 @@ class Realtime(Overlay):
         self.pen_text_elevation.setColor(self.wcfg["font_color_elevation_reading"])
         self.pen_text_scale = QPen()
         self.pen_text_scale.setColor(self.wcfg["font_color_elevation_scale"])
+        self.show_corner_numbers = self.wcfg["show_corner_numbers"]
+        if self.show_corner_numbers:
+            self.corner_voffset = font_m.voffset
+            self.pen_corner = QPen(self.wcfg["font_color_corner_numbers"])
 
         # Last data
         self.last_modified = 0
@@ -101,6 +107,8 @@ class Realtime(Overlay):
         self.map_scaled = None
         self.map_range = (0,10,0,10)
         self.map_scale = 1,1
+        self.map_path = QPainterPath()
+        self.map_corners: MapCorners | None = None  # official corners of recorded map (None: not placed yet)
 
         self.update_elevation(-1)
 
@@ -109,6 +117,12 @@ class Realtime(Overlay):
         # Elevation map
         modified = minfo.mapping.lastModified
         self.update_elevation(modified)
+        if self.show_corner_numbers and self.map_scaled:
+            corners = map_corners(api.read.session.track_name(), minfo.mapping, drawing_demo())
+            if corners is not None and corners is not self.map_corners:
+                self.map_corners = corners
+                self.draw_marks(self.map_path)
+                self.update()
 
         # Vehicle position
         # Whole pixels: repainted only when mark moves (not on every tick)
@@ -127,6 +141,8 @@ class Realtime(Overlay):
             self.last_modified = data
             raw_data = minfo.mapping.elevations if data != -1 else None
             map_path = self.create_elevation_path(raw_data)
+            self.map_path = map_path
+            self.map_corners = None  # placed again on new map
             self.draw_background(map_path)
             self.draw_progress(map_path)
             self.draw_progress_line(map_path)
@@ -336,3 +352,21 @@ class Realtime(Overlay):
             # scale * (0pos - min_range)
             zero_elevation = self.map_scale[1] * -self.map_range[2]
             painter.drawLine(0, zero_elevation, self.display_width, zero_elevation)
+
+        # Draw official corner numbers (or names), at bottom
+        if self.show_corner_numbers and self.map_scaled and self.map_corners:
+            painter.resetTransform()
+            painter.setViewport(0, 0, self.display_width, self.display_height)
+            painter.setFont(self.font())
+            painter.setPen(self.pen_corner)
+            metrics = QFontMetricsF(self.font())
+            last_right = -999.0
+            for corner, text in zip(self.map_corners.corners, self.map_corners.texts()):
+                width = metrics.horizontalAdvance(text) + 4
+                pos_x = (corner.distance - self.map_range[0]) * self.map_scale[0]
+                left = min(max(pos_x - width / 2, 0), self.display_width - width)
+                if left < last_right:  # over previous label
+                    continue
+                last_right = left + width
+                rect = QRectF(left, self.display_height - metrics.height() + self.corner_voffset, width, metrics.height())
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)

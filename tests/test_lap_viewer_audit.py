@@ -615,11 +615,11 @@ def test_qml_pages_without_warnings(viewer):  # noqa: F811
 
 def test_help_lists_every_map_key():
     from neopedal import i18n
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
 
-    with open(os.path.join(QML_FOLDER, "LapViewer.qml"), encoding="utf-8") as file:
+    with open(qml_path("LapViewer.qml"), encoding="utf-8") as file:
         help_text = file.read()
-    with open(os.path.join(QML_FOLDER, "TrackMap.qml"), encoding="utf-8") as file:
+    with open(qml_path("TrackMap.qml"), encoding="utf-8") as file:
         map_text = file.read()
     assert '["1-9", i18n.tr("Line coloring")]' in help_text and '["G", ' in help_text and '["X", ' in help_text
     assert "1-8" not in help_text and "1-8 coloring" not in map_text and "G off track, X track limits" in map_text

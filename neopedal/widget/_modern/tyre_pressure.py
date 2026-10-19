@@ -47,7 +47,7 @@ class Realtime(QuadMixin, ModernOverlay):
 
     options = (
         "font_size", "hot_pressure_temperature_threshold", "average_sampling_duration",
-        "show_pressure_deviation", "show_tyre_compound",
+        "show_pressure_deviation", "show_tyre_compound", "show_compound_color_by_type",
     )
 
     def __init__(self, config, widget_name):
@@ -57,7 +57,9 @@ class Realtime(QuadMixin, ModernOverlay):
         self.unit_pres = units.set_unit_pressure(pres_unit)
         self.text_width_chars = 3 + (pres_unit != "kPa")
         self.hot_temp = max(wcfg["hot_pressure_temperature_threshold"], 0)
-        self.compounds = TyreCompounds(False)
+        # Compound badges in compound color, else all on one neutral color (symbols only)
+        neutral = None if wcfg["show_compound_color_by_type"] else self.theme.surface_raised
+        self.compounds = TyreCompounds(False, badge_color=neutral)
         self.add_font("tiny", 0.5, "bold", caps=True)  # left & right compound badges
         self.show_compound = wcfg["show_tyre_compound"]
         self.show_deviation = wcfg["show_pressure_deviation"]

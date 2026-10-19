@@ -29,12 +29,14 @@ import logging
 import math
 import os
 from bisect import bisect_right
+from contextlib import suppress
 from dataclasses import dataclass
 
-from PySide6.QtCore import Property, Signal, Slot
+from PySide6.QtCore import Property, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QWidget
 
+from ... import app_signal
 from ... import calculation as calc
 from ...const_file import ConfigType, FileExt, FileFilter
 from ...i18n import tr, trm
@@ -43,7 +45,8 @@ from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
 from ..lap_viewer import distance_unit
 from ..track_map_geometry import config_grades, curve_at, curve_description, node_at
-from .game_pictures import notifier, track_logo_url
+from .formatting import format_date
+from .game_pictures import LogoCache, notifier
 from .lines import (
     VertexStore,
     Vertices,
@@ -150,6 +153,27 @@ def read_geometry(filepath: str, filename: str) -> MapGeometry | None:
     )
 
 
+def map_path(filepath: str, filename: str) -> str:
+    """Track map file path (key of track list & map shown)"""
+    return os.path.normpath(f"{filepath}{filename}{FileExt.SVG}")
+
+
+def is_map_file(path: str) -> bool:
+    """Existing file with track map file extension (content checked once read)"""
+    return path.lower().endswith(FileExt.SVG) and os.path.isfile(path)
+
+
+def list_track_maps(folder: str) -> list[tuple[str, float]]:
+    """Track map files of folder (worker thread): name & modified time, by name"""
+    try:
+        with os.scandir(folder) as entries:
+            maps = [(os.path.splitext(entry.name)[0], entry.stat().st_mtime) for entry in entries
+                    if entry.name.lower().endswith(FileExt.SVG) and entry.is_file()]
+    except OSError:  # folder missing (no map recorded yet) or unreadable
+        return []
+    return sorted(maps, key=lambda item: item[0].lower())
+
+
 def scaled_lines(geometry: MapGeometry, widths: dict[str, float], meters_per_pixel: float) -> dict[str, Vertices]:
     """Lines depending on map scale: road, outline, sectors, start & sector lines (by key name)"""
     xs, ys, line_normals = geometry.loop_xs, geometry.loop_ys, geometry.loop_normals
@@ -180,10 +204,14 @@ class TrackMapBackend(PageBackend):
     currentChanged = Signal()  # node at position (curve, slope & info) or curve nodes changed
     configChanged = Signal()
     loadingChanged = Signal()
+    tracksChanged = Signal()  # track maps of app folder changed, or their logos fetched from game
+    tracksLoadingChanged = Signal()
+    unitsChanged = Signal()  # distance unit setting changed (settings dialog) while page open
 
     def __init__(self, parent: QWidget):
         super().__init__(parent, "Track map viewer")
         notifier().changed.connect(self.logoChanged)
+        notifier().changed.connect(self.pictures_changed)
         self.mapChanged.connect(self.logoChanged)
         self._window = parent
         self.prefix = f"track_map_{id(self)}|"
@@ -191,6 +219,7 @@ class TrackMapBackend(PageBackend):
         self.raw_coords: list[tuple[float, float]] = []
         self.raw_dists: list[tuple[float, float]] = []
         self.sectors: tuple[int, int] = (0, 0)
+        self.map_file = ""  # path of map shown (map_path)
         self.map_name = ""
         self.map_length = 0.0
         self.curve_nodes = 10
@@ -202,13 +231,31 @@ class TrackMapBackend(PageBackend):
         self._meters_per_pixel = 1.0
         self._loading = False
         self._released = False
+        self._tracks: list[dict] = []  # track maps of app folder (picker)
+        self._tracks_loading = False
+        self.logos = LogoCache()  # circuit logos looked for once per name
         self.ecfg = cfg.user.config["track_map_viewer"]
         self.grades = config_grades(self.ecfg)
+        self._units = distance_unit()  # factor from meters & symbol of user distance unit
+        app_signal.refresh.connect(self.units_refresh)  # unit setting changed in settings dialog
+        self._units_connected = True
+        self.refreshTracks()
 
     def release_resources(self):
         self._released = True  # jobs still running: their result dropped
         self.geometry = None
         VertexStore.remove_prefix(self.prefix)
+        if self._units_connected:
+            self._units_connected = False
+            with suppress(RuntimeError, TypeError):
+                app_signal.refresh.disconnect(self.units_refresh)
+
+    def units_refresh(self, _changed: bool = True):
+        """Settings applied: distances shown in new unit, page told only if the distance unit changed"""
+        units = distance_unit()
+        if units != self._units:
+            self._units = units
+            self.unitsChanged.emit()
 
     def key(self, name: str) -> str:
         return self.prefix + name
@@ -227,10 +274,76 @@ class TrackMapBackend(PageBackend):
     def mapName(self) -> str:
         return self.map_name
 
+    # Track picker (TrackPicker.qml): track maps of app folder, map shown
+    @Property(list, notify=tracksChanged)
+    def tracks(self) -> list[dict]:
+        return self._tracks
+
+    @Property(bool, notify=tracksLoadingChanged)
+    def tracksLoading(self) -> bool:
+        """Track maps of app folder listed in background"""
+        return self._tracks_loading
+
+    @Property(str, notify=mapChanged)
+    def currentTrack(self) -> str:
+        return self.map_file
+
+    @Property(str, notify=mapChanged)
+    def currentLabel(self) -> str:
+        return self.map_name or tr("Choose a track map")
+
+    @Property(bool, constant=True)
+    def allTracks(self) -> bool:
+        return False
+
     @Property(str, notify=logoChanged)
-    def trackLogo(self) -> str:
+    def currentLogo(self) -> str:
         """Circuit logo of game for map name (track name)"""
-        return track_logo_url(self.map_name) if self.map_name else ""
+        return self.logos.track(self.map_name) if self.map_name else ""
+
+    @Slot()
+    def refreshTracks(self):
+        """Track maps of app folder listed again (page opened, picker opened: maps recorded meanwhile)"""
+        self.set_tracks_loading(True)
+        folder = cfg.path.track_map
+        self.jobs.run("list maps", lambda: list_track_maps(folder), self.tracks_listed, self.tracks_failed,
+                      key="tracks")
+
+    def tracks_listed(self, maps: list[tuple[str, float]]):
+        if self._released:
+            return
+        folder = cfg.path.track_map
+        tracks = [
+            {"key": map_path(folder, name), "label": name, "date": format_date(modified), "current": False,
+             "logo": self.logos.track(name)}
+            for name, modified in maps
+        ]
+        self.set_tracks_loading(False)
+        if tracks != self._tracks:  # list shown again only if changed (picker selection kept)
+            self._tracks = tracks
+            self.tracksChanged.emit()
+
+    def set_tracks_loading(self, loading: bool):
+        if loading != self._tracks_loading:
+            self._tracks_loading = loading
+            self.tracksLoadingChanged.emit()
+
+    def tracks_failed(self, error: BaseException):
+        logger.error("Track map viewer: unable to list maps", exc_info=(type(error), error, error.__traceback__))
+        self.tracks_listed([])
+
+    def pictures_changed(self):
+        """Logos fetched from game meanwhile (or theme changed): track list shown again if its logos changed"""
+        tracks = [dict(entry, logo=self.logos.track(entry["label"])) for entry in self._tracks]
+        if tracks != self._tracks:
+            self._tracks = tracks
+            self.tracksChanged.emit()
+
+    @Slot(str)
+    def selectTrack(self, key: str):
+        """Track map of list picked"""
+        if key and key != self.map_file:
+            self.load_file(key)
 
     @Property(float, notify=mapChanged)
     def length(self) -> float:
@@ -240,15 +353,15 @@ class TrackMapBackend(PageBackend):
     def nodes(self) -> int:
         return len(self.raw_coords)
 
-    @Property(str, notify=mapChanged)
+    @Property(str, notify=unitsChanged)
     def distanceUnit(self) -> str:
         """User distance unit symbol: m or ft"""
-        return distance_unit()[1]
+        return self._units[1]
 
-    @Property(float, notify=mapChanged)
+    @Property(float, notify=unitsChanged)
     def distanceScale(self) -> float:
         """User distance unit per meter"""
-        return distance_unit()[0]
+        return self._units[0]
 
     @Property(dict, notify=mapChanged)
     def view(self) -> dict:
@@ -316,7 +429,29 @@ class TrackMapBackend(PageBackend):
     def openMap(self):
         filename, _ = QFileDialog.getOpenFileName(self._window, dir=cfg.path.track_map, filter=FileFilter.SVG)
         if filename:
-            self.load_map(os.path.dirname(filename) + "/", os.path.splitext(os.path.basename(filename))[0])
+            self.load_file(filename)
+
+    @Slot(list, result=str)
+    def droppedMap(self, urls: list) -> str:
+        """Track map file among files dragged on page (file urls): first one with track map extension, "" if
+        none (drop refused)"""
+        for url in urls:
+            path = (url if isinstance(url, QUrl) else QUrl(str(url))).toLocalFile()
+            if path and is_map_file(path):
+                return path
+        return ""
+
+    @Slot(list, result=bool)
+    def openDropped(self, urls: list) -> bool:
+        """Files dropped on page: track map file loaded like one opened, False if none"""
+        path = self.droppedMap(urls)
+        if path:
+            self.load_file(path)
+        return bool(path)
+
+    def load_file(self, path: str) -> bool:
+        """Load track map file from its path (see load_map)"""
+        return self.load_map(os.path.dirname(path) + "/", os.path.splitext(os.path.basename(path))[0])
 
     def load_map(self, filepath: str, filename: str) -> bool:
         """Load track map file made by Mapping module (read in background), warning if missing or invalid
@@ -332,12 +467,16 @@ class TrackMapBackend(PageBackend):
         widths, scale = self.scaled_widths(), self._meters_per_pixel
 
         def work() -> tuple:
-            geometry = read_geometry(filepath, filename)
-            lines = scaled_lines(geometry, widths, scale) if geometry else {}
+            try:
+                geometry = read_geometry(filepath, filename)
+                lines = scaled_lines(geometry, widths, scale) if geometry else {}
+            except Exception:  # unreadable or broken file: warned like an invalid one, with its path
+                logger.exception("Track map viewer: unable to read map %s%s%s", filepath, filename, FileExt.SVG)
+                geometry, lines = None, {}
             return filepath, filename, geometry, lines, (widths, scale)
 
         self.set_loading(True)
-        self.jobs.run("read map", work, self.map_read, self.map_failed, key="map")
+        self.jobs.run("read map", work, self.map_read, key="map")
         return True
 
     def set_loading(self, loading: bool):
@@ -345,12 +484,8 @@ class TrackMapBackend(PageBackend):
             self._loading = loading
             self.loadingChanged.emit()
 
-    def map_failed(self, error: BaseException):
-        logger.error("Track map viewer: unable to read map", exc_info=(type(error), error, error.__traceback__))
-        self.map_read(("", self.map_name, None, {}, None))
-
     def map_read(self, result: tuple):
-        """Map read in background: shown (or warned if invalid)"""
+        """Map read in background: shown, or warned if invalid (map shown before kept)"""
         from PySide6.QtWidgets import QMessageBox
 
         if self._released:
@@ -358,17 +493,13 @@ class TrackMapBackend(PageBackend):
         self.set_loading(False)
         filepath, filename, geometry, lines, built_for = result
         if geometry is None:
-            self.geometry = None
-            self.raw_coords, self.raw_dists, self.map_name, self.map_length = [], [], "", 0.0
-            self._shown = None
-            VertexStore.remove_prefix(self.prefix)
-            self.mapChanged.emit()
             QMessageBox.warning(self._window, tr("Error"), trm(
                 "Unable to load track map file from<br>"
                 f"<b>{filepath}{filename}{FileExt.SVG}</b><br><br>"
                 "Only support SVG file that generated with NeoPedal."))
             return
         self.geometry = geometry
+        self.map_file = map_path(filepath, filename)
         self.raw_coords, self.raw_dists, self.sectors = geometry.coords, geometry.dists, geometry.sectors
         self.map_name, self.map_length = geometry.name, geometry.length
         self.corners, self.corners_numbered = geometry.corners, geometry.numbered

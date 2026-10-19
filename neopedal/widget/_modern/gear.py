@@ -327,11 +327,11 @@ class Realtime(ModernOverlay):
         )
 
     def limiter_state(self) -> int:
-        """Speed limiter on (switched on or active), or reminder: in pit lane with car limiter off"""
+        """Speed limiter switched on, or reminder: in pit lane with car limiter off"""
         if not self.wcfg["show_speed_limiter"]:
             return LIMITER_OFF
         switch = api.read.switch
-        if switch.speed_limiter() or switch.speed_limiter_active():
+        if switch.speed_limiter():
             return LIMITER_ON
         if (self.wcfg["show_speed_limiter_reminder"] and switch.speed_limiter_available()
                 and api.read.vehicle.in_pits() and api.read.vehicle.speed() > 1):

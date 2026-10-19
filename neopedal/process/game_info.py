@@ -37,6 +37,8 @@ import math
 import re
 from typing import Any, NamedTuple
 
+from ..const_common import SECTOR_FLAG_ORDER
+
 CHAT_TIME_SCALE = 1e-7  # chat timestamp unit: 100 ns
 IMMOVABLE = "Immovable"  # contact with track objects (walls, barriers)
 SAME_INCIDENT = 2.0  # seconds: contacts of the same cars this close are one incident
@@ -326,6 +328,16 @@ class SessionState(NamedTuple):
     wetness: float = -1.0  # average wetness of racing line (0 to 1)
 
 
+def sector_yellow_flags(flags: Any) -> tuple[bool, ...]:
+    """Yellow flag in sector 1 to 3 of sectorFlag list (game order, see SECTOR_FLAG_ORDER), () if unknown"""
+    if not isinstance(flags, list):
+        return ()
+    yellow = tuple("YELLOW" in str(flag).upper() for flag in flags)
+    if len(yellow) != len(SECTOR_FLAG_ORDER):
+        return yellow
+    return tuple(yellow[index] for index in SECTOR_FLAG_ORDER)
+
+
 def parse_session_state(info: Any) -> SessionState:
     """Phase, flags & weather of watch session info"""
     if not isinstance(info, dict):
@@ -342,7 +354,7 @@ def parse_session_state(info: Any) -> SessionState:
     return SessionState(
         phase=phase if isinstance(phase, int) and not isinstance(phase, bool) else -1,
         yellow=str(info.get("yellowFlagState") or "NONE").upper(),
-        sector_flags=tuple("YELLOW" in str(flag).upper() for flag in flags) if isinstance(flags, list) else (),
+        sector_flags=sector_yellow_flags(flags),
         air=value("ambientTemp", -999.0),
         track=value("trackTemp", -999.0),
         rain=value("raining", -1.0),

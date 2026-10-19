@@ -31,6 +31,7 @@ from PySide6.QtGui import QPainter
 
 from ... import units
 from ...api_control import api
+from ...template.setting_heatmap import HEATMAP_DEFAULT_TYRE
 from .._data import temperature_text
 from .base import DASH, ModernOverlay
 from .quad import QuadMixin, Section, Tile, heat_color
@@ -60,7 +61,7 @@ class Realtime(QuadMixin, ModernOverlay):
         self.leading_zero = min(max(int(wcfg.get("leading_zero", 2)), 1), 3)
         self.ico = wcfg.get("show_inner_center_outer", False)
         self.compounds = TyreCompounds(
-            wcfg.get("enable_heatmap_auto_matching", True), wcfg.get("heatmap_name", "tyre_default"),
+            wcfg.get("enable_heatmap_auto_matching", True), wcfg.get("heatmap_name", HEATMAP_DEFAULT_TYRE),
             wcfg.get("enable_heatmap_from_optimal_temperature", False),
         )
         self.add_font("tiny", 0.5, "bold", caps=True)  # left & right compound badges

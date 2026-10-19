@@ -78,6 +78,9 @@ OVERLAY_LABELS = MappingProxyType({
     "Avg": "Moy.",
     "Health": "État",
     "E/Lap": "É/tour",
+    "DR/SR": "DR/SR",
+    "Field DR/SR": "DR/SR plateau",
+    "SoF": "SoF",
     "Left": "Gauche",
     "Live": "Direct",
     "Live pos": "Pos. directe",
@@ -230,10 +233,14 @@ OVERLAY_LABELS = MappingProxyType({
     "Trend": "Tendance",
     # Graphic overlays (modern design)
     "Front slip": "Dérive AV",
+    "Front radius": "Rayon AV",
+    "Rear radius": "Rayon AR",
     "Yaw": "Lacet",
     # Flag (modern design)
     "Closed": "Fermée",
+    "Damage": "Dégâts",
     "Finish": "Arrivée",
+    "Heavy": "Lourds",
     "Leaders pit": "Stands leaders",
     "Low energy": "Énergie basse",
     "Low fuel": "Carburant bas",
@@ -262,4 +269,12 @@ OVERLAY_LABELS = MappingProxyType({
     "Detached": "Détachée",
     "Inner": "Int.",
     "Puncture": "Crevaison",
+    # Corner coach
+    "Apex": "Corde",
+    "Next": "Suivant",
+    "No braking": "Sans freinage",
+    "Now": "Freinez",
+    "On point": "Pile",
+    "early": "tôt",
+    "late": "tard",
 })

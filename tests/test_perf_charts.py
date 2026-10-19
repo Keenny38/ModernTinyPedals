@@ -87,7 +87,7 @@ def chart_view(ui_env, tmp_path):
     """Chart component in a QQuickWidget with app theme & translator"""
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from neopedal.ui.quick import QML_FOLDER, PageState, Theme, Translator, register_types, theme_copy
+    from neopedal.ui.quick import PageState, Theme, Translator, qml_folder_imports, register_types, theme_copy
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -97,7 +97,7 @@ def chart_view(ui_env, tmp_path):
         register_types()
         wrapper = tmp_path / f"wrapper{len(views)}.qml"
         wrapper.write_text(
-            f'import QtQuick\nimport "{QUrl.fromLocalFile(QML_FOLDER).toString()}"\n{body}\n', encoding="utf-8")
+            f'import QtQuick\n{qml_folder_imports()}\n{body}\n', encoding="utf-8")
         view = QQuickWidget()
         view.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
         context = view.rootContext()

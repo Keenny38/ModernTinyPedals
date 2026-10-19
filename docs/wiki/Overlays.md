@@ -1,6 +1,6 @@
 # Overlays
 
-NeoPedal has **88 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+NeoPedal has **93 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
 
 To give the settings of one overlay or of several to someone else, use `Share` on the `Overlays` page or in `Overlay Options`: see [Share overlay settings](Presets-and-Settings.md#share-overlay-settings).
 
@@ -21,10 +21,12 @@ Every overlay has a **modern design**:
 - standings as rows with a position badge, class pill and position in class, with selectable columns (`column_*` options of Relative, Standings and Rivals);
 - fuel and energy with a gauge and markers, tyres and brakes as tiles in heatmap colors, LEDs as glowing dots.
 - graphic overlays drawn for the design: round **radar** fading at its edge (amber, then red glow toward a car alongside), **track map** with cars as numbered dots in class colors (or race status colors) and a checkered start line, **navigation** view with road edge lines, **friction circle** with G rings, a trace fading with age and recent peaks, **heading** compass ring with yaw and front slip angle, drawn **steering wheel**, **instrument** and **weather forecast** icons drawn as shapes, **trailing** inputs with soft areas under throttle and brake, **track notes** card.
-- **flag** items as chips in flag colors (caption above value, only while active), **chat** feed with a color per sender and new messages highlighted, **elevation** profile with the driven part in accent color and the car as a dot, **race notifications** with an icon per message and a bar shrinking with the time left, **steering meter** growing from center with a thumb, **RPM LEDs** keeping a faint tint of their color zone while unlit, **spotter** bars glowing toward the screen center.
+- **flag** items as chips in flag colors (caption above value, only while active, alerts flashing when raised, most urgent first if wanted), **chat** feed with a color per sender and new messages highlighted, **elevation** profile with the driven part in accent color and the car as a dot, **race notifications** with an icon per message and a bar shrinking with the time left, **steering meter** growing from center with a thumb, **RPM LEDs** keeping a faint tint of their color zone while unlit, **spotter** bars glowing toward the screen center.
 - **Dashboard HUD** (formerly Black box) keeping its layout and options, in the Barlow font, theme colors and cards with a hairline border.
 
 The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them. In the Overlay Options page, Relative, Standings and Rivals list their columns in one `Columns` list, from left to right as the overlay draws them: switch each column on or off there, drag it or use the arrows to move it. Sections follow for the rows, the classes and number of cars (Standings), then the options of each column, dimmed while the column is hidden. The live preview of these three shows a sample race made with your list options.
+
+The modern design also reads these options of the classic layout: `trace_fade_out_step` (Friction Circle), `extra_digits` (Sectors), `show_inverted_delta_laptime_layout` (Relative, Standings, Rivals), `split_gap` (Standings), `reference_line_opacity` (Telemetry Compare), `leading_zero` (Speedometer), `show_compound_color_by_type` (Tyre Pressure) and `icon_size` (Weather Forecast). The classic layout has its own switches for the parts made for the modern design, off by default: `show_invalid_lap_highlight` (Timing, Delta Best, Laps & Position), `show_wind_speed` (Weather), `show_speed_limiter_pit_reminder` (Gear) and `show_game_overheating_highlight` (Engine, Engine Temperature).
 
 The **classic layout** is still available:
 
@@ -32,6 +34,10 @@ The **classic layout** is still available:
 - for one overlay: turn on its `enable_classic_layout` option (classic layout with modern colors).
 
 Other options of `Config` > `Overlay Style` (they apply to all presets): `enable_modern_font` (on: labels in `modern_design_font_name`, default `Barlow Semi Condensed`, and values in `modern_font_name`, default `JetBrains Mono`, monospace and bundled, also the font of classic layout overlays; off: each overlay in its own `font_name` option), `corner_radius_scale`, `enable_depth_effects`, `minimum_bar_gap`, `overlay_scale` (scale of all overlays) and `enable_fade_animation`.
+
+**Opacity of all overlays**: `overlay_opacity_percentage` makes every overlay more see-through at once, text included (`100` by default). It multiplies the `opacity` option of each overlay (right click › Opacity in edit mode), so `80` with an overlay at `0.9` shows it at 72%: one setting for all, each overlay keeps its own. It applies on screen, on stream and in VR.
+
+**Darker panels** (modern design): `background_opacity_percentage` sets the opacity of the overlay panels (`92` by default, `100` solid), and `enable_black_background` draws them in neutral black instead of the blue-tinted slate of the dark themes (Modern Light keeps its panels).
 
 ## Themes
 
@@ -54,7 +60,7 @@ The window of the app has the same four themes (`window_color_theme` in `Config`
 
 ## Visibility by session and pit
 
-- **Auto hide** (tray menu `Auto Hide`, on by default) hides every overlay when you are not driving. While you spectate a session or watch a replay, overlays are shown as long as a stream overlay source is on air (`Show overlays while spectating`, see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)).
+- **Auto hide** (tray menu `Auto Hide`, on by default) hides every overlay when you are not driving, in the garage too. While you spectate a session or watch a replay, overlays are kept on the stream as long as a stream overlay source is on air (`Show overlays while spectating`, see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)), but stay hidden on your screen and in VR. The `overlay_visibility` hotkey shows them on screen anyway.
 - Each overlay has a `visibility_context` option: `Always` (default), `Race`, `Qualifying & Race`, `Practice & Qualifying`, `On Track` or `In Pits`.
 - Overlays fade in and out when they appear or hide (`enable_fade_animation` in `Config` > `Overlay Style`).
 
@@ -84,6 +90,16 @@ The **Telemetry Compare** overlay (off by default, `Driver Inputs` category) com
 - `reference_lap_source`: `Viewer` (default) uses the lap set as reference in the Telemetry Viewer for the track and class (with a double-click or the flag button), `Best` the fastest valid recorded lap, `Last` the last recorded lap. Without a lap set in the viewer, the fastest valid lap is used. The reference lap is checked again every few seconds: a new best lap, or a reference changed in the viewer, is used while you drive.
 - Laps come from the [Recorder module](Telemetry-Viewer.md#lap-recording): drive a few laps first, `No reference lap` is shown until the track and class have one. The `Delta` module (on by default) keeps the charts moving smoothly between position updates of the game.
 
+## Corner Coach
+
+The **Corner Coach** overlay (off by default, `Driver Inputs` category) coaches you corner by corner against the same reference lap as Telemetry Compare (`reference_lap_source`: `Viewer`, `Best` or `Last`):
+
+- **Next**: the next corner, with its official number or name when the track has them (`T5`, `Tertre Rouge`), and the distance to its apex (`show_next_corner`).
+- **Brake**: distance to the braking point of the reference lap, then once you brake `On point`, `8 m early` or `8 m late` (`show_braking_point`; within `braking_point_tolerance`, `3` m by default, counts as on point), or `No braking` for a corner taken flat.
+- **Apex**: minimum speed of the corner you just left and its difference to the reference lap, green when faster (`show_apex_speed`).
+
+Corners are found once per reference lap, in the background. `No reference lap` is shown until the track and class have a recorded lap.
+
 ## Speed Delta
 
 The **Speed Delta** overlay (off by default, `Timing` category) shows your speed difference to four reference laps at the same place of the lap: all time best, session best, stint best and last lap. It is positive when you are faster (green in the modern design, red when slower) and smoothed over `speed_delta_smoothing_samples` samples (`10` by default).
@@ -98,6 +114,7 @@ The **Speed Delta** overlay (off by default, `Timing` category) shows your speed
 The **Driver Rank** overlay (off by default, `Timing` category, Le Mans Ultimate) shows your **Driver Rank (DR)** and **Safety Rank (SR)** as the game menu shows them (rank, tier and progress to the next tier), and your **track limits points** against the points allowed per penalty of the race (`1.25/5`; no limit in practice and qualifying, which have no penalty).
 
 - Ranks are read from the game folder (`coherent_local_storage.json`, written by the game menu, only read): they change once the game menu shows new ones, after an online race. A dash while they are unknown (game folder not found, never signed in online).
+- Recent game versions no longer keep ranks in that file while the game runs. To keep them up to date, keep `enable_online_driver_ranks` on (`Config` > `Application` > `Online`, on by default): the app reads your ranks from RaceControl the way the game menu does (sign-in with a Steam ticket of the running game, ranks only, nothing saved), at start, 30 s, 2 and 5 min after each session and every 5 minutes while the game runs. The Driver Stats card then says `Ranks of RaceControl, updated <date>`.
 - The game folder is found like for race results (folder chosen on the `Results` page, else your Steam libraries); you are found by the Steam account last signed in, else by your game profile name.
 - `show_progress` shows the progress to the next tier; each item can be shown or hidden (`show_driver_rank`, `show_safety_rank`, `show_track_limits`), with its own prefix and colors in the classic design. The modern design shows each rank in its color, with the progress as a bar.
 
@@ -118,22 +135,25 @@ Each part has its own on/off option (car body, wheel name, tyre drawing and its 
 
 ## Relative, Standings and Track Map
 
-- **Relative: `Gap Trend` column** (modern design, `column_gap_trend`, on by default): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
+- **Relative, Standings, Rivals: `Gap Trend` column** (modern design, `column_gap_trend`, on by default in Relative, off in Standings and Rivals): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
 - **Standings: class header** (modern design, `show_class_header`, on by default): in multi-class split mode, or with one class shown (`enable_single_class_exclusive_mode`), each class starts with its name in a colored pill; the class column is left out and the position badge shows the place in class.
 - **Standings: class order** (`class_order`, both designs): the order of the classes in multi-class split mode (Hypercar, LMP2, LMP3, GT3... by default). In `Overlay Options`, drag the classes or use the arrows; `Default Order` puts the default order back. Classes found in no list come after, fastest first.
 - **Standings: other classes**: `maximum_vehicles_per_split_others` takes any value from `0`; `0` hides the other classes.
 - **Relative, Standings, Rivals: lap time like a timing tower** (modern design): running time of the lap, then after the line the completed lap and the time behind personal best in turn (same place: narrow column), sector bars colored as the game live timing, `OUT` / `IN` laps, invalid lap in red, trend arrow.
-- **Relative, Standings, Rivals: pit status & stops in one column** (modern design): the pit status pill, then the pit stops count or the penalty.
+- **Relative, Standings, Rivals: pit status & stops in one column** (modern design): the pit stops count or the penalty, replaced by the pit status pill (pit lane, garage, slow, finished) while there is one: one narrow slot. `show_pit_stops_beside_status` shows both side by side (wider column).
 - **Relative, Standings, Rivals: real penalties** (Le Mans Ultimate): the pit stops column shows the penalty as the game gives it (`DT`, `SG10`, `+10s`, `DQ`, `+35s` added at finish) instead of `PEN` or `-1`.
 - **Standings: column labels** (modern design, `show_column_headers`, on by default): a row of short labels above the cars.
 - **Standings: gaps and intervals**: `Time Gap` is the gap to the leader (to the leader's best lap outside races), `Interval` the gap to the car ahead (best lap difference outside races). By class in multi-class split mode or with one class shown (`show_time_gap_from_same_class`, `show_time_interval_from_same_class`).
-- **Standings: `Energy per Lap` column** (modern design, Le Mans Ultimate, off by default): virtual energy each driver used in the last lap, or the average of the last 5 laps, for every car of the session.
-- **Standings: `Track limits` column** (modern design, Le Mans Ultimate, off by default): the track limits points of each driver, amber once any, red one point before the penalty in races.
+- **Relative, Standings: `Energy per Lap` column** (modern design, Le Mans Ultimate, off by default): virtual energy each driver used in the last lap, or the average of the last 5 laps, for every car of the session.
+- **Relative, Standings, Rivals: `Track limits` column** (modern design, Le Mans Ultimate, off by default): the track limits points of each driver, amber once any, red one point before the penalty in races.
+- **Relative, Standings, Rivals: `Driver & Safety Rank` column** (modern design, Le Mans Ultimate, `column_driver_ranks`, off by default): `S2 P3` in rank colors, dashes while unknown. Yours and your team members' always; every other driver's with `enable_online_driver_ranks` on: while the game is on an online server (practice, race, private server), the app asks RaceControl the profiles of the drivers of the session by name (drivers joining the session asked at once, known ones again every 5 minutes and after each session; drivers leaving are no longer shown). The game badge of each driver follows as its icon (`show_driver_badge`, on by default). The **Session** overlay can show the average of the field (`show_field_level`, `S3 · G1`), and Standings the strength of field of each class at the end of its class header (`show_class_sof`, `SoF S2 40% · G1 15%`).
 
 ![Standings: class header and class order](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
 
 - **Track map: sector performance** (modern design, `show_sector_performance`, on by default): each sector of the road is colored by your most recent time there, as the game live timing: purple for the best of your class in the session, green for your personal best, orange slower.
 - **Track map: nearby cars** (modern design, `show_nearby_vehicle_highlight`, on by default): cars less than `nearby_vehicle_threshold` (`1.0` s) ahead or behind get a ring.
+- **Track map, Elevation: corner numbers** (both designs, `show_corner_numbers`, off by default): the official corner numbers (or names, translated) of the track, beside each bend of the map and under the elevation profile. `V5` in French, so they never read as a car position.
+- **Relative: lap time delta column** (modern design, `column_delta_laptime`, off by default): the last laps of each car against yours, as in Standings and Rivals.
 
 ![Track map: sector performance colors and nearby cars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
 
@@ -157,7 +177,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Relative | Cars around you on track, with class, tyres, pit status, gaps and gap trend |
 | Relative Finish Order | Estimated finish order between the leader and you, with refuelling estimate |
 | Rivals | Cars ahead and behind you in your class |
-| Sectors | Sector times and gaps |
+| Sectors | Sector times and gaps; best sectors from the first lap, the out and in lap included (only the sectors through the pit lane or of a lap invalidated by the game are left out) |
 | Session | Clock, session name, time left, lap, position |
 | Speed Delta | Speed difference to the best, session best, stint best and last lap at the same place of the lap, see [above](#speed-delta) |
 | Standings | Classification with selectable columns, class headers and class order |
@@ -183,6 +203,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Tyre Temperature | Tyre surface temperature; optional heatmap centered on the LMU optimal temperature |
 | Tyre Wear | Tyre wear |
 | Wheel Camber | Wheel camber angle |
+| Wheel Dimension | Front and rear tyre radius measured while driving (Wheels module `enable_wheel_dimension_measurement`) |
 | Wheel Toe | Wheel toe angle |
 
 ### Brakes
@@ -201,6 +222,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 |---|---|
 | Pedal | Pedal inputs and force feedback; throttle & brake bars flash on TC, ABS, wheel lock & spin |
 | Telemetry Compare | Speed, pedals, steering and gear against the reference lap of the Telemetry Viewer, with delta |
+| Corner Coach | Next corner, braking point and apex speed against the reference lap of the Telemetry Viewer |
 | Steering Angle | Steering and wheel angle |
 | Steering Meter | Steering input |
 | Steering Wheel | Virtual steering wheel |
@@ -219,7 +241,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Fuel | Fuel usage, laps and minutes left, refuelling |
 | Fuel Energy Saver | Fuel or virtual energy saving targets |
 | Gear | Gear, RPM, speed, battery; speed limiter reminder |
-| Instrument | Vehicle instruments: headlights, ignition, clutch |
+| Instrument | Vehicle instruments: headlights, ignition (red while ignition and engine are off, amber while stalled), clutch |
 | Lift And Coast LED | Lift and coast, TC and ABS activation, wheel slip and lock |
 | Push To Pass | Push to pass (P2P) usage |
 | RPM LED | Shift lights |
@@ -250,7 +272,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Chat | In-game chat of LMU; `scroll_direction`: `Upward` (newest message at the bottom, default) or `Downward` (newest at the top); messages fade out at the end of their display time, also in the garage and menus |
 | Dashboard HUD | All-in-one view of the car (formerly Black box), see [below](#dashboard-hud) |
 | Elevation | Elevation profile of the track |
-| Flag | Flags, pit state, warnings, start lights |
+| Flag | Flags, pit state, warnings, start lights, penalty to serve, last lap, heavy damage, gap of the car lapping you under blue flag, speed limiter against the pit speed limit (and pit lane driven without it) |
 | Heading | Yaw angle, slip angle, heading |
 | Navigation | Zoomed map centered on your car |
 | Pace Notes | Pace notes and comments |
@@ -263,6 +285,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Traffic | Nearest cars closing in: slower car ahead, faster car behind |
 | Weather | Weather; wind in LMU |
 | Weather Forecast | Weather forecast |
+| Wind Direction | Compass turning with your car and arrow of where the wind blows (up: tailwind), colored by wind strength; a dot while calm (no wind simulated) |
 
 ### Other
 
@@ -271,7 +294,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Onboard Setting | ABS and TC levels (LMU) |
 | System Performance | CPU and memory usage of the system and of the app |
 
-Track Map, Navigation and Elevation need at least one complete, valid lap on the track: the Mapping module records the map. Brand logos (column `column_brand_logo` of Relative, Standings and Rivals, on by default and turned on once in existing presets) are the real logos of Le Mans Ultimate: the app takes them from the game running on your computer (Rest API access of `Config` > `Le Mans Ultimate API` on, the default) and keeps them in the `gameimage` folder, so they show up after the game was open once with the app. A PNG file of your own named after a brand in the `brandlogo` folder is shown instead; with rFactor 2, own files are the only logos. While a brand has no logo, its first letters are shown.
+Track Map, Navigation and Elevation need at least one complete, valid lap on the track: the Mapping module records the map (a node every `minimum_node_distance` meters, 5 by default; a lap with a jump, such as back to the garage, is not kept). The `Orient (°)` column of the Track info editor turns the map of one track in the Track Map overlay, added to `display_orientation`. Brand logos (column `column_brand_logo` of Relative, Standings and Rivals, on by default and turned on once in existing presets) are the real logos of Le Mans Ultimate: the app takes them from the game running on your computer (Rest API access of `Config` > `Le Mans Ultimate API` on, the default) and keeps them in the `gameimage` folder, so they show up after the game was open once with the app. A PNG file of your own named after a brand in the `brandlogo` folder is shown instead; with rFactor 2, own files are the only logos. While a brand has no logo, its first letters are shown.
 
 ## Dashboard HUD
 

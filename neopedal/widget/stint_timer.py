@@ -36,6 +36,7 @@ from PySide6.QtGui import QPainter
 
 from .. import calculation as calc
 from ..api_control import api
+from ..demo_state import drawing_demo
 from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
@@ -133,7 +134,9 @@ class StintTimerMixin:
         self.show_drivers = bool(wcfg["show_driver_times"])
         self.drivers_option = min(max(int(wcfg["number_of_drivers"]), 0), MAX_DRIVERS)
         self.minimum_drive = max(float(wcfg["minimum_driving_minutes"]), 0.0) * 60
-        self.driver_times = DRIVER_TIMES
+        # Pictures on simulated data (overlay previews) keep their own times: the shared ones are reset
+        # on any other session, so a preview would wipe the driving times of the running session
+        self.driver_times = DriverTimes() if drawing_demo() else DRIVER_TIMES
 
     def driver_rows(self) -> int:
         """Driver rows shown: number of drivers option, or drivers seen"""

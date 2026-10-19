@@ -754,19 +754,19 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
 
 def test_qml_page_translated(ui_env, monkeypatch, host):
     """Texts of the QML page in app language, every text of its QML files translated"""
-    import glob
+    import os
     import re
 
     from neopedal import i18n
     from neopedal.i18n.fr import TRANSLATION
     from neopedal.ui import race_calculator
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_files
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
-    for name in glob.glob(f"{QML_FOLDER}/Race*.qml"):
+    for name in sorted(path for path in qml_files() if os.path.basename(path).startswith("Race")):
         with open(name, encoding="utf-8") as file:
             missing += [text for text in pattern.findall(file.read()) if text not in TRANSLATION]
     assert not missing

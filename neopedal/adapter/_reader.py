@@ -27,9 +27,6 @@ from abc import ABC, abstractmethod
 from ..penalty_info import Penalty
 from ..process.weather import WeatherNode
 
-# Game index of sector 1, 2, 3 (game sector index 0 = sector 3)
-SECTOR_ORDER = (1, 2, 0)
-
 
 def signed_char(value: bytes | int) -> int:
     """Signed value of ctypes char (bytes) or byte field, shared by readers"""
@@ -502,7 +499,7 @@ class Session(ABC):
     def sector_yellow_flags(self) -> tuple[bool, bool, bool]:
         """Local yellow flag in sector 1, sector 2, sector 3
 
-        Game sector flag order assumed same as vehicle sector (game index 0 = sector 3).
+        Game sector flag order: see SECTOR_FLAG_ORDER.
         """
 
     @abstractmethod

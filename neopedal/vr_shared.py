@@ -690,6 +690,162 @@ def layer_digest(folder: str) -> str:
     return digest.hexdigest()
 
 
+# Owners trusted for a layer copy in a shared folder: current user, SYSTEM, Administrators (elevated app)
+TRUSTED_OWNER_SIDS = ("S-1-5-18", "S-1-5-32-544")
+SHARED_PARENTS_CHECKED = 2  # parents of a shared copy root checked (openxr_layer & app folders, base not)
+
+
+def _sid_text(advapi32: Any, kernel32: Any, sid: Any) -> str | None:
+    """String form of a SID pointer (S-1-5-...), None if not converted"""
+    text = ctypes.c_wchar_p()
+    if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+        return None
+    try:
+        return str(text.value)
+    finally:
+        kernel32.LocalFree(text)
+
+
+def _win_security() -> tuple[Any, Any]:
+    """advapi32 & kernel32 with the signatures used here (Windows only)"""
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p]
+    advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    advapi32.GetSecurityDescriptorDacl.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(wintypes.BOOL)]
+    advapi32.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+    advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    return advapi32, kernel32
+
+
+def current_user_sid() -> str | None:
+    """SID of the user running the app (S-1-5-21-...), None if unknown or not Windows"""
+    if not WINDOWS:
+        return None
+    from ctypes import wintypes
+
+    advapi32, kernel32 = _win_security()
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):  # TOKEN_QUERY
+        return None
+    try:
+        size = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser: size asked first
+        buffer = ctypes.create_string_buffer(max(size.value, ctypes.sizeof(ctypes.c_void_p)))
+        if not advapi32.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
+            return None
+        sid = ctypes.c_void_p.from_buffer(buffer).value  # TOKEN_USER starts with the SID pointer
+        return _sid_text(advapi32, kernel32, sid)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def path_owner_sid(path: str) -> str | None:
+    """SID of the owner of file or folder (Windows), None if not read"""
+    if not WINDOWS:
+        return None
+    advapi32, kernel32 = _win_security()
+    owner = ctypes.c_void_p()
+    descriptor = ctypes.c_void_p()
+    # SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION
+    if advapi32.GetNamedSecurityInfoW(path, 1, 1, ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)):
+        return None
+    try:
+        return _sid_text(advapi32, kernel32, owner)
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
+def trusted_owner(path: str) -> bool:
+    """File or folder owned by the user running the app (or SYSTEM, Administrators): never by another user, who
+    could change the layer DLL every OpenXR game of this user loads"""
+    if not WINDOWS:
+        getuid = getattr(os, "getuid", None)
+        return getuid is None or os.stat(path).st_uid in (getuid(), 0)
+    owner = path_owner_sid(path)
+    return owner is not None and (owner == current_user_sid() or owner in TRUSTED_OWNER_SIDS)
+
+
+def restrict_to_user(folder: str) -> None:
+    """Folder (& what it will hold) accessible by the user running the app only (SYSTEM & Administrators too):
+    access inherited from the shared base dropped (system drive root lets every user change subfolders)
+
+    Raises:
+        OSError: access not changed.
+    """
+    if not WINDOWS:
+        os.chmod(folder, 0o700)
+        return
+    from ctypes import wintypes
+
+    user = current_user_sid()
+    if user is None:
+        raise PermissionError(f"user unknown, access of {folder} not restricted")
+    advapi32, kernel32 = _win_security()
+    descriptor = ctypes.c_void_p()
+    sddl = f"D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"  # protected: nothing inherited
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
+        raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+    try:
+        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        dacl = ctypes.c_void_p()
+        if not advapi32.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present), ctypes.byref(dacl),
+                                                  ctypes.byref(defaulted)):
+            raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+        # SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        error = advapi32.SetNamedSecurityInfoW(folder, 1, 0x00000004 | 0x80000000, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)  # type: ignore[attr-defined]
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
+def secure_shared_root(root: str, parents: int = SHARED_PARENTS_CHECKED) -> None:
+    """Root of layer copies in a folder shared by every user (ProgramData, Public, system drive root) made or
+    checked: root & its parents owned by this user (a folder made first by another user, named after this user,
+    could have the DLL changed later), root accessible by this user only
+
+    Raises:
+        OSError: root or a parent owned by another user, or root not made.
+    """
+    def check_parents():
+        folder = root
+        for _ in range(parents):
+            folder = os.path.dirname(folder)
+            if os.path.isdir(folder) and not trusted_owner(folder):
+                raise PermissionError(f"{folder} owned by another user")
+
+    check_parents()
+    os.makedirs(root, exist_ok=True)
+    if not trusted_owner(root):
+        raise PermissionError(f"{root} owned by another user")
+    restrict_to_user(root)
+    check_parents()  # made meanwhile by another user
+
+
 def install_layer(manifest: str, root: str) -> str:
     """Copy layer files to their own subfolder of root, named after their content, returns its manifest
 
@@ -704,7 +860,9 @@ def install_layer(manifest: str, root: str) -> str:
     installed = os.path.join(folder, LAYER_MANIFEST)
     # Existing copy reused only with the same content: a folder of a shared root (ProgramData) could be
     # written by another user, its DLL would be loaded by every OpenXR game
-    if os.path.isfile(installed) and os.path.isfile(os.path.join(folder, LAYER_DLL)) and layer_digest(folder) == digest:
+    dll = os.path.join(folder, LAYER_DLL)
+    if (os.path.isfile(installed) and os.path.isfile(dll) and layer_digest(folder) == digest
+            and all(trusted_owner(path) for path in (folder, dll, installed))):  # owner: else changed later
         return installed
     os.makedirs(root, exist_ok=True)
     if os.path.isdir(folder):
@@ -822,6 +980,7 @@ def loadable_manifest(manifest: str, roots: Sequence[str] | None = None) -> str 
         if not root.isascii():
             continue
         try:
+            secure_shared_root(root)  # made by this user, for this user only (shared base): else next folder
             installed = install_layer(manifest, root)  # fails without write permission: next folder
         except OSError as error:
             logger.debug("VR overlay: OpenXR layer not copied to %s: %s", root, error)

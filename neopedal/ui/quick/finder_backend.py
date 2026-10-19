@@ -22,7 +22,8 @@ Find Option page backend (qml/OptionFinder.qml): ranked results with current val
 Results show the value of each option (on / off switch, color, number...), whether it differs from
 default, and the option description. On / off options switch right in the list; any result opens
 its settings page filtered on the option. Without search words, "Changed only" lists every option
-set apart from its default.
+set apart from its default. Switches & resets are saved and applied at once: undo & redo (Ctrl+Z,
+Ctrl+Y, Undo button of the notice) save and apply the previous value the same way.
 """
 
 from __future__ import annotations
@@ -30,24 +31,28 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QWidget
+from shiboken6 import isValid
 
 from ... import app_signal
 from ...const_file import ConfigType
-from ...i18n import tr
+from ...i18n import tr, trm
 from ...i18n.options import module_label, option_help, option_label
 from ...module_control import mctrl, wctrl
 from ...setting import cfg
 from .._common import run_after_saving
 from ..module_view import sort_key
 from ..option_finder import OptionEntry, cached_index, reload_function, search_options
+from ..toast import show_toast
 from .models import DictListModel
 from .option_kinds import KIND_BOOL, KIND_COLOR, display_text, value_kind
 
 MAX_SHOWN = 200
+HISTORY_LIMIT = 100  # undo steps kept
 GROUP_ALL = ""
 GROUPS = (  # filter chips: (config type, label)
     (ConfigType.WIDGET, "Overlays"),
@@ -67,8 +72,22 @@ ROLES = (
 )
 
 
+class Change(NamedTuple):
+    """Option value saved from this page (undo & redo step)"""
+
+    key: str  # entry key
+    before: Any
+    after: Any
+    preset: str  # preset the value is saved in, "" for application options
+
+
 def entry_key(entry: OptionEntry) -> str:
     return f"{entry.config_type}/{entry.section}/{entry.key}"
+
+
+def saved_in(entry: OptionEntry) -> str:
+    """Preset file holding entry value, "" for application options (config file)"""
+    return "" if entry.config_type == ConfigType.CONFIG else cfg.filename.setting
 
 
 def user_values(entry: OptionEntry) -> tuple[dict, dict]:
@@ -109,6 +128,7 @@ class FinderBackend(QObject):
 
     resultsChanged = Signal()
     filterChanged = Signal()
+    historyChanged = Signal()  # undo & redo
 
     def __init__(self, parent, open_option: Callable[[OptionEntry], Any]):
         super().__init__(parent)
@@ -122,6 +142,9 @@ class FinderBackend(QObject):
         self._changed_only = False
         self._found: list[OptionEntry] = []  # matching search & changed filter, all groups
         self._counts: dict[str, int] = {}
+        self._undo: list[Change] = []
+        self._redo: list[Change] = []
+        self._toast: QWidget | None = None  # notice shown last, replaced by the next one
         self.update_results()
 
     # Results
@@ -221,6 +244,14 @@ class FinderBackend(QObject):
     def searching(self) -> bool:
         return bool(self._words) or self._changed_only
 
+    @Property(bool, notify=historyChanged)
+    def canUndo(self) -> bool:
+        return bool(self._undo)
+
+    @Property(bool, notify=historyChanged)
+    def canRedo(self) -> bool:
+        return bool(self._redo)
+
     # Filters
     @Slot(str)
     def setSearch(self, text: str):
@@ -262,7 +293,9 @@ class FinderBackend(QObject):
         values, defaults = user_values(entry) if entry is not None else ({}, {})
         if entry is None or value_kind(entry.key, defaults.get(entry.key)).kind != KIND_BOOL:
             return
-        self.set_value(entry, not bool(values.get(entry.key)))
+        switched_on = not bool(values.get(entry.key))
+        if self.set_value(entry, switched_on):
+            self.notify(trm(f"{self.change_name(entry)} {'switched on' if switched_on else 'switched off'}"), True)
 
     @Slot(str)
     def resetOption(self, key: str):
@@ -271,8 +304,8 @@ class FinderBackend(QObject):
         if entry is None:
             return
         _, defaults = user_values(entry)
-        if entry.key in defaults:
-            self.set_value(entry, defaults[entry.key])
+        if entry.key in defaults and self.set_value(entry, defaults[entry.key]):
+            self.notify(trm(f"{self.change_name(entry)} back to default"), True)
 
     @Slot(str)
     def copyKey(self, key: str):
@@ -281,12 +314,24 @@ class FinderBackend(QObject):
         clipboard = QGuiApplication.clipboard()
         if entry is not None and clipboard is not None:
             clipboard.setText(entry.key)
+            self.notify(tr("Copied"))  # told: nothing else shows the copy
 
-    def set_value(self, entry: OptionEntry, value: Any):
-        """Save option value & apply it (overlay or module restarted, app reloaded for global options)"""
+    def set_value(self, entry: OptionEntry, value: Any, record: bool = True) -> bool:
+        """Save option value & apply it (overlay or module restarted, app reloaded for global options),
+        False if already set
+
+        Args:
+            record: new change, undo step added (not when undone or redone).
+        """
         values, _ = user_values(entry)
-        if values.get(entry.key) == value:
-            return
+        before = values.get(entry.key)
+        if before == value:
+            return False
+        if record:
+            self._undo.append(Change(entry_key(entry), before, value, saved_in(entry)))
+            del self._undo[:-HISTORY_LIMIT]
+            self._redo.clear()
+            self.historyChanged.emit()
         control = wctrl if entry.config_type == ConfigType.WIDGET else mctrl
         if entry.key == "enable" and entry.config_type in (ConfigType.WIDGET, ConfigType.MODULE):
             control.toggle(entry.section)  # started or stopped, saved
@@ -299,3 +344,57 @@ class FinderBackend(QObject):
                 cfg.save(0)
             run_after_saving(reload_function(entry))
         self.update_results()
+        return True
+
+    # Undo & redo
+    @Slot()
+    def undo(self):
+        """Last change reverted: previous value saved & applied"""
+        self.step(self._undo, self._redo, undo=True)
+
+    @Slot()
+    def redo(self):
+        self.step(self._redo, self._undo, undo=False)
+
+    def step(self, source: list[Change], target: list[Change], undo: bool):
+        """Change of source set back (undo) or again (redo), moved to target
+
+        A change whose option was set elsewhere meanwhile (other page, other preset loaded) is dropped,
+        not reverted from here.
+        """
+        while source:
+            change = source.pop()
+            entry = self.entry(change.key)
+            current, value = (change.after, change.before) if undo else (change.before, change.after)
+            if entry is None or change.preset != saved_in(entry) or user_values(entry)[0].get(entry.key) != current:
+                continue
+            target.append(change)
+            self.set_value(entry, value, record=False)
+            name = self.change_name(entry)
+            self.notify(trm(f"Undone: {name}" if undo else f"Redone: {name}"))
+            break
+        self.historyChanged.emit()
+
+    def undo_change(self, change: Change):
+        """Undo button of a notice: its change reverted if it is still the last one (page not released)"""
+        if isValid(self) and self._undo and self._undo[-1] is change:
+            self.undo()
+
+    # Notices
+    @staticmethod
+    def change_name(entry: OptionEntry) -> str:
+        return f"<b>{html.escape(option_label(entry.key))}</b> ({html.escape(module_label(entry.section))})"
+
+    def notify(self, text: str, undoable: bool = False):
+        """Notice at bottom of page (replaces the previous one), Undo button for a new change"""
+        page = self.parent()
+        if not isinstance(page, QWidget):
+            return
+        if self._toast is not None and isValid(self._toast):
+            self._toast.close()
+        if undoable:
+            change = self._undo[-1]
+            self._toast = show_toast(
+                page, text, action_text=tr("Undo (Ctrl+Z)"), action=lambda: self.undo_change(change))
+        else:
+            self._toast = show_toast(page, text)

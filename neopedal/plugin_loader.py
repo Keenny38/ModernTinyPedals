@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import safe_mode
 from .const_app import LEGACY_PACKAGE
-from .userfile import write_json
+from .userfile import app_path, write_json
 from .validator import is_finite_number
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PLUGIN_FOLDER = "plugins"
+PLUGIN_FOLDER = app_path("plugins")  # next to NeoPedal, whatever the working folder (default of folder arguments)
 PLUGIN_PREFIX = "plugin_"
 PLUGIN_BASE_DEFAULT = MappingProxyType({
     "enable": False,
@@ -96,8 +96,9 @@ SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart NeoPedal to load it"
 BUNDLED_PLUGINS: MappingProxyType[str, str] = MappingProxyType({})
 
 
-def discover_plugins(folder: str = PLUGIN_FOLDER) -> dict[str, str]:
+def discover_plugins(folder: str = "") -> dict[str, str]:
     """Find plugin folders, returns widget name: plugin folder path"""
+    folder = folder or PLUGIN_FOLDER
     plugins: dict[str, str] = {}
     if not os.path.isdir(folder):
         return plugins
@@ -115,7 +116,7 @@ def discover_plugins(folder: str = PLUGIN_FOLDER) -> dict[str, str]:
     return plugins
 
 
-def load_plugin_defaults(folder: str = PLUGIN_FOLDER) -> dict[str, dict]:
+def load_plugin_defaults(folder: str = "") -> dict[str, dict]:
     """Load plugin default settings, invalid plugin is skipped"""
     defaults: dict[str, dict] = {}
     for widget_name, path in discover_plugins(folder).items():
@@ -160,9 +161,9 @@ def valid_plugin_setting(widget_name: str, setting: dict) -> dict:
     return valid
 
 
-def plugin_path(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
+def plugin_path(widget_name: str, folder: str = "") -> str:
     """Plugin folder path from widget name"""
-    return os.path.join(folder, widget_name[len(PLUGIN_PREFIX):])
+    return os.path.join(folder or PLUGIN_FOLDER, widget_name[len(PLUGIN_PREFIX):])
 
 
 def plugin_code_files(path: str) -> list[str]:
@@ -234,7 +235,7 @@ def load_trusted() -> dict[str, str]:
     return {str(name): str(digest) for name, digest in data.items()}
 
 
-def is_trusted(widget_name: str, folder: str = PLUGIN_FOLDER) -> bool:
+def is_trusted(widget_name: str, folder: str = "") -> bool:
     """Check if plugin code matches trusted digest"""
     return is_trusted_digest(widget_name, plugin_digest(plugin_path(widget_name, folder)))
 
@@ -244,7 +245,7 @@ def is_trusted_digest(widget_name: str, digest: str) -> bool:
     return digest in (BUNDLED_PLUGINS.get(widget_name), load_trusted().get(widget_name))
 
 
-def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER, expected_digest: str | None = None) -> str:
+def trust_plugin(widget_name: str, folder: str = "", expected_digest: str | None = None) -> str:
     """Trust current plugin code, returns digest
 
     Args:
@@ -295,7 +296,7 @@ def install_legacy_package_finder() -> None:
         sys.meta_path.insert(0, LegacyPackageFinder())  # before path finder: never a second copy of a module
 
 
-def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLDER) -> ModuleType:
+def load_plugin_widget(package: str, widget_name: str, folder: str = "") -> ModuleType:
     """Load plugin widget module as "<package>.<widget_name>", or error placeholder if failed
 
     Code is read once: digest checked & code run from the same bytes (never from bytecode).
@@ -381,7 +382,7 @@ def error_placeholder(module_name: str, widget_name: str, message: str) -> Modul
     return placeholder
 
 
-def install_plugin_package(zip_filename: str, folder: str = PLUGIN_FOLDER) -> str:
+def install_plugin_package(zip_filename: str, folder: str = "") -> str:
     """Install plugin from zip (one top folder with widget.py & setting.json), returns widget name
 
     Raises:
@@ -391,7 +392,7 @@ def install_plugin_package(zip_filename: str, folder: str = PLUGIN_FOLDER) -> st
     import zipfile
 
     try:
-        return _install_plugin_package(zip_filename, folder)
+        return _install_plugin_package(zip_filename, folder or PLUGIN_FOLDER)
     except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, NotImplementedError, EOFError) as error:
         # corrupt, encrypted (RuntimeError) or unsupported compression (NotImplementedError) package
         raise ValueError(f"invalid package: {error}") from error

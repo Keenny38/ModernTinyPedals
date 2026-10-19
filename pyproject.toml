@@ -1,27 +1,14 @@
 [project]
 name = "neopedal"
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
 description = "Free and Open Source telemetry overlay application for racing simulation"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.11"
-dependencies = [
-    "cryptography>=43",
-    "psutil>=6.1",
-    "PySide6>=6.8,<6.12",  # 6.12.0: refcount error on Python 3.11
-    "pyxdg; sys_platform == 'linux'",
-]
 
+# One source per list: runtime ranges in requirements.txt (tool.setuptools.dynamic), development tools in
+# requirements-dev.txt, pinned runtime of release builds in requirements-lock.txt (Checks use it as constraints)
 [project.optional-dependencies]
-dev = [
-    "pytest>=8",
-    "pytest-cov>=6",
-    "pytest-timeout>=2",
-    "pytest-xdist>=3",
-    "pre-commit>=3",
-    "ruff>=0.6",
-    "mypy>=1.10",
-]
 build = [
     "pyinstaller>=6.10",
 ]
@@ -49,6 +36,7 @@ include = ["neopedal*", "pyLMUSharedMemory*", "pyRfactor2SharedMemory*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "neopedal.version.__version__" }
+dependencies = { file = ["requirements.txt"] }
 
 [tool.ruff]
 target-version = "py311"

@@ -330,6 +330,7 @@ def calc_consumption(
                 used_curr += amount_diff
             else:  # pitstop refilling check
                 amount_start = amount_curr
+                amount_diff = 0.0  # refilled, not a negative consumption rate
             amount_last = amount_curr
         elif amount_last > amount_curr:
             used_curr += amount_diff

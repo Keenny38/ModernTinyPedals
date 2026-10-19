@@ -238,8 +238,8 @@ def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
     monkeypatch.setattr(os, "replace", replace)
     library.tree.topLevelItem(0).setSelected(True)
     library.delete()  # was: exception out of the slot, first files gone, viewer not told
+    wait_library(library)  # files moved on a worker thread
     monkeypatch.setattr(os, "replace", real_replace)
-    wait_library(library)
     assert warnings and "file in use" in warnings[0]
     assert [entry.file.path for entry in viewer.backend.external] == [paths[0]]  # deleted one forgotten only
     assert library.tree.topLevelItem(0).childCount() == 1 and library.button_undo.isVisibleTo(library)
@@ -395,6 +395,7 @@ def test_replay_link_of_imported_and_interrupted(backend, tmp_path, monkeypatch)
     from neopedal import replay
     from neopedal.replay import ReplayInfo
     from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.lap_backend import find_replay
 
     times = [index * 0.5 for index in range(181)]
     columns: dict = {"lap_time": times, "distance": [t * 30 for t in times]}
@@ -410,7 +411,8 @@ def test_replay_link_of_imported_and_interrupted(backend, tmp_path, monkeypatch)
     def target(meta: dict):
         lap = PlotLap(str(tmp_path / name), "lap", LapData(name, columns, meta), QColor("red"))
         backend.data.set_laps([lap])
-        return backend.replay_target(lap, 0.0)
+        moment = backend.replay_moment(lap, 0.0)
+        return None if moment is None else find_replay(str(tmp_path), *moment)
 
     assert target({}) is None  # interrupted replay no longer assumed 24 h long
     os.utime(interrupted, (end + 10, end + 10))

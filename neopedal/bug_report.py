@@ -35,6 +35,7 @@ from time import localtime, strftime
 from typing import Any, NamedTuple
 
 from . import version_check
+from .command_server import redact_secret_query
 from .const_app import APP_NAME
 from .const_file import LogFile
 from .log_handler import ERROR_LOG_FILE
@@ -47,12 +48,12 @@ MAX_LOG_SIZE = 5 * 1024 * 1024
 
 
 def redact_text(text: str) -> str:
-    """Remove user home folder from text"""
+    """Remove user home folder and access code & token query values (logged URL) from text"""
     home = os.path.expanduser("~")
     if len(home) > 3:
         for variant in {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}:
             text = text.replace(variant, "~")
-    return text
+    return redact_secret_query(text)
 
 
 def redact_setting(data):

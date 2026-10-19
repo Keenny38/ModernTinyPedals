@@ -270,7 +270,7 @@ def test_delete_while_loading(backend, monkeypatch):
     backend.load_laps()
     backend.deleteLaps([first, third])
     wait_loaded(backend)
-    assert not os.path.exists(first) and not os.path.exists(third) and len(backend._undo) == 2
+    assert not os.path.exists(first) and not os.path.exists(third) and len(backend._undo[-1]) == 2
     assert backend.undoText.endswith("(2)")
     backend.undoDelete()
     wait_loaded(backend)

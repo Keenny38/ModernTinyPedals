@@ -21,6 +21,7 @@ Flag Widget
 """
 
 from collections.abc import Mapping
+from math import isfinite
 from typing import TYPE_CHECKING, Any
 
 from .. import calculation as calc
@@ -28,7 +29,9 @@ from .. import units
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import minfo
+from ..penalty_info import label as penalty_label
 from ._base import Overlay
+from ._common import player_race_laps
 from ._data import run_laps
 
 if TYPE_CHECKING:
@@ -37,7 +40,13 @@ if TYPE_CHECKING:
 # Full course yellow state (game) -> text after prefix: 1 pending, 2 pits closed, 3 pits open
 # for lead lap cars, 4 pits open, 5 last lap, 6 resume, 7 race halt (red flag)
 FCY_PHASES = {1: "", 2: "", 3: " LDR", 4: " PIT", 5: " END", 6: " GO", 7: " RED"}
-
+SPEED_TOLERANCE = 0.2  # m/s over pit speed limit still under it (limiter oscillation)
+BLUE_GAP_MAX = 30.0  # seconds: blue flag shows gap of car behind up to this, else time under blue flag
+# Speed limiter state
+LIMITER_HIDDEN = 0
+LIMITER_ON = 1
+LIMITER_OVER = 2  # on, over pit speed limit in pit lane
+LIMITER_OFF = 3  # pit lane driven without limiter
 
 
 def is_low_amount(wcfg: Mapping[str, Any], energy: bool, amount: float, laps: float, consumption: float) -> bool:
@@ -48,6 +57,77 @@ def is_low_amount(wcfg: Mapping[str, Any], energy: bool, amount: float, laps: fl
     if energy:
         return amount <= wcfg["low_energy_percentage_threshold"]
     return amount <= wcfg["low_fuel_volume_threshold"]
+
+
+def pit_speed_limit() -> float:
+    """Pit speed limit (m/s, measured on track with limiter on), 0 if unknown"""
+    limit = minfo.mapping.pitSpeedLimit
+    return limit if isfinite(limit) and limit > 0 else 0.0
+
+
+def pending_penalty() -> str:
+    """Penalty to serve (DT, SG10, PEN x2...), "" if none (disqualification shown by finish state)"""
+    penalty = api.read.vehicle.penalty()
+    count = api.read.vehicle.number_penalties()
+    if penalty.disqualified or not (penalty.pending or count > 0):
+        return ""
+    return penalty_label(penalty._replace(added=0), count)
+
+
+def on_last_lap(in_race: bool) -> bool:
+    """Race lap of player ending with the flag (white flag): same finish lap as Laps and position & Session"""
+    if not in_race or api.read.session.pre_race() or api.read.vehicle.finish_state():
+        return False
+    laps_done, finish_lap = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
+    return 0 < finish_lap - laps_done <= 1  # laps done: completed laps + lap progress
+
+
+def heavy_damage() -> float | None:
+    """Car heavily damaged (dented body part, detached part or wheel): aero damage fraction (-1 unknown),
+    None if not"""
+    if (max(api.read.vehicle.damage_severity(), default=0) < 2 and not api.read.vehicle.is_detached()
+            and not any(api.read.wheel.is_detached())):
+        return None
+    aero = api.read.vehicle.aero_damage()
+    return aero if isfinite(aero) and aero >= 0 else -1.0
+
+
+def blue_flag_gap() -> float:
+    """Time gap (seconds) of nearest car behind (the one lapping under blue flag), MAX_SECONDS if too far"""
+    gap = minfo.vehicles.nearestTraffic
+    return gap if 0 <= gap < BLUE_GAP_MAX else MAX_SECONDS
+
+
+class PitLimiterWatch:
+    """Speed limiter state: on (over pit speed limit in pit lane), or pit lane driven without it from lane entry
+    (or garage exit) until switched on, so limiter released at lane exit is no warning"""
+
+    __slots__ = ("_engaged",)
+
+    def __init__(self):
+        self._engaged = False
+
+    def update(self) -> int:
+        """Speed limiter state (LIMITER_*)"""
+        in_lane = api.read.vehicle.in_paddock() == 1
+        limiter_on = bool(api.read.switch.speed_limiter())  # pit limiter switch (not rev limiter cut)
+        if not in_lane:
+            self._engaged = False
+            return LIMITER_ON if limiter_on else LIMITER_HIDDEN
+        if limiter_on:
+            self._engaged = True
+            limit = pit_speed_limit()
+            if limit and api.read.vehicle.speed() > limit + SPEED_TOLERANCE:
+                return LIMITER_OVER
+            return LIMITER_ON
+        if not self._engaged and api.read.switch.speed_limiter_available() and api.read.vehicle.speed() > 1:
+            return LIMITER_OFF
+        return LIMITER_HIDDEN
+
+    def reset(self):
+        """Reset"""
+        self._engaged = False
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -126,6 +206,10 @@ class Realtime(Overlay):
         # Speed limiter
         if self.wcfg["show_speed_limiter"]:
             self.decimals_speed = max(self.wcfg["decimal_places_speed"], 0)
+            self.bar_style_limiter = (
+                (self.wcfg["font_color_speed_limiter"], self.wcfg["background_color_speed_limiter"]),
+                (self.wcfg["font_color_speed_limiter_over"], self.wcfg["background_color_speed_limiter_over"]),
+            )
             self.bar_limiter = self.set_rawtext(
                 text=self.wcfg["speed_limiter_text"],
                 width=bar_width,
@@ -288,6 +372,51 @@ class Realtime(Overlay):
                 column=self.wcfg["display_order_full_course_yellow"],
             )
 
+        # Penalty to serve
+        if self.wcfg["show_penalty"]:
+            self.bar_penalty = self.set_rawtext(
+                text="PENALTY",
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_penalty"],
+                bg_color=self.wcfg["background_color_penalty"],
+            )
+            self.set_primary_orient(
+                target=self.bar_penalty,
+                column=self.wcfg["display_order_penalty"],
+            )
+
+        # Last lap (white flag)
+        if self.wcfg["show_last_lap"]:
+            self.bar_last_lap = self.set_rawtext(
+                text=self.wcfg["last_lap_text"],
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_last_lap"],
+                bg_color=self.wcfg["background_color_last_lap"],
+            )
+            self.set_primary_orient(
+                target=self.bar_last_lap,
+                column=self.wcfg["display_order_last_lap"],
+            )
+
+        # Heavy damage
+        if self.wcfg["show_damage"]:
+            self.bar_damage = self.set_rawtext(
+                text="DAMAGE",
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_damage"],
+                bg_color=self.wcfg["background_color_damage"],
+            )
+            self.set_primary_orient(
+                target=self.bar_damage,
+                column=self.wcfg["display_order_damage"],
+            )
+
         # Last data
         self.pit_timer = PitTimer(self.wcfg["pit_time_highlight_duration"])
         self.green_timer = GreenFlagTimer(self.wcfg["green_flag_duration"])
@@ -298,12 +427,14 @@ class Realtime(Overlay):
             self.wcfg["traffic_low_speed_threshold"],
             self.wcfg["show_traffic_while_off_track"],
         )
+        self.limiter_watch = PitLimiterWatch()
 
     def post_update(self):
         self.pit_timer.reset()
         self.blue_timer.reset()
         self.traffic_timer.reset()
         self.green_timer.reset()
+        self.limiter_watch.reset()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -327,11 +458,7 @@ class Realtime(Overlay):
 
         # Pit limiter
         if self.wcfg["show_speed_limiter"]:
-            limiter_state: float = api.read.switch.speed_limiter() or api.read.switch.speed_limiter_active()
-            show_speed = self.wcfg["show_current_speed_while_limiter_on"]
-            if limiter_state and show_speed:
-                limiter_state = api.read.vehicle.speed() + 0.0000001
-            self.update_limiter(self.bar_limiter, limiter_state, show_speed)
+            self.update_limiter(self.bar_limiter, self.limiter_watch.update())
 
         # Blue flag
         if self.wcfg["show_blue_flag"]:
@@ -370,7 +497,7 @@ class Realtime(Overlay):
 
         # Sector yellow flags
         if self.wcfg["show_sector_yellow_flags"]:
-            if not self.wcfg["show_yellow_flag_for_race_only"] or in_race:
+            if not self.wcfg["show_sector_yellow_flags_for_race_only"] or in_race:
                 sectors = api.read.session.sector_yellow_flags()
             else:
                 sectors = (False, False, False)
@@ -379,6 +506,18 @@ class Realtime(Overlay):
         # Full course yellow
         if self.wcfg["show_full_course_yellow"]:
             self.update_fcy(self.bar_fcy, api.read.session.yellow_flag_state())
+
+        # Penalty to serve
+        if self.wcfg["show_penalty"]:
+            self.update_penalty(self.bar_penalty, pending_penalty())
+
+        # Last lap
+        if self.wcfg["show_last_lap"]:
+            self.update_last_lap(self.bar_last_lap, on_last_lap(in_race))
+
+        # Heavy damage
+        if self.wcfg["show_damage"]:
+            self.update_damage(self.bar_damage, heavy_damage())
 
     # GUI update methods
     def update_pit_timer(self, target, data):
@@ -431,23 +570,35 @@ class Realtime(Overlay):
                 target.state = hidden
                 target.setHidden(hidden)
 
-    def update_limiter(self, target, data, show_speed: bool):
+    def limiter_text(self, state: int) -> str:
+        """Speed limiter text: off warning, current speed or difference to pit speed limit, else prefix"""
+        wcfg = self.wcfg
+        if state == LIMITER_OFF:
+            return wcfg["speed_limiter_off_text"]
+        prefix = wcfg["speed_limiter_text"]
+        if not wcfg["show_current_speed_while_limiter_on"]:
+            return prefix
+        speed = api.read.vehicle.speed()
+        limit = pit_speed_limit()
+        if wcfg["show_speed_limit_difference"] and limit:
+            value = f"{self.unit_speed(speed - limit):+.{self.decimals_speed}f}"
+        else:
+            value = f"{self.unit_speed(speed):.{self.decimals_speed}f}"
+        if prefix:
+            return f"{prefix}{value:>6.6}"
+        return f"{value:.7}"
+
+    def update_limiter(self, target, state: int):
         """Speed limiter, keyed on text shown (speed changes too small to show never repaint)"""
-        text_limiter = ""
-        if data and show_speed:
-            speed = f"{self.unit_speed(data):.{self.decimals_speed}f}"
-            prefix = self.wcfg["speed_limiter_text"]
-            if prefix:
-                text_limiter = f"{prefix}{speed:>6.6}"
-            else:
-                text_limiter = f"{speed:.7}"
-        shown = (bool(data), text_limiter)
+        if state == LIMITER_OFF and not self.wcfg["show_speed_limiter_off_warning"]:
+            state = LIMITER_HIDDEN
+        shown = (state, self.limiter_text(state) if state else "")
         if target.last != shown:
             target.last = shown
-            if data:
-                if show_speed:
-                    target.text = text_limiter
-                    target.update()
+            if state:
+                target.text = shown[1]
+                target.fg, target.bg = self.bar_style_limiter[state != LIMITER_ON]
+                target.update()
                 hidden = False
             else:
                 hidden = True
@@ -456,18 +607,26 @@ class Realtime(Overlay):
                 target.state = hidden
                 target.setHidden(hidden)
 
+    def blue_flag_text(self, seconds: float) -> str:
+        """Class of car lapping (4 characters) & its time gap, or time under blue flag"""
+        class_name = minfo.vehicles.nearestBlueClass
+        class_style = self.cfg.user.classes.get(class_name)
+        if class_style is not None:
+            class_name = class_style["alias"]
+        if not class_name:
+            class_name = "BLUE"
+        gap = blue_flag_gap() if self.wcfg["show_blue_flag_gap"] else MAX_SECONDS
+        if gap == MAX_SECONDS:
+            return f"{class_name:<4.4}{seconds:3.0f}"
+        return f"{class_name:<4.4}{gap:3.1f}" if gap < 9.95 else f"{class_name:<4.4}{gap:3.0f}"
+
     def update_blueflag(self, target, data):
-        """Blue flag"""
-        if target.last != data:
-            target.last = data
-            if data != MAX_SECONDS:
-                class_name = minfo.vehicles.nearestBlueClass
-                class_style = self.cfg.user.classes.get(class_name)
-                if class_style is not None:
-                    class_name = class_style["alias"]
-                if not class_name:
-                    class_name = "BLUE"
-                target.text = f"{class_name:<4.4}{data:3.0f}"
+        """Blue flag, keyed on text shown"""
+        shown = self.blue_flag_text(data) if data != MAX_SECONDS else ""
+        if target.last != shown:
+            target.last = shown
+            if shown:
+                target.text = shown
                 target.update()
                 hidden = False
             else:
@@ -625,6 +784,56 @@ class Realtime(Overlay):
             phase = FCY_PHASES.get(data)
             if phase is not None:
                 target.text = f"{self.wcfg['full_course_yellow_text']}{phase}"
+                target.update()
+                hidden = False
+            else:
+                hidden = True
+
+            if target.state != hidden:
+                target.state = hidden
+                target.setHidden(hidden)
+
+    def update_penalty(self, target, data: str):
+        """Penalty to serve"""
+        if target.last != data:
+            target.last = data
+            if data:
+                prefix = self.wcfg["penalty_text"]
+                if not prefix:
+                    target.text = data
+                elif len(prefix) + len(data) < 7:  # room for a space (bar is 7 characters wide)
+                    target.text = f"{prefix} {data}"
+                else:
+                    target.text = f"{prefix}{data}"
+                target.update()
+                hidden = False
+            else:
+                hidden = True
+
+            if target.state != hidden:
+                target.state = hidden
+                target.setHidden(hidden)
+
+    def update_last_lap(self, target, data: bool):
+        """Last lap"""
+        if target.last != data:
+            target.last = data
+            hidden = not data
+            if target.state != hidden:
+                target.state = hidden
+                target.setHidden(hidden)
+
+    def update_damage(self, target, data: float | None):
+        """Heavy damage, with aero damage if known"""
+        shown = None if data is None else round(data * 100)
+        if target.last != shown:
+            target.last = shown
+            if shown is not None:
+                prefix = self.wcfg["damage_text"]
+                if shown < 1:  # aero damage unknown or none: body, wheel
+                    target.text = prefix
+                else:
+                    target.text = f"{prefix:<3}{shown:>3}%" if prefix else f"{shown}%"
                 target.update()
                 hidden = False
             else:

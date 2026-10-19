@@ -160,23 +160,25 @@ def track_editor(editor_env, monkeypatch):
 def test_track_info_saved_unchanged(track_editor):
     track_editor.applying()
     assert cfg.user.tracks["Spa"] == {
-        "pit_entry": 6800.0, "pit_exit": 300.0, "pit_speed": 16.67, "speed_trap": 2000.0,
+        "pit_entry": 6800.0, "pit_exit": 300.0, "pit_speed": 16.67, "speed_trap": 2000.0, "orientation": 0.0,
         "sunrise": "06:30", "sunset": "21:15", "preset": "spa_race"}
 
 
 def test_track_info_clock_and_number_validation(track_editor):
     table = track_editor.table_tracks
-    table.item(0, 5).setText("7:5")
-    assert table.item(0, 5).text() == "07:05"
-    table.item(0, 6).setText("25:70")  # clamped to end of day
-    assert table.item(0, 6).text() == "24:00"
-    table.item(0, 6).setText("dusk")  # invalid: previous value kept
-    assert table.item(0, 6).text() == "24:00"
+    table.item(0, 6).setText("7:5")
+    assert table.item(0, 6).text() == "07:05"
+    table.item(0, 7).setText("25:70")  # clamped to end of day
+    assert table.item(0, 7).text() == "24:00"
+    table.item(0, 7).setText("dusk")  # invalid: previous value kept
+    assert table.item(0, 7).text() == "24:00"
     table.item(0, 1).setText("x")
     assert table.item(0, 1).text() == "6800.0"
-    table.item(0, 7).setText("  other  ")
+    table.item(0, 5).setText("-90")  # track map orientation (Orient column)
+    table.item(0, 8).setText("  other  ")
     track_editor.applying()
     assert cfg.user.tracks["Spa"]["sunrise"] == "07:05"
+    assert cfg.user.tracks["Spa"]["orientation"] == -90.0
     assert cfg.user.tracks["Spa"]["preset"] == "other"
 
 

@@ -378,6 +378,7 @@ def test_g_circle_orientation_and_scale(viewer):  # noqa: F811
 def test_replay_found_for_lap(viewer, monkeypatch):  # noqa: F811
     from neopedal import replay
     from neopedal.replay import ReplayInfo
+    from neopedal.ui.quick.lap_backend import find_replay
     from neopedal.userfile.telemetry_lap import lap_timestamp_of
 
     backend = viewer.backend
@@ -388,11 +389,13 @@ def test_replay_found_for_lap(viewer, monkeypatch):  # noqa: F811
         ReplayInfo("other.tpreplay", created - 5000, 0, 100.0, "LMU", {}),
         ReplayInfo("race.tpreplay", created, 0, 1000.0, "LMU", {}),
     ])
-    filename, position = backend.replay_target(lap, 0.0)
+    moment = backend.replay_moment(lap, 0.0)
+    filename, position = find_replay(".", *moment)
     assert filename == "race.tpreplay" and position == pytest.approx(200 - lap.data.lap_time, abs=0.5)
     monkeypatch.setattr(replay, "list_replays", lambda folder: [])
-    assert backend.replay_target(lap, 0.0) is None
-    backend.openReplay(0.0, "")
+    assert find_replay(".", *moment) is None
+    backend.openReplay(0.0, "")  # replay files read in background
+    backend.wait_jobs()
     assert "No replay" in backend.status
 
 
@@ -456,7 +459,7 @@ def test_map_modes_cursor_gap_and_sectors(viewer):  # noqa: F811
     for mode, filled in (("line", True), ("gear", True), ("elevation", False)):  # elevation not recorded
         backend.setMapMode(mode)
         assert (VertexStore.get(backend.trackMap["colored"]).vertex_count > 0) == filled, mode
-    assert backend.mapLegend == {}
+    assert {key: value for key, value in backend.mapLegend.items() if key not in ("items", "zones", "tones")} == {}
     gap = backend.mapCursor(1000.0)[1]["gap"]
     assert gap.startswith("+") and gap.endswith(" s")  # compared lap behind
     backend.setTimeAxis(True)

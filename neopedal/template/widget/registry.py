@@ -135,6 +135,7 @@ OVERLAYS: tuple[OverlaySpec, ...] = (
     overlay("brake_temperature", BRAKES),
     overlay("brake_wear", BRAKES),
     overlay("chat", TRACK, demo=DEMO_SAMPLE),
+    overlay("corner_coach", INPUTS),
     overlay("cruise", ENGINE),
     overlay("damage", CHASSIS),
     overlay("damage_stats", CHASSIS),
@@ -216,7 +217,9 @@ OVERLAYS: tuple[OverlaySpec, ...] = (
     overlay("weight_distribution", CHASSIS),
     overlay("wheel_camber", TYRES),
     overlay("black_box", TRACK, option_ui=BLACK_BOX_UI),
+    overlay("wheel_dimension", TYRES),
     overlay("wheel_toe", TYRES),
+    overlay("wind_direction", TRACK),
 )
 
 

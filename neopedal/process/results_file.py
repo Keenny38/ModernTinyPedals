@@ -724,7 +724,7 @@ def chosen_results_folder(config_path: str) -> str:
         if cached is not None and cached[0] == stamp:
             return cached[1]
     try:
-        with open(path, encoding="utf-8") as file:
+        with open(path, encoding="utf-8-sig") as file:
             settings = json.load(file)
     except (OSError, ValueError):
         return ""

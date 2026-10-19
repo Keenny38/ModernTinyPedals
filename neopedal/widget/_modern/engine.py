@@ -33,6 +33,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import minfo
+from ..engine import smoothed_energy_rate
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
@@ -87,6 +88,7 @@ class Realtime(StatsMixin, ModernOverlay):
         """Peak power found again for next car (power to weight ratio)"""
         self.ema_power = 0.0
         self.max_power_kw = 0.0
+        self.ema_energy_rate = 0.0
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -111,7 +113,8 @@ class Realtime(StatsMixin, ModernOverlay):
             power_kw = 0.0
             max_ve = engine.max_virtual_energy()
             if max_ve > 0:  # from energy consumption if torque not available
-                power_kw = minfo.energy.rateOfConsumption * max_ve / 100_000
+                self.ema_energy_rate = smoothed_energy_rate(self.ema_energy_rate, minfo.energy.rateOfConsumption)
+                power_kw = self.ema_energy_rate * max_ve / 100_000
                 torque = calc.engine_torque(power_kw, rpm)
         overheating = self.wcfg["show_game_overheating_warning"] and engine.overheating()
         values = []

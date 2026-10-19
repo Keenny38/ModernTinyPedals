@@ -31,6 +31,7 @@ Replaces the former fuel calculator & tyre strategy planner tools (see tools_vie
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 
 from PySide6.QtCore import QUrl
 from PySide6.QtQuickWidgets import QQuickWidget
@@ -100,14 +101,30 @@ class RaceCalculator(BaseEditor):
         """Ctrl+Z: calculator off shows nothing, nothing undone"""
         if self.backend.game_data:
             super().undo()
+            self.backend.undoChanged.emit()
 
     def redo(self):
         if self.backend.game_data:
             super().redo()
+            self.backend.undoChanged.emit()
+
+    def can_undo(self) -> bool:
+        """Undo history has a step (Undo button enabled)"""
+        return self.backend.game_data and bool(self._undo_stack)
+
+    def can_redo(self) -> bool:
+        return self.backend.game_data and bool(self._redo_stack)
+
+    def reset_undo(self):
+        super().reset_undo()
+        if hasattr(self, "backend"):
+            self.backend.undoChanged.emit()
 
     def confirm_discard(self) -> bool:
-        """Tyre plan kept automatically between sessions: nothing to lose"""
-        return True
+        """Tyre plan kept automatically between sessions: nothing to lose, unless it cannot be saved (asked)"""
+        return self.backend.tyres_kept() or self.confirm(tr(
+            "<b>Tyre plan could not be saved automatically.</b><br><br>Close anyway? Changes to the tyre plan "
+            "will be lost (save it to a file first with Ctrl+S)."))
 
     def free_page(self):
         if self.view is not None:  # QML gone before the backend it binds to
@@ -127,6 +144,15 @@ class RaceCalculator(BaseEditor):
 
     def toast(self, text: str):
         show_toast(self, text)
+
+    def toast_undo(self, text: str):
+        """Change done without confirmation (reset, tyre taken off...): Undo button in the toast"""
+        show_toast(self, text, action_text=tr("Undo"), action=self.undo)
+
+    def toast_file(self, text: str, path: str):
+        from .quick.replay_files import show_in_folder
+
+        show_toast(self, text, action_text=tr("Show in Folder"), action=partial(show_in_folder, path))
 
     def confirm(self, text: str) -> bool:
         return self.confirm_operation(message=text)

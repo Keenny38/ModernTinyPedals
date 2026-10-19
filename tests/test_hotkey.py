@@ -70,6 +70,7 @@ def commands(ui_env, monkeypatch, app_ctx):
     calls = []
     monkeypatch.setattr(command, "app_signal", SimpleNamespace(
         refresh=SimpleNamespace(emit=lambda *args: calls.append("refresh")),
+        spectate_changed=SimpleNamespace(emit=lambda slot: calls.append(("spectate", slot))),
         reload=SimpleNamespace(emit=lambda *args: calls.append("reload")),
         quitapp=SimpleNamespace(emit=lambda *args: calls.append("quit"))))
     monkeypatch.setattr(command, "overlay_signal", SimpleNamespace(
@@ -124,7 +125,8 @@ def test_spectate_driver_cycles_by_place(commands, monkeypatch, current, step, e
     else:
         command.hotkey_spectate_previous_driver()
     assert places[slots.index(cfg.api["player_index"])] == expected
-    assert "setup" in commands and "refresh" in commands
+    assert "setup" in commands and ("spectate", cfg.api["player_index"]) in commands  # no app-wide refresh
+    assert "refresh" not in commands
 
 
 def test_spectate_driver_needs_spectate_mode(commands, monkeypatch):

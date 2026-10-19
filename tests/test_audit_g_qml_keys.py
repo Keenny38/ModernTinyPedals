@@ -49,14 +49,14 @@ def has_property(item, name: str) -> bool:
 def component(ui_env, tmp_path):
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from neopedal.ui.quick import QML_FOLDER, Theme, Translator, register_types, theme_copy
+    from neopedal.ui.quick import Theme, Translator, qml_folder_imports, register_types, theme_copy
 
     register_types()
     views = []
 
     def loading(body: str):
         wrapper = tmp_path / f"wrapper{len(views)}.qml"
-        wrapper.write_text(f'import QtQuick\nimport "{QUrl.fromLocalFile(QML_FOLDER).toString()}"\n{body}\n',
+        wrapper.write_text(f'import QtQuick\n{qml_folder_imports()}\n{body}\n',
                            encoding="utf-8")
         view = QQuickWidget()
         views.append(view)
@@ -126,6 +126,8 @@ def test_segmented_keeps_caller_binding(component):
 
 def test_lap_viewer_tabs_follow_backend_after_click(opener, warnings):  # noqa: F811
     dialog = opener()
+    dialog.resize(1900, 800)  # side panel wide enough for its six tabs (narrower: drop-down list instead)
+    wait(0.4)
     view, backend = dialog.view, dialog.backend
     segmented = find(view, lambda item: has_property(item, "options") and has_property(item, "squeezed"))
     tabs = next(item for item in segmented if evaluate(view, item, "options.length") == 6)
@@ -183,7 +185,7 @@ def test_track_map_viewer_arrow_keys(map_viewer):
     canvas = find(view, lambda item: item.property("targetZoom") is not None)[0]
     sliders = find(view, lambda item: "Slider" in item.metaObject().className() and item.property("stepSize") is not None)
     assert len(sliders) >= 2
-    assert all(slider.property("focusPolicy") == Qt.FocusPolicy.NoFocus.value for slider in sliders)
+    assert all(slider.property("focusPolicy") == Qt.FocusPolicy.TabFocus.value for slider in sliders)  # Tab only
     click(view, sliders[-1])  # position slider clicked: keys stay on page
     wait(0.2)
     assert focused(view) is root

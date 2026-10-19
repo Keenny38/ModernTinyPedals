@@ -56,6 +56,7 @@ class Realtime(DataModule):
 
         gen_wheel_rotation = calc_wheel_rotation(
             output=minfo.wheels,
+            wheel_measurement=bool(self.mcfg["enable_wheel_dimension_measurement"]),
             max_rot_bias_f=max(self.mcfg["maximum_rotation_difference_front"], 0.00001),
             max_rot_bias_r=max(self.mcfg["maximum_rotation_difference_rear"], 0.00001),
             min_rot_axle=max(self.mcfg["minimum_axle_rotation"], 0.0),
@@ -128,6 +129,7 @@ def calc_wheel_rotation(
     max_rot_bias_r: float,
     min_rot_axle: float,
     lock_threshold: float,
+    wheel_measurement: bool = True,
 ):
     """Calculate wheel rotation, radius, locking percent, slip ratio"""
     last_reset = None  # reset check
@@ -162,6 +164,8 @@ def calc_wheel_rotation(
                 vehicle_name = api.read.vehicle.vehicle_name()
                 radius_front_ema = 0.0
                 radius_rear_ema = 0.0
+            if not wheel_measurement:
+                output.wheelRadiusFront = output.wheelRadiusRear = 0.0
 
         wheel_rot = api.read.wheel.rotation()
         speed = api.read.vehicle.speed()
@@ -188,11 +192,16 @@ def calc_wheel_rotation(
             last_accel_max = accel_max
             d_factor = 2 / max(40 * accel_max, 20)  # scale ema factor with max accel
             # Front average wheel radius
-            if rot_axle_f < -min_rot_axle and 0 < rot_bias_f < max_rot_bias_f:
-                radius_front_ema = calc.exp_mov_avg(d_factor, radius_front_ema, calc.rotation_radius(speed, rot_axle_f))
+            # (first sample taken as is: average rising from 0 reads as wheel lock meanwhile)
+            if rot_axle_f < -min_rot_axle and 0 <= rot_bias_f < max_rot_bias_f:
+                radius_raw = calc.rotation_radius(speed, rot_axle_f)
+                radius_front_ema = calc.exp_mov_avg(d_factor, radius_front_ema, radius_raw) if (
+                    radius_front_ema > 0) else radius_raw
             # Rear average wheel radius
-            if rot_axle_r < -min_rot_axle and 0 < rot_bias_r < max_rot_bias_r:
-                radius_rear_ema = calc.exp_mov_avg(d_factor, radius_rear_ema, calc.rotation_radius(speed, rot_axle_r))
+            if rot_axle_r < -min_rot_axle and 0 <= rot_bias_r < max_rot_bias_r:
+                radius_raw = calc.rotation_radius(speed, rot_axle_r)
+                radius_rear_ema = calc.exp_mov_avg(d_factor, radius_rear_ema, radius_raw) if (
+                    radius_rear_ema > 0) else radius_raw
 
         # Calculate slip ratio, against each wheel's own ground speed: in a corner the outer
         # wheels travel faster than the car center, which would read as false slip
@@ -228,6 +237,9 @@ def calc_wheel_rotation(
         output.lockingPercentRear = locking_r
         output.slipRatio[:] = slip_ratio
         output.wheelRadius[:] = (radius_front_ema, radius_front_ema, radius_rear_ema, radius_rear_ema)
+        if wheel_measurement:  # wheel dimension overlay (millimeters)
+            output.wheelRadiusFront = radius_front_ema * 1000
+            output.wheelRadiusRear = radius_rear_ema * 1000
         output.lockingTime[:] = locking_time
 
 

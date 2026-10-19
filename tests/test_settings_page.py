@@ -80,9 +80,32 @@ def test_every_global_option_shown_once(settings):
         shown = [info.key for info in settings._infos.values() if info.section == category.key]
         assert sorted(shown) == sorted(expected), category.key
         for _, keys in category.groups:  # group lists name real options only
-            assert set(keys) <= set(cfg.user.config[category.key]), category.key
+            for option in keys:
+                section, key = option.split("/", 1) if "/" in option else (category.key, option)
+                assert key in cfg.user.config[section], option
     assert "application/home_quick_access" not in settings._infos  # edited by Home page
     assert "application/position_x" not in settings._infos
+
+
+def test_overlay_editing_shown_in_overlay_style(settings):
+    """Overlay Editing options saved in application section, shown & reset in Overlay Style only"""
+    editing = [info for info in settings._infos.values() if info.group == "Overlay Editing"]
+    assert {info.key for info in editing} == {
+        "enable_edit_mode_on_unlock", "enable_magnetic_snap", "snap_distance", "snap_gap", "show_layout_guides",
+        "grid_move_size", "enable_layout_per_screen_setup",
+    }
+    assert all(info.section == "application" and info.category == "overlay_style" for info in editing)
+    settings.selectCategory("application")
+    assert not any(row["group"] == "Overlay Editing" for row in settings.model.rows)
+    assert all(row["key"] != "application/snap_gap" for row in settings.model.rows)
+    settings.selectCategory("overlay_style")
+    assert settings.model.rows[-1]["group"] == "Overlay Editing" and row(settings, "application/snap_gap")
+    settings.setNumber("application/snap_gap", 4)
+    nav = {entry["key"]: entry for entry in settings.categories}
+    assert nav["overlay_style"]["changed"] == 1 and nav["application"]["changed"] == 0
+    settings.selectCategory("application")
+    settings.focus_option("application", "snap_gap")  # option search: its category shown
+    assert settings.category == "overlay_style"
 
 
 def test_groups_and_editor_kinds(settings):
@@ -96,9 +119,9 @@ def test_groups_and_editor_kinds(settings):
     themes = list(rxp.CHOICE_COMMON[rxp.CFG_WINDOW_COLOR_THEME])
     assert theme["choices"] == themes  # English: shown as saved
     assert theme["choiceIndex"] == themes.index(cfg.application["window_color_theme"])
-    snap = row(settings, "application/snap_distance")
-    assert snap["kind"] == "integer" and snap["minimum"] == 0 and snap["maximum"] == 1000 and snap["decimals"] == 0
     settings.selectCategory("overlay_style")
+    snap = row(settings, "application/snap_distance")  # Overlay Editing: saved in application section
+    assert snap["kind"] == "integer" and snap["minimum"] == 0 and snap["maximum"] == 1000 and snap["decimals"] == 0
     radius = row(settings, "overlay_style/corner_radius_scale")
     assert radius["kind"] == "float" and radius["decimals"] == 2 and radius["step"] == pytest.approx(0.01)
     assert row(settings, "overlay_style/modern_font_name")["kind"] == "font"
@@ -123,6 +146,7 @@ def test_pending_edits_undo_redo_discard(settings):
     assert settings.pendingCount == 1
     settings.redo()
     assert settings.pendingCount == 0
+    settings.selectCategory("overlay_style")
     settings.setNumber("application/snap_distance", 25.4)
     assert row(settings, "application/snap_distance")["number"] == 25  # whole number option
     settings.discard()
@@ -140,7 +164,7 @@ def test_invalid_values_block_apply(settings):
     assert settings.errorCount == 0 and row(settings, key)["color"] == "#00FF00"
     assert settings.apply() is True
     assert cfg.notification["font_color_locked_preset"] == "#00FF00"
-    assert settings.host.applied_sections == [{"notification"}] and not settings.canUndo
+    assert settings.host.applied_sections == [{"notification"}] and settings.canUndo  # history kept
 
 
 def test_number_text_and_choice_edits_applied(settings, ui_env):
@@ -184,7 +208,9 @@ def test_typed_text_taken_while_typing(settings):
 def test_options_read_at_startup_offer_restart(settings):
     assert row(settings, "application/enable_high_dpi_scaling")["applies"] == "restart"
     assert row(settings, "application/show_at_startup")["applies"] == "next_start"
+    settings.selectCategory("overlay_style")
     assert row(settings, "application/snap_gap")["applies"] == ""
+    settings.selectCategory("application")
     settings.setBool("application/enable_high_dpi_scaling", not cfg.application["enable_high_dpi_scaling"])
     settings.setBool("application/show_at_startup", not cfg.application["show_at_startup"])
     assert settings.apply()
@@ -231,6 +257,7 @@ def test_overlay_style_applied_to_running_overlays(settings, bundled_fonts):
 
 def test_reset_option_and_category(settings):
     cfg.application["snap_gap"] = 5
+    settings.selectCategory("overlay_style")  # Overlay Editing: saved in application section
     settings.refresh()
     assert row(settings, "application/snap_gap")["modified"]
     settings.resetOption("application/snap_gap")
@@ -429,6 +456,7 @@ def test_page_closed_again_while_asking_to_save(window, monkeypatch):
 def test_undo_history_capped(settings):
     """Category reset & discard keep at most 100 undo steps, like single edits"""
     cfg.application["snap_gap"] = 5
+    settings.selectCategory("overlay_style")
     settings.refresh()
     settings.host.answer = True
     for step in range(120):
@@ -548,14 +576,14 @@ def test_page_qml_bundled_modules_and_translated():
     import re
 
     from neopedal.i18n.fr import TRANSLATION
-    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import qml_path
     from neopedal.ui.quick.qml_modules import QML_MODULES
     from neopedal.ui.quick.settings_backend import CATEGORIES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
     for name in PAGE_QML:
-        with open(f"{QML_FOLDER}/{name}.qml", encoding="utf-8") as file:
+        with open(qml_path(f"{name}.qml"), encoding="utf-8") as file:
             text = file.read()
         modules = re.findall(r"^import ([A-Za-z.]+)", text, flags=re.MULTILINE)
         assert modules and all(module.replace(".", "/") in QML_MODULES for module in modules), (name, modules)

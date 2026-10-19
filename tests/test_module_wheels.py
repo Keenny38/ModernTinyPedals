@@ -81,7 +81,7 @@ def learn_radius(generator, monkeypatch):
 def test_no_lock_before_wheel_radius_is_learned(driving, monkeypatch):
     generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
     rolling(monkeypatch, rotation=(-25.0,) * 4, brake=0.9, elapsed=0.0)
-    generator.send(0)  # identical rotations: radius not learned
+    generator.send(0)  # first sample is the radius: rolling wheels read no slip (not -100%: locked)
     assert list(driving.slipRatio) == [0.0] * 4
 
 
@@ -176,3 +176,27 @@ def test_generators_wait_for_the_car_to_be_on_track(ui_env, monkeypatch):
     calc_wheel_angle(output).send(0)
 
     assert list(output.camberAngle) == [0.0] * 4
+
+
+def test_tyre_radius_measured_for_wheel_dimension(driving, monkeypatch):
+    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+    learn_radius(generator, monkeypatch)
+    assert driving.wheelRadiusFront == pytest.approx(driving.wheelRadius[0] * 1000)
+    assert driving.wheelRadiusRear == pytest.approx(driving.wheelRadius[2] * 1000)
+    assert driving.wheelRadiusFront > 0
+
+
+def test_tyre_radius_not_published_while_measurement_disabled(driving, monkeypatch):
+    driving.wheelRadiusFront = driving.wheelRadiusRear = 345.0  # from earlier session
+    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2, wheel_measurement=False)
+    learn_radius(generator, monkeypatch)
+    assert driving.wheelRadius[0] > 0  # still learned for slip ratio
+    assert driving.wheelRadiusFront == driving.wheelRadiusRear == 0.0
+
+
+def test_radius_learned_with_equal_wheel_rotations(driving, monkeypatch):
+    """Both wheels of an axle at the same speed (no rotation difference) is a valid sample"""
+    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+    rolling(monkeypatch, rotation=(-25.0,) * 4)
+    generator.send(0)
+    assert driving.wheelRadius[0] == pytest.approx(driving.wheelRadius[2]) and driving.wheelRadius[0] > 0

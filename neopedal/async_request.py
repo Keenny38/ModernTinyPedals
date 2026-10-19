@@ -26,7 +26,6 @@ import asyncio
 import logging
 import threading
 from asyncio import StreamReader, create_task, open_connection, wait_for
-from collections.abc import Awaitable
 from contextlib import asynccontextmanager, suppress
 from functools import partial
 from time import monotonic, perf_counter
@@ -36,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 RESOLVED_HOLD = 300.0  # seconds a resolved local address is reused (re-resolved after failure)
 UNRESOLVED_HOLD = 5.0  # seconds before probing again when nothing answered (game not running)
+MAX_BODY = 16 * 1024 * 1024  # response body size limit (bytes), larger response handled as invalid
 _resolved_hosts: dict[tuple[str, int], tuple[str, float]] = {}  # (host, port): (address, expiry time)
 _resolved_lock = threading.Lock()
 
@@ -143,7 +143,11 @@ async def read_line(reader: StreamReader, separator: bytes) -> bytes:
 
 
 async def read_response(reader: StreamReader) -> HttpResponse:
-    """Read complete response (status line, headers, body)"""
+    """Read complete response (status line, headers, body)
+
+    Raises:
+        ValueError: line too long, or body larger than MAX_BODY (handled as other invalid response).
+    """
     header_bytes = await read_line(reader, b"\r\n\r\n")
     lines = header_bytes[:-4].split(b"\r\n")
     version, status = parse_status_line(lines[0])
@@ -164,6 +168,8 @@ async def read_response(reader: StreamReader) -> HttpResponse:
         if body_length < 0:  # body until connection closes: not read, connection not reusable
             body = b""
             keep_alive = False
+        elif body_length > MAX_BODY:
+            raise ValueError(f"response body too large: {body_length} bytes")
         elif body_length:
             # Note: read(n) returns only data already received (can be less than n),
             # readexactly(n) waits for complete body
@@ -181,6 +187,8 @@ async def read_chunked(reader: StreamReader) -> bytes:
         chunk_size = int(size_line[:-2].split(b";")[0], 16)  # ignore chunk extension
         if chunk_size <= 0:
             break
+        if len(temp_bytes) + chunk_size > MAX_BODY:
+            raise ValueError("response body too large")
         temp_bytes.extend(await reader.readexactly(chunk_size))
         await reader.readexactly(2)  # CRLF after chunk data
     while await read_line(reader, b"\r\n") != b"\r\n":  # trailers, until empty line
@@ -364,34 +372,3 @@ async def localhost_resolve(hostnames: set[str], port: int, timeout: float = 3) 
     logger.warning("RestAPI: unable to resolve local hostname")
     return ""
 
-
-async def _print_result(test_func: Awaitable):
-    """Test result"""
-    start = perf_counter()
-    result = await test_func
-    end = perf_counter()
-    is_timeout = " (timeout)" if not result else " (done)"
-    print(f"{end - start:.6f}s{is_timeout},", result)
-
-
-async def _test_async_get(timeout: float):
-    """Test run"""
-    req1 = set_header_get("/rest/sessions/setting/SESSSET_race_timescale")
-    req2 = set_header_get("/rest/sessions/weather")
-    rf2_host = await localhost_resolve({"localhost", "127.0.0.1"}, 5397, timeout)
-    task_rf2 = [
-        _print_result(get_response(req1, rf2_host, 5397, timeout)),  # RF2
-        _print_result(get_response(req2, rf2_host, 5397, timeout)),  # RF2
-    ]
-    req3 = set_header_get("/rest/sessions/weather")
-    req4 = set_header_get("/rest/strategy/pitstop-estimate")
-    lmu_host = await localhost_resolve({"localhost", "127.0.0.1"}, 6397, timeout)
-    task_lmu = [
-        _print_result(get_response(req3, lmu_host, 6397, timeout)),  # LMU
-        _print_result(get_response(req4, lmu_host, 6397, timeout)),  # LMU
-    ]
-    await asyncio.gather(*task_rf2, *task_lmu)
-
-
-if __name__ == "__main__":
-    asyncio.run(_test_async_get(1))

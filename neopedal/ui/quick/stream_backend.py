@@ -145,7 +145,9 @@ def hidden_reason(rows: list[dict[str, Any]], spectating: bool) -> str:
 class StreamOverlaysBackend(PageBackend):
     """Stream overlays page state & actions"""
 
-    serverChanged = Signal()  # switch, settings, addresses, status
+    serverChanged = Signal()  # switch, settings, status
+    addressesChanged = Signal()  # addresses of sources (port, token, LAN access & addresses, layout format)
+    layoutChanged = Signal()  # layout source: screen size, format, placed, undo, live
     overlaysChanged = Signal()
     resultsChanged = Signal()  # race results source options
     noticeChanged = Signal()
@@ -162,13 +164,18 @@ class StreamOverlaysBackend(PageBackend):
         self.notice = ""
         self.notice_count = 0
         self.watched: set[str] = set()
-        self._server_state: tuple = ()
+        # What the properties of each signal depend on, signaled only when changed (asked every second)
+        self._server_state: tuple | None = ()
+        self._addresses_state: tuple | None = ()
+        self._layout_state: tuple | None = ()
+        self._layout_undo: tuple[str, dict[str, list[float]], int] | None = None  # section, places & version at reset
         self._model = DictListModel(OVERLAY_ROLES, self)
         self._timer = self.page_timer(self.refresh, REFRESH_MS)
-        app_signal.refresh.connect(self.refresh_overlays)
+        app_signal.refresh.connect(self.overlays_changed)
 
     # Page
     def page_shown(self):
+        self.drop_when_shown()  # everything read again
         self.refresh(force=True)
         self._timer.start()
 
@@ -179,7 +186,7 @@ class StreamOverlaysBackend(PageBackend):
         self.page_hidden()
         self.page_file.flush()
         with suppress(RuntimeError, TypeError):  # already disconnected
-            app_signal.refresh.disconnect(self.refresh_overlays)
+            app_signal.refresh.disconnect(self.overlays_changed)
 
     def save_settings(self):
         """Settings written once changes pause"""
@@ -194,23 +201,47 @@ class StreamOverlaysBackend(PageBackend):
 
     @Slot()
     def refresh(self, force: bool = False):
-        """Live sources & sizes (every second while shown), server state signaled only when changed"""
+        """Live sources & sizes (every second while shown), each group of properties signaled only when changed
+        (all if force)"""
         self.watched = streamoverlay.watched()
         self.refresh_overlays()
         state = self.server_state()
         if force or state != self._server_state:
             self._server_state = state
             self.serverChanged.emit()
+        state = self.addresses_state()
+        if force or state != self._addresses_state:
+            self._addresses_state = state
+            self.addressesChanged.emit()
+        state = self.layout_state()
+        if force or state != self._layout_state:
+            self._layout_state = state
+            self.layoutChanged.emit()
 
     def server_state(self) -> tuple:
         """Everything server properties depend on"""
         setting = self.setting()
         return (
-            bool(setting["enable_stream_overlay"]), streamoverlay.running, frozenset(self.watched),
+            bool(setting["enable_stream_overlay"]), streamoverlay.running, len(self.watched),
             bool(setting["enable_lan_access"]), streamoverlay.port(), setting["frame_rate"],
-            streamoverlay.access_token(), self.lanText, self.screenText, self.layoutSizeText,
-            self.spectating, self.hiddenText, stream_layout.version,
+            self.spectating, self.statusText, self.hiddenText,
         )
+
+    def addresses_state(self) -> tuple:
+        """Everything address properties depend on"""
+        return self.lanText, self.layoutUrl, self.indexUrl
+
+    def layout_state(self) -> tuple:
+        """Everything layout properties depend on (screen size asked once): places & undo follow the layout version"""
+        return (
+            self.screen_size(), self.layout_format, LAYOUT in self.watched, stream_layout.version,
+            self._layout_undo is not None,
+        )
+
+    def overlays_changed(self, *_args):
+        """Overlays enabled, reloaded or switched elsewhere (app refresh signal): rows synced, once shown if hidden
+        (page shown reads everything again)"""
+        self.when_shown(self.refresh_overlays)
 
     def refresh_overlays(self, *_args):
         """Overlay rows synced in place (every second while shown), page told only when something changed"""
@@ -287,7 +318,7 @@ class StreamOverlaysBackend(PageBackend):
             return tr("On air: %1 sources shown").replace("%1", str(len(self.watched)))
         return tr("Ready")
 
-    @Property(str, notify=serverChanged)
+    @Property(str, notify=addressesChanged)
     def lanText(self) -> str:
         """Addresses for another computer (LAN access)"""
         return "  ".join(streamoverlay.base_urls()[1:]) if self.lanAccess else ""
@@ -324,11 +355,11 @@ class StreamOverlaysBackend(PageBackend):
         self.notify(tr("New access token: copy the addresses again into your streaming software."))
 
     # Addresses
-    @Property(str, notify=serverChanged)
+    @Property(str, notify=addressesChanged)
     def layoutUrl(self) -> str:
         return streamoverlay.url(f"/{LAYOUT}", "crop=16:9" if self.layout_format == "16:9" else "")
 
-    @Property(str, notify=serverChanged)
+    @Property(str, notify=addressesChanged)
     def indexUrl(self) -> str:
         return streamoverlay.url("/")
 
@@ -341,12 +372,12 @@ class StreamOverlaysBackend(PageBackend):
         ratio = screen.devicePixelRatio()
         return round(screen.geometry().width() * ratio), round(screen.geometry().height() * ratio)
 
-    @Property(str, notify=serverChanged)
+    @Property(str, notify=layoutChanged)
     def screenText(self) -> str:
         """Layout canvas size: screen holding most overlays"""
         return size_text(*self.screen_size())
 
-    @Property(str, notify=serverChanged)
+    @Property(str, notify=layoutChanged)
     def layoutSizeText(self) -> str:
         """Layout source detail: browser source size & part of screen shown"""
         width, height = self.screen_size()
@@ -359,7 +390,7 @@ class StreamOverlaysBackend(PageBackend):
                 "%2", size_text(width, height)) + ")"
         return text
 
-    @Property(bool, notify=serverChanged)
+    @Property(bool, notify=layoutChanged)
     def layoutPlaced(self) -> bool:
         """Overlays placed by the layout editor on this layout format"""
         return bool(stream_layout.get(layout_section(self.crop())))
@@ -375,12 +406,34 @@ class StreamOverlaysBackend(PageBackend):
 
     @Slot()
     def resetLayout(self):
-        stream_layout.set(layout_section(self.crop()), {})
+        """Overlays of this layout format back to their place on screen, places kept for one undo"""
+        section = layout_section(self.crop())
+        places = stream_layout.get(section)
+        stream_layout.set(section, {})
+        self._layout_undo = (section, places, stream_layout.version) if places else None
         streamoverlay.store.bump()
         self.refresh(force=True)
         self.notify(tr("Overlays back to their place on screen"))
 
-    @Property(int, notify=serverChanged)
+    @Property(bool, notify=layoutChanged)
+    def canUndoReset(self) -> bool:
+        """Places of this layout format before the last reset can be put back (layout not changed since)"""
+        undo = self._layout_undo
+        return (undo is not None and undo[0] == layout_section(self.crop())
+                and undo[2] == stream_layout.version)
+
+    @Slot()
+    def undoResetLayout(self):
+        if not self.canUndoReset or self._layout_undo is None:
+            return
+        section, places, _version = self._layout_undo
+        self._layout_undo = None
+        stream_layout.set(section, places)
+        streamoverlay.store.bump()
+        self.refresh(force=True)
+        self.notify(tr("Previous layout restored"))
+
+    @Property(int, notify=layoutChanged)
     def layoutFormatIndex(self) -> int:
         return LAYOUT_FORMATS.index(self.layout_format)
 
@@ -391,7 +444,7 @@ class StreamOverlaysBackend(PageBackend):
             self.save_settings()
             self.refresh(force=True)
 
-    @Property(bool, notify=serverChanged)
+    @Property(bool, notify=layoutChanged)
     def layoutLive(self) -> bool:
         return LAYOUT in self.watched
 

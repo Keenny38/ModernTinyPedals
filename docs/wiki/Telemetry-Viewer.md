@@ -33,7 +33,7 @@ Lap list tools:
 - `Clean only` hides invalid, out and in laps. The search field finds laps by vehicle, session, setup or note.
 - The quick selection menu checks `Best vs Last Lap`, `3 Best Laps`, `5 Best Laps` or `Best Lap in Similar Conditions` (track temperature, compound, wet track), or `Uncheck All`. `Shift` + click checks every lap between two.
 - Right-click a lap: `Set as Reference`, `Export MoTeC...`, `Keep Lap` (never removed by the recorder), `Note...`, `Use as Delta Best...` (the lap becomes the delta best used on track; your first delta best is always kept as a backup, plus the 5 latest ones; a teammate's lap of the same track and class can be used too), `Setup Differences with Reference...`, `Move to Trash`. Session rows have the same actions for all their laps.
-- Deleted laps go to a trash: `Ctrl+Z` restores them.
+- Deleted laps go to a trash: `Ctrl+Z` restores them, last deletion first (up to 20 deletions). `Recently Deleted Laps...` (quick selection menu of the lap list) lists every lap of the trash with a `Restore` button; laps stay there 30 days. `Delete` deletes the highlighted lap, or else the checked laps, and `/` jumps to the search.
 - `Live` lists new laps as soon as they are recorded and compares the newest lap with the best one (a new best lap with the previous best). A reference lap you picked stays the reference, and the viewer switches to the track you are driving.
 
 ## Charts
@@ -121,7 +121,7 @@ Click the `?` button for the full list. Main keys: `Space` play / pause, `Left` 
 
 ## Track Map Viewer
 
-`Tools` > `Track Map Viewer` shows the track maps recorded by the Mapping module (`Load Map`):
+`Tools` > `Track Map Viewer` shows the track maps recorded by the Mapping module: pick one in the list of recorded maps at the top (search by name), open a `.svg` map from another folder with `Open File`, or drop it on the page. A map that cannot be read is named in the warning, and the map shown stays.
 
 - road at its real width, line colored by sector, start and sector lines, official corner numbers (click one to go there);
 - at the current position: curve section, osculating circle, distance circles, curve radius and angle, slope, XYZ position;

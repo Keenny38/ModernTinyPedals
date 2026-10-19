@@ -79,8 +79,10 @@ def new_widget(cfg, overrides, modern=False):
     from neopedal.widget._modern import black_box as modern_black_box
 
     setting = cfg.user.setting["black_box"]
-    setting.update(enable_heatmap_auto_matching=False, slow_data_update_interval=0, enable_auto_resize=False,
-                   alert_pulse_frequency=0, smooth_transition_duration=0, enable_required_modules=False)
+    # Wide heatmap bands (former tyre_default colors): tyre changes of test stay in one band, as counted below
+    setting.update(enable_heatmap_auto_matching=False, heatmap_name_tyre="thermal_infrared", slow_data_update_interval=0,
+                   enable_auto_resize=False, alert_pulse_frequency=0, smooth_transition_duration=0,
+                   enable_required_modules=False)
     setting.update(overrides)
     return (modern_black_box.Realtime if modern else black_box.Realtime)(cfg, "black_box")
 

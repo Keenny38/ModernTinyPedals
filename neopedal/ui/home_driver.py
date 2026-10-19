@@ -27,6 +27,7 @@ Results files & profile read on a worker thread (read_driver_data), card text ma
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from ..i18n import tr, trm
@@ -97,7 +98,7 @@ def other_account_text(other: dr.OtherAccount, light: bool) -> str:
 
 
 def driver_card_text(player: dr.DriverRanks | None, remembered: bool, updated: float,
-                     history: list[dr.HistoryEntry], data: DriverData | None, light: bool,
+                     history: Sequence[dr.HistoryEntry], data: DriverData | None, light: bool,
                      others: list[dr.OtherAccount] | None = None) -> tuple[str, str] | None:
     """Value & detail of driver card, None if nothing known (card hidden)
 

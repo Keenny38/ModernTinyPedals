@@ -52,6 +52,7 @@ from ..const_file import ConfigType
 from ..i18n import tr, trm
 from ..i18n.options import module_label, option_label, option_tooltip, search_text
 from ..setting import cfg
+from ..template.option_limits import clamp_to_limit
 from ._common import (
     QVAL_COLOR,
     QVAL_FLOAT,
@@ -59,6 +60,7 @@ from ._common import (
     BaseDialog,
     CompactButton,
     UIScaler,
+    confirm_action,
     run_after_saving,
     singleton_dialog,
 )
@@ -175,12 +177,7 @@ class LiveSetting:
             f"Preset <b>{preset_name}</b> was loaded since this page was opened."
             f"<br><br>Save changed options to <b>{preset_name}</b>?"
         )
-        confirm = QMessageBox.question(
-            parent, tr("Confirm"), trm(msg_text),
-            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            defaultButton=QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
+        if not confirm_action(parent, tr("Confirm"), trm(msg_text), tr("Save")):
             return False
         self.preset_filename = cfg.filename.setting
         return True
@@ -325,7 +322,8 @@ class FontConfig(BaseDialog):
                 if re.search("font_size", key):
                     font_size = self.edit_fontsize.value()
                     if font_size != 0:
-                        setting[key] = max(setting[key] + font_size, 1)
+                        # Option limit too (1-200): widgets are rebuilt from this setting, not validated again
+                        setting[key] = clamp_to_limit(key, max(setting[key] + font_size, 1))
                     continue
                 # Auto font offset
                 if key == "enable_auto_font_offset":
@@ -339,7 +337,7 @@ class FontConfig(BaseDialog):
                 if key == "font_offset_vertical":
                     font_offset = self.edit_fontoffset.value()
                     if font_offset != 0:
-                        setting[key] += font_offset
+                        setting[key] = clamp_to_limit(key, setting[key] + font_offset)
                     continue
         # Reset after applied
         self.edit_fontsize.setValue(0)

@@ -29,16 +29,17 @@ from __future__ import annotations
 from math import ceil
 from typing import TYPE_CHECKING, Any
 
-from ...api_control import api
+from PySide6.QtGui import QColor
+
 from ...const_common import MAX_SECONDS
-from ...demo_state import drawing_demo
-from ...formatter import format_points
 from ...i18n import tr_overlay
 from ...module_info import minfo
 from ...template.widget.drivers_ui import STANDINGS_COLUMNS
-from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text
+from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text, live_trends
 from .rows import DASH, class_style, laptime_text
-from .table import DELTAS, LAPTIME, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+from .table import LAPTIME, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+
+DEFAULT_SPLIT_GAP = 5  # split_gap template default: space between class groups of design
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import StandingsConfig
@@ -54,16 +55,18 @@ class Realtime(DriverTable):
         *DRIVER_OPTIONS,
         "show_column_headers",
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
-        "show_class_header", "show_class_column_with_class_header", "class_order",
+        "show_class_header", "show_class_column_with_class_header", "show_class_sof", "class_order",
         "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
-        "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
-        "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
+        "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others", "split_gap",
+        "column_delta_laptime", "number_of_delta_laptime", "show_inverted_delta_laptime_layout",
+        "display_order_delta_laptime",
         "column_time_interval", "show_time_interval_from_same_class", "decimal_places_time_interval",
         "time_interval_leader_text", "display_order_time_interval",
         "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap", "time_gap_leader_text",
         "display_order_time_gap", "column_track_limits",
         "display_order_track_limits", "column_energy_per_lap", "show_energy_per_lap_average",
-        "display_order_energy_per_lap",
+        "display_order_energy_per_lap", "column_driver_ranks", "show_driver_badge",
+        "display_order_driver_ranks", "column_gap_trend", "display_order_gap_trend",
     )
 
     def __init__(self, config, widget_name):
@@ -75,11 +78,6 @@ class Realtime(DriverTable):
         by_class = split or wcfg["enable_single_class_exclusive_mode"]  # cars shown grouped by class
         self.class_gap = by_class and wcfg["show_time_gap_from_same_class"]
         self.class_interval = by_class and wcfg["show_time_interval_from_same_class"]
-        self.limit = 0.0  # track limits points per penalty of session, 0 if none
-        self.demo = False  # overlay pictures & previews: simulated energy usage, nothing read from game
-        self.energy_usage: Any = None  # energy usage poller, see usages
-        self.usage_average = bool(wcfg["show_energy_per_lap_average"])
-        self.delta_count = min(max(int(wcfg["number_of_delta_laptime"]), 2), 5)
         self.gap_leader = self.user_text("time_gap_leader_text", tr_overlay("Leader"))
         self.int_leader = self.user_text("time_interval_leader_text", DASH)
         if wcfg["enable_single_class_exclusive_mode"]:
@@ -94,7 +92,12 @@ class Realtime(DriverTable):
         self.class_headers = bool(wcfg["show_class_header"]) and (
             split or wcfg["enable_single_class_exclusive_mode"])
         self.class_column_hidden = self.class_headers and not wcfg["show_class_column_with_class_header"]
+        self.class_sof = self.class_headers and bool(wcfg["show_class_sof"])  # strength of field in class headers
+        self.sof_label = tr_overlay("SoF")
+        self.rank_colors: dict[str, QColor] = {}
         self.setup_table()
+        # Space between class groups follows split gap (pixels in classic design, design space at default)
+        self.table = self.table._replace(split_scale=max(float(wcfg["split_gap"]), 0.0) / DEFAULT_SPLIT_GAP)
         self.set_size(self.table.width, self.table.height(1))
 
     def extra_column(self, key: str) -> Column | None:
@@ -104,12 +107,6 @@ class Realtime(DriverTable):
         if key == "time_interval":
             sample = "888." + "8" * self.int_decimals if self.int_decimals else "888"
             return Column(key, max(self.text_width("value", sample), self.text_width("label", self.int_leader)), RIGHT)
-        if key == "delta_laptime":
-            return Column(key, (self.text_width("small", "8.8") + self.unit * 0.3) * self.delta_count, RIGHT)
-        if key == "track_limits":
-            return Column(key, self.text_width("dim", "88.88"), RIGHT)
-        if key == "energy_per_lap":
-            return Column(key, self.text_width("dim", "88.8%"), RIGHT)
         return None
 
     def extra_cell(self, key: str, veh, ctx: Context, extra: dict) -> Cell:
@@ -128,14 +125,6 @@ class Realtime(DriverTable):
             if not ctx.in_race and not 0 < veh.bestLapTime < MAX_SECONDS:  # best lap interval: no time yet
                 return Cell(TEXT, DASH, "value", theme.text_faint)
             return Cell(TEXT, gap_text(gap, self.int_decimals), "value", theme.text_dim)
-        if key == "track_limits":
-            return self.track_limits_cell(veh.trackLimitsPoints, ctx.in_race)
-        if key == "energy_per_lap":
-            return self.energy_per_lap_cell(veh)
-        if key == "delta_laptime":
-            if ctx.player is None or veh.isPlayer:
-                return Cell(DELTAS)
-            return Cell(DELTAS, extra=tuple(veh.lapTimeHistory.delta(ctx.player.lapTimeHistory, self.delta_count)))
         return Cell()
 
     def laptime_cell(self, veh, ctx: Context) -> Cell:
@@ -174,54 +163,59 @@ class Realtime(DriverTable):
             return Cell(TEXT, DASH, "strong", theme.text_faint)
         return Cell(TEXT, f"+{gap:.{self.gap_decimals}f}", "strong", theme.text)
 
-    def energy_per_lap_cell(self, veh) -> Cell:
-        """Virtual energy used in last lap (or average of last 5 laps) as game gives it, dash if unknown"""
-        theme = self.theme
-        if self.demo:
-            used = demo_energy_per_lap(veh)
-        else:
-            usage = self.usages().usage(veh.driverName)
-            used = -1.0 if usage is None else (usage.average if self.usage_average else usage.last)
-        if used <= 0:
-            return Cell(TEXT, DASH, "dim", theme.text_faint)
-        return Cell(TEXT, f"{used * 100:.1f}%", "dim", theme.text_dim)
-
-    def usages(self) -> Any:
-        """Energy usage poller (energy_usage module loaded only with energy per lap column)"""
-        if self.energy_usage is None:
-            from ...energy_usage import energy_usage
-
-            self.energy_usage = energy_usage
-        return self.energy_usage
-
-    def track_limits_cell(self, points: float, in_race: bool) -> Cell:
-        """Track limits points: amber once any, red one point before penalty (races only: no penalty in
-        practice & qualifying)"""
-        theme = self.theme
-        if points <= 0:
-            return Cell(TEXT, DASH, "dim", theme.text_faint)
-        limit = self.limit if in_race else 0.0
-        color = theme.negative if limit > 0 and points >= limit - 1 else theme.warning
-        return Cell(TEXT, format_points(points), "dim", color)
-
-    def class_header(self, class_name: str) -> ClassHeader:
-        """Header of a class group: class name (game name, words apart) on class color"""
+    def class_header(self, class_name: str, level: Any = None) -> ClassHeader:
+        """Header of a class group: class name (game name, words apart) on class color, strength of field of
+        class at right end (average driver & safety rank with progress, in color of driver rank) if known"""
         _, color = class_style(self.cfg, class_name, self.theme)
-        return ClassHeader(class_name.replace("_", " ").strip() or DASH, color)
+        text = class_name.replace("_", " ").strip() or DASH
+        if level is None or level.driver is None:
+            return ClassHeader(text, color)
+        from ...process import driver_ranks as dr
+
+        colors = self.rank_colors
+        if not colors:  # rank colors made once
+            colors.update((name, QColor(value)) for name, value in
+                          (dr.RANK_COLORS_LIGHT if self.theme.light else dr.RANK_COLORS).items())
+        info = f"{self.sof_label} {level.driver.short} {level.driver.progress}%"
+        if level.safety is not None:
+            info = f"{info} · {level.safety.short} {level.safety.progress}%"
+        return ClassHeader(text, color, info, colors.get(level.driver.name.casefold(), self.theme.text_dim))
+
+    def class_levels(self, data_set) -> dict[str, Any]:
+        """Strength of field of each class: average ranks of its drivers (all cars of class, shown or not)"""
+        from ...process import field_ranks as fr
+
+        if self.demo:
+            from ...process import driver_ranks as dr
+            from .drivers import SAMPLE_RANKS
+
+            ranks: dict[str, list] = {}
+            for veh in data_set:
+                if veh.driverName:
+                    sample = SAMPLE_RANKS[veh.positionOverall % len(SAMPLE_RANKS)]
+                    ranks.setdefault(veh.vehicleClass, []).append(
+                        dr.DriverRanks("", "", "", "", dr.Rank(*sample[:2], 50), dr.Rank(*sample[2:4], 50)))
+            return {name: fr.average_level(found) for name, found in ranks.items()}
+        from ...rank_info import field_level
+
+        names: dict[str, list[str]] = {}
+        for veh in data_set:
+            if veh.driverName:
+                names.setdefault(veh.vehicleClass, []).append(veh.driverName)
+        return {name: field_level(class_names) for name, class_names in names.items()}
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        self.limit = api.read.session.limits_points()
-        self.demo = drawing_demo()
-        if self.wcfg["column_energy_per_lap"] and not self.demo:
-            self.usages().poll()
-        self.show_rows(minfo.vehicles.dataSet, minfo.relative.standings, self.context())
+        self.poll_columns(minfo.vehicles.dataSet)
+        self.trend_of = live_trends() if self.wcfg["column_gap_trend"] else None
+        # Cars of session only (strength of field of classes): slots beyond keep drivers of a former bigger session
+        cars = minfo.vehicles.dataSet[:max(minfo.vehicles.totalVehicles, 0)]
+        self.show_rows(cars, minfo.relative.standings, self.context())
 
     def show_field(self, field, ctx: Context):
         from .sample_field import sample_standings
 
-        self.limit = 5.0
-        self.demo = True
+        self.sample_columns()
         self.show_rows(field.vehicles, sample_standings(field, self.wcfg), ctx)
 
     def show_rows(self, data_set, standings: list[int], ctx: Context):
@@ -229,6 +223,7 @@ class Realtime(DriverTable):
         above each class group if class headers, widget height follows"""
         rows: list = []
         shown_class = None
+        levels = self.class_levels(data_set) if self.class_sof else {}
         for index in standings[:self.max_rows]:
             if index == -1:
                 if rows and rows[-1] is not SEPARATOR:
@@ -237,8 +232,8 @@ class Realtime(DriverTable):
                 veh = data_set[index]
                 if self.class_headers and veh.vehicleClass != shown_class:
                     shown_class = veh.vehicleClass
-                    rows.append(self.class_header(shown_class))
-                rows.append(self.driver_row(veh, ctx))
+                    rows.append(self.class_header(shown_class, levels.get(shown_class)))
+                rows.append(self.driver_row(veh, ctx, **self.position_trend(veh, index, ctx)))
         while rows and rows[-1] is SEPARATOR:
             rows.pop()
         rows_tuple = tuple(rows)
@@ -247,10 +242,3 @@ class Realtime(DriverTable):
             if ceil(height) != self.height():
                 self.set_size(self.table.width, height)
                 self.update()  # resized: whole widget
-
-
-def demo_energy_per_lap(veh) -> float:
-    """Simulated energy used per lap (overlay pictures & previews): cars with virtual energy only"""
-    if "LMP2" in veh.vehicleClass or "LMP3" in veh.vehicleClass:
-        return -1.0
-    return 0.031 + (veh.positionOverall * 7 % 9) * 0.0012

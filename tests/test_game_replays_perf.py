@@ -52,11 +52,12 @@ def test_timeline_end_steady_without_session_length(replays_page):  # noqa: F811
     backend.session_end = -1.0
     ends = set()
     for replay_time in range(1700, 1760, 7):
-        backend.replay_time = float(replay_time)
-        ends.add(backend.timeline["end"])
+        backend.update_replay_time(float(replay_time))
+        ends.add(backend.timelineEnd)
     assert len(ends) <= 2 and all(end % 60 == 0 for end in ends)
     backend.session_end = 3600.0
-    assert backend.timeline["end"] == 3600.0
+    backend.update_timeline_end()
+    assert backend.timelineEnd == 3600.0
 
 
 def test_lists_reuse_rows(replays_page):  # noqa: F811
@@ -74,7 +75,7 @@ def test_lists_reuse_rows(replays_page):  # noqa: F811
         replays_page.resize(1400, 860)
         replays_page.show()
         pump(20)
-        # Jump button made for the selected incident row only (none hovered)
+        # Jump button accent on the selected incident row only (none hovered)
         jumps = len(buttons(flat=False, accent=True))
         backend.selectIncident(backend.incidentRows.rows[0]["key"])
         pump()
@@ -84,7 +85,7 @@ def test_lists_reuse_rows(replays_page):  # noqa: F811
         lists = [item for item in items_of(replays_page.view.rootObject())
                  if item.metaObject().className().startswith("QQuickListView") and item.property("reuseItems")]
         assert len(lists) == 4  # results sessions, replays, incidents, standings
-        assert len(buttons(text="Watch")) == 1  # selected replay row only
+        assert len([button for button in buttons(text="Watch") if button.isVisible()]) == 1  # selected row only
     finally:
         qInstallMessageHandler(previous)
     qml = [text for text in messages if ".qml" in text]

@@ -182,11 +182,14 @@ def test_lap_viewer_open_replay_seeks_after_load(viewer, tmp_path, monkeypatch):
     monkeypatch.setattr(module, "restart_api", lambda: None)
     monkeypatch.setattr(type(api), "name", property(lambda self: module.API_LMU_NAME))
     monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", FRAME_SIZE]])
+    from neopedal.ui.quick import lap_backend
+
     backend = viewer.backend
-    monkeypatch.setattr(backend, "replay_target", lambda lap, x: (filename, 42.0))
+    monkeypatch.setattr(lap_backend, "find_replay", lambda folder, moment, replayed: (filename, 42.0))
     view = None
     try:
         backend.openReplay(0.0, "")
+        backend.wait_jobs()  # replay looked for in background
         view = next(widget for widget in viewer.findChildren(BaseDialog) if type(widget).__name__ == "ReplayView")
         assert not replay.active and backend.status == "Loading replay…"
         wait_loaded(view)
@@ -195,7 +198,8 @@ def test_lap_viewer_open_replay_seeks_after_load(viewer, tmp_path, monkeypatch):
         assert player.paused and player.position == pytest.approx(42.0, abs=0.05)
         assert "Replay: long.tpreplay" in backend.status
         player.seek(0.0)
-        backend.openReplay(0.0, "")  # same replay already played: position shown at once
+        backend.openReplay(0.0, "")  # same replay already played: position shown once found
+        backend.wait_jobs()
         assert replay.player is player and player.position == pytest.approx(42.0, abs=0.05)
     finally:
         replay.unload()

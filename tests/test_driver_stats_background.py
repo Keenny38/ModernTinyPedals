@@ -307,6 +307,8 @@ def test_pictures_changed_refreshes_only_when_logos_change(backend, monkeypatch)
     from neopedal.userfile.game_images import images
 
     backend.selectTrack("")
+    visible = [True]
+    monkeypatch.setattr(type(backend), "page_visible", property(lambda self: visible[0]))
     tracks_signals, refreshes = [], []
     backend.tracksChanged.connect(lambda: tracks_signals.append(1))
     original = type(backend).refresh_table
@@ -315,7 +317,11 @@ def test_pictures_changed_refreshes_only_when_logos_change(backend, monkeypatch)
     assert not tracks_signals and not refreshes  # same logos: nothing shown again
     monkeypatch.setattr(game_pictures, "track_logo_url", lambda *names: f"file:///{names[0]}.png")
     monkeypatch.setattr(images, "version", images.version + 1)  # pictures fetched from game
+    visible[0] = False
     backend.pictures_changed()
+    assert not tracks_signals and not refreshes  # hidden page: rebuilt once shown, never meanwhile
+    visible[0] = True
+    backend.run_deferred()
     assert tracks_signals and refreshes
     assert backend.tracks[1]["logo"].endswith(".png") and backend.cell("Monza", "track").logo.endswith("Monza.png")
 

@@ -27,6 +27,7 @@ TRACKINFO_DEFAULT = MappingProxyType({
     "pit_exit": 0.0,
     "pit_speed": 0.0,
     "speed_trap": 0.0,
+    "orientation": 0.0,  # track map overlay orientation (degrees), added to display_orientation
     "sunrise": "06:00",
     "sunset": "20:00",
     "preset": "",  # primary preset name, auto loaded on this track

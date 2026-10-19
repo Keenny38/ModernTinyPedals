@@ -1,5 +1,6 @@
 """Module tests: track map & pit lane mapping, driver stats, car setup backup, track & pace notes"""
 
+from itertools import pairwise
 from types import SimpleNamespace
 
 import pytest
@@ -577,3 +578,81 @@ def test_notes_file_filters_headers_and_parsers():
     assert track_notes.set_notes_header_by_filter(FileFilter.CSV) == ()
     assert track_notes.set_notes_parser(FileFilter.GPLINI) is track_notes.parse_gpl_notes
     assert track_notes.set_notes_writer(FileFilter.TPPN) is track_notes.write_csv_notes
+
+
+def drive_distances(tele: dict, gen, lap_start: float, distances: list[float], sector_lines: bool = True):
+    """Drive a lap through given lap distances, crossing sector lines at 1/3 & 2/3 of points"""
+    tele["timing.start"] = lap_start
+    total = len(distances)
+    for index, distance in enumerate(distances):
+        sector = 0 if index < total / 3 else (1 if index < total * 2 / 3 else 2)
+        tele.update({
+            "lap.distance": distance,
+            "lap.sector_index": sector if sector_lines else 0,
+            "vehicle.position_longitudinal": distance,
+            "vehicle.position_lateral": float(index % 7),
+            "vehicle.position_vertical": 1.5,
+            "timing.current_laptime": 0.5,
+        })
+        gen.send(1)
+
+
+def finish_lap(tele: dict, gen, lap_start: float):
+    """Cross finish line with valid lap time, saved 2 seconds into next lap"""
+    tele.update({"timing.start": lap_start, "timing.current_laptime": 2.0, "timing.last_laptime": 90.0})
+    gen.send(1)
+    gen.send(1)
+
+
+@pytest.fixture
+def map_recorder(tele, tmp_path):
+    def build(min_node_distance: float = 5.0):
+        output = MappingInfo()
+        gen = module_mapping.record_track_map(output, f"{tmp_path.as_posix()}/", min_node_distance)
+        tele.update({"timing.start": 0.0, "timing.last_laptime": -1.0})
+        gen.send(1)  # no map file yet
+        return gen
+    return build
+
+
+def test_track_map_nodes_at_least_minimum_distance_apart(map_recorder, tele, tmp_path):
+    gen = map_recorder(min_node_distance=25.0)
+    drive_distances(tele, gen, 10.0, [index * 10.0 for index in range(400)])  # a sample every 10 meters
+    finish_lap(tele, gen, 100.0)
+    _, dists, _ = load_track_map_file(f"{tmp_path.as_posix()}/", "SimTrack")
+    gaps = [after[0] - before[0] for before, after in pairwise(dists)]
+    assert len(dists) == 133 and min(gaps) >= 25.0  # every third sample (30 meters)
+
+
+def test_track_map_lap_with_teleport_not_recorded(map_recorder, tele, tmp_path):
+    gen = map_recorder()
+    distances = [index * 10.0 for index in range(400)]
+    distances[150:] = [distance + 1500.0 for distance in distances[150:]]  # back to garage, skipped part of lap
+    drive_distances(tele, gen, 10.0, distances)
+    finish_lap(tele, gen, 100.0)
+    assert not (tmp_path / "SimTrack.svg").exists()
+
+
+def test_track_map_previous_lap_distance_at_lap_start_ignored(map_recorder, tele, tmp_path):
+    gen = map_recorder()
+    distances = [3995.0, 3998.0] + [index * 10.0 for index in range(1, 400)]  # distance reset after lap start
+    drive_distances(tele, gen, 10.0, distances)
+    finish_lap(tele, gen, 100.0)
+    _, dists, _ = load_track_map_file(f"{tmp_path.as_posix()}/", "SimTrack")
+    assert dists[0][0] == pytest.approx(10.0)
+
+
+def test_track_map_without_sector_lines_not_recorded(map_recorder, tele, tmp_path):
+    gen = map_recorder()
+    drive_distances(tele, gen, 10.0, [index * 10.0 for index in range(400)], sector_lines=False)
+    finish_lap(tele, gen, 100.0)
+    assert not (tmp_path / "SimTrack.svg").exists()
+
+
+def test_track_orientation_loaded_with_track_info(tele, ui_env, monkeypatch):
+    from neopedal.setting import cfg
+
+    monkeypatch.setitem(cfg.user.tracks, "SimTrack", {"orientation": 270.0})
+    output = MappingInfo()
+    module_mapping.record_track_info(output).send(1)
+    assert output.orientation == 270.0

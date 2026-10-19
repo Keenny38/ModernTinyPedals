@@ -71,7 +71,7 @@ def test_backup_timestamp():
 
 # Load user preset
 def test_load_missing_file_returns_default_copy(folder):
-    loaded = load_setting_json_file("missing.json", folder, DEFAULT, validator=keep_all, max_attempts=1)
+    loaded = load_setting_json_file("missing.json", folder, DEFAULT, validator=keep_all)
     assert loaded == DEFAULT
     loaded["widget"]["size"] = 1
     assert DEFAULT["widget"]["size"] == 10  # default never modified
@@ -85,7 +85,7 @@ def test_load_valid_file_uses_validator(folder):
         calls.append((user, default))
         return {**default, **user}
 
-    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=validator, max_attempts=1)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=validator)
     assert loaded["widget"] == {"enable": True} and loaded["module"] == {"enable": True}
     assert len(calls) == 1
 
@@ -93,7 +93,7 @@ def test_load_valid_file_uses_validator(folder):
 def test_load_corrupted_file_falls_back_and_keeps_backup(folder, monkeypatch):
     monkeypatch.setattr(json_setting, "sleep", lambda _: None)
     write(folder, "user.json", '{"widget": {"enable": tru')
-    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=3)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all)
     assert loaded == DEFAULT
     saved_backups = backups(folder, "user.json")
     assert len(saved_backups) == 1  # broken file kept for user to recover
@@ -108,7 +108,7 @@ def test_load_validator_error_falls_back(folder, monkeypatch):
     def validator(user, default):
         return {key: user[key] for key in default}  # TypeError on list
 
-    assert load_setting_json_file("user.json", folder, DEFAULT, validator=validator, max_attempts=2) == DEFAULT
+    assert load_setting_json_file("user.json", folder, DEFAULT, validator=validator) == DEFAULT
 
 
 def locked_open(locked_path: str, monkeypatch):
@@ -127,7 +127,7 @@ def locked_open(locked_path: str, monkeypatch):
 def test_load_locked_file_not_saved_over(folder, monkeypatch):
     write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
     locked_open(f"{folder}user.json", monkeypatch)
-    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2, access_timeout=0.1)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, access_timeout=0.1)
     assert loaded == DEFAULT
     unreadable = json_setting._unreadable_files
     assert json_setting.is_unreadable_file("user.json", folder)
@@ -145,7 +145,7 @@ def test_skipped_save_of_locked_file_notified_once(folder, monkeypatch):
 
     write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
     locked_open(f"{folder}user.json", monkeypatch)
-    load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2, access_timeout=0.1)
+    load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, access_timeout=0.1)
     unreadable = json_setting._unreadable_files
     monkeypatch.undo()
     monkeypatch.setattr(json_setting, "_unreadable_files", unreadable)
@@ -169,13 +169,13 @@ def test_load_lock_released_while_retrying(folder, monkeypatch):
 
     def flaky_open(file, *args, **kwargs):
         calls.append(file)
-        if len(calls) < 4:  # more than max_attempts: access errors retried by time, not attempts
+        if len(calls) < 4:  # access errors retried by time
             raise PermissionError(13, "Permission denied")
         return real_open(file, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", flaky_open)
     monkeypatch.setattr(json_setting, "sleep", lambda _: None)
-    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all)
     assert loaded == {"widget": {"enable": True}}
     assert not json_setting.is_unreadable_file("user.json", folder)
 
@@ -183,7 +183,7 @@ def test_load_lock_released_while_retrying(folder, monkeypatch):
 def test_load_style_locked_file_not_saved_over(folder, monkeypatch):
     write(folder, "style.json", '{"A":{"color":"#000"}}')
     locked_open(f"{folder}style.json", monkeypatch)
-    loaded = load_style_json_file("style.json", folder, {"A": {}}, max_attempts=2, access_timeout=0.1)
+    loaded = load_style_json_file("style.json", folder, {"A": {}}, access_timeout=0.1)
     assert loaded == {"A": {}}
     monkeypatch.undo()
     with open(f"{folder}style.json", encoding="utf-8") as file:
@@ -192,7 +192,7 @@ def test_load_style_locked_file_not_saved_over(folder, monkeypatch):
 
 # Load style preset
 def test_load_style_missing_file_creates_default(folder):
-    loaded = load_style_json_file("style.json", folder, {"A": {"color": "#FFF"}}, max_attempts=1)
+    loaded = load_style_json_file("style.json", folder, {"A": {"color": "#FFF"}})
     assert loaded == {"A": {"color": "#FFF"}}
     assert read_json(folder, "style.json") == loaded
 
@@ -204,7 +204,7 @@ def test_load_style_updated_by_validator_saved_with_backup(folder):
         style["A"]["color"] = "#000"
         return True  # modified
 
-    loaded = load_style_json_file("style.json", folder, {}, validator=validator, max_attempts=1)
+    loaded = load_style_json_file("style.json", folder, {}, validator=validator)
     assert loaded == {"A": {"color": "#000"}}
     assert read_json(folder, "style.json") == loaded
     assert len(backups(folder, "style.json")) == 1
@@ -212,7 +212,7 @@ def test_load_style_updated_by_validator_saved_with_backup(folder):
 
 def test_load_style_unchanged_not_rewritten(folder):
     write(folder, "style.json", '{"A":{}}')
-    load_style_json_file("style.json", folder, {}, validator=lambda style: False, max_attempts=1)
+    load_style_json_file("style.json", folder, {}, validator=lambda style: False)
     with open(f"{folder}style.json", encoding="utf-8") as file:
         assert file.read() == '{"A":{}}'
     assert backups(folder, "style.json") == []
@@ -221,7 +221,7 @@ def test_load_style_unchanged_not_rewritten(folder):
 def test_load_style_corrupted_falls_back(folder, monkeypatch):
     monkeypatch.setattr(json_setting, "sleep", lambda _: None)
     write(folder, "style.json", "{broken")
-    loaded = load_style_json_file("style.json", folder, {"A": {}}, max_attempts=2)
+    loaded = load_style_json_file("style.json", folder, {"A": {}})
     assert loaded == {"A": {}}
     assert read_json(folder, "style.json") == {"A": {}}  # repaired
     assert len(backups(folder, "style.json")) == 1  # broken file kept
@@ -240,14 +240,14 @@ def test_verify_json_file(folder):
 
 # Save
 def test_save_creates_new_file(folder):
-    save_and_verify_json_file(DEFAULT, "new.json", folder, max_attempts=3)
+    save_and_verify_json_file(DEFAULT, "new.json", folder)
     assert read_json(folder, "new.json") == DEFAULT
     assert backups(folder, "new.json") == []
 
 
 def test_save_overwrites_and_removes_temporary_backup(folder):
     write(folder, "data.json", json.dumps({"old": True}))
-    save_and_verify_json_file(DEFAULT, "data.json", folder, max_attempts=3)
+    save_and_verify_json_file(DEFAULT, "data.json", folder)
     assert read_json(folder, "data.json") == DEFAULT
     assert backups(folder, "data.json") == []
 
@@ -262,7 +262,7 @@ def test_save_failure_restores_previous_file(folder, monkeypatch):
     monkeypatch.setattr(json_setting, "sleep", lambda _: None)
     monkeypatch.setattr(json_setting, "verify_json_file", lambda *args, **kwargs: False)
     write(folder, "data.json", json.dumps({"old": True}))
-    save_and_verify_json_file(DEFAULT, "data.json", folder, max_attempts=3)
+    save_and_verify_json_file(DEFAULT, "data.json", folder)
     assert read_json(folder, "data.json") == {"old": True}  # previous content restored
     assert backups(folder, "data.json") == []
 
@@ -279,7 +279,7 @@ def test_save_failure_and_restore_failure_keeps_renamed_backup(folder, monkeypat
     monkeypatch.setattr(json_setting, "verify_json_file", lambda *args, **kwargs: False)
     monkeypatch.setattr(json_setting, "restore_backup_file", lambda *args, **kwargs: False)
     write(folder, "data.json", json.dumps({"old": True}))
-    save_and_verify_json_file(DEFAULT, "data.json", folder, max_attempts=2)
+    save_and_verify_json_file(DEFAULT, "data.json", folder)
     # Temporary backup deleted, renamed copy kept so previous content can be recovered by user
     kept = backups(folder, "data.json")
     assert len(kept) == 1
@@ -341,7 +341,7 @@ def test_save_never_leaves_truncated_file(folder, monkeypatch):
 
 def test_save_invalid_data_leaves_no_backup(folder):
     write(folder, "data.json", json.dumps({"old": True}))
-    save_and_verify_json_file({"bad": object()}, "data.json", folder, max_attempts=3)
+    save_and_verify_json_file({"bad": object()}, "data.json", folder)
     assert read_json(folder, "data.json") == {"old": True}
     assert sorted(os.listdir(folder)) == ["data.json"]  # backup & temporary file removed
 

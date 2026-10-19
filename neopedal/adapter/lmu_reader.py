@@ -38,14 +38,14 @@ from ..calculation import (
     oriyaw,
     slip_angle,
 )
-from ..const_common import MAX_SECONDS, WHEELS_NA
+from ..const_common import MAX_SECONDS, SECTOR_FLAG_ORDER, WHEELS_NA
 from ..formatter import strip_invalid_char
 from ..penalty_info import Penalty
 from ..process.weather import WeatherNode
 from ..validator import bytes_to_str
 from ..validator import infnan_to_zero as rmnan
 from . import _reader
-from ._reader import SECTOR_ORDER, signed_char
+from ._reader import signed_char
 from .lmu_connector import LMU_COMPOUND_TYPE, LMUInfo
 from .lmu_restapi import RestAPIData
 
@@ -693,13 +693,13 @@ class Session(_reader.Session, DataAdapter):
     def sector_yellow_flags(self) -> tuple[bool, bool, bool]:
         """Local yellow flag in sector 1, sector 2, sector 3
 
-        Game sector flag order assumed same as vehicle sector (game index 0 = sector 3).
+        Game sector flag order: see SECTOR_FLAG_ORDER.
         """
         sec_flag = self.shmm.lmuScorInfo.mSectorFlag
         return (
-            sec_flag[SECTOR_ORDER[0]] == 1,
-            sec_flag[SECTOR_ORDER[1]] == 1,
-            sec_flag[SECTOR_ORDER[2]] == 1,
+            sec_flag[SECTOR_FLAG_ORDER[0]] == 1,
+            sec_flag[SECTOR_FLAG_ORDER[1]] == 1,
+            sec_flag[SECTOR_FLAG_ORDER[2]] == 1,
         )
 
     def wind_velocity(self) -> tuple[float, float, float]:
@@ -836,7 +836,7 @@ class Switch(_reader.Switch, DataAdapter):
         return bool(self.shmm.lmuTeleVeh(index).mSpeedLimiterAvailable)
 
     def speed_limiter_active(self, index: int | None = None) -> bool:
-        """Whether pit speed limiter is active (rF2: speed limiter switched on)"""
+        """Whether a limiter is cutting the engine (also set at the rev limiter: pit limiter switch is speed_limiter)"""
         return bool(self.shmm.lmuTeleVeh(index).mSpeedLimiterActive)
 
 

@@ -54,8 +54,9 @@ def hotkey_widget_toggle(widget_name: str):
 
 
 def hotkey_overlay_visibility():
-    """Command - overlay visibility"""
-    realtime_state.hidden = not realtime_state.hidden
+    """Command - overlay visibility (shown on screen too if auto hidden on screen only)"""
+    realtime_state.hidden = not (realtime_state.hidden or realtime_state.screen_hidden)
+    realtime_state.screen_hidden = False
     overlay_signal.hidden.emit(realtime_state.hidden)
 
 
@@ -204,7 +205,7 @@ def spectate_place(offset: int):
             cfg.api["player_index"] = api.read.vehicle.slot_id(vehicle_index)
             api.setup()
             cfg.save()
-            app_signal.refresh.emit(True)  # Spectate page follows
+            app_signal.spectate_changed.emit(cfg.api["player_index"])  # Spectate page follows (mode unchanged)
             return
 
 

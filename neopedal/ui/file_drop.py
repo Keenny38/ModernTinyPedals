@@ -17,7 +17,8 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Files dropped on main window: preset (.json), preset package, overlay settings or plugin (.zip), MoTeC log (.ld)
+Files dropped on main window: preset (.json), preset package, overlay settings or plugin (.zip), MoTeC log (.ld),
+consumption history, race plan or tyre plan (opened in Race Calculator, which takes them dropped on its page too)
 """
 
 from __future__ import annotations
@@ -43,6 +44,11 @@ DROP_PACKAGE = "package"
 DROP_OVERLAYS = "overlays"  # overlay settings package
 DROP_PLUGIN = "plugin"
 DROP_MOTEC = "motec"
+DROP_RACE = "race"  # one of the Race Calculator files below
+DROP_HISTORY = "history"
+DROP_RACE_PLAN = "race_plan"
+DROP_TYRE_PLAN = "tyre_plan"
+RACE_FILES = {FileExt.CONSUMPTION: DROP_HISTORY, FileExt.RACEPLAN: DROP_RACE_PLAN, FileExt.TYRESTRATEGY: DROP_TYRE_PLAN}
 MAX_PRESET_SIZE = 20 * 1024 * 1024
 
 
@@ -52,13 +58,21 @@ def dropped_files(mime: QMimeData) -> list[str]:
         return []
     return [
         url.toLocalFile() for url in mime.urls()
-        if url.isLocalFile() and url.toLocalFile().lower().endswith((FileExt.JSON, ".zip", ".ld"))
+        if url.isLocalFile() and url.toLocalFile().lower().endswith((FileExt.JSON, ".zip", ".ld", *RACE_FILES))
     ]
+
+
+def race_file_kind(path: str) -> str:
+    """Race Calculator file: DROP_HISTORY, DROP_RACE_PLAN or DROP_TYRE_PLAN, empty if not one"""
+    lower = path.lower()
+    return next((kind for extension, kind in RACE_FILES.items() if lower.endswith(extension)), "")
 
 
 def classify(path: str) -> str:
     """Type of dropped file, empty if not supported"""
     lower = path.lower()
+    if race_file_kind(lower):
+        return DROP_RACE
     if lower.endswith(FileExt.JSON):
         return DROP_PRESET
     if lower.endswith(".ld"):
@@ -121,40 +135,55 @@ def handle_drop(window, paths: list[str]) -> list[str]:
     from .app import PAGE_INDEX
 
     messages = []
-    for path in paths:
-        kind = classify(path)
-        name = os.path.basename(path)
-        if kind == DROP_PRESET:
-            try:
-                filename = import_preset_file(path, cfg.path.settings)
-            except (OSError, ValueError) as error:
-                messages.append(trm(f"Unable to import <b>{name}</b>: {tr(str(error))}"))
-                continue
-            messages.append(trm(f"Preset imported: <b>{filename[:-5]}</b>"))
-            window.centralWidget().set_current_index(PAGE_INDEX["preset"])
+    imported = False  # presets imported not refreshed yet: pages & menus refreshed once, not once per file
+    try:
+        for path in paths:
+            kind = classify(path)
+            name = os.path.basename(path)
+            if imported and kind != DROP_PRESET:  # other file next (may open a dialog): presets listed first
+                imported = False
+                app_signal.refresh.emit(True)
+            if kind == DROP_PRESET:
+                try:
+                    filename = import_preset_file(path, cfg.path.settings)
+                except (OSError, ValueError) as error:
+                    messages.append(trm(f"Unable to import <b>{name}</b>: {tr(str(error))}"))
+                    continue
+                messages.append(trm(f"Preset imported: <b>{filename[:-5]}</b>"))
+                window.centralWidget().set_current_index(PAGE_INDEX["preset"])
+                imported = True
+            elif kind == DROP_PACKAGE:
+                window.centralWidget().set_current_index(PAGE_INDEX["preset"])
+                window.centralWidget().preset_tab.import_package_file(path)
+            elif kind == DROP_OVERLAYS:
+                from .overlay_share import import_overlay_file
+
+                import_overlay_file(window, path)
+            elif kind == DROP_MOTEC:
+                from .lap_viewer import import_motec_log
+
+                messages.append(import_motec_log(window, path))
+            elif kind == DROP_RACE:
+                from .tools_view import open_tool
+
+                open_dropped = getattr(getattr(open_tool("race_calculator.RaceCalculator", window), "backend", None),
+                                       "open_dropped", None)
+                if callable(open_dropped):  # opened like its Open action, told by the page
+                    open_dropped([path])
+            elif kind == DROP_PLUGIN:
+                from ._common import BaseDialog
+                from .plugin_manager import PluginManager
+
+                manager = PluginManager(window)
+                manager.show()
+                # Already open as page: installed from that page (new copy is deleted)
+                shown = manager.shown_dialog() if isinstance(manager, BaseDialog) else manager
+                install_file = getattr(shown, "install_file", None)
+                if callable(install_file):  # not opened as separate window already
+                    install_file(path)
+            else:
+                messages.append(trm(f"Unsupported file: <b>{name}</b>"))
+    finally:
+        if imported:
             app_signal.refresh.emit(True)
-        elif kind == DROP_PACKAGE:
-            window.centralWidget().set_current_index(PAGE_INDEX["preset"])
-            window.centralWidget().preset_tab.import_package_file(path)
-        elif kind == DROP_OVERLAYS:
-            from .overlay_share import import_overlay_file
-
-            import_overlay_file(window, path)
-        elif kind == DROP_MOTEC:
-            from .lap_viewer import import_motec_log
-
-            messages.append(import_motec_log(window, path))
-        elif kind == DROP_PLUGIN:
-            from ._common import BaseDialog
-            from .plugin_manager import PluginManager
-
-            manager = PluginManager(window)
-            manager.show()
-            # Already open as page: installed from that page (new copy is deleted)
-            shown = manager.shown_dialog() if isinstance(manager, BaseDialog) else manager
-            install_file = getattr(shown, "install_file", None)
-            if callable(install_file):  # not opened as separate window already
-                install_file(path)
-        else:
-            messages.append(trm(f"Unsupported file: <b>{name}</b>"))
     return messages

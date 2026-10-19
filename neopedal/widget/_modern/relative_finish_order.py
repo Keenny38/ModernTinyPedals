@@ -147,9 +147,14 @@ class Realtime(ModernOverlay):
         energy_type = minfo.energy.available
         leader_index = minfo.vehicles.leaderIndex
         player_index = minfo.vehicles.playerIndex
-        leader_lap_into = api.read.lap.progress(leader_index)
         player_lap_into = api.read.lap.progress()
-        leader_pace = minfo.vehicles.dataSet[leader_index].lapTimeHistory.average
+        if leader_index >= 0:
+            leader_data = minfo.vehicles.dataSet[leader_index]
+            leader_lap_into = api.read.lap.progress(leader_index)
+            leader_pace = leader_data.lapTimeHistory.average
+            leader_pit_time = leader_data.pitTimer.elapsed
+        else:  # no leader (new session, no place 1 in scoring)
+            leader_lap_into = leader_pace = leader_pit_time = 0.0
         player_pace = minfo.delta.lapTimePace
         leader_valid = 0 < leader_pace < MAX_SECONDS
         player_valid = 0 < player_pace < MAX_SECONDS
@@ -165,7 +170,7 @@ class Realtime(ModernOverlay):
             time_left = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
             laps_diff = 0
 
-        self.leader_pit_times[-1] = minfo.vehicles.dataSet[leader_index].pitTimer.elapsed
+        self.leader_pit_times[-1] = leader_pit_time
         self.player_pit_times[-1] = player_vehicle().pitTimer.elapsed
         consumption = minfo.energy if energy_type else minfo.fuel
         fuel_in_tank = 0 if self.wcfg["show_absolute_refilling"] else consumption.amountCurrent

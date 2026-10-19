@@ -3,6 +3,100 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.26.0 (2026-10-19)
+
+Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en ligne, de nouvelles alertes de drapeau, des panneaux plus sombres, deux overlays de TinyPedal 2.51, et trois audits des bugs, des performances et de l'interface.
+
+### Nouveautés
+
+#### Overlay Coach de virages
+
+- **Coaching virage par virage** par rapport au même tour de référence que Comparaison de télémétrie (`reference_lap_source` : `Visionneuse`, `Meilleur` ou `Dernier`), désactivé par défaut, catégorie `Commandes pilote` :
+  - **Suivant** : le prochain virage, avec son numéro officiel ou son nom (`V5`, `Tertre Rouge`), et la distance jusqu'à sa corde (`show_next_corner`).
+  - **Frein** : la distance jusqu'au point de freinage du tour de référence, puis dès que vous freinez `Pile`, `8 m tôt` ou `8 m tard` (`show_braking_point`, `braking_point_tolerance` 3 m par défaut), ou `Sans freinage` pour un virage passé à fond.
+  - **Corde** : vitesse minimale du virage que vous venez de passer et son écart avec le tour de référence, en vert quand vous êtes plus rapide (`show_apex_speed`).
+
+![Overlay Coach de virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-coach.png)
+
+#### Driver Rank et Safety Rank en ligne (Le Mans Ultimate)
+
+- Les versions récentes du jeu ne gardent plus les rangs dans leur fichier de menu pendant que le jeu tourne : avec `enable_online_driver_ranks` (`Réglages` > `Application` > `En ligne`, activé par défaut), l'app les lit sur **RaceControl** comme le menu du jeu (ticket Steam du jeu lancé, rangs seulement, rien d'enregistré), au démarrage, après chaque session et toutes les 5 minutes.
+- Sur un serveur en ligne (essais, course, serveur privé), les **rangs de tous les pilotes de la session** sont lus aussi, par leur nom :
+  - **colonne `Driver Rank et Safety Rank`** dans Relatif, Classement et Rivaux (`column_driver_ranks`, désactivée par défaut) : `S2 P3` aux couleurs des rangs, avec le badge du jeu de chaque pilote ;
+  - **force du plateau** de chaque catégorie dans les en-têtes de catégorie du Classement (`show_class_sof`) et moyenne du plateau dans l'overlay Session (`show_field_level`) ;
+  - Driver Rank et Safety Rank sur les cartes pilote de la **Régie de course**.
+
+![Colonne Driver Rank et Safety Rank](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-17-driver-ranks-column.png)
+
+#### Drapeau : nouvelles alertes
+
+- **Pénalité à purger** (`DT`, `SG10`, `PEN×2`), **dernier tour** (aussi en course au temps) et **gros dégâts** (aéro en %), dans les deux designs.
+- Sous **drapeau bleu**, l'écart de la voiture qui vous prend un tour.
+- **Limiteur** par rapport à la vitesse de la voie des stands : vert quand il est enclenché, rouge au-dessus de la limite dans la voie des stands, et une alerte quand la voie des stands est parcourue sans lui.
+- Design moderne : `enable_new_flag_flash` (les nouvelles alertes clignotent), `enable_urgency_order` (les plus urgentes en premier), et l'overlay prend juste la place des alertes affichées.
+- `show_sector_yellow_flags_for_race_only` : les drapeaux jaunes de secteur ont leur propre option « course seulement » (reprise de celle du drapeau jaune dans vos presets).
+
+#### Panneaux plus sombres et opacité de tous les overlays
+
+- **`enable_black_background`** : les panneaux des thèmes modernes sombres en noir neutre au lieu du bleu ardoise ([issue #5](https://github.com/Keenny38/ModernTinyPedals/issues/5)).
+- **`background_opacity_percentage`** : opacité des panneaux modernes (92 par défaut, comme avant ; 100 plein).
+- **`overlay_opacity_percentage`** : tous les overlays plus transparents d'un coup, à l'écran, sur le stream et en VR. Elle multiplie l'opacité de chaque overlay, qui garde la sienne.
+
+![Fond noir uni](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-black-background.png)
+
+#### Repris de TinyPedal 2.51
+
+- Overlay **Direction du vent** : boussole qui tourne avec votre voiture et flèche qui montre où souffle le vent (vers le haut : vent arrière), colorée selon sa force ; un point par temps calme. `wind_speed_unit` (`m/s`, `KPH`, `MPH`) sert aussi à la Météo.
+- Overlay **Dimensions des roues** : rayon des pneus avant et arrière mesuré en roulant (`enable_wheel_dimension_measurement` du module roues).
+- **Carte de piste** : la colonne `Orient (°)` de l'éditeur d'infos de piste tourne la carte d'un circuit. **Module cartographie** : `minimum_node_distance` entre les points enregistrés (5 m par défaut), un tour avec un saut (retour au garage) n'est plus enregistré.
+- **Instruments** : `warning_color_engine_off`, contact en rouge quand le contact et le moteur sont coupés.
+- **Heatmaps** : nouvelles heatmaps par défaut `tyre_optimal_80` (nouvelles gommes) et `brake_optimal_400` (nouveaux freins) ; `tyre_default` devient `thermal_infrared`. Vos heatmaps et vos choix sont gardés.
+
+#### Overlays
+
+- **Numéros de virage** : les numéros officiels (ou noms) des virages sur la Carte de piste et sous le profil d'Altitude (`show_corner_numbers`, désactivé par défaut).
+- **Relatif** : colonne écart au tour (`column_delta_laptime`), comme dans Classement et Rivaux.
+
+![Numéros de virage sur la carte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-numbers.png)
+
+#### App
+
+- **Annuler partout** : corbeille des tours sur 20 niveaux et `Tours supprimés récemment...` pour restaurer des tours plus anciens (gardés 30 jours) ; `Ctrl+Z` / `Ctrl+Y` pour les interrupteurs de Rechercher une option ; l'annulation de `Réglages` revient aussi avant `Appliquer`.
+- **Fichiers récents** dans le calculateur de course (`Charger un fichier`, `Ouvrir un fichier récent` pour les plans de course et de pneus), et les fichiers `.consumption`, `.race-plan` et `.tyre-strategy` déposés sur la page ou la fenêtre principale. Cartes `.svg` déposées sur la Visionneuse de carte, avec une recherche dans les cartes enregistrées.
+- Page **`Stream`** dans la barre de navigation, après `Régie` (ajoutée aussi aux barres personnalisées).
+- Les options d'**Édition des overlays** (mode édition, aimantation, grille, guides) passent dans `Réglages` > `Style de l'overlay` (toujours enregistrées au même endroit).
+- Clavier : `/` va à la recherche, `Suppr` supprime la sélection.
+- Les actions qui effacent demandent confirmation, avec un bouton qui porte le nom de l'action ; les barres d'outils de la visionneuse de tours, de la visionneuse de carte, des statistiques, des rejeux et des résultats se replient dans un menu quand la fenêtre est étroite.
+- Les exports nomment leur fichier avec `Afficher dans le dossier` ; `Effacer les filtres` sur la page Résultats quand rien ne correspond ; un fichier de résultats illisible est signalé.
+
+### Améliorations
+
+- **Secteurs** : les temps et les écarts attendent le temps du secteur donné par le jeu, ils correspondent donc au HUD du jeu ; les tours de sortie et d'entrée des stands comptent pour les meilleurs secteurs (seuls les secteurs passés dans la voie des stands sont exclus), les meilleurs secteurs personnels ne viennent jamais d'un tour passé par les stands.
+- **Classement** : `show_pitstop_duration_while_requested_pitstop` désactivé par défaut (la colonne Temps garde les temps au tour quand un arrêt est demandé), aussi dans les presets existants.
+- **Une seule copie de l'app par dossier de réglages**, avec un verrou système libéré même après un plantage (plus de `pid.log`) ; un redémarrage attend que la copie précédente soit fermée.
+- **Plus léger et plus fluide** : les pages cachées ne se rafraîchissent plus, moins de rafraîchissements quand la voiture suivie change (Régie de course, spectateur), textes de lecture de la visionneuse de tours à 10 Hz, listes, graphiques et jauges plus légers.
+- **Rejeux** : les rejeux supprimés partent à la corbeille en arrière-plan, avec une progression et `Arrêt`.
+- **Mises à jour** : l'installateur est téléchargé dans un dossier temporaire privé et vérifié de nouveau à l'extraction ; il est supprimé si vous refusez l'installation ou s'il ne démarre pas.
+- **Revue de l'interface** : tailles, espacements et couleurs cohérents, libellés français qui tiennent à toutes les largeurs (en-tête du calculateur de course), focus et touches dans la Régie de course.
+
+### Corrections
+
+- **Masquage automatique** : les overlays se cachent de nouveau au garage quand les overlays de stream sont à l'antenne (OBS les garde) ; en spectateur, ils restent sur le stream seulement.
+- **Tableau de bord web** : cookie de connexion par port (`np_session_<port>`) : **reconnectez-vous une fois** après la mise à jour.
+- **Overlays de stream** : WebSocket accepté seulement depuis les pages de NeoPedal pendant que leur serveur tourne ; un nouveau jeton d'accès demande confirmation ; une réinitialisation de la disposition peut être annulée.
+- **Overlay VR** : dossiers partagés des calques protégés (vérification du propriétaire et droits d'accès).
+- **Instruments et Compteur ATH** : contact lu correctement pendant le démarrage.
+- **Module roues** : la mesure du rayon n'affiche plus un faux blocage de roue au début.
+- **Direction du vent et Météo** : flèche du vent exacte à 0° et 360°.
+- **Chrono de relais** : les aperçus des overlays ne changent plus les temps de conduite en direct.
+- **Classement** : force du plateau calculée sur les voitures de la session seulement.
+- **Calculateur de course** : historique de consommation enregistré et supprimé sans risque pendant que la session en direct l'écrit.
+- **Plus de 100 corrections** issues de trois audits (bugs, performances, interface), dans les overlays, les pages et les connexions.
+
+### Retiré
+
+- `maximum_loading_attempts` : un fichier de réglages endommagé n'est plus relu en boucle : il est gardé en sauvegarde et les valeurs par défaut sont utilisées tout de suite (un fichier verrouillé par un antivirus ou une synchro cloud est toujours réessayé).
+
 ## 0.25.0 (2026-10-17)
 
 Des options plus sûres partout : chaque nombre a des limites visibles, les presets sont réparés au chargement, et la page Options des overlays montre des situations de course et les deux designs.

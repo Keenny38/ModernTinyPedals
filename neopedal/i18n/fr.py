@@ -618,6 +618,12 @@ TRANSLATION = MappingProxyType({
     "Clear Row": "Vider la ligne",
     "Pit stop plan copied": "Plan d'arrêts copié",
     "<b>Start a new tyre plan?</b>": "<b>Commencer un nouveau plan pneus ?</b>",
+    "<b>Tyre plan could not be saved automatically.</b><br><br>Close anyway? Changes to the tyre plan will be lost (save it to a file first with Ctrl+S).":
+        "<b>Le plan pneus n'a pas pu être enregistré automatiquement.</b><br><br>Fermer quand même ? Les modifications du plan pneus seront perdues (enregistrez-le d'abord dans un fichier avec Ctrl+S).",
+    "Open Recent": "Ouvrir un fichier récent",
+    "No recent files": "Aucun fichier récent",
+    "Drop consumption history, race plan or tyre plan files to open them":
+        "Déposez des historiques de consommation, plans de course ou plans pneus pour les ouvrir",
     "Columns": "Colonnes",
     "Select laps, then add them: their average goes to the calculator, invalid laps (red) left out.": "Sélectionnez des tours puis ajoutez-les : leur moyenne va dans le calculateur, les tours invalides (en rouge) sont ignorés.",
     "Race Type": "Type de course",
@@ -1076,6 +1082,7 @@ TRANSLATION = MappingProxyType({
     "Moving average of noisy channels: G, steering rate, wheel slip, time gain/loss": "Moyenne glissante des canaux bruités : G, vitesse de braquage, glissement des roues, gain/perte de temps",
     "New recorded laps listed at once, newest lap compared with best lap": "Nouveaux tours listés dès leur enregistrement, dernier tour comparé au meilleur",
     "No replay recorded with this lap.": "Aucun rejeu enregistré avec ce tour.",
+    "Looking for the replay of this lap…": "Recherche du rejeu de ce tour…",
     "Not recorded in shown laps": "Non enregistré dans les tours affichés",
     "Open Replay Here": "Ouvrir le rejeu ici",
     'Outline of grip used in every direction by each lap (dots faded)': "Contour de l'adhérence utilisée dans chaque direction par chaque tour (points estompés)",
@@ -1273,6 +1280,7 @@ TRANSLATION = MappingProxyType({
     "Pit exit (m)": "Sortie des stands (m)",
     "Pit speed (m/s)": "Vitesse dans les stands (m/s)",
     "Speed trap (m)": "Radar de vitesse (m)",
+    "Orient (°)": "Orient. carte (°)",
     "Sunrise": "Lever du soleil",
     "Sunset": "Coucher du soleil",
     "Primary preset": "Preset principal",
@@ -1514,6 +1522,12 @@ TRANSLATION = MappingProxyType({
     "Left": "Gauche",
     "Length": "Longueur",
     "Load a track map recorded by the Mapping module.": "Chargez une carte de piste enregistrée par le module Mapping.",
+    "Or drop a track map file (.svg) here.": "Ou déposez ici un fichier de carte de piste (.svg).",
+    "Choose a track map": "Choisir une carte de piste",
+    "No track map recorded yet": "Aucune carte de piste enregistrée",
+    "Open a track map from another folder": "Ouvrir une carte de piste d'un autre dossier",
+    "Reading track map...": "Lecture de la carte de piste...",
+    "Drop a track map (.svg) to open it": "Déposez une carte de piste (.svg) pour l'ouvrir",
     "Long": "Longue",
     "Map Info": "Infos carte",
     "Map nodes measured from position: more nodes, longer curve section": "Nœuds de carte mesurés depuis la position : plus de nœuds, section de courbe plus longue",
@@ -1635,6 +1649,15 @@ TRANSLATION = MappingProxyType({
     "Stop Keeping Checked Laps": "Ne plus garder les tours cochés",
     "Export Checked Laps (MoTeC)...": "Exporter les tours cochés (MoTeC)...",
     "Move Checked Laps to Trash...": "Mettre les tours cochés à la corbeille...",
+    "Recently Deleted Laps...": "Tours supprimés récemment...",
+    "Recently Deleted Laps": "Tours supprimés récemment",
+    "Deleted laps are kept %1 days, then removed for good.":
+        "Les tours supprimés sont gardés %1 jours, puis effacés définitivement.",
+    "Deleted %1": "Supprimé le %1",
+    "Reading deleted laps...": "Lecture des tours supprimés...",
+    "No deleted lap": "Aucun tour supprimé",
+    "Search laps": "Rechercher des tours",
+    "Move highlighted or checked laps to trash": "Mettre à la corbeille le tour en évidence ou les tours cochés",
     "Search laps: vehicle, session, note...": "Rechercher : véhicule, session, note...",
     "Where time is lost": "Où le temps est perdu",
     "Long-run pace": "Rythme en long run",
@@ -1754,6 +1777,9 @@ TRANSLATION = MappingProxyType({
     "Replay folder unknown: start LMU once so the page lists its replays.": "Dossier des rejeux inconnu : lancez LMU une fois pour que la page liste ses rejeux.",
     "Move selected replays to the recycle bin": "Mettre les rejeux sélectionnés à la corbeille",
     "Move replay to the recycle bin": "Mettre le rejeu à la corbeille",
+    "Moving to the recycle bin...": "Mise à la corbeille...",
+    "Files are still being moved to the recycle bin, try again once done.":
+        "Des fichiers sont encore en cours de mise à la corbeille, réessayez une fois terminé.",
     "Copying replays...": "Copie des rejeux...",
     "Selected": "Sélection",
     "Clear selection (Escape)": "Effacer la sélection (Échap)",
@@ -1868,6 +1894,11 @@ TRANSLATION = MappingProxyType({
     "No results folder found": "Aucun dossier de résultats trouvé",
     "No session results yet": "Aucun résultat de session pour l'instant",
     "No session matches the filters": "Aucune session ne correspond aux filtres",
+    "This results file can't be read": "Ce fichier de résultats est illisible",
+    "The file may be damaged, still being written by the game, or not a results file. Pick the session again to "
+    "read it again.":
+        "Le fichier est peut-être abîmé, encore en cours d'écriture par le jeu, ou ce n'est pas un fichier de "
+        "résultats. Choisissez de nouveau la session pour le relire.",
     "Results are written by Le Mans Ultimate (or rFactor 2) in UserData/Log/Results at the end of each session. "
     "Choose that folder if the game is not installed with Steam.":
         "Le Mans Ultimate (ou rFactor 2) écrit les résultats dans UserData/Log/Results à la fin de chaque "
@@ -2775,16 +2806,16 @@ TRANSLATION = MappingProxyType({
     "Folder cannot be used": "Dossier inutilisable",
     "On or off required": "Activé ou désactivé attendu",
     "Text required": "Texte attendu",
-    "Interface, startup, updates, presets & backups, overlay editing":
-        "Interface, démarrage, mises à jour, presets et sauvegardes, édition des overlays",
+    "Interface, startup, updates, presets & backups":
+        "Interface, démarrage, mises à jour, presets et sauvegardes",
     "Interface": "Interface",
     "Startup & Window": "Démarrage et fenêtre",
     "Updates": "Mises à jour",
     "Presets & Backups": "Presets et sauvegardes",
     "Overlay Editing": "Édition des overlays",
     "Performance & Hotkeys": "Performances et raccourcis",
-    "Modern design, theme, fonts & size of every overlay":
-        "Design moderne, thème, polices et taille de tous les overlays",
+    "Modern design, theme, fonts, size & editing of every overlay":
+        "Design moderne, thème, polices, taille et édition de tous les overlays",
     "Design": "Design",
     "Notices shown at the bottom of the main window": "Notifications affichées en bas de la fenêtre principale",
     "Window manager, transparency & positions on some systems":
@@ -2903,6 +2934,7 @@ TRANSLATION = MappingProxyType({
     "Interval": "Intervalle",
     "Time Gap": "Écart de temps",
     "Gap Trend": "Tendance d'écart",
+    "Driver & Safety Rank": "Driver Rank et Safety Rank",
     "Preview not available for this overlay": "Aperçu indisponible pour cet overlay",
     "Preview off": "Aperçu désactivé",
     "Reset Overlay": "Réinitialiser l'overlay",
@@ -3061,5 +3093,123 @@ TRANSLATION = MappingProxyType({
     "Undo with Ctrl+Z while this page is open.": "Annulez avec Ctrl+Z tant que cette page est ouverte.",
     "Championship not imported": "Championnat non importé",
     "Logo not saved": "Logo non enregistré",
+    # Broadcast graphics & stream overlays: save failures, confirmations, undo of a layout reset
+    "Championship not removed": "Championnat non supprimé",
+    "Logo not removed": "Logo non supprimé",
+    "Previous layout restored": "Disposition précédente rétablie",
+    "Layout changed since the reset: nothing undone":
+        "Disposition modifiée depuis la réinitialisation : rien n'a été annulé",
+    "Reset this layout?": "Réinitialiser cette disposition ?",
+    "Overlays of this layout go back to their place on screen. You can undo it right after.":
+        "Les overlays de cette disposition reprennent leur place à l'écran. Vous pourrez annuler juste après.",
+    "Put the overlays back where they were before the reset":
+        "Remettre les overlays où ils étaient avant la réinitialisation",
+    "Make a new access token?": "Créer un nouveau jeton d'accès ?",
+    "Every browser source already set up in your streaming software stops working until you copy its new address "
+    "into it.":
+        "Chaque source navigateur déjà configurée dans votre logiciel de stream cesse de fonctionner tant que vous "
+        "n'y avez pas copié sa nouvelle adresse.",
+    "Reset the graphics layout?": "Réinitialiser la disposition des graphismes ?",
+    "Every graphic of this layout goes back to its place and size. You can undo it right after.":
+        "Chaque graphisme de cette disposition reprend sa place et sa taille. Vous pourrez annuler juste après.",
+    "Put the graphics back where they were before the reset":
+        "Remettre les graphismes où ils étaient avant la réinitialisation",
     "Badge": "Badge",
+    # UI/UX audit 2026-10-18
+    "Select laps, then add them: their average goes to the calculator, invalid laps (struck through) left out.":
+        "Sélectionnez des tours, puis ajoutez-les : leur moyenne va dans le calculateur, les tours invalides (barrés) sont ignorés.",
+    "No lap recorded yet": "Aucun tour enregistré pour l'instant",
+    "Drive a few laps, or load a file.": "Roulez quelques tours, ou chargez un fichier.",
+    "Collapsed": "Replié",
+    "Expanded": "Déplié",
+    "Left / Right: stint details": "Gauche / Droite : détail des relais",
+    "Space or Enter: pick a tyre, Delete: take it off (undo with Ctrl+Z)":
+        "Espace ou Entrée : choisir un pneu, Suppr : le retirer (annuler avec Ctrl+Z)",
+    "Clean Up Stock": "Nettoyer le stock",
+    "Delete: remove from stock": "Suppr : retirer du stock",
+    "Remove from Stock": "Retirer du stock",
+    "Session best": "Meilleur de la session",
+    "Personal best": "Record personnel du tour",
+    "Replay saved": "Replay enregistré",
+    "Newest session": "Session la plus récente",
+    "Places gained from the grid": "Places gagnées depuis la grille",
+    "Protected from deletion": "Protégé de la suppression",
+    "Every input reset to zero": "Toutes les valeurs remises à zéro",
+    "Tyre taken off": "Pneu retiré de la roue",
+    "Row cleared": "Ligne vidée",
+    "Unused tyres removed": "Pneus inutilisés retirés",
+    "No unused tyre in stock": "Aucun pneu inutilisé dans le stock",
+    "%1 invalid value(s)": "%1 valeur(s) invalide(s)",
+    "Category": "Catégorie de réglages",
+    "All options": "Toutes les options",
+    "Clear the captured classification?": "Effacer le classement capturé ?",
+    "Collapse Section": "Replier la section",
+    "Color as #RRGGBB, for example #E5383B": "Couleur au format #RRVVBB, par exemple #E5383B",
+    "Commentary": "Écran commentateur",
+    "Desk": "Pupitre",
+    "Director mode": "Mode de la régie",
+    "Expand Section": "Déplier la section",
+    "Keys 1 to 6 take the suggestion of that number": "Les touches 1 à 6 prennent la suggestion de ce numéro",
+    "Message shown: Show puts the new text on air": "Message affiché : Afficher met le nouveau texte à l'antenne",
+    "Overlay state": "État des overlays",
+    "Remove the league logo?": "Supprimer le logo de la ligue ?",
+    "Score": "Score de l'histoire",
+    "Stream overlays are off: the addresses below show nothing until you turn them on.":
+        "Overlays de stream désactivés : les adresses ci-dessous n'affichent rien tant que vous ne les activez pas.",
+    "The classification captured at that moment is lost: a new capture takes the order of now.":
+        "Le classement capturé à ce moment est perdu : une nouvelle capture prend l'ordre actuel.",
+    "The logo file is deleted from the branding folder. Choose the picture again to get it back.":
+        "Le fichier du logo est supprimé du dossier de la ligue. Choisissez de nouveau l'image pour le retrouver.",
+    "Turn On Server": "Démarrer le serveur",
+    "Unseen": "Non vu",
+    "Sorted descending": "Tri décroissant",
+    "Sorted ascending": "Tri croissant",
+    "From %1 to %2": "De %1 à %2",
+    "Copied": "Copié",
+    "Changes discarded": "Modifications abandonnées",
+    "%1 laps moved to trash": "%1 tours mis à la corbeille",
+    "%1 moved to trash": "%1 mis à la corbeille",
+    "Add laps from another folder or track, import a MoTeC log (.ld) or a teammate's folder":
+        "Ajouter des tours d'un autre dossier ou circuit, importer un log MoTeC (.ld) ou le dossier d'un coéquipier",
+    "Channel": "Canal",
+    "Channel along X axis": "Canal sur l'axe X",
+    "Channel along Y axis": "Canal sur l'axe Y",
+    "Channels shown on charts & simple view and chart heights go back to defaults.":
+        "Les canaux affichés sur les courbes et la vue simple et les hauteurs des courbes reviennent aux valeurs par défaut.",
+    "Default channels & chart heights": "Canaux et hauteurs des courbes par défaut",
+    "Discard changes to this math channel?": "Abandonner les modifications de ce canal calculé ?",
+    "Driving points shown on the map: braking, apex, exit, track-out, lockups, off track, limits":
+        "Points de pilotage affichés sur la carte : freinage, corde, sortie, point de sortie, blocages, sorties de piste, limites",
+    "Insert in expression": "Insérer dans l'expression",
+    "Laps driven on this track are listed here once recorded. Laps from elsewhere: Import.":
+        "Les tours roulés sur ce circuit s'affichent ici une fois enregistrés. Tours d'ailleurs : Importer.",
+    "Name, expression or unit typed since last save are lost.":
+        "Le nom, l'expression ou l'unité saisis depuis le dernier enregistrement sont perdus.",
+    "Next node": "Nœud suivant",
+    "Order": "Ordre de tri",
+    "Position along track": "Position sur le circuit",
+    "Previous node": "Nœud précédent",
+    "Reset shown channels?": "Réinitialiser les canaux affichés ?",
+    "Wheel: zoom · drag: move · double-click: whole circle":
+        "Molette : zoom · glisser : déplacer · double-clic : cercle entier",
+    "Wheel: zoom · drag: move · double-click: whole plot":
+        "Molette : zoom · glisser : déplacer · double-clic : graphique entier",
+    "Whole lap (double-click, Home)": "Tour entier (double-clic, Début)",
+    "Whole map (double-click)": "Carte entière (double-clic)",
+    "Zoom in": "Zoom avant",
+    "Zoom out": "Zoom arrière",
+    # UI/UX audit 2026-10-18
+    "Include Notes": "Inclure les notes",
+    "Without Notes": "Sans les notes",
+    "Import Style Presets": "Importer les presets de style",
+    "Keep My Style Presets": "Garder mes presets de style",
+    "Restart": "Redémarrer",
+    "Assign Anyway": "Attribuer quand même",
+    "Import and Restart": "Importer et redémarrer",
+    "Use as Delta Best": "Utiliser comme delta best",
+    "Start in Safe Mode": "Démarrer en mode sans échec",
+    "Start Normally": "Démarrer normalement",
+    # UI/UX audit 2026-10-18
+    "Columns, sort & colors of the table": "Colonnes, tri et couleurs du tableau",
+    "Reload, backups & delete": "Recharger, sauvegardes et suppression",
 })

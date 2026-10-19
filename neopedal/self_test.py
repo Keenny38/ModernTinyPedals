@@ -80,12 +80,12 @@ def check_qml_pages() -> str:
     from PySide6.QtCore import QUrl
     from PySide6.QtQml import QQmlComponent, QQmlEngine
 
-    from .ui.quick import QML_FOLDER, register_types
+    from .ui.quick import QML_FOLDER, qml_files, register_types
 
     register_types()
     engine = QQmlEngine()
     engine.addImportPath(QML_FOLDER)
-    files = sorted(glob(os.path.join(QML_FOLDER, "*.qml")))
+    files = qml_files()  # every subfolder (components & zones)
     if not files:
         raise FileNotFoundError(QML_FOLDER)
     errors: list[str] = []

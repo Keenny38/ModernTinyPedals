@@ -54,16 +54,16 @@ def import_settings(parent: QWidget | None) -> None:
             "Choose the global settings folder of the other copy of the app, "
             "for example in %APPDATA% on Windows or ~/.config on Linux."))
         return
-    answer = QMessageBox.question(
+    from ._common import confirm_action
+
+    if not confirm_action(
         parent, tr("Import Settings"),
         tr("Import settings from this folder?") + f"\n{os.path.normpath(source)}\n\n" + tr(
             "Options, shortcuts, driver stats, language packs and Dashboard HUD incidents are copied, "
             "the folder is not changed. Current settings are set aside in a backup folder (never "
             "deleted), then the app restarts with the imported settings."),
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        QMessageBox.StandardButton.Cancel,
-    )
-    if answer != QMessageBox.StandardButton.Yes:
+        tr("Import and Restart"),
+    ):
         return
     if not settings_import.request_import(cfg.path.config, source):
         QMessageBox.warning(parent, tr("Import Settings"), tr("Request not saved, see log."))

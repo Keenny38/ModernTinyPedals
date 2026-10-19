@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from neopedal import app_signal, loader
-
-QML = Path(__file__).resolve().parents[1] / "neopedal" / "ui" / "qml"
+from neopedal.ui.quick import qml_path
 
 
 def test_ctrl_c_quits_through_main_window(monkeypatch):
@@ -37,6 +36,6 @@ def test_ctrl_c_without_window_closes_and_exits(monkeypatch):
 
 def test_game_logo_mipmap_not_bound():
     """A mipmap change reloads an Image: bound to its own size, it loops (status, shown, width)"""
-    text = (QML / "GameLogo.qml").read_text(encoding="utf-8")
+    text = Path(qml_path("GameLogo.qml")).read_text(encoding="utf-8")
     code = "\n".join(line.split("//")[0] for line in text.splitlines())
     assert not re.search(r"^\s*mipmap\s*:", code, re.MULTILINE)

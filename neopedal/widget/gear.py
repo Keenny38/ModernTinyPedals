@@ -197,6 +197,11 @@ class Realtime(Overlay):
 
         # Speed limiter
         if self.wcfg["show_speed_limiter"]:
+            self.bar_style_limiter = (
+                (self.wcfg["font_color_speed_limiter"], self.wcfg["background_color_speed_limiter"]),
+                # Reminder: in pit lane with car limiter off, colors swapped
+                (self.wcfg["background_color_speed_limiter"], self.wcfg["font_color_speed_limiter"]),
+            )
             self.bar_limiter = self.set_rawtext(
                 text=self.wcfg["speed_limiter_text"],
                 width=limiter_width,
@@ -266,8 +271,7 @@ class Realtime(Overlay):
 
         # Speed limier
         if self.wcfg["show_speed_limiter"]:
-            limiter = api.read.switch.speed_limiter()
-            self.update_limiter(self.bar_limiter, limiter)
+            self.update_limiter(self.bar_limiter, self.limiter_state())
 
         # Consumption bar
         if self.wcfg["show_consumption_bar"]:
@@ -347,10 +351,23 @@ class Realtime(Overlay):
             target.update_input(min(max(rate, 0.0), 1.0) ** self.cons_exp)
 
     def update_limiter(self, target, data):
-        """Limiter"""
+        """Limiter: 0 off, 1 on, 2 reminder"""
         if target.last != data:
             target.last = data
+            if data:
+                target.fg, target.bg = self.bar_style_limiter[data - 1]
+                target.update()
             target.setHidden(not data)
+
+    def limiter_state(self) -> int:
+        """Speed limiter on (1), or reminder (2): in pit lane with car limiter off"""
+        switch = api.read.switch
+        if switch.speed_limiter():
+            return 1
+        if (self.wcfg["show_speed_limiter_pit_reminder"] and switch.speed_limiter_available()
+                and api.read.vehicle.in_pits() and api.read.vehicle.speed() > 1):
+            return 2
+        return 0
 
     # Additional methods
     def color_rpm(self, rpm, gear, speed):

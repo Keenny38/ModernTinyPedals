@@ -63,6 +63,17 @@ ROLES = (
 )
 
 
+class Counts(NamedTuple):
+    """Counts of the page (header, filter choices, enable needed), told only when one changed"""
+
+    total: int = 0
+    active: int = 0
+    failed: int = 0
+    shown: int = 0
+    needed: tuple[str, ...] = ()  # labels of modules off that enabled overlays or modules need
+    states: tuple[int, int, int] = (0, 0, 0)  # rows of All, Active & Inactive choice (search applied)
+
+
 class ModuleSpec(NamedTuple):
     """Module of the page: icon glyph, data it fills, what it does, data that can be reset"""
 
@@ -237,8 +248,22 @@ class ModuleBackend(PageBackend):
         self._search = ""
         self._words: tuple[str, ...] = ()
         self._state = FILTER_ALL
+        self._counts = Counts()
         self.rows_model = DictListModel(ROLES, self)
         self.refresh()
+
+    # Page
+    def page_shown(self):
+        """Page shown: states read again (modules started or stopped meanwhile tell no signal), so any refresh
+        deferred while hidden is not needed"""
+        self.drop_when_shown()
+        self.refresh()
+
+    @Slot()
+    def settings_changed(self, *_):
+        """Setting, preset or module state changed elsewhere (hotkey, tray, other page): rows read again, once
+        shown if hidden (see page_shown)"""
+        self.when_shown(self.refresh)
 
     # Dependencies
     def load_dependencies(self, dependencies: Dependencies | None = None):
@@ -336,8 +361,18 @@ class ModuleBackend(PageBackend):
         self._apply()
 
     def _apply(self):
-        self.rows_model.sync([row for row in self._rows if self._matches(row)])
-        self.countsChanged.emit()
+        shown = [row for row in self._rows if self._matches(row)]
+        self.rows_model.sync(shown)
+        searched = [row for row in self._rows if self._matches(row, use_state=False)]
+        searched_active = sum(row["active"] for row in searched)
+        counts = Counts(
+            len(self._rows), sum(row["active"] for row in self._rows), sum(row["failed"] for row in self._rows),
+            len(shown), tuple(row["label"] for row in self._rows if row["needed"]),
+            (len(searched), searched_active, len(searched) - searched_active),
+        )
+        if counts != self._counts:
+            self._counts = counts
+            self.countsChanged.emit()
 
     def row(self, name: str) -> dict | None:
         return next((row for row in self._rows if row["key"] == name), None)
@@ -350,31 +385,29 @@ class ModuleBackend(PageBackend):
     # Counts
     @Property(int, notify=countsChanged)
     def totalCount(self) -> int:
-        return len(self._rows)
+        return self._counts.total
 
     @Property(int, notify=countsChanged)
     def activeCount(self) -> int:
-        return sum(row["active"] for row in self._rows)
+        return self._counts.active
 
     @Property(int, notify=countsChanged)
     def failedCount(self) -> int:
-        return sum(row["failed"] for row in self._rows)
+        return self._counts.failed
 
     @Property(int, notify=countsChanged)
     def shownCount(self) -> int:
-        return self.rows_model.rowCount()
+        return self._counts.shown
 
     @Property(list, notify=countsChanged)
     def neededNames(self) -> list[str]:
         """Modules off that enabled overlays or modules need"""
-        return [row["label"] for row in self._rows if row["needed"]]
+        return list(self._counts.needed)
 
     @Property(list, notify=countsChanged)
     def stateCounts(self) -> list[int]:
         """Rows of All, Active & Inactive choice (search applied)"""
-        rows = [row for row in self._rows if self._matches(row, use_state=False)]
-        active = sum(row["active"] for row in rows)
-        return [len(rows), active, len(rows) - active]
+        return list(self._counts.states)
 
     # Filters
     @Property(str, notify=filterChanged)

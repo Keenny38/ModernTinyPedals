@@ -97,7 +97,8 @@ class Realtime(InstrumentMixin, ModernOverlay):
                 lights.append(Light(bool(api.read.switch.headlights()), icon=theme.positive))
             elif key == "ignition":
                 ignition = self.read_ignition()
-                lights.append(Light(ignition > 0, theme.warning if ignition == 1 else None))
+                # Amber tile while stalled, red tile while ignition & engine off
+                lights.append(Light(ignition > 0, (theme.negative, theme.warning, None)[ignition]))
             elif key == "clutch":
                 clutch = self.read_clutch()
                 lights.append(Light(clutch >= 2, theme.accent if clutch % 2 else None))

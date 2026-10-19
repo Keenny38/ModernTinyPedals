@@ -29,7 +29,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPl
 
 from ..bug_report import create_bug_report, default_report_filename, snapshot_report
 from ..i18n import tr, trm
-from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseDialog, CompactButton, UIScaler, confirm_action, singleton_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +109,8 @@ class BugReport(BaseDialog):
         filename = self._report_filename
         if not self.isVisible():  # closed meanwhile: report saved (logged), nothing to ask
             return
-        answer = QMessageBox.question(
-            self, tr("Create Bug Report"),
-            trm(f"Bug report saved ({len(files)} files):<br><b>{filename}</b><br><br>Open folder?"),
-        )
-        if answer == QMessageBox.StandardButton.Yes:
+        if confirm_action(self, tr("Create Bug Report"),
+                          trm(f"Bug report saved ({len(files)} files):<br><b>{filename}</b><br><br>Open folder?"),
+                          tr("Open Folder"), cancel_text=tr("Close"), default_action=True):
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(filename)))
         self.accept()

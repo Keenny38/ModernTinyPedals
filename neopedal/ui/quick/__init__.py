@@ -43,11 +43,15 @@ from ...i18n import tr, trm
 from ...regex_pattern import COMMON_TYRE_COMPOUNDS
 from ...template.setting_compounds import COMPOUND_COLORS, COMPOUND_SYMBOLS, compound_letter
 from ...template.setting_status_colors import STATUS_COLORS
-from .. import UIScaler
+from .. import UIScaler, colorblind_state, set_colorblind  # noqa: F401  # set_colorblind: tests & pages
 
 logger = logging.getLogger(__name__)
 
 QML_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "qml")
+# QML files are in subfolders: components (shared Tp* controls, imported by pages with import "../components")
+# and one folder per zone (config, overlays, director, telemetry, analysis)
+QML_COMPONENTS = os.path.join(QML_FOLDER, "components")
+_QML_INDEX: dict[str, dict[str, str]] = {}
 QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "int": "int", "QString": "string"}  # Theme property types
 _registered = False
 
@@ -69,9 +73,71 @@ FONT_SCALE = {
 RADIUS_SCALE = {"radiusXs": 0.2, "radiusSm": 0.3, "radiusMd": 0.45, "radiusLg": 0.6, "radiusXl": 0.75}
 # Page width breakpoints: factor of em (pages with content-tuned widths keep their own, commented)
 BREAKPOINTS = {"bpCompact": 40, "bpNarrow": 56, "bpWide": 70}
+# Spacing: factor of em. space1..6 for gaps inside a block, pad* for the margins of a page, card, popup
+SPACE_SCALE = {
+    "space1": 0.2, "space2": 0.3, "space3": 0.4, "space4": 0.6, "space5": 0.8, "space6": 1.2,
+    "padPage": 0.8,  # page margins
+    "padCard": 0.7,  # card & panel padding
+    "padPopup": 1.0,  # popup & dialog padding
+}
+# Control & row heights: factor of em
+SIZE_SCALE = {
+    "controlHeight": 2.3,  # buttons, switches, segmented controls, search fields
+    "controlHeightSm": 1.85,  # compact toolbars, buttons inside rows
+    "controlHeightXs": 1.5,  # buttons inside chips & tags
+    "fieldHeight": 2.05,  # text & number fields, combo boxes
+    "rowCompact": 2.1,  # dense tables, menus
+    "row": 2.8,  # lists
+    "rowTall": 3.4,  # lists with two text lines
+}
 # Animation durations (ms), 0 when Windows animations are off
 MOTION = {"motionFast": 120, "motionBase": 180, "motionSlow": 250}
+# Tint alpha (color over a surface): named levels of theme.tint(color, level)
+TINT_LEVELS = {"subtle": 0.1, "selected": 0.18, "strong": 0.28}
+TINT_SELECTED_LIGHT = 0.12  # selected rows of light themes (dim text stays 4.5:1 on them)
 INK_DARK = "#111111"  # text on light fills
+# Colorblind safe status colors (Okabe-Ito like overlays: green -> blue, red -> vermillion, purple -> reddish
+# purple), (on dark background, on light background): app pages follow the overlay style option
+COLORBLIND_STATUS = {
+    "gain": ("#56B4E9", "#0067A8"),
+    "loss": ("#F08A50", "#B04A00"),
+    "warning": ("#E6A100", "#8F5F00"),
+    "purple": ("#E08AC0", "#A33D80"),
+}
+# Overlay preview stage (always dark: overlays are drawn for a game screen)
+STAGE_COLORS = {"stageTop": "#2B313A", "stageBottom": "#14171C", "stageText": "#AEB5BF"}
+# Session kind colors: race, qualifying, practice (theme color names), others dim
+SESSION_TONES = {"R": "warning", "RACE": "warning", "Q": "purple", "QUALIFY": "purple", "P": "accent",
+                 "PRACTICE": "accent"}
+
+
+def qml_path(qml_name: str) -> str:
+    """Full path of a QML (or JS) file of QML_FOLDER by file name, whatever its subfolder (index made once per
+    folder), QML_FOLDER/qml_name if unknown"""
+    folder = QML_FOLDER
+    index = _QML_INDEX.get(folder)
+    if index is None:
+        index = {}
+        for root, _folders, names in os.walk(folder):
+            for name in names:
+                if name.endswith((".qml", ".js")):
+                    index.setdefault(name, os.path.join(root, name))
+        _QML_INDEX[folder] = index
+    return index.get(qml_name, os.path.join(folder, qml_name))
+
+
+def qml_folder_imports() -> str:
+    """QML import lines of every subfolder of QML_FOLDER (components & zones): QML text written outside these
+    folders (tests, tools) uses any page component by name"""
+    folders = sorted(entry.path for entry in os.scandir(QML_FOLDER) if entry.is_dir() and not entry.name.startswith("_"))
+    return "\n".join(f'import "{QUrl.fromLocalFile(folder).toString()}"' for folder in folders)
+
+
+def qml_files() -> list[str]:
+    """Full paths of every QML file of QML_FOLDER (subfolders included), sorted by file name"""
+    qml_path("")  # index made
+    return sorted((path for name, path in _QML_INDEX[QML_FOLDER].items() if name.endswith(".qml")),
+                  key=os.path.basename)
 
 
 def compound_key(name: str) -> str:
@@ -99,6 +165,26 @@ def contrast_ratio(first: QColor, second: QColor) -> float:
 
     high, low = sorted((luminance(first), luminance(second)), reverse=True)
     return (high + 0.05) / (low + 0.05)
+
+
+def readable_on(color: QColor, background: QColor, toward: QColor, minimum: float = 4.5) -> QColor:
+    """color moved toward another color (text) until it reaches the contrast ratio on background"""
+    if contrast_ratio(color, background) >= minimum:
+        return QColor(color)
+    for step in range(1, 11):
+        mix = step / 10
+        mixed = QColor.fromRgbF(color.redF() + (toward.redF() - color.redF()) * mix,
+                                color.greenF() + (toward.greenF() - color.greenF()) * mix,
+                                color.blueF() + (toward.blueF() - color.blueF()) * mix)
+        if contrast_ratio(mixed, background) >= minimum:
+            return mixed
+    return QColor(toward)
+
+
+def blended(color: QColor, background: QColor, alpha: float) -> QColor:
+    """Opaque color of a translucent color over a background"""
+    return QColor.fromRgbF(*(top * alpha + bottom * (1 - alpha) for top, bottom in (
+        (color.redF(), background.redF()), (color.greenF(), background.greenF()), (color.blueF(), background.blueF()))))
 
 
 def fill_for_white_text(color: QColor, minimum: float = 4.5) -> QColor:
@@ -141,6 +227,10 @@ def _motion_token(name: str) -> Property:
     return Property(int, lambda self: MOTION[name] if _ANIMATIONS[0] else 0, constant=True, doc=f"Duration (ms) {name}")
 
 
+def _stage_token(name: str) -> Property:
+    return Property(QColor, lambda self: QColor(STAGE_COLORS[name]), constant=True, doc=f"Preview stage color {name}")
+
+
 def register_types():
     """Register Python QML types & controls style once, before first QML page is loaded"""
     global _registered
@@ -168,10 +258,27 @@ class Theme(QObject):
         app = QApplication.instance()
         if isinstance(app, QGuiApplication):
             app.paletteChanged.connect(self.changed)
+        colorblind_state().changed.connect(self.changed)
 
     @staticmethod
     def _color(role: QPalette.ColorRole, group=QPalette.ColorGroup.Active) -> QColor:
         return QApplication.palette().color(group, role)
+
+    def _is_dark(self) -> bool:
+        return self._color(QPalette.ColorRole.Window).lightness() < 128
+
+    def _tint_selected(self) -> float:
+        return TINT_LEVELS["selected"] if self._is_dark() else TINT_SELECTED_LIGHT
+
+    def _role(self, name: str) -> QColor:
+        """Status color of a role (STATUS_COLORS), colorblind safe variant when that option is on"""
+        pair = COLORBLIND_STATUS[name] if colorblind_state().enabled and name in COLORBLIND_STATUS else STATUS_COLORS[name]
+        return QColor(pair[0] if self._is_dark() else pair[1])
+
+    @Property(bool, notify=changed)
+    def colorblind(self) -> bool:
+        """Colorblind safe status colors (overlay style option): gain blue, loss orange..."""
+        return colorblind_state().enabled
 
     @Property(bool, notify=changed)
     def dark(self) -> bool:
@@ -225,30 +332,30 @@ class Theme(QObject):
 
     @Property(QColor, notify=changed)
     def gold(self) -> QColor:
-        """Fastest lap star"""
-        return self._status(*STATUS_COLORS["gold"])
+        """Fastest lap star, yellow flag"""
+        return self._role("gold")
 
     @Property(QColor, notify=changed)
     def purple(self) -> QColor:
         """Best sector, theoretical best"""
-        return self._status(*STATUS_COLORS["purple"])
+        return self._role("purple")
 
     @Property(QColor, notify=changed)
     def warning(self) -> QColor:
-        return self._status(*STATUS_COLORS["warning"])
+        return self._role("warning")
 
     @Property(QColor, notify=changed)
     def gain(self) -> QColor:
-        return self._status(*STATUS_COLORS["gain"])
+        return self._role("gain")
 
     @Property(QColor, notify=changed)
     def loss(self) -> QColor:
-        return self._status(*STATUS_COLORS["loss"])
+        return self._role("loss")
 
     @Property(QColor, notify=changed)
     def lossFill(self) -> QColor:
         """Loss / error color filling a badge under white text (4.5:1 contrast)"""
-        return fill_for_white_text(self._status(*STATUS_COLORS["loss"]))
+        return fill_for_white_text(self._role("loss"))
 
     @Property(QColor, notify=changed)
     def silver(self) -> QColor:
@@ -309,12 +416,57 @@ class Theme(QObject):
 
     @Slot(bool, bool, result=QColor)
     def rowColor(self, hovered: bool, selected: bool) -> QColor:
-        """List row background: selected (accent tint), hovered, else transparent"""
+        """List row background: selected (accent tint, a third stronger hovered), hovered, else transparent"""
         if selected:
             color = QColor(self._color(QPalette.ColorRole.Highlight))
-            color.setAlphaF(0.24 if hovered else 0.18)
+            color.setAlphaF(self._tint_selected() * (4 / 3 if hovered else 1))
             return color
         return self._color(QPalette.ColorRole.Midlight) if hovered else QColor(0, 0, 0, 0)
+
+    @Slot(QColor, "QVariant", result=QColor)
+    def tint(self, color: QColor, level=None) -> QColor:
+        """Translucent color: level "subtle" / "selected" / "strong" (TINT_LEVELS) or an alpha number"""
+        tinted = QColor(color)
+        if isinstance(level, (int, float)) and not isinstance(level, bool):
+            tinted.setAlphaF(max(0.0, min(1.0, float(level))))
+        else:
+            tinted.setAlphaF(self._tint_selected() if level == "selected" else TINT_LEVELS.get(level, TINT_LEVELS["subtle"]))
+        return tinted
+
+    @Slot(QColor, result=QColor)
+    def dimOn(self, background: QColor) -> QColor:
+        """Dim text readable (4.5:1) on a background: dim text itself, else moved toward text color.
+        Translucent backgrounds are taken over the page background (window)."""
+        window = self._color(QPalette.ColorRole.Window)
+        surface = blended(background, window, background.alphaF()) if background.alphaF() < 1 else background
+        return readable_on(self._color(QPalette.ColorRole.PlaceholderText), surface, self._color(QPalette.ColorRole.Text))
+
+    @Slot(str, result=QColor)
+    def tone(self, name: str) -> QColor:
+        """Theme color of a semantic name sent by backends ("gain", "loss", "fastest"...), dim text if unknown"""
+        return QColor(getattr(self, _TONE_NAMES.get(name, "dimText")))
+
+    @Slot(str, result=QColor)
+    def sessionColor(self, code: str) -> QColor:
+        """Session kind color: race, qualifying, practice ("R" / "RACE"...), dim text for others"""
+        return QColor(getattr(self, SESSION_TONES.get(str(code).upper(), "dimText")))
+
+    @Property(QColor, notify=changed)
+    def cardBorder(self) -> QColor:
+        """Border of cards & list rows (lighter than base on dark themes)"""
+        base = self._color(QPalette.ColorRole.Base)
+        return base.lighter(135) if self._is_dark() else self._color(QPalette.ColorRole.Mid)
+
+    @Property(QColor, notify=changed)
+    def plotBase(self) -> QColor:
+        """Chart plot background"""
+        base = self._color(QPalette.ColorRole.Base)
+        return base.darker(118) if self._is_dark() else base.darker(102)
+
+    @Property(QColor, notify=changed)
+    def plotBorder(self) -> QColor:
+        base = self._color(QPalette.ColorRole.Base)
+        return base.lighter(130) if self._is_dark() else self._color(QPalette.ColorRole.Mid)
 
     @Property(float, constant=True)
     def em(self) -> float:
@@ -375,12 +527,41 @@ class Theme(QObject):
     motionSlow = _motion_token("motionSlow")
     tipDelay = Property(int, lambda self: 500, constant=True, doc="Tooltip delay (ms)")
     disabledOpacity = Property(float, lambda self: 0.45, constant=True, doc="Opacity of disabled controls")
-    tintSubtle = Property(float, lambda self: 0.1, constant=True, doc="Alpha of a light color tint (hover)")
-    tintSelected = Property(float, lambda self: 0.18, constant=True, doc="Alpha of a selected / checked tint")
+    tintSubtle = Property(float, lambda self: TINT_LEVELS["subtle"], constant=True, doc="Alpha of a light color tint (hover)")
+    tintStrong = Property(float, lambda self: TINT_LEVELS["strong"], constant=True, doc="Alpha of a strong tint (active state)")
+    tintSelected = Property(float, lambda self: self._tint_selected(),
+                            notify=changed, doc="Alpha of a selected / checked tint (lighter on light themes)")
+    space1 = _size_token(SPACE_SCALE, "space1")
+    space2 = _size_token(SPACE_SCALE, "space2")
+    space3 = _size_token(SPACE_SCALE, "space3")
+    space4 = _size_token(SPACE_SCALE, "space4")
+    space5 = _size_token(SPACE_SCALE, "space5")
+    space6 = _size_token(SPACE_SCALE, "space6")
+    padPage = _size_token(SPACE_SCALE, "padPage")
+    padCard = _size_token(SPACE_SCALE, "padCard")
+    padPopup = _size_token(SPACE_SCALE, "padPopup")
+    controlHeight = _size_token(SIZE_SCALE, "controlHeight")
+    controlHeightSm = _size_token(SIZE_SCALE, "controlHeightSm")
+    controlHeightXs = _size_token(SIZE_SCALE, "controlHeightXs")
+    fieldHeight = _size_token(SIZE_SCALE, "fieldHeight")
+    rowCompact = _size_token(SIZE_SCALE, "rowCompact")
+    row = _size_token(SIZE_SCALE, "row")
+    rowTall = _size_token(SIZE_SCALE, "rowTall")
+    stageTop = _stage_token("stageTop")
+    stageBottom = _stage_token("stageBottom")
+    stageText = _stage_token("stageText")
 
 
-# Theme slots in JavaScript (same results as Theme.compound / compoundLetter / inkOn / rowColor, no Python
-# call per binding)
+# Semantic color names sent by backends (tone strings) -> Theme property
+_TONE_NAMES = {
+    "loss": "loss", "gain": "gain", "warning": "warning", "accent": "accent", "fastest": "purple", "purple": "purple",
+    "yellow": "gold", "gold": "gold", "live": "live", "silver": "silver", "bronze": "bronze", "text": "text",
+    "dim": "dimText",
+}
+
+
+# Theme slots in JavaScript (same results as Theme.compound / compoundLetter / inkOn / rowColor / tint / dimOn /
+# tone / sessionColor, no Python call per binding)
 _THEME_FUNCTIONS_QML = """    readonly property var compoundColors: (%s)
     readonly property var compoundLetters: (%s)
     readonly property var compoundPatterns: (%s)
@@ -400,9 +581,57 @@ _THEME_FUNCTIONS_QML = """    readonly property var compoundColors: (%s)
                 return compoundPatterns[i][1]
         return tyre.charAt(0).toUpperCase()
     }
+    readonly property var tintLevels: (%s)
     function rowColor(hovered, selected) {
-        return selected ? Qt.rgba(accent.r, accent.g, accent.b, hovered ? tintSelected + 0.06 : tintSelected)
+        return selected ? Qt.rgba(accent.r, accent.g, accent.b, hovered ? tintSelected * 4 / 3 : tintSelected)
              : hovered ? hover : "transparent"
+    }
+    function tint(color, level) {
+        var c = typeof color === "string" ? Qt.color(color) : color
+        if (!c || c.r === undefined)
+            return "transparent"
+        var alpha = typeof level === "number" ? Math.max(0, Math.min(1, level))
+                  : level === "selected" ? tintSelected
+                  : tintLevels[level] !== undefined ? tintLevels[level] : tintLevels.subtle
+        return Qt.rgba(c.r, c.g, c.b, alpha)
+    }
+    function luminance(c) {
+        function channel(v) { return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+    }
+    function contrast(first, second) {
+        var a = luminance(first), b = luminance(second)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+    function dimOn(background) {
+        var bg = typeof background === "string" ? Qt.color(background) : background
+        if (!bg || bg.r === undefined)
+            return dimText
+        if (bg.a < 1)
+            bg = Qt.rgba(bg.r * bg.a + window.r * (1 - bg.a), bg.g * bg.a + window.g * (1 - bg.a),
+                         bg.b * bg.a + window.b * (1 - bg.a), 1)
+        if (contrast(dimText, bg) >= 4.5)
+            return dimText
+        for (var step = 1; step <= 10; ++step) {
+            var mix = step / 10
+            var mixed = Qt.rgba(dimText.r + (text.r - dimText.r) * mix, dimText.g + (text.g - dimText.g) * mix,
+                                dimText.b + (text.b - dimText.b) * mix, 1)
+            if (contrast(mixed, bg) >= 4.5)
+                return mixed
+        }
+        return text
+    }
+    function tone(name) {
+        switch (name) {
+%s
+        default: return dimText
+        }
+    }
+    function sessionColor(code) {
+        switch (String(code).toUpperCase()) {
+%s
+        default: return dimText
+        }
     }
     function inkOn(color) {
         var c = typeof color === "string" && color !== "" ? Qt.color(color) : color
@@ -427,8 +656,11 @@ def theme_copy(engine: QQmlEngine, theme: Theme) -> QObject:
             logger.error("QML: theme property %s type %s not copied", prop.name(), prop.typeName())
             return theme
         lines.append(f"    readonly property {kind} {prop.name()}: source.{prop.name()}")
+    tones = "\n".join(f'        case "{name}": return {prop}' for name, prop in _TONE_NAMES.items())
+    sessions = "\n".join(f'        case "{code}": return {prop}' for code, prop in SESSION_TONES.items())
     lines.append(_THEME_FUNCTIONS_QML % (json.dumps(dict(COMPOUND_COLORS)), json.dumps(dict(COMPOUND_SYMBOLS)),
-                                         json.dumps(COMMON_TYRE_COMPOUNDS), INK_DARK))
+                                         json.dumps(COMMON_TYRE_COMPOUNDS), json.dumps(TINT_LEVELS), tones, sessions,
+                                         INK_DARK))
     lines.append("}")
     component = QQmlComponent(engine)
     component.setData("\n".join(lines).encode(), QUrl("theme_copy.qml"))
@@ -557,7 +789,7 @@ class PageState(QObject):
 
     def eventFilter(self, watched, event):
         kind = event.type()
-        if kind in _PAGE_STATE_EVENTS:
+        if kind in _PAGE_STATE_EVENTS and isValid(self._view):  # view being destroyed: its wrapper is gone first
             if kind == QEvent.Type.Hide and watched is self._view:
                 if self._active:  # hidden, spontaneous too (window minimized: isVisible() stays True)
                     self._active = False
@@ -662,7 +894,7 @@ def create_quick_view(
     from .preview_provider import install_provider
     install_provider(engine)  # overlay pictures (image://overlaypreview/), registered before loading
     install_incubator(view)  # asynchronous loaders really asynchronous, set before loading
-    view.setSource(QUrl.fromLocalFile(os.path.join(QML_FOLDER, qml_name)))
+    view.setSource(QUrl.fromLocalFile(qml_path(qml_name)))
     for error in view.errors():
         logger.error("QML: %s", error.toString())
     return view

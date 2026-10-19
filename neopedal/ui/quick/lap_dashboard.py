@@ -25,7 +25,8 @@ cards while a pedal, steering, gear or speed channel is shown, G circle while a 
 4 wheels channel or one wheel of it is). Show menu lists channels in the same groups.
 
 Layout (groups & items shown) changes with laps & selection only, values are read at each cursor move, one entry per
-item & lap in layout order: QML items are kept while cursor moves.
+item & lap in layout order: QML items are kept while cursor moves. Groups of simple view are a list model synced in
+place (a group whose items stay keeps its cells), only while simple view is shown (worked out again once shown).
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ from ..lap_viewer import (
     number_text,
 )
 from .lap_base import PagePart, weak_host
+from .models import DictListModel
 
 if TYPE_CHECKING:
     from PySide6.QtCore import SignalInstance
@@ -64,6 +66,10 @@ INPUTS_COLUMNS = ["throttle", "brake", "clutch", "steering", "speed_kph", "gear"
 # Channels shown as pedal cards & G circle in simple view (in Show menu order)
 CARD_CHANNELS = ("speed_kph", "throttle", "brake", "all:pedals", "clutch", "gear", "steering")
 G_CHANNELS = ("accel_lat", "accel_long")
+# Groups of simple view (pedal cards apart): items without their index (a group keeps its cells when items before it
+# change), first: index of its first item in values read at cursor (items of a group follow each other)
+GROUP_ROLES = ("key", "title", "items", "first")
+DRIVER_GROUP = "driver"  # pedal cards of each lap, not a group of simple view
 
 
 class Item(NamedTuple):
@@ -77,7 +83,7 @@ class Item(NamedTuple):
 
 
 GROUPS: tuple[tuple[str, str, tuple[Item, ...]], ...] = (
-    ("driver", "Pedals & Steering Wheel", (Item(INPUTS_ITEM, "inputs"),)),
+    (DRIVER_GROUP, "Pedals & Steering Wheel", (Item(INPUTS_ITEM, "inputs"),)),
     ("timing", "Timing", (Item("delta", "center"), Item("delta_rate", "center"))),
     ("engine", "Engine", (
         Item("rpm", "bar"), Item("water_temp", "bar"), Item("oil_temp", "bar"), Item("fuel", "bar"),
@@ -165,6 +171,7 @@ class DashboardTab(PagePart):
 
     changed = Signal()  # channels shown (Show menu, simple view items), also sent by chartChanged & mathChanged
     channelsChanged = Signal()  # Show menu channels or their availability changed (not their shown state)
+    layoutChanged = Signal()  # simple view items changed (values read at cursor again), groupKeys
 
     def __init__(self, page: DashboardHost, data: TraceData, opened: bool, parent: QObject | None = None):
         super().__init__(parent)
@@ -174,19 +181,46 @@ class DashboardTab(PagePart):
         self._clutch_used: dict[str, tuple] = {}  # lap key: lap data, clutch pressed in lap (pedal cards)
         self.opened = opened  # simple view shown once: its series built with charts
         self._catalog: list[dict] | None = None  # Show menu channels last read (see channels)
+        self._group_model = DictListModel(GROUP_ROLES, self)  # groups of simple view (see update_layout)
+        self._group_keys: list[str] = []  # every group shown, pedal cards first when shown
+        self._layout_items: list = self.items  # items of groups last synced (values of other items read again)
+        self._layout_shown = False  # simple view shown: groups synced on every change
+        self._layout_stale = True  # changed while simple view hidden: synced once shown
         page.chartChanged.connect(self.changed)  # items recorded in shown laps
         page.mathChanged.connect(self.changed)
         self.changed.connect(self.check_catalog)
+        self.changed.connect(self.check_layout)
 
     @Property(list, notify=changed)
     def catalog(self) -> list[dict]:
         """Show menu: every group & its channels, shown & recorded"""
         return self.catalog_list()
 
+    @Property(dict, notify=changed)
+    def shownState(self) -> dict:
+        """Show menu shown state in one read: {"channels": {shown channel: True}, "groups": {group: 0 none, 1 some,
+        2 all shown}}, chips & group boxes read it by key (no scan of every channel per group on each toggle)
+
+        All shown: every channel of group but one wheel ones (what setGroup shows), so a click on a full group's box
+        hides it.
+        """
+        visible = set(self._page.visible)
+        groups = {}
+        for group in self.channel_groups():
+            items = group["items"]
+            main = [item for item in items if not item["detail"]] or items
+            groups[group["key"]] = (2 if all(item["key"] in visible for item in main)
+                                    else 1 if any(item["key"] in visible for item in items) else 0)
+        return {"channels": dict.fromkeys(visible, True), "groups": groups}
+
     @Property(list, notify=channelsChanged)
     def channels(self) -> list[dict]:
         """Show menu groups & channels without shown state (shownChannels): same list until channels or their
         availability change, chips kept while channels are toggled"""
+        return self.channel_groups()
+
+    def channel_groups(self) -> list[dict]:
+        """Show menu groups & channels without shown state, built once until they change (see check_catalog)"""
         if self._catalog is None:
             self._catalog = self.catalog_list(False)
         return self._catalog
@@ -210,6 +244,45 @@ class DashboardTab(PagePart):
     def layout(self) -> list[dict]:
         """Groups & items shown (recorded & picked)"""
         return self.layout_list()
+
+    @Property(QObject, constant=True)
+    def groups(self) -> DictListModel:
+        """Groups of simple view, pedal cards apart (GROUP_ROLES): synced in place while simple view is shown"""
+        return self._group_model
+
+    @Property(list, notify=layoutChanged)
+    def groupKeys(self) -> list[str]:
+        """Every group shown in simple view, pedal cards ("driver") first when shown"""
+        return self._group_keys
+
+    @Slot(bool)
+    def setLayoutShown(self, shown: bool):
+        """Simple view shown or hidden: groups synced on every change while shown, once shown again if changed"""
+        self._layout_shown = bool(shown)
+        if self._layout_shown and self._layout_stale:
+            self.update_layout()
+
+    @Slot()
+    def check_layout(self):
+        """Channels shown, laps or math channels changed: groups synced now if shown, else once shown"""
+        if self._layout_shown:
+            self.update_layout()
+        else:
+            self._layout_stale = True
+
+    def update_layout(self):
+        """Groups of simple view synced in place (groups kept keep their cells), layoutChanged sent if items or groups
+        changed (values read at cursor again)"""
+        self._layout_stale = False
+        layout = self.layout_list()
+        rows = [{"key": group["key"], "title": group["title"], "first": group["items"][0]["index"],
+                 "items": [{name: value for name, value in item.items() if name != "index"} for item in group["items"]]}
+                for group in layout if group["key"] != DRIVER_GROUP]
+        self._group_model.sync(rows)
+        keys = [group["key"] for group in layout]
+        if keys != self._group_keys or self.items is not self._layout_items:
+            self._group_keys, self._layout_items = keys, self.items
+            self.layoutChanged.emit()
 
     def dashboard_groups(self) -> list[tuple[str, str, list[Item]]]:
         """Every group with its items: math channels & channels of no group in groups of their own"""
@@ -289,8 +362,9 @@ class DashboardTab(PagePart):
         return catalog
 
     def layout_list(self) -> list[dict]:
-        """Groups & items shown (recorded & picked), index of each item in values read at cursor"""
-        self.items = []
+        """Groups & items shown (recorded & picked), index of each item in values read at cursor; items read at cursor
+        kept (same list: cursor state cache kept) while they stay the same"""
+        shown_items: list[tuple[Item, Channel | None]] = []
         layout = []
         for key, title, items in self.dashboard_groups():
             shown = []
@@ -300,10 +374,12 @@ class DashboardTab(PagePart):
                 channel = CHANNEL_MAP.get(item.key)
                 unit = self.data.unit_of(channel) if channel is not None else ""
                 shown.append({"key": item.key, "kind": item.kind, "title": self.item_title(item), "unit": unit,
-                              "heat": item.heat, "index": len(self.items)})
-                self.items.append((item, channel))
+                              "heat": item.heat, "index": len(shown_items)})
+                shown_items.append((item, channel))
             if shown:
                 layout.append({"key": key, "title": tr(title), "items": shown})
+        if shown_items != self.items:
+            self.items = shown_items
         return layout
 
     @Slot(str, bool)
@@ -440,3 +516,4 @@ class DashboardTab(PagePart):
     def release(self):
         self.items = []
         self._clutch_used = {}
+        self._layout_stale = True  # groups synced again once laps are read again

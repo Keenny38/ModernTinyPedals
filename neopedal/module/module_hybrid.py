@@ -134,7 +134,7 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
                 battery_drain += last_battery_charge - battery_charge
                 alt_motor_state_debounce = 0
                 alt_motor_state = 2
-            elif last_battery_charge < battery_charge < 100: # regen
+            elif last_battery_charge < battery_charge <= 100:  # regen (up to full)
                 battery_regen += battery_charge - last_battery_charge
                 alt_motor_state_debounce = 0
                 alt_motor_state = 3
