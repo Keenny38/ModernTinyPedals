@@ -292,7 +292,8 @@ def test_shared_layer_root_owned_by_user(tmp_path, monkeypatch):
     vr_shared.secure_shared_root(root)  # again: kept
     if sys.platform == "win32":
         user = vr_shared.current_user_sid()
-        assert user is not None and vr_shared.path_owner_sid(root) == user
+        # elevated admin (CI runners): new folders owned by the Administrators group, trusted too
+        assert user is not None and vr_shared.path_owner_sid(root) in (user, *vr_shared.TRUSTED_OWNER_SIDS)
     other = str(tmp_path / "other" / "openxr_layer" / "user")
     os.makedirs(other)
     monkeypatch.setattr(vr_shared, "trusted_owner", lambda path: os.path.normcase(path) != os.path.normcase(other))
