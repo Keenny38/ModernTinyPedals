@@ -768,6 +768,8 @@ class Env:
         self.errors = []
         manifest = str(tmp_path / vr_shared.LAYER_MANIFEST)
         monkeypatch.setattr(vr_shared, "WINDOWS", True)
+        if sys.platform != "win32":  # owner of layer copies read by the Windows API (real check: bug audit tests)
+            monkeypatch.setattr(vr_shared, "trusted_owner", lambda path: True)
         monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: manifest)
         monkeypatch.setattr(vr_shared, "register_layer", lambda path: self.registered.append(path) or True)
         monkeypatch.setattr(vr_shared, "unregister_layer", lambda: self.unregistered.append(1) or 0)

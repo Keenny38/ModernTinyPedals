@@ -290,12 +290,16 @@ def test_show_menu_keeps_scroll_and_tells_no_match(opener, warnings):
     listed = len(chips())
     catalog = [item for group in backend.dashboard.catalog for item in group["items"]]
     assert 0 < listed < len(catalog)  # one wheel channels listed only while shown or searched
-    channels.setProperty("contentY", 200.0)
+    # Scrolled within bounds: list height depends on fonts (shorter on Linux), past the end it returns to bounds
+    bottom = channels.property("originY") + channels.property("contentHeight") - channels.property("height")
+    scroll = min(200.0, bottom)
+    assert scroll > 50.0
+    channels.setProperty("contentY", scroll)
     wait(0.2)
     target = next(item for item in catalog[20:] if not item["shown"] and not item["detail"])
     backend.setChannelVisible(target["key"], True)
     wait(0.3)
-    assert channels.property("contentY") == pytest.approx(200.0)  # list kept at its place
+    assert channels.property("contentY") == pytest.approx(scroll, abs=0.5)  # list kept at its place
     chip = next(item for item in chips() if item.property("channel") == target["key"])
     assert chip.property("shown")
     empty = find(view, lambda item: item.property("text") == "No channel matches")[0]

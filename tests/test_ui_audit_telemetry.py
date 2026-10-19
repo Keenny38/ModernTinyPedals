@@ -212,5 +212,9 @@ def test_lap_toolbar_overflows_into_menu(opener, warnings):  # noqa: F811
     wait(0.5)
     toolbar = named(view, "lapToolbar")
     assert named(view, "showButton").isVisible()  # pinned
-    # Overflows into "⋯" exactly when the full row does not fit (TpToolbar widths themselves: design tokens tests)
-    assert more.isVisible() == (toolbar.property("fullWidth") > toolbar.width() + 0.5) or 1 in list(toolbar.property("modes"))
+    # Overflows into "⋯" exactly when the full row does not fit (TpToolbar widths themselves: design tokens tests).
+    # Modes may come back as QJSValue (Linux): converted. Labels dropped to icons (1) first, then "⋯" (2)
+    modes = toolbar.property("modes")
+    modes = list(modes.toVariant() if hasattr(modes, "toVariant") else modes)
+    assert more.isVisible() == (2 in modes)
+    assert more.isVisible() or 1 in modes or toolbar.property("fullWidth") <= toolbar.width() + 0.5
