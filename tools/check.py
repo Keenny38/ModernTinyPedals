@@ -5,6 +5,8 @@ Same commands as the Checks workflow, so a push to master is not the first time 
 Also warns when the changelogs have no section for the next version (needed to publish it),
 and lints edited workflows when actionlint / zizmor are installed.
 
+Tests are spread over every CPU when pytest-xdist is installed (requirements-dev.txt), as on Linux CI.
+
 Usage (from project root):
     python tools/check.py                 every check (about 4 minutes)
     python tools/check.py --quick         without tests
@@ -88,6 +90,16 @@ def workflow_linters() -> list[tuple[str, list[str]]]:
     return linters
 
 
+def parallel_test_args() -> list[str]:
+    """pytest-xdist arguments: tests spread over every CPU, none if not installed (one process)"""
+    import importlib.util
+
+    if importlib.util.find_spec("xdist") is None:
+        print("(pytest-xdist not installed: tests run in one process, pip install -r requirements-dev.txt)")
+        return []
+    return ["-n", "auto"]
+
+
 def install_hook() -> int:
     hooks = git("rev-parse", "--git-path", "hooks")
     path = os.path.join(ROOT, hooks, "pre-push")
@@ -126,7 +138,8 @@ def main() -> int:
     checks += [(title, command, None) for title, command in workflow_linters()]
     if not options.quick:
         checks.append(("tests with coverage", [python, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                                               "--timeout=300", "--cov=neopedal", "--cov-report=term:skip-covered"],
+                                               *parallel_test_args(), "--timeout=300", "--cov=neopedal",
+                                               "--cov-report=term:skip-covered"],
                        {"QT_QPA_PLATFORM": "offscreen"}))
 
     failed = [title for title, command, env in checks if not run(title, command, env)]

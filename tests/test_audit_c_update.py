@@ -67,8 +67,9 @@ def test_portable_notes_open_release_page(ui_env, monkeypatch):
     dialog = button.release_notes_dialog(prompt=True)
     try:
         assert dialog.portable and dialog.download_url == ""  # never the installer
-        assert release_notes.tr(release_notes.PORTABLE_UPDATE_NOTE) in dialog.button_install.toolTip()
-        dialog.button_install.click()
+        assert release_notes.tr(release_notes.PORTABLE_UPDATE_NOTE) in dialog.backend.installTip
+        assert dialog.backend.portableNote and dialog.backend.installText == release_notes.tr("Open Releases Page")
+        dialog.request_install()
         assert opened and opened[0].endswith("/releases")
     finally:
         dialog.deleteLater()

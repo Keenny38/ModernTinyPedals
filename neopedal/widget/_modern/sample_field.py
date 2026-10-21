@@ -40,7 +40,7 @@ from ...module.module_relative import (
     standings_index_from_all_classes,
     standings_index_from_same_class,
 )
-from ...module_info import VehicleDataSet
+from ...module_info import VehicleDataSet, set_class_bests
 from ...penalty_info import NO_PENALTY, Penalty
 
 LAP_TIME = 104.0  # estimated lap time (seconds), relative gaps wrap around it
@@ -153,6 +153,7 @@ def sample_field() -> SampleField:
 
 
 SECTOR_SHARES = (0.33, 0.35, 0.32)  # sample lap split into sectors
+SAMPLE_NOW = 3600.0  # session time of sample race (running lap times)
 OUT_LAP = 13  # car on its out lap (last of GT3, away from player)
 
 
@@ -169,20 +170,20 @@ def set_sample_sectors(veh, index: int, best: float):
     sectors.current = (first if sectors.sector >= 1 else 0.0, sectors.best[1] + 0.2 if sectors.sector == 2 else 0.0)
     sectors.laps = 12
     sectors.last_kind = "OUT" if index == OUT_LAP else ""
+    veh.lapStartTime = SAMPLE_NOW - sample_running(sectors, index == OUT_LAP or not veh.isValidLap)
+
+
+def sample_running(sectors, lap_shown: bool) -> float:
+    """Time into lap being driven of sample car: line just crossed in S1 (completed lap shown, out lap, invalid lap
+    too), else completed sectors & half of sector being driven (running time)"""
+    if sectors.sector == 0 or lap_shown:
+        return 2.5
+    return sum(sectors.current[:sectors.sector]) + sectors.best[sectors.sector] * 0.5
 
 
 def class_best_sectors(vehicles) -> None:
     """Best sectors & best lap of each class told to its cars"""
-    best: dict[str, list[float]] = {}
-    for veh in vehicles:
-        found = best.setdefault(veh.vehicleClass, [0.0, 0.0, 0.0, 0.0])
-        for number, value in enumerate((*veh.sectors.best, veh.bestLapTime)):
-            if value and (not found[number] or value < found[number]):
-                found[number] = value
-    for veh in vehicles:
-        found = best[veh.vehicleClass]
-        veh.classBestSectors = (found[0], found[1], found[2])
-        veh.classBestLap = found[3]
+    set_class_bests(vehicles)
 
 
 def sample_standings(field: SampleField, setting: Mapping[str, Any]) -> list[int]:

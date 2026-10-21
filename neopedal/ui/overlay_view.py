@@ -42,7 +42,7 @@ class OverlayView(QWidget):
         self.module_control = module_control
         self.backend = OverlayBackend(
             self, module_control, self.open_config, self.confirm, self.show_log,
-            self.export_settings, self.import_settings)
+            self.export_settings, self.import_settings, self.open_presets, self.open_layout_editor)
         self.view: QQuickWidget | None = None  # see ensure_view
         self._creating = False
         self._layout = QVBoxLayout(self)
@@ -103,6 +103,19 @@ class OverlayView(QWidget):
         from .overlay_share import import_overlay_settings
 
         import_overlay_settings(self)
+
+    def open_presets(self):
+        """Presets page of main window"""
+        host = self.parentWidget()
+        while host is not None and not hasattr(host, "select_preset_tab"):
+            host = host.parentWidget()
+        if host is not None:
+            host.select_preset_tab()
+
+    def open_layout_editor(self):
+        from .tools_view import open_tool
+
+        open_tool("layout_editor.LayoutEditor", self.window())
 
     def show_log(self):
         from .log_info import LogInfo

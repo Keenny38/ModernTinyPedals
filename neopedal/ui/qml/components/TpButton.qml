@@ -81,7 +81,8 @@ AbstractButton {
                 id: label
                 text: control.shownText
                 visible: text !== ""
-                width: Math.max(0, Math.min(implicitWidth, control.labelMax, control.availableWidth - control.pad - control.iconWidth))
+                // Half a pixel spare: fractional sizes (130.2 - 19.2 - 20 = 90.99999) never cut a fitting label
+                width: Math.max(0, Math.min(implicitWidth, control.labelMax, control.availableWidth - control.pad - control.iconWidth + 0.5))
                 elide: Text.ElideRight
                 color: control.accent ? "white" : control.checked ? theme.accent : theme.text
                 font.weight: control.accent ? Font.DemiBold : Font.Normal

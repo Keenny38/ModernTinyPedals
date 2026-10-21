@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, qInstallMessageHandler
 
 from neopedal.setting import cfg
-from neopedal.ui.quick import stats_backend
+from neopedal.ui.quick import stats_backend, stats_common, stats_io
 from neopedal.userfile import driver_history
 from neopedal.userfile.driver_history import SessionRecord
 from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
@@ -53,9 +53,9 @@ def test_level_scale_unknown_ladder():
 
 
 def test_chart_ticks_and_grid(backend):  # noqa: F811
-    assert stats_backend.chart_ticks(69.5, 72.6) == [70.0, 71.0, 72.0]
-    assert stats_backend.chart_ticks(120.9, 121.7) == [121.0, 121.2, 121.4, 121.6]
-    assert stats_backend.chart_ticks(5.0, 5.0) == []
+    assert stats_common.chart_ticks(69.5, 72.6) == [70.0, 71.0, 72.0]
+    assert stats_common.chart_ticks(120.9, 121.7) == [121.0, 121.2, 121.4, 121.6]
+    assert stats_common.chart_ticks(5.0, 5.0) == []
     driver_history.save_history(cfg.path.config, HISTORY)
     backend.reload_stats()
     backend.selectRow(OREGA)
@@ -81,8 +81,8 @@ def test_activity_and_recent_sessions(backend):  # noqa: F811
     backend.selectTrack("")
     activity = backend.activity
     days = activity["days"]
-    assert activity["weeks"] == stats_backend.ACTIVITY_WEEKS and len(days) == stats_backend.ACTIVITY_WEEKS * 7
-    first = date.today() - timedelta(days=date.today().weekday() + (stats_backend.ACTIVITY_WEEKS - 1) * 7)
+    assert activity["weeks"] == stats_common.ACTIVITY_WEEKS and len(days) == stats_common.ACTIVITY_WEEKS * 7
+    first = date.today() - timedelta(days=date.today().weekday() + (stats_common.ACTIVITY_WEEKS - 1) * 7)
     index = (date.today() - first).days
     assert days[index]["level"] == 4  # 8000 s + 600 s today
     assert days[index - 1]["level"] == 3 and days[index - 2]["level"] == 1  # 4000 s, 1000 s
@@ -122,8 +122,8 @@ def test_cells_dimmed_and_level_pill(backend):  # noqa: F811
 
 def test_history_read_only_when_changed(backend, monkeypatch):  # noqa: F811
     calls = []
-    original = stats_backend.load_history
-    monkeypatch.setattr(stats_backend, "load_history", lambda path: calls.append(path) or original(path))
+    original = stats_io.load_history
+    monkeypatch.setattr(stats_io, "load_history", lambda path: calls.append(path) or original(path))
     backend.reload_stats()
     backend.reload_stats()
     assert not calls  # stats saved every lap: history unchanged

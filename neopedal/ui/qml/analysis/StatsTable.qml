@@ -7,7 +7,7 @@ import "../components"
 // Enter: open row, Delete: remove row, Backspace: back to All Tracks, Menu key: row menu.
 // Rows of the same track are moved in place when sorted or reloaded (animated, scroll kept); a cell is a
 // single text, its logo, level pill or letter badge made only in columns having any (backend column "extras").
-// Names at left, numbers at right (tabular digits).
+// Names at left, numbers at right (tabular digits). Vehicles grouped by class: line above the first row of each class.
 FocusScope {
     id: table
 
@@ -257,6 +257,7 @@ FocusScope {
             required property int index
             required property string key
             required property var cells
+            required property string group  // class of a new class group (grouped by class), "" otherwise
             readonly property bool selected: key === table.selectedKey
             property int hoveredColumn: -1
             readonly property string tip: hoveredColumn >= 0 && cells[hoveredColumn] ? (cells[hoveredColumn].tip || "") : ""
@@ -289,6 +290,12 @@ FocusScope {
                 color: theme.accent
                 opacity: rowItem.selected ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: theme.motionBase } }
+            }
+            Rectangle {  // first row of another class (vehicles grouped by class): line above it
+                visible: rowItem.group !== ""
+                width: parent.width
+                height: Math.max(2, Math.round(theme.em * 0.12))
+                color: theme.tint(theme.accent, 0.45)
             }
             FocusRing {
                 target: surface

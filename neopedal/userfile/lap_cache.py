@@ -39,7 +39,7 @@ import sys
 import threading
 import time
 from array import array
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 
@@ -62,6 +62,14 @@ ARRAYS_MAGIC = b"TPLA"  # arrays file: header & packed arrays
 ARRAYS_FORMAT = 1
 ARRAYS_HEAD = struct.Struct("<4sII")  # magic, format version, JSON header length
 ARRAY_TYPES = ("d", "f", "i")  # array type codes stored (8, 4 & 4 bytes)
+# Lap columns read at once from cache file (charts, map, driving points & corners of a lap viewer page shown with
+# default channels), others when first used (see CachedColumns)
+EAGER_COLUMNS = (
+    "time", "lap_time", "distance", "speed_kph", "throttle", "brake", "steering", "gear", "sector",
+    "pos_x", "pos_y", "pos_z", "accel_lat", "accel_long", "path_lateral", "track_edge", "yaw",
+    "tc_level", "abs_level", "engine_map",
+    *(f"{name}_{wheel}" for name in ("wheel_speed", "ride_height", "surface") for wheel in ("fl", "fr", "rl", "rr")),
+)
 MAX_HEADER = 16 * 1024 * 1024  # bytes, larger header: not an arrays file
 __all__ = ("EXACT_COLUMNS", "load_cached_lap", "prune_cache", "read_arrays_file", "remove_cached_lap",
            "write_arrays_file")
@@ -130,30 +138,151 @@ def read_arrays_file(path: str) -> tuple[dict, dict[str, array]] | None:
     return values, arrays
 
 
+def wheel_group(name: str) -> str:
+    """Columns read together from a cache file: the 4 wheels of a wheel column (tyre_temp_fl...), else column alone"""
+    return name[:-3] if name[-3:-2] == "_" and name[-2:] in ("fl", "fr", "rl", "rr") else name
+
+
+class CachedColumns(Mapping[str, Column]):
+    """Lap columns of a cache file, each read from file when first used (whole lap: several MB, a lap viewer
+    page uses about a third of its columns), EAGER_COLUMNS at once
+
+    Missing columns are read under a lock (lap read by page & background threads), wheel columns 4 at a time
+    (one file read per panel). Cache file changed or removed meanwhile (pruned, lap file changed): read again
+    from lap file. Pickled (worker process) with columns read so far, others read there from file.
+    """
+
+    __slots__ = ("_target", "_file", "_lap_path", "_entries", "_loaded", "_lock")
+
+    def __init__(self, target: str, file: tuple[int, int], lap_path: str,
+                 entries: dict[str, tuple[int, str, int]], loaded: dict[str, Column]):
+        self._target = target  # cache file
+        self._file = file  # cache file size & modification time when entries were read
+        self._lap_path = lap_path
+        self._entries = entries  # column name: offset in file, array type code, value count
+        self._loaded = loaded
+        self._lock = threading.Lock()
+
+    def __getitem__(self, name: str) -> Column:
+        column = self._loaded.get(name)
+        if column is not None:
+            return column
+        if name not in self._entries:
+            raise KeyError(name)
+        with self._lock:
+            if name not in self._loaded:
+                group = wheel_group(name)
+                self.read_columns([key for key in self._entries
+                                   if key not in self._loaded and (key == name or wheel_group(key) == group)])
+            return self._loaded[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._entries
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __reduce__(self) -> tuple:
+        with self._lock:
+            loaded = dict(self._loaded)
+        return CachedColumns, (self._target, self._file, self._lap_path, self._entries, loaded)
+
+    def read_columns(self, names: list[str]) -> None:
+        """Read columns from cache file (lock held), from lap file if cache file changed"""
+        try:
+            with open(self._target, "rb") as file:
+                stat = os.fstat(file.fileno())
+                if (stat.st_size, stat.st_mtime_ns) == self._file:
+                    for name in names:
+                        offset, typecode, count = self._entries[name]
+                        column = array(typecode)
+                        file.seek(offset)
+                        column.frombytes(file.read(count * column.itemsize))
+                        if len(column) != count:
+                            raise ValueError("cache file cut short")
+                        if sys.byteorder != "little":
+                            column.byteswap()
+                        self._loaded[name] = column
+                    return
+        except (OSError, ValueError) as error:
+            logger.debug("LAP CACHE: %s not read from cache: %s", self._lap_path, error)
+        self.read_from_lap(names)
+
+    def read_from_lap(self, names: list[str]) -> None:
+        """Columns read from lap file (cache file gone), zeros if lap file changed meanwhile (other samples)"""
+        try:
+            columns = load_lap(self._lap_path).columns
+        except (OSError, ValueError) as error:
+            logger.warning("LAP CACHE: unable to read %s again: %s", self._lap_path, error)
+            columns = {}
+        for name in self._entries:  # every missing column at once: lap file parsed once
+            if name in self._loaded:
+                continue
+            _, typecode, count = self._entries[name]
+            values = columns.get(name)
+            self._loaded[name] = (array(typecode, values) if values is not None and len(values) == count
+                                  else array(typecode, bytes(count * array(typecode).itemsize)))
+
+
+def read_cached_lap(target: str, stamp: tuple[int, int], lap_path: str) -> LapData | None:
+    """Lap of cache file if made from lap file of stamp (columns read when used, EAGER_COLUMNS now), else None"""
+    try:
+        with open(target, "rb") as file:
+            stat = os.fstat(file.fileno())
+            head = file.read(ARRAYS_HEAD.size)
+            if len(head) < ARRAYS_HEAD.size:
+                return None
+            magic, version, size = ARRAYS_HEAD.unpack(head)
+            if magic != ARRAYS_MAGIC or version != ARRAYS_FORMAT or size > min(MAX_HEADER, stat.st_size):
+                return None
+            header = json.loads(file.read(size).decode("utf-8"))
+            values, listed = header["values"], header["arrays"]
+            info = values.get("info")
+            if (not isinstance(values, dict) or values.get("version") != CACHE_VERSION
+                    or values.get("stamp") != list(stamp) or not isinstance(values.get("name"), str)
+                    or not isinstance(info, (dict, type(None))) or not isinstance(listed, list)):
+                return None
+            entries: dict[str, tuple[int, str, int]] = {}
+            offset = ARRAYS_HEAD.size + size
+            for name, typecode, count in listed:
+                if typecode != column_type(name) or not isinstance(count, int) or count < 0:
+                    return None
+                entries[str(name)] = (offset, typecode, count)
+                offset += count * array(typecode).itemsize
+            if offset > stat.st_size:
+                return None
+            columns = CachedColumns(target, (stat.st_size, stat.st_mtime_ns), lap_path, entries, {})
+            eager = [name for name in EAGER_COLUMNS if name in entries]
+            columns.read_columns(eager)
+    except (OSError, ValueError, TypeError, KeyError):  # UnicodeDecodeError & JSON errors are ValueError
+        return None
+    with suppress(OSError):
+        os.utime(target)  # recently used: kept when pruning
+    return LapData(values["name"], columns, info)
+
+
 def load_cached_lap(folder: str, path: str) -> LapData:
-    """Lap from cache if lap file did not change, else loaded from CSV & cached, raises OSError or ValueError"""
+    """Lap from cache if lap file did not change, else loaded from CSV & cached, raises OSError or ValueError
+
+    Lap from cache file reads its columns when used (see CachedColumns).
+    """
     stamp = file_stamp(path)
     target = cache_file(folder, path) if folder else ""
     if target:
-        found = read_arrays_file(target)
-        if found is not None:
-            values, arrays = found
-            info = values.get("info")
-            if (values.get("version") == CACHE_VERSION and values.get("stamp") == list(stamp)
-                    and isinstance(values.get("name"), str) and isinstance(info, (dict, type(None)))
-                    and all(column.typecode == column_type(name) for name, column in arrays.items())):
-                with suppress(OSError):
-                    os.utime(target)  # recently used: kept when pruning
-                columns: dict[str, Column] = dict(arrays)
-                return LapData(values["name"], columns, info)  # packed arrays kept
+        lap = read_cached_lap(target, stamp, path)
+        if lap is not None:
+            return lap
     lap = load_lap(path)
-    if target:
-        save_cached_lap(target, stamp, lap)
+    if target and save_cached_lap(target, stamp, lap):
+        return read_cached_lap(target, stamp, path) or lap  # columns parsed now released, read again when used
     return lap
 
 
-def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData) -> None:
-    """Write lap cache file atomically (laps loaded in threads)"""
+def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData) -> bool:
+    """Write lap cache file atomically (laps loaded in threads), returns whether written"""
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         write_arrays_file(target, {"version": CACHE_VERSION, "stamp": list(stamp), "name": lap.name, "info": lap.info},
@@ -161,6 +290,8 @@ def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData) -> None:
                            else array(column_type(name), values) for name, values in lap.columns.items()})
     except (OSError, OverflowError, TypeError, ValueError) as error:
         logger.debug("LAP CACHE: unable to save %s: %s", target, error)
+        return False
+    return True
 
 
 FileStamp = tuple[int, int, float]  # lap file size, modification time (ns) & modification time (s)

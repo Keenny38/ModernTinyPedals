@@ -81,7 +81,7 @@ def test_watcher_without_game(tmp_path):
 def test_player_badge_found_in_event_registration(tmp_path, monkeypatch):
     """Profile entry has no badge: badge of same driver elsewhere in file (registration profile, team list)"""
     from neopedal.setting import cfg
-    from neopedal.ui.quick.stats_backend import badge_card
+    from neopedal.ui.quick.stats_common import badge_card
     from neopedal.userfile import badge_icons
 
     driver = {"steamId": "76561190000000001", "name": "Keenny Hess", "profile": {"nationality": "FR", "badge": "sr-saint"},

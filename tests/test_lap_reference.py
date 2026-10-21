@@ -5,6 +5,7 @@ import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtWidgets import QMessageBox
 
 from neopedal.setting import cfg
 from neopedal.userfile import lap_reference
@@ -189,12 +190,11 @@ def test_viewer_download_failure_keeps_cache(viewer):
 
 def test_viewer_change_sheet_url(viewer, monkeypatch):
     from neopedal.ui import _common
-    from neopedal.ui.quick import stats_backend
 
     dialogs = []
     monkeypatch.setattr(_common.TextInputDialog, "open", lambda self: dialogs.append(self))
     warnings = []
-    monkeypatch.setattr(stats_backend.QMessageBox, "warning",
+    monkeypatch.setattr(QMessageBox, "warning",
                         staticmethod(lambda *args, **kwargs: warnings.append(args)))
     viewer.changeSheetUrl()
     dialog = dialogs[0]

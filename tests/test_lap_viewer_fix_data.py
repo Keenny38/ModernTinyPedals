@@ -283,7 +283,8 @@ def test_tyre_wear_unknown_when_tyres_changed_during_lap(ui_env, tmp_path):
     tab = types.SimpleNamespace(  # session tab part stand-in
         session_key=lambda groups=None: "s", session_groups=lambda: [("s", "Session", group)],
         _page=types.SimpleNamespace(data=types.SimpleNamespace(laps=[]), reference_key=""),
-        _extra={"p2": (1.0, {"wear": -39.5})}, _busy=False, session_trend=SessionTab.session_trend)
+        _extra={"p2": (1.0, {"wear": -39.5})}, _busy=False, session_trend=SessionTab.session_trend,
+        current_metric=lambda: "time", metric_info=SessionTab.metric_info, value_trend=SessionTab.value_trend)
     rows = SessionTab.session_data(tab)["laps"]
     assert rows[0]["wear"] == pytest.approx(1.0) and rows[1]["wear"] == -1.0
 

@@ -100,10 +100,12 @@ class CornerTable(PagePart):
     """Corner table of lap viewer page (QML backend.cornerTable): corner by corner comparison with reference lap"""
 
     changed = Signal()  # corner rows, sort, sensitivity, compared lap (page cornersChanged)
+    focusRequestChanged = Signal()
 
     def __init__(self, page: CornerHost, setting: dict, parent: QObject | None = None):
         super().__init__(parent)
         self._page = weak_host(page)
+        self._focus = -1  # corner row charts zoom on once the corner list shows (see request_focus), -1 if none
         self.row_model = DictListModel(CORNER_ROLES, self)  # corner table rows (kept while their corner stays)
         self._table: list[dict] = []  # corner table rows
         self._marks: list[dict] = []  # corner numbers on charts
@@ -147,6 +149,24 @@ class CornerTable(PagePart):
         """Corner table row of corner (shown when selected on map), -1 if none"""
         return next((number for number, row in enumerate(self._table)
                      if row["kind"] == "corner" and row["index"] == index), -1)
+
+    @Property(int, notify=focusRequestChanged)
+    def focusRequest(self) -> int:
+        """Corner row asked from elsewhere (Home page debrief), -1 if none: the corner list zooms charts on it"""
+        return self._focus
+
+    def request_focus(self, index: int):
+        """Charts zoomed on corner row once the corner list shows (now if shown)"""
+        self._focus = index
+        self.focusRequestChanged.emit()
+
+    @Slot(result=int)
+    def takeFocus(self) -> int:
+        """Corner row asked, then forgotten (zoomed on once), -1 if none"""
+        index, self._focus = self._focus, -1
+        if index >= 0:
+            self.focusRequestChanged.emit()
+        return index
 
     @Property(list, notify=changed)
     def marks(self) -> list[dict]:

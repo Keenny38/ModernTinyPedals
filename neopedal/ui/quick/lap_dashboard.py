@@ -94,14 +94,18 @@ GROUPS: tuple[tuple[str, str, tuple[Item, ...]], ...] = (
         Item("all:tyre_wear", "wheels", scale=(0.0, 100.0)), Item("all:tyre_temp_in", "wheels", True),
         Item("all:tyre_temp_mid", "wheels", True), Item("all:tyre_temp_out", "wheels", True),
         Item("all:camber_spread", "wheels"), Item("all:tyre_load", "wheels"), Item("tyre_temp_spread", "bar"),
+        Item("all:camber", "wheels"),
     )),
     ("brakes", "Brakes", (Item("all:brake_temp", "wheels", heat=True), Item("brake_bias", "number"))),
     ("chassis", "Chassis", (
         Item(G_ITEM, "g"), Item("slip_angle", "center"), Item("all:slip", "wheels"), Item("all:wheel_speed", "wheels"),
-        Item("all:susp_defl", "wheels"), Item("all:ride_height", "wheels"),
+        Item("all:susp_defl", "wheels"), Item("all:ride_height", "wheels"), Item("all:damper_vel", "wheels"),
+        Item("rake", "center"), Item("downforce_front", "bar"), Item("downforce_rear", "bar"), Item("aero_balance", "bar"),
     )),
     ("electronics", "Electronics", (
         Item("tc_active", "light"), Item("abs_active", "light"), Item("tc_level", "number"), Item("abs_level", "number"),
+        Item("throttle_car", "bar", scale=(0.0, 1.0)), Item("brake_car", "bar", scale=(0.0, 1.0)),
+        Item("throttle_cut", "center"), Item("brake_cut", "center"),
     )),
     ("track", "Track", (
         Item("track_position", "center"), Item("path_lateral", "center"), Item("pos_z", "bar"),

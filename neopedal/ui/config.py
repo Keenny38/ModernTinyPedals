@@ -91,7 +91,8 @@ UNTRANSLATED_CHOICES = (rxp.CFG_API_NAME, rxp.CFG_CHARACTER_ENCODING, rxp.CFG_LA
 HIDDEN_OPTIONS = {
     "application": (
         "position_x", "position_y", "window_width", "window_height", "window_maximized", "last_page_index",
-        "rail_items", "open_pages", "skipped_update_version", "home_quick_access",
+        "rail_items", "open_pages", "skipped_update_version", "last_run_version", "home_quick_access",
+        "show_overlay_screen_view", "overlays_sort_order", "favorite_overlays", "recent_overlays",
     ),
     "vr_overlay": ("mirror_position_x", "mirror_position_y"),
 }

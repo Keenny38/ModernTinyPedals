@@ -44,12 +44,13 @@ AbstractButton {
             anchors.verticalCenter: parent.verticalCenter
             x: cell.align & Qt.AlignRight ? parent.width - width - theme.space1
              : cell.align & Qt.AlignHCenter ? (parent.width - width) / 2 : theme.space1
-            // From the texts' natural widths (Row's own implicit width follows the cut label: loop)
-            width: Math.min(label.implicitWidth + (cell.sorted ? arrow.implicitWidth + spacing : 0), parent.width - theme.space2)
+            // From the texts' natural widths (Row's own implicit width follows the cut label: loop), 1 px more: a short
+            // caption given exactly its fractional width is elided ("PB" shown "...")
+            width: Math.min(label.implicitWidth + 1 + (cell.sorted ? arrow.implicitWidth + spacing : 0), parent.width - theme.space2)
             Text {
                 id: label
                 text: cell.text
-                width: Math.max(0, Math.min(implicitWidth, row.width - (cell.sorted ? arrow.width + row.spacing : 0)))
+                width: Math.max(0, Math.min(implicitWidth + 1, row.width - (cell.sorted ? arrow.width + row.spacing : 0)))
                 elide: Text.ElideRight
                 color: cell.sorted ? theme.accent : theme.dimText
                 font.pointSize: theme.fontCaption

@@ -123,6 +123,7 @@ BRAKE_ON = 0.1  # brake pedal fraction counted as braking
 BRAKE_GAP = 60.0  # meters, braking points closer than this to previous braking end are the same braking
 SLIP_RATIO = 0.12  # wheel speed this much off car speed: locked or spinning wheel
 SLIP_SPEED = 40.0  # km/h, slip not checked slower
+BOTTOM_HEIGHT = 1.0  # mm, ride height of a wheel this low or under: car bottoming (floor or plank on track, kerb)
 TRACKOUT_AFTER = 120.0  # meters after corner end searched for track-out point
 FULL_THROTTLE = 0.9  # throttle fraction counted as full throttle
 ZONE_MIN = 5.0  # meters, shorter pedal zones left out
@@ -406,30 +407,38 @@ def braking_points(lap: LapData) -> list[float]:
 
 
 def slip_events(lap: LapData) -> list[tuple[float, str]]:
-    """Distances where front wheels lock under braking ("lock") or rear wheels spin on throttle ("spin")
+    """Distances where front wheels lock under braking ("lock"), rear wheels spin on throttle ("spin")
+    or car bottoms out ("bottom": a wheel ride height near 0)
 
-    Wheel slip from wheel speed against car speed, one event per slip episode.
+    Wheel slip from wheel speed against car speed, one event per slip or bottoming episode.
     """
     columns = lap.columns
-    needed = ("speed_kph", "brake", "throttle", *(f"wheel_speed_{wheel}" for wheel in ("fl", "fr", "rl", "rr")))
-    if not all(column in columns for column in needed):
+    wheel_speeds = [f"wheel_speed_{wheel}" for wheel in ("fl", "fr", "rl", "rr")]
+    slips = all(column in columns for column in ("speed_kph", "brake", "throttle", *wheel_speeds))
+    # Ride height recorded (laps of older versions & games without it: zeros)
+    ride_heights = [columns.get(f"ride_height_{wheel}") or () for wheel in ("fl", "fr", "rl", "rr")]
+    heights = "speed_kph" in columns and all(
+        len(values) == len(lap.distance) and any(values) for values in ride_heights)
+    if not slips and not heights:
         return []
     events: list[tuple[float, str]] = []
-    last = {"lock": -math.inf, "spin": -math.inf}
-    active = {"lock": False, "spin": False}
+    last = {"lock": -math.inf, "spin": -math.inf, "bottom": -math.inf}
+    active = {"lock": False, "spin": False, "bottom": False}
     for index, distance in enumerate(lap.distance):
         speed = columns["speed_kph"][index]
         if speed < SLIP_SPEED:
-            active = {"lock": False, "spin": False}
+            active = {"lock": False, "spin": False, "bottom": False}
             continue
-        front = min(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index])
-        rear = max(columns["wheel_speed_rl"][index], columns["wheel_speed_rr"][index])
-        if not rear and not max(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index]):
-            continue  # every wheel at 0 while moving: wheel speed not recorded
-        states = {
-            "lock": columns["brake"][index] > BRAKE_ON and (front - speed) / speed < -SLIP_RATIO,
-            "spin": columns["throttle"][index] > 0.3 and (rear - speed) / speed > SLIP_RATIO,
-        }
+        states = {}
+        if heights:
+            states["bottom"] = min(values[index] for values in ride_heights) <= BOTTOM_HEIGHT
+        if slips:
+            front = min(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index])
+            rear = max(columns["wheel_speed_rl"][index], columns["wheel_speed_rr"][index])
+            if rear or max(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index]):
+                # (every wheel at 0 while moving: wheel speed not recorded)
+                states["lock"] = columns["brake"][index] > BRAKE_ON and (front - speed) / speed < -SLIP_RATIO
+                states["spin"] = columns["throttle"][index] > 0.3 and (rear - speed) / speed > SLIP_RATIO
         for kind, slipping in states.items():
             if slipping and not active[kind] and distance - last[kind] > BRAKE_GAP:
                 events.append((distance, kind))

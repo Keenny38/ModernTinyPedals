@@ -1272,3 +1272,29 @@ def test_preview_of_other_design_to_compare(options, monkeypatch):
     cfg.user.config["overlay_style"]["overlay_theme"] = "Legacy Dark"  # one design only with this theme
     options.refresh()
     assert not options.overlayInfo["canCompare"]
+
+
+def test_preview_played_on_page(window):
+    """Live Preview plays the overlay on a moving simulated race: pictures shown by the page, pause keeps the still"""
+    import time
+
+    from PySide6.QtQuick import QQuickItem
+
+    from neopedal.ui.overlay_options import open_overlay_options
+
+    window.resize(1900, 1000)  # preview panel shown on wide pages only
+    page = open_overlay_options(window, "pedal")
+    assert page is not None and not page.view.errors()
+    backend = page.backend
+    backend.setPreviewPlaying(True)
+    deadline = time.monotonic() + 10
+    while not backend.liveUrl and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+    assert backend.liveUrl.startswith("image://overlaypreview/") and backend.previewAnimated
+    panel = page.view.rootObject().findChild(QQuickItem, "previewPanel")
+    image = next(item for item in panel.findChildren(QQuickItem) if item.property("source") is not None
+                 and str(item.property("source").toString()).startswith("image://overlaypreview/"))
+    assert image.property("source").toString() == backend.liveUrl
+    backend.setPreviewPlaying(False)
+    flush()
+    assert backend.liveUrl == "" and image.property("source").toString() == backend.previewUrl

@@ -164,7 +164,7 @@ def test_index_save_always_scheduled(backend):  # noqa: F811
 
 # --- Track limits cache read in a job, saved whole
 def test_limits_cache_read_in_job(backend, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_loading
 
     page = backend
     page.wait_jobs()
@@ -176,7 +176,7 @@ def test_limits_cache_read_in_job(backend, monkeypatch):  # noqa: F811
     assert page._limits is not None and os.path.isfile(cache)
     assert not [name for name in os.listdir(os.path.dirname(cache)) if name.endswith(".tmp")]
     calls: list[bool] = []
-    monkeypatch.setattr(lap_backend, "read_limits_cache", record_threads(lap_backend, "read_limits_cache", calls))
+    monkeypatch.setattr(lap_loading, "read_limits_cache", record_threads(lap_loading, "read_limits_cache", calls))
     page._limits, page._limits_track = None, ""
     page.start_limits(TRACK)
     assert page._limits is None and page.is_loading()  # read in background
@@ -186,7 +186,7 @@ def test_limits_cache_read_in_job(backend, monkeypatch):  # noqa: F811
 
 # --- Undo restores marks with one write per folder
 def test_undo_restores_marks_once_per_folder(backend, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_actions
     from neopedal.userfile import lap_marks
 
     page = backend
@@ -198,7 +198,7 @@ def test_undo_restores_marks_once_per_folder(backend, monkeypatch):  # noqa: F81
     saves: list[str] = []
     original = lap_marks.save_marks
     monkeypatch.setattr(lap_marks, "save_marks", lambda folder, marks: (saves.append(folder), original(folder, marks))[1])
-    monkeypatch.setattr(lap_backend, "set_mark", lambda *args, **kwargs: pytest.fail("one write per lap"))
+    monkeypatch.setattr(lap_actions, "set_mark", lambda *args, **kwargs: pytest.fail("one write per lap"))
     page.undoDelete()
     assert len(saves) == 1
     assert all(page.lap_marks(path).get("kept") for path in paths)
@@ -269,16 +269,16 @@ def test_map_hover_one_call_same_results(backend):  # noqa: F811
     page.setMapShown(True)
     line = page.reference_map_line()
     assert line is not None
-    page.setMapKinds(["brake", "apex"])
+    page.mapPointer.setMapKinds(["brake", "apex"])
     for index in (10, len(line.xs) // 3, len(line.xs) // 2):
         x, y = line.xs[index], line.ys[index]
-        hover = page.mapHover(x, y, 5.0, 8.0, "", True)
-        assert hover["point"] == page.mapPointAt(x, y, 5.0, ["brake", "apex"])
-        position = page.mapPick(x, y, 8.0)
+        hover = page.mapPointer.mapHover(x, y, 5.0, 8.0, "", True)
+        assert hover["point"] == page.mapPointer.mapPointAt(x, y, 5.0, ["brake", "apex"])
+        position = page.mapPointer.mapPick(x, y, 8.0)
         assert hover["x"] == position and position >= 0
         assert hover["placement"] == ({} if "tip" in hover["point"] else page.placementAt(position, ""))
         assert hover["cursor"] is page.cursorState(position)  # same position & state: cached
-    assert "x" not in page.mapHover(line.xs[5], line.ys[5], 5.0, 8.0, "", False)  # no scrub (lap playing)
+    assert "x" not in page.mapPointer.mapHover(line.xs[5], line.ys[5], 5.0, 8.0, "", False)  # no scrub (lap playing)
     state = page.cursorState(300.0)
     assert all("color" not in value for values in state["values"] for value in values)
     assert all("color" not in point and "lap" not in point for point in state["map"])
@@ -301,12 +301,12 @@ def test_session_state_built_once(backend, monkeypatch):  # noqa: F811
 
 
 def test_pictures_update_logos_in_place(backend, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_library
 
     page = backend
     rows = list(page.lap_model.rows)
     monkeypatch.setattr(page, "fill_list", lambda: pytest.fail("list built again"))
-    monkeypatch.setattr(lap_backend, "brand_logo_url", lambda vehicle: f"logo:{vehicle}")
+    monkeypatch.setattr(lap_library, "brand_logo_url", lambda vehicle: f"logo:{vehicle}")
     page.pictures_changed()
     assert page.lap_model.rows == rows
     assert all(row["logo"] == f"logo:{row['brand']}" for row in rows if row["kind"] == "session" and row.get("brand"))
@@ -318,12 +318,12 @@ def test_consistency_file_times_asked_once(backend, monkeypatch):  # noqa: F811
     asked: list[str] = []
     original = os.path.getmtime
     monkeypatch.setattr(os.path, "getmtime", lambda path: (asked.append(path), original(path))[1])
-    page.lap_mtime(page.entries[0].file.path)
-    page.lap_mtime(page.entries[0].file.path)
+    page.mapConsistency.lap_mtime(page.entries[0].file.path)
+    page.mapConsistency.lap_mtime(page.entries[0].file.path)
     assert len(asked) == 1
     page.fill_list()  # list filled again: asked again
     asked.clear()
-    page.lap_mtime(page.entries[0].file.path)
+    page.mapConsistency.lap_mtime(page.entries[0].file.path)
     assert len(asked) == 1
 
 

@@ -78,8 +78,7 @@ def test_stats_table_highlight_follows_burst(page):  # noqa: F811
 
 # Point 13: settings page opened again: no second page built
 def test_settings_opened_twice_builds_one_page(app_window, monkeypatch):  # noqa: F811
-    from neopedal.ui import app as app_module
-    from neopedal.ui import app_settings
+    from neopedal.ui import app_settings, app_tab_view
 
     built = []
     original = app_settings.AppSettings.__init__
@@ -94,7 +93,7 @@ def test_settings_opened_twice_builds_one_page(app_window, monkeypatch):  # noqa
     assert second is first and len(built) == 1
     # Copy made anyway (opened by other code): its QML unloaded before deleted
     released = []
-    monkeypatch.setattr(app_module, "release_quick_views", lambda dialog: released.append(dialog))
+    monkeypatch.setattr(app_tab_view, "release_quick_views", lambda dialog: released.append(dialog))
     copy = app_settings.AppSettings(app_window)
     copy.open()
     assert released == [copy] and copy.shown_dialog() is first

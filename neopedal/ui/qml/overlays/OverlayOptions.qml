@@ -651,7 +651,9 @@ TpPage {
                                     y: Math.max(0, (previewFlick.contentHeight - height) / 2)
                                     width: Math.round(previewPanel.baseWidth * previewPanel.shownZoom)
                                     height: Math.round(previewPanel.baseHeight * previewPanel.shownZoom)
-                                    source: backend.previewUrl
+                                    // Played on a moving simulated race, else the still picture
+                                    source: backend.liveUrl !== "" && backend.previewState === 2 ? backend.liveUrl
+                                                                                               : backend.previewUrl
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
                                     mipmap: false  // decoded at shown size (sourceSize below): no mipmaps
@@ -708,6 +710,18 @@ TpPage {
                             enabled: backend.previewEnabled
                             Row {
                                 spacing: theme.space1
+                                TpButton {
+                                    flat: true
+                                    checked: backend.previewPlaying && backend.previewAnimated
+                                    enabled: backend.previewAnimated
+                                    glyph: backend.previewPlaying ? "" : ""  // pause, play
+                                    fallback: backend.previewPlaying ? "II" : "\u25b6"
+                                    tip: !backend.previewAnimated
+                                         ? i18n.tr("This overlay shows a fixed sample: it is not played")
+                                         : backend.previewPlaying ? i18n.tr("Pause: still picture of the simulated race")
+                                         : i18n.tr("Play: overlay on a simulated race driving a corner in a loop")
+                                    onClicked: backend.setPreviewPlaying(!backend.previewPlaying)
+                                }
                                 TpButton {
                                     flat: true
                                     glyph: ""  // zoom out

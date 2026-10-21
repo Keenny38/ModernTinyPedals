@@ -35,7 +35,8 @@ import logging
 import os
 import weakref
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from importlib import import_module
 from typing import Any
 
@@ -368,6 +369,96 @@ def fit(image: QImage, max_size: QSize) -> QImage:
     scaled = image.scaled(limit, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
     scaled.setDevicePixelRatio(ratio)
     return scaled
+
+
+class LivePreview:
+    """Overlay drawn on a moving simulated session, picture by picture (hovered card of Overlays page, preview of
+    Overlay Options)
+
+    Own simulated session (demo_data.set_motion: a corner driven in a loop) in race situation (scenario), so
+    pictures of other pages keep the still one; own widget drawn at scale, updated & grabbed per frame, deleted by
+    close(). Pictures fit max_size if set. See live_preview.
+    """
+
+    def __init__(self, config: Setting, widget_name: str, widget_setting: Mapping, max_size: QSize | None = None,
+                 scale: float = 1.0, scenario: str = ""):
+        from ..demo_data import DemoSession, demo_globals, update_widget
+        from ..widget._modern import modern_module, uses_modern_design
+
+        self.widget_name = widget_name
+        self.max_size = max_size
+        self.widget: Any = None
+        preview_config = PreviewSetting(config, widget_name, dict(widget_setting), scale)
+        if uses_modern_design(preview_config, widget_name):
+            module = modern_module(widget_name)
+        else:
+            module = import_module(f"neopedal.widget.{widget_name}")
+        self.session = DemoSession(config.user.setting["standings"], scenario)
+        with _shared_style(), demo_globals(self.session) as patch_loaded:
+            widget = module.Realtime(preview_config, widget_name)
+            try:
+                patch_loaded()
+                if getattr(widget, "show_sample", None) is not None:  # driver lists draw a sample race: still
+                    widget.deleteLater()
+                    return
+                update_widget(widget, widget_name, self.session)
+            except Exception:
+                widget.deleteLater()
+                raise
+        self.widget = widget
+
+    @property
+    def animated(self) -> bool:
+        return self.widget is not None
+
+    def frame(self, seconds: float) -> QImage | None:
+        """Picture at seconds into the loop, None if it cannot be drawn"""
+        from ..demo_data import demo_globals, set_motion, update_once
+
+        if self.widget is None:
+            return None
+        set_motion(self.session, seconds)
+        with _shared_style(), demo_globals(self.session):
+            update_once(self.widget)
+            self.widget.adjustSize()
+            pixmap = self.widget.grab()
+        if pixmap.isNull():
+            return None
+        image = pixmap.toImage()
+        return image if self.max_size is None else fit(image, self.max_size)
+
+    def close(self):
+        if self.widget is not None:
+            self.widget.deleteLater()
+            self.widget = None
+
+
+def live_preview(config: Setting, widget_name: str, widget_setting: Mapping, max_size: QSize | None = None,
+                 scale: float = 1.0, scenario: str = "") -> LivePreview | None:
+    """Animated picture source of overlay, None if overlay is not animated (sample pictures out of race situation,
+    lap traces, driver lists) or cannot be drawn (error logged at debug level: still picture kept)"""
+    from ..demo_data import LAP_WIDGETS, SAMPLE_WIDGETS
+
+    if widget_name in LAP_WIDGETS or (widget_name in SAMPLE_WIDGETS and not scenario):
+        return None
+    try:
+        live = LivePreview(config, widget_name, widget_setting, max_size, scale, scenario)
+    except Exception as error:  # plugins needing live data...: page never broken
+        logger.debug("Live preview error: %s: %s", widget_name, error, exc_info=True)
+        return None
+    return live if live.animated else None
+
+
+@contextmanager
+def _shared_style() -> Iterator[None]:
+    """Style set by widgets on shared painter state put back after (running overlays keep theirs)"""
+    from ..widget._painter import OverlayStyle
+
+    shared = OverlayStyle.corner_scale, OverlayStyle.depth_effects
+    try:
+        yield
+    finally:
+        OverlayStyle.corner_scale, OverlayStyle.depth_effects = shared
 
 
 # Pages showing pictures

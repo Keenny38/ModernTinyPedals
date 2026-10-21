@@ -9,6 +9,7 @@ from PySide6.QtCore import QMimeData, QUrl
 
 from neopedal.module_info import ConsumptionDataSet, minfo
 from neopedal.setting import cfg
+from neopedal.ui.quick import stats_sharing
 from tests.test_driver_stats_viewer import backend as stats_page  # noqa: F401 (fixtures)
 from tests.test_driver_stats_viewer import dialogs, window  # noqa: F401
 from tests.test_race_calculator import host, page  # noqa: F401
@@ -101,7 +102,7 @@ def test_live_delete_and_new_lap_never_lost(page, monkeypatch):  # noqa: F811
 
     from neopedal.api_control import api
     from neopedal.module.module_stint import prepend
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_history
 
     history = deque(LAPS, 100)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", history)
@@ -122,7 +123,7 @@ def test_live_delete_and_new_lap_never_lost(page, monkeypatch):  # noqa: F811
         saved.append(list(laps))
         return True
 
-    monkeypatch.setattr(race_backend, "write_history", write_history)
+    monkeypatch.setattr(race_history, "write_history", write_history)
     backend = page.backend
     backend.setValidOnly(False)
     backend.loadLive()
@@ -136,37 +137,37 @@ def test_live_delete_and_new_lap_never_lost(page, monkeypatch):  # noqa: F811
 
 # --- Automatic saves: told once per failure streak, asked before closing
 def test_plan_file_failure_told_once(page, host, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_files
 
     backend = page.backend
-    real_write = race_backend.atomic_write
+    real_write = race_files.atomic_write
 
     def failing(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(race_backend, "atomic_write", failing)
+    monkeypatch.setattr(race_files, "atomic_write", failing)
     before = len(host.toasts)
     backend.write_plan_file()
     backend.write_plan_file()
     assert len(host.toasts) == before + 1 and "Race Plan overlay: disk full" in host.toasts[-1]
-    monkeypatch.setattr(race_backend, "atomic_write", real_write)
+    monkeypatch.setattr(race_files, "atomic_write", real_write)
     backend.write_plan_file()  # saved again: streak over
     assert "plan" not in backend.save_failed
-    monkeypatch.setattr(race_backend, "atomic_write", failing)
+    monkeypatch.setattr(race_files, "atomic_write", failing)
     backend.write_plan_file()
     assert len(host.toasts) == before + 2  # new streak told again
 
 
 def test_tyre_autosave_failure_asked_before_close(page, host, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_tyre_tab
 
     backend = page.backend
-    real_save = race_backend.save_tyre_strategy_file
+    real_save = race_tyre_tab.save_tyre_strategy_file
 
     def failing(**kwargs):
         raise OSError("read-only folder")
 
-    monkeypatch.setattr(race_backend, "save_tyre_strategy_file", failing)
+    monkeypatch.setattr(race_tyre_tab, "save_tyre_strategy_file", failing)
     before = len(host.toasts)
     backend.addTyre()
     backend.autosave_tyres()
@@ -174,14 +175,14 @@ def test_tyre_autosave_failure_asked_before_close(page, host, monkeypatch):  # n
     assert len(host.toasts) == before + 1 and "tyre plan automatically: read-only folder" in host.toasts[-1]
     assert page.confirm_discard() and "could not be saved automatically" in host.asked[-1]  # answered yes
     asked = len(host.asked)
-    monkeypatch.setattr(race_backend, "save_tyre_strategy_file", real_save)
+    monkeypatch.setattr(race_tyre_tab, "save_tyre_strategy_file", real_save)
     assert page.confirm_discard() and len(host.asked) == asked  # saved again when closing: nothing asked
 
 
 def test_pending_autosave_written_before_close(page, host, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_tyre_tab
 
-    monkeypatch.setattr(race_backend, "save_tyre_strategy_file", lambda **kwargs: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr(race_tyre_tab, "save_tyre_strategy_file", lambda **kwargs: (_ for _ in ()).throw(OSError("x")))
     page.backend.addTyre()  # autosave waiting
     assert page.backend._autosave_timer.isActive()
     monkeypatch.setattr(page, "confirm", lambda text: False)
@@ -199,7 +200,7 @@ def test_plan_csv_exported_and_told(page, host, files, out):  # noqa: F811
 
 
 def test_plan_csv_failure_keeps_old_file(page, host, files, out, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_files
 
     target = out / "plan.csv"
     target.write_text("old", encoding="utf-8")
@@ -209,7 +210,7 @@ def test_plan_csv_failure_keeps_old_file(page, host, files, out, monkeypatch):  
             file.write("half")
         raise OSError("disk full")
 
-    monkeypatch.setattr(race_backend, "write_plan_csv", half_written)
+    monkeypatch.setattr(race_files, "write_plan_csv", half_written)
     host.save_path = str(target)
     page.backend.exportPlanCsv()
     assert target.read_text(encoding="utf-8") == "old" and os.listdir(out) == ["plan.csv"]
@@ -228,7 +229,6 @@ def test_stats_csv_atomic_and_told(stats_page, out, monkeypatch):  # noqa: F811
     from PySide6.QtWidgets import QFileDialog
 
     from neopedal.ui import toast
-    from neopedal.ui.quick import stats_backend
 
     target = out / "stats.csv"
     shown = []
@@ -237,7 +237,7 @@ def test_stats_csv_atomic_and_told(stats_page, out, monkeypatch):  # noqa: F811
     stats_page.exportCsv(False)
     assert target.read_text(encoding="utf-8-sig").startswith("Vehicle")
     assert shown[-1][0] == "Exported: <b>stats.csv</b>" and callable(shown[-1][1]["action"])
-    monkeypatch.setattr(stats_backend, "csv_text", lambda *args: (_ for _ in ()).throw(OSError("locked")))
+    monkeypatch.setattr(stats_sharing, "csv_text", lambda *args: (_ for _ in ()).throw(OSError("locked")))
     assert not stats_page.write_csv(str(target))  # failed half way: old export left whole
     assert target.read_text(encoding="utf-8-sig").startswith("Vehicle") and os.listdir(out) == ["stats.csv"]
 

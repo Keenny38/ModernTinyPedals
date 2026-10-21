@@ -148,6 +148,21 @@ CHANNELS = (
     Channel("engine_map", "Engine Map", "", 0.5),
     Channel("water_temp", "Water Temp", "°C", 0.6, quantity="temperature"),
     Channel("oil_temp", "Oil Temp", "°C", 0.6, quantity="temperature"),
+    # Recorded from this version: pedals after driving aids (TC cut, ABS, throttle blip), aero load, camber
+    Channel("throttle_car", "Throttle (Car)", "", 1.0, (0.0, 1.0)),
+    Channel("brake_car", "Brake (Car)", "", 1.0, (0.0, 1.0)),
+    Channel("all:throttle_aid", "Throttle: Driver & Car", "", 1.2, (0.0, 1.0), parts=("throttle", "throttle_car")),
+    Channel("all:brake_aid", "Brake: Driver & Car", "", 1.2, (0.0, 1.0), parts=("brake", "brake_car")),
+    Channel("throttle_cut", "Throttle Cut", "", 0.8, (-1.0, 1.0), sources=("throttle", "throttle_car")),
+    Channel("brake_cut", "Brake Cut", "", 0.8, (-1.0, 1.0), sources=("brake", "brake_car")),
+    Channel("downforce_front", "Downforce Front", "kN", 0.8),
+    Channel("downforce_rear", "Downforce Rear", "kN", 0.8),
+    Channel("all:downforce", "Downforce", "kN", 1.2, parts=("downforce_front", "downforce_rear")),
+    Channel("aero_balance", "Aero Balance", "%", 0.8, sources=("downforce_front", "downforce_rear")),
+    *wheel_channels("camber", "Camber", "°"),
+    Channel("rake", "Rake", "mm", 0.8, quantity="length", sources=tuple(f"ride_height_{wheel}" for wheel in WHEELS)),
+    *wheel_channels("damper_vel", "Damper Velocity", "mm/s", "length", sources=("susp_defl_{wheel}", "lap_time"),
+                    noisy=True),
 )
 CHANNEL_MAP = {channel.column: channel for channel in CHANNELS}
 MATH_PREFIX = "math:"  # math channels (user expressions, see quick/math_channels): added to CHANNEL_MAP
@@ -165,9 +180,12 @@ CHANNEL_PRESETS = {  # channel menu presets: name, visible channels
     "Suspension": ("speed_kph", "all:ride_height", "all:susp_defl", "accel_lat", "accel_long"),
     "Camber": ("speed_kph", "all:camber_spread", "all:tyre_temp_in", "all:tyre_temp_out", "all:tyre_load"),
     "Car Settings": ("delta", "speed_kph", "brake_bias", "tc_level", "abs_level", "engine_map"),
+    "Driving Aids": ("speed_kph", "all:throttle_aid", "throttle_cut", "all:brake_aid", "brake_cut", "all:slip"),
+    "Aero": ("speed_kph", "all:downforce", "aero_balance", "rake", "all:ride_height", "all:damper_vel"),
 }
 PART_COLORS = {  # sub-channel colors of combined panels when one lap is shown
-    "throttle": "#22C55E", "brake": "#EF4444",
+    "throttle": "#22C55E", "brake": "#EF4444", "throttle_car": "#86EFAC", "brake_car": "#FCA5A5",
+    "downforce_front": "#38BDF8", "downforce_rear": "#F97316",
     "fl": "#38BDF8", "fr": "#F97316", "rl": "#A3E635", "rr": "#E879F9",
 }
 SMOOTHING_LEVELS = (0, 3, 7, 15, 31)  # moving average samples of noisy channels, by smoothing setting

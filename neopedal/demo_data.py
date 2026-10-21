@@ -48,7 +48,7 @@ from pyLMUSharedMemory import lmu_data
 from . import api_connector
 from .const_common import MAX_SECONDS, SECTOR_FLAG_ORDER
 from .demo_state import demo_drawing
-from .module_info import ConsumptionDataSet, ModuleInfo, StintDataSet, VehicleDataSet
+from .module_info import ConsumptionDataSet, ModuleInfo, StintDataSet, TrackMap, VehicleDataSet
 from .penalty_info import NO_PENALTY, Penalty
 from .process.weather import WeatherNode
 from .template.widget.registry import DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE, demo_names
@@ -396,20 +396,16 @@ def set_demo_sectors(data, index: int, best: float):
     first = sectors.best[0] if index % 2 else sectors.best[0] + 0.15  # S1 being driven: personal best or slower
     sectors.current = (first if sectors.sector >= 1 else 0.0, sectors.best[1] + 0.2 if sectors.sector == 2 else 0.0)
     sectors.laps = PLAYER_LAPS
+    # Running lap time: line just crossed in S1 (completed lap shown), else completed sectors & half of next one
+    data.lapStartTime = ELAPSED - (2.5 if sectors.sector == 0 else
+                                   sum(sectors.current[:sectors.sector]) + sectors.best[sectors.sector] * 0.5)
 
 
 def demo_class_best_sectors(cars) -> None:
     """Best sectors & best lap of each class told to its cars"""
-    best: dict[str, list[float]] = {}
-    for data in cars:
-        found = best.setdefault(data.vehicleClass, [0.0, 0.0, 0.0, 0.0])
-        for number, value in enumerate((*data.sectors.best, data.bestLapTime)):
-            if value and (not found[number] or value < found[number]):
-                found[number] = value
-    for data in cars:
-        found = best[data.vehicleClass]
-        data.classBestSectors = (found[0], found[1], found[2])
-        data.classBestLap = found[3]
+    from .module_info import set_class_bests
+
+    set_class_bests(cars)
 
 
 def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
@@ -629,10 +625,12 @@ def set_modules(minfo: ModuleInfo):
     hybrid.fuelEnergyBias = 0.012
 
     mapping = minfo.mapping
-    mapping.coordinates = tuple((point[1], point[2]) for point in TRACK_POINTS)
-    mapping.elevations = tuple((point[0], point[3]) for point in TRACK_POINTS)
-    mapping.sectors = TRACK_SECTORS
-    mapping.lastModified = 1.0
+    mapping.trackMap = TrackMap(
+        tuple((point[1], point[2]) for point in TRACK_POINTS),
+        tuple((point[0], point[3]) for point in TRACK_POINTS),
+        TRACK_SECTORS,
+        1.0,
+    )
     mapping.speedTrapPosition = 3420.0
     mapping.pitEntryPosition = 3880.0
     mapping.pitExitPosition = 260.0
@@ -837,6 +835,109 @@ def replay_lap(widget, data, minfo: ModuleInfo, update: Callable[[Any], None] | 
             setattr(delta, source, value)
 
 
+# Animated preview (hovered card of Overlays page): a corner driven in a loop
+MOTION_PERIOD = 6.0  # seconds per corner
+MOTION_SPEEDS = ((0.0, 0.25, 52.0, 64.0), (0.25, 0.45, 64.0, 30.0), (0.45, 0.7, 30.0, 27.0), (0.7, 1.0, 27.0, 52.0))
+GEAR_TOP_SPEEDS = (0.0, 14.0, 24.0, 33.0, 42.0, 52.0, 66.0)  # m/s at top of each gear, see set_motion
+MOTION_DISTANCE = 270.0  # meters driven per corner (lap distance looped back after)
+MOTION_START = 0.18  # phase of first picture: braking comes at once (no long straight first)
+WHEEL_MOTION_FIELDS = ("mBrakeTemp", "mTireLoad", "mSuspForce", "mSuspensionDeflection", "mRideHeight", "mRotation",
+                       "mLateralPatchVel", "mLongitudinalPatchVel", "mVerticalTireDeflection")
+
+
+def eased(phase: float, start: float, end: float, low: float, high: float) -> float:
+    """Value going from low to high (eased) while phase goes from start to end"""
+    fraction = min(max((phase - start) / (end - start), 0.0), 1.0)
+    return low + (high - low) * (0.5 - 0.5 * math.cos(math.pi * fraction))
+
+
+def set_motion(session: DemoSession, seconds: float):
+    """Player car driven through a corner, looped (MOTION_PERIOD): inputs, G force, speed, gear & RPM, steering
+    torque, delta and position into lap; clocks run on
+
+    Wheels follow (brake pressure & temperature, tyre surface temperature, load, suspension, ride height, wheel
+    speed & slip) around their simulated values. In pits (scenario): rolling in the pit lane at the limiter.
+    Only for a session of its own (see widget_preview.LivePreview): the shared session of still pictures is never
+    moved.
+    """
+    phase = ((seconds / MOTION_PERIOD) + MOTION_START) % 1.0
+    data, minfo = session.data, session.minfo
+    tele = data.telemetry.telemInfo[PLAYER]
+    wheels = tele.mWheels
+    if session.motion is None:  # simulated values the motion goes around
+        session.motion = {
+            "wheels": [{field: getattr(wheel, field) for field in WHEEL_MOTION_FIELDS} for wheel in wheels],
+            "temperature": [tuple(wheel.mTemperature) for wheel in wheels],
+            "ride": (tele.mFrontRideHeight, tele.mRearRideHeight),
+            "suspension": tuple(minfo.wheels.currentSuspensionPosition),  # wheels module outputs
+            "slip": tuple(minfo.wheels.slipRatio),
+        }
+    base = session.motion
+    elapsed = ELAPSED + seconds
+    tele.mElapsedTime = data.scoring.scoringInfo.mCurrentET = elapsed
+    wave = math.sin(2 * math.pi * phase)
+    if session.scenario == "pits":  # limiter on in the pit lane: inputs only
+        throttle = 0.35 + 0.05 * wave
+        tele.mUnfilteredThrottle = tele.mFilteredThrottle = throttle
+        tele.mUnfilteredSteering = tele.mFilteredSteering = 0.04 * wave
+        tele.mEngineRPM = 4300 + 60 * wave
+        return
+    throttle, brake, steering, lgt, lat = corner_inputs(phase)
+    speed = next(eased(phase, *part) for part in MOTION_SPEEDS if phase <= part[1])
+    gear = next((index for index, top in enumerate(GEAR_TOP_SPEEDS) if index and speed <= top), 6)
+    low, top = GEAR_TOP_SPEEDS[gear - 1], GEAR_TOP_SPEEDS[gear]
+    elapsed = ELAPSED + seconds
+    tele.mElapsedTime = data.scoring.scoringInfo.mCurrentET = elapsed
+    tele.mUnfilteredThrottle = tele.mFilteredThrottle = throttle
+    tele.mUnfilteredBrake = tele.mFilteredBrake = brake
+    tele.mUnfilteredSteering = tele.mFilteredSteering = steering
+    tele.mSteeringShaftTorque = steering * 58.0
+    tele.mLocalVel.z = -speed
+    tele.mLocalAccel.x = lat * 9.81
+    tele.mLocalAccel.z = lgt * 7.5
+    tele.mLocalRot.y = lat * 0.17
+    tele.mGear = gear
+    tele.mEngineRPM = min(3800.0 + 4300.0 * (speed - low) / (top - low), tele.mEngineMaxRPM - 150.0)
+    minfo.force.lgtGForceRaw, minfo.force.latGForceRaw = lgt, lat
+    distance = (LAP_DISTANCE + phase * MOTION_DISTANCE) % TRACK_LENGTH
+    data.scoring.vehScoringInfo[PLAYER].mLapDist = distance
+    pos_x, pos_y, pos_z, heading = track_position(distance)
+    tele.mPos.x, tele.mPos.y, tele.mPos.z = pos_x, pos_z, -pos_y
+    tele.mOri[2].x, tele.mOri[2].z = math.sin(heading), math.cos(heading)
+    tele.mOri[0].x, tele.mOri[0].z = math.cos(heading), -math.sin(heading)
+    value = lap_delta(PLAYER_LAPS, LAP_DISTANCE / TRACK_LENGTH) + 0.05 * wave
+    for source in DELTA_SOURCES:
+        setattr(minfo.delta, source, value)
+    # Brakes heat up while braking, cool down after; load moves forward under braking, outward in the corner
+    heat = eased(phase, 0.25, 0.45, 0.0, 1.0) if phase < 0.45 else eased(phase, 0.45, 1.0, 1.0, 0.0)
+    pitch = (lgt + 0.45) / 2.3  # 0 accelerating, 1 hardest braking
+    tele.mFrontRideHeight = base["ride"][0] - 0.008 * pitch
+    tele.mRearRideHeight = base["ride"][1] + 0.006 * pitch
+    suspension, slips = list(base["suspension"]), list(base["slip"])
+    for index, wheel in enumerate(wheels):
+        front = index < 2
+        side = 1.0 if index % 2 else -1.0  # right wheels loaded in the corner (lateral G positive)
+        shift = (1.0 if front else -1.0) * pitch + side * lat / 2.0  # share of load moved onto this wheel
+        values = base["wheels"][index]
+        wheel.mBrakePressure = brake * (0.95 if front else 0.78)
+        wheel.mBrakeTemp = values["mBrakeTemp"] + (190.0 if front else 140.0) * heat
+        wheel.mTireLoad = values["mTireLoad"] * (1.0 + 0.45 * shift)
+        wheel.mSuspForce = values["mSuspForce"] * (1.0 + 0.4 * shift)
+        wheel.mSuspensionDeflection = values["mSuspensionDeflection"] * (1.0 + 0.5 * shift)
+        wheel.mVerticalTireDeflection = values["mVerticalTireDeflection"] * (1.0 + 0.3 * shift)
+        wheel.mRideHeight = values["mRideHeight"] - 0.006 * shift
+        slip = (0.06 if front else 0.03) * brake - (0.0 if front else 0.04) * throttle  # lock up, wheelspin
+        wheel.mRotation = values["mRotation"] * speed / 58.0 * (1.0 - slip)
+        suspension[index] = base["suspension"][index] * (1.0 + 0.5 * shift)
+        slips[index] = base["slip"][index] + abs(slip)
+        wheel.mLongitudinalPatchVel = values["mLongitudinalPatchVel"] * (1.0 + 20.0 * abs(slip))
+        wheel.mLateralPatchVel = values["mLateralPatchVel"] * (0.3 + lat)
+        for layer, temperature in enumerate(base["temperature"][index]):
+            wheel.mTemperature[layer] = temperature + 4.0 * shift + (1.5 * heat if front else 0.0)
+    minfo.wheels.currentSuspensionPosition = suspension
+    minfo.wheels.slipRatio = slips
+
+
 class DemoAPI:
     """Stands for api_control.api in widget modules: reader of the simulated session"""
 
@@ -899,12 +1000,14 @@ def set_scenario(sim, data, minfo: ModuleInfo, scenario: str):
 class DemoSession:
     """Simulated race: game data (api.read) and module outputs (minfo) read by widgets"""
 
-    __slots__ = ("sim", "data", "api", "minfo")
+    __slots__ = ("sim", "data", "api", "minfo", "scenario", "motion")
 
     def __init__(self, standings: Mapping[str, Any], scenario: str = ""):
         self.sim, self.data = lmu_api()
         self.api = DemoAPI(self.sim)
         self.minfo = ModuleInfo()
+        self.scenario = scenario
+        self.motion: dict[str, Any] | None = None  # simulated values moved around (see set_motion)
         set_telemetry(self.sim, self.data)
         set_vehicles(self.minfo, standings, self.api.read)
         set_modules(self.minfo)

@@ -63,6 +63,7 @@ Card {
         onClosed: root.menuClosed()
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
         Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exports.exportMotec(root.menuPath) }
+        Action { text: i18n.tr("Share Lap..."); onTriggered: backend.exports.shareLap(root.menuPath) }
         MenuSeparator {}
         Action {
             text: i18n.tr("Keep Lap")
@@ -96,6 +97,7 @@ Card {
         onClosed: root.menuClosed()
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
         Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exports.exportMotec(root.menuPath) }
+        Action { text: i18n.tr("Share Lap..."); onTriggered: backend.exports.shareLap(root.menuPath) }
     }
     // Setup differences of a shown lap with reference lap (lap list menu)
     SetupDiff { id: setupDiff }

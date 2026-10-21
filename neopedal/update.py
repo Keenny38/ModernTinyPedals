@@ -199,14 +199,13 @@ RELEASE_DETAILS_HEADING = "## Commits"  # technical part of release notes (commi
 def parse_release_notes(data: bytes) -> str:
     """Release notes (Markdown body of GitHub release), empty if unavailable
 
-    Visuals section (before / after images of overlays) is left out: images are online only.
+    Visuals section (before / after images of overlays, after the commits) is kept: What's New shows it folded.
     """
     try:
         release = json.loads(data[data.index(b"{"):].decode("utf-8"))
-        body = str(release.get("body") or "")
+        return str(release.get("body") or "").strip()
     except (AttributeError, TypeError, IndexError, ValueError):
         return ""
-    return body.split(RELEASE_VISUALS_HEADING, 1)[0].strip()
 
 
 def parse_release_tag(data: bytes) -> str:
@@ -223,17 +222,45 @@ def parse_release_tag(data: bytes) -> str:
 # CHANGELOG.<language code>.md (CHANGELOG.fr.md), with the same "## X.Y.Z (date)" sections
 CHANGELOG_FILE = "CHANGELOG.md"
 MAX_CHANGELOG_SIZE = 4 * 1024 * 1024
+MAX_EARLIER_VERSIONS = 12  # versions between installed & latest shown by What's New (older ones: GitHub)
+_changelog_date = re.compile(r"\((\d{4})-(\d{1,2})-(\d{1,2})\)")
+
+
+class ChangelogEntry(NamedTuple):
+    """Changelog section of a version"""
+
+    version: str  # "0.26.0"
+    date: tuple[int, int, int]  # release date (year, month, day), DATE_NA if not written
+    body: str  # Markdown
+
+
+def changelog_entries(text: str) -> list[ChangelogEntry]:
+    """Changelog sections in file order ("## 0.26.0 (2026-10-19)"), text before first "## " heading left out"""
+    sections: list[tuple[str, str, list[str]]] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            sections.append((line[3:].split(" ")[0], line, []))
+        elif sections:
+            sections[-1][2].append(line)
+    entries = []
+    for name, heading, body in sections:
+        match = _changelog_date.search(heading)
+        date = (int(match.group(1)), int(match.group(2)), int(match.group(3))) if match else DATE_NA
+        entries.append(ChangelogEntry(name, date, "\n".join(body).strip()))
+    return entries
 
 
 def changelog_sections(text: str) -> list[tuple[str, str]]:
     """Changelog sections (version, body) in file order, text before first "## " heading left out"""
-    sections: list[tuple[str, list[str]]] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            sections.append((line[3:].split(" ")[0], []))
-        elif sections:
-            sections[-1][1].append(line)
-    return [(name, "\n".join(body).strip()) for name, body in sections]
+    return [(entry.version, entry.body) for entry in changelog_entries(text)]
+
+
+def entries_between(entries: list[ChangelogEntry], newer_than: tuple[int, int, int], up_to: tuple[int, int, int],
+                    limit: int = MAX_EARLIER_VERSIONS) -> list[ChangelogEntry]:
+    """Changelog sections of versions newer than newer_than and up to up_to (included), newest first, at most limit"""
+    found = [entry for entry in entries if newer_than < parse_version_string(entry.version) <= up_to]
+    found.sort(key=lambda entry: parse_version_string(entry.version), reverse=True)
+    return found[:limit]
 
 
 def changelog_section(text: str, version: str) -> str:
@@ -266,20 +293,90 @@ def localize_release_notes(notes: str, summary: str) -> str:
     return summary
 
 
-def fetch_localized_summary(repo: str, tag: str, language: str, timeout: float = 5) -> str:
-    """Translated changelog section of release (CHANGELOG.<language>.md at release tag), empty if none"""
-    filename = localized_changelog_name(language)
-    if filename == CHANGELOG_FILE or not tag or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+def tag_version(tag: str) -> str:
+    """Version of release tag ("v0.26.0" -> "0.26.0")"""
+    return tag.lstrip("v").split("-")[0]
+
+
+def fetch_changelog(repo: str, tag: str, language: str, timeout: float = 5) -> str:
+    """Changelog of language at release tag (CHANGELOG.<language>.md, CHANGELOG.md for English), empty if none"""
+    if not tag or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
         return ""
+    filename = localized_changelog_name(language)
     url = f"https://raw.githubusercontent.com/{repo}/{tag}/{filename}"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
-            text = response.read(MAX_CHANGELOG_SIZE).decode("utf-8", "replace")
+            return response.read(MAX_CHANGELOG_SIZE).decode("utf-8", "replace")
     except (OSError, ValueError, http.client.HTTPException) as error:  # not translated (404), offline, cut
-        logger.info("UPDATES: no %s release notes: %s", language, error)
+        logger.info("UPDATES: no %s changelog: %s", language, error)
         return ""
-    version = tag.lstrip("v").split("-")[0]
-    return changelog_section(text, version)
+
+
+def fetch_localized_summary(repo: str, tag: str, language: str, timeout: float = 5) -> str:
+    """Translated changelog section of release (CHANGELOG.<language>.md at release tag), empty if none"""
+    if localized_changelog_name(language) == CHANGELOG_FILE:
+        return ""
+    return changelog_section(fetch_changelog(repo, tag, language, timeout), tag_version(tag))
+
+
+# Changelog screenshots: "![caption](https://raw.githubusercontent.com/<repo>/<ref>/docs/changes/<file>)" lines,
+# shown by What's New from docs/changes next to the app (project, or screenshots of the version in a release
+# build), else downloaded once into the changelog image folder
+CHANGELOG_IMAGE_URL = re.compile(
+    r"https://raw\.githubusercontent\.com/([\w.-]+/[\w.-]+)/[\w.-]+/docs/changes/(\w[\w.-]*\.(?:png|jpe?g|gif|webp))")
+CHANGELOG_IMAGE_FOLDER = os.path.join("docs", "changes")
+MAX_CHANGELOG_IMAGE_SIZE = 8 * 1024 * 1024
+IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+
+
+def changelog_image_name(url: str) -> str:
+    """File name of changelog screenshot of app repository (update or fork), empty if not one"""
+    match = CHANGELOG_IMAGE_URL.fullmatch(url)
+    if match is None:
+        return ""
+    repos = {FORK_REPO_NAME.lower(), update_repository().lower()}
+    return match.group(2) if match.group(1).lower() in repos else ""
+
+
+def is_image_data(data: bytes) -> bool:
+    """PNG, JPEG, GIF or WebP file content"""
+    return data.startswith(IMAGE_SIGNATURES) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def changelog_image_cache() -> str:
+    """Folder of downloaded changelog screenshots"""
+    from .userfile import app_path, set_default_data_path
+
+    return app_path(set_default_data_path("changelogimage/"))
+
+
+def changelog_image_file(url: str, timeout: float = 10) -> str:
+    """Local file of changelog screenshot (docs/changes next to app, else downloaded once & kept)
+
+    Raises:
+        ValueError: not a changelog screenshot of app repository.
+        OSError: not available (offline, not found, not an image, unable to save).
+    """
+    from .userfile import APP_ROOT, atomic_replace
+
+    name = changelog_image_name(url)
+    if not name:
+        raise ValueError(f"not a changelog image: {url}")
+    folder = changelog_image_cache()
+    for path in (os.path.join(APP_ROOT, CHANGELOG_IMAGE_FOLDER, name), os.path.join(folder, name)):
+        if os.path.isfile(path):
+            return path
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            data = response.read(MAX_CHANGELOG_IMAGE_SIZE + 1)
+    except (ValueError, http.client.HTTPException) as error:
+        raise OSError(f"changelog image not downloaded: {error}") from error
+    if len(data) > MAX_CHANGELOG_IMAGE_SIZE or not is_image_data(data):
+        raise OSError(f"changelog image too large or not an image: {url}")
+    path = os.path.join(folder, name)
+    os.makedirs(folder, exist_ok=True)
+    atomic_replace(path, data, fsync=False)  # downloaded again if lost
+    return path
 
 
 UNINSTALLER_NAME = "unins000.exe"  # left next to app executable by installer (Inno Setup)
@@ -771,6 +868,8 @@ class UpdateChecker:
         "installer",
         "release_notes",
         "localized_notes",
+        "earlier_entries",
+        "_changelog_cache",
     )
 
     def __init__(self):
@@ -785,6 +884,9 @@ class UpdateChecker:
         self.installer: InstallerAsset | None = None
         self.release_notes = ""  # English (GitHub release notes)
         self.localized_notes: dict[str, str] = {}  # language code: translated notes
+        # language code: changelog sections of versions between installed & latest (skipped updates), newest first
+        self.earlier_entries: dict[str, list[ChangelogEntry]] = {}
+        self._changelog_cache: dict[tuple[str, str, str], str] = {}  # (repo, tag, language): changelog, last tag only
 
     def is_manual(self) -> bool:
         """Is manual checking"""
@@ -808,6 +910,20 @@ class UpdateChecker:
     def notes(self, language: str) -> str:
         """Release notes of latest release in language, English if not translated"""
         return self.localized_notes.get(language) or self.release_notes
+
+    def earlier_notes(self, language: str) -> list[ChangelogEntry]:
+        """Changelog sections of versions between installed & latest release (newest first), in language if
+        translated, else English, empty if none (installed version is the previous release)"""
+        return self.earlier_entries.get(language) or self.earlier_entries.get("en", [])
+
+    def _changelog(self, repo: str, tag: str, language: str) -> str:
+        """Changelog of language at release tag, fetched once per tag (checked again every few hours)"""
+        key = (repo, tag, language)
+        if key not in self._changelog_cache:
+            if any(cached[:2] != key[:2] for cached in self._changelog_cache):
+                self._changelog_cache.clear()  # newer release: older changelogs never used again
+            self._changelog_cache[key] = fetch_changelog(repo, tag, language)
+        return self._changelog_cache[key]
 
     def latest_version(self) -> tuple[int, int, int]:
         """Version of latest release (last check)"""
@@ -874,15 +990,27 @@ class UpdateChecker:
             current_version = parse_version_string(version.__version__)
             update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
             localized_notes = {}
+            earlier_entries = {}
             language = current_language()
-            if update_available and language != "en":  # notes shown in app language
-                summary = fetch_localized_summary(repo, parse_release_tag(raw_bytes), language)
-                if summary:
-                    localized_notes[language] = localize_release_notes(release_notes, summary)
+            if update_available:
+                # Changelog of release: notes in app language, sections of skipped versions in between
+                tag = parse_release_tag(raw_bytes)
+                text = self._changelog(repo, tag, language)
+                if language != "en":
+                    summary = changelog_section(text, tag_version(tag))
+                    if summary:
+                        localized_notes[language] = localize_release_notes(release_notes, summary)
+                    if not text:  # not translated: skipped versions in English
+                        text = self._changelog(repo, tag, "en")
+                earlier = [entry for entry in entries_between(changelog_entries(text), current_version, checked_version)
+                           if parse_version_string(entry.version) != checked_version]  # latest: release notes
+                if earlier:
+                    earlier_entries[language] = earlier
             # Save info, all at once (no partial state on error)
             self.installer = installer
             self.release_notes = release_notes
             self.localized_notes = localized_notes
+            self.earlier_entries = earlier_entries
             self._update_available = update_available
             self._last_checked_version = checked_version
             self._last_checked_date = checked_date

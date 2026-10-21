@@ -34,7 +34,7 @@ import os
 from dataclasses import fields
 from math import isfinite
 from time import monotonic
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .. import units
 from ..api_control import api
@@ -42,6 +42,7 @@ from ..const_file import FileExt
 from ..fuel_strategy import (
     Strategy,
     StrategyInput,
+    measured_input,
     plan,
     remaining_input,
     strategy_input_from_values,
@@ -65,6 +66,7 @@ PLAN_CHECK_SECONDS = 2.0  # race calculator plan & tyre plan checked for changes
 TYRE_PLAN_NAME = "race_calculator_tyres"  # tyre plan kept by race calculator (config folder)
 PLAN_FILE = "race_calculator_plan.json"  # plan input kept by race calculator (config folder)
 DEFAULT_INPUT = StrategyInput()
+TEXT_FIELDS = ("driver_names",)  # plan input fields of texts (other tuples: numbers)
 MENU_TOLERANCE = 1.0  # fuel unit or % of energy: pit menu refill close enough to plan
 
 
@@ -90,12 +92,15 @@ def load_plan_input(filename: str) -> tuple[StrategyInput, list[int]] | None:
         with open(filename, encoding="utf-8") as file:
             data = json.load(file)
         values = data["setup"]
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for item in fields(StrategyInput):
             if item.name not in values:
                 continue
             default = getattr(DEFAULT_INPUT, item.name)
             value = values[item.name]
+            if item.name in TEXT_FIELDS:
+                kwargs[item.name] = tuple(str(text) for text in value)
+                continue
             if isinstance(default, tuple):
                 value = tuple(float(number) for number in value)
             elif isinstance(default, bool):
@@ -329,11 +334,14 @@ class Realtime(Overlay):
             return
         if live.in_pits:
             return
-        key = (state.laps_done, state.stops_done, self.plan_key)
+        key = (state.replan_key(), self.plan_key)
         if key == self.live_key:
             return
         self.live_key = key
-        rest = plan(remaining_input(self.setup, self.strategy, state))
+        setup = self.setup
+        if self.wcfg["enable_live_consumption"]:  # lap time & consumption of the race so far
+            setup = measured_input(setup, minfo.history.consumptionDataSet, self.unit_fuel)
+        rest = plan(remaining_input(setup, self.strategy, state))
         if self.tyre_changes:
             rest.tyre_changes = self.tyre_changes[state.stops_done:][:len(rest.stops)]
         self.live = rest if rest.ready else None

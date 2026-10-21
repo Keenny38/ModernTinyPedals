@@ -37,7 +37,7 @@ from ... import units
 from ...api_control import api
 from ...demo_state import drawing_demo
 from ...i18n import tr_overlay as tr
-from ...module_info import minfo
+from ...module_info import NO_TRACK_MAP, TrackMap, minfo
 from ...userfile.corner_coach import MapCorners, map_corners
 from .base import CENTER, LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
@@ -92,6 +92,7 @@ class Realtime(ModernOverlay):
         self.label_reading = tr("Elevation")
         self.label_scale = tr("Scale")
         self.last_modified = None
+        self.track_map: TrackMap = NO_TRACK_MAP  # map drawn (distances & sectors of one map)
         self.line = QPolygonF()
         self.area = QPainterPath()
         self.xs: list[float] = []  # profile x of each point (car dot height)
@@ -111,14 +112,15 @@ class Realtime(ModernOverlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        modified = minfo.mapping.lastModified
-        if modified != self.last_modified:
-            self.last_modified = modified
-            self.build_profile(minfo.mapping.elevations, minfo.mapping.sectors)
+        track = minfo.mapping.trackMap  # taken once: distances & sectors of the same map
+        if track.lastModified != self.last_modified:
+            self.last_modified = track.lastModified
+            self.track_map = track
+            self.build_profile(track.elevations, track.sectors)
             self.map_corners = None  # placed again on new map
             self.redraw_static()
         if self.show_corner_numbers and self.xs:
-            corners = map_corners(api.read.session.track_name(), minfo.mapping, drawing_demo())
+            corners = map_corners(api.read.session.track_name(), self.track_map, drawing_demo())
             if corners is not None and corners is not self.map_corners:
                 self.map_corners = corners
                 self.redraw_static()

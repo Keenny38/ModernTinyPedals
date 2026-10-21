@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from neopedal.setting import cfg
 from neopedal.ui._common import BaseEditor
+from neopedal.ui.quick import stats_common
 from tests.test_driver_stats_viewer import opens_on_game_track, settle
 
 
@@ -179,17 +180,16 @@ def test_stats_viewer_shows_game_track(stats_viewer):
 
 
 def test_stats_viewer_display_units(stats_viewer, monkeypatch):
-    from neopedal.ui.quick import stats_backend
 
     monkeypatch.setitem(cfg.units, "odometer_unit", "Kilometer")
     monkeypatch.setitem(cfg.units, "fuel_unit", "Gallon")
-    assert stats_backend.parse_display_value("meters", 125000.0) == 125.0
-    assert stats_backend.parse_display_value("liters", 3.785411784) == pytest.approx(1.0)
-    assert stats_backend.format_header_key("meters") == "Km"
-    assert stats_backend.format_header_key("liters") == "Gallons"
+    assert stats_common.parse_display_value("meters", 125000.0) == 125.0
+    assert stats_common.parse_display_value("liters", 3.785411784) == pytest.approx(1.0)
+    assert stats_common.format_header_key("meters") == "Km"
+    assert stats_common.format_header_key("liters") == "Gallons"
     monkeypatch.setitem(cfg.units, "odometer_unit", "Mile")
-    assert stats_backend.format_header_key("meters") == "Miles"
-    assert stats_backend.format_header_key("races") == "Finishes"
+    assert stats_common.format_header_key("meters") == "Miles"
+    assert stats_common.format_header_key("races") == "Finishes"
 
 
 def test_stats_viewer_reset_lap_time(stats_viewer, dialogs):

@@ -258,7 +258,7 @@ def test_time_column_colors_and_energy_decimals(ui_env, bundled_fonts):
     car.bestLapTime = car.lastLapTime
     assert widget.laptime_cell(car, context).color == theme.positive  # personal best
     car.bestLapTime = car.lastLapTime - 0.5
-    assert widget.laptime_cell(car, context).color == theme.text_dim
+    assert widget.laptime_cell(car, context).color == theme.caution  # personal best not improved: yellow
     practice = Context(in_race=False, player=context.player, player_pit_request=False)
     car.classBestLapTime = car.classBestLap = car.bestLapTime
     assert widget.laptime_cell(car, practice).color == theme.best  # class best lap outside race
@@ -305,6 +305,22 @@ def test_class_best_sectors_and_lap():
     update_class_best_sectors(output)
     assert output.dataSet[1].classBestSectors == (29.5, 31.0, 29.0) and output.dataSet[1].classBestLap == 90.0
     assert output.dataSet[2].classBestSectors == (33.0, 30.5, 33.0) and output.dataSet[2].classBestLap == 100.0
+    sectors = output.dataSet[0].sectors
+    sectors.sector, sectors.current = 2, (29.2, 30.8)  # S1 & S2 beaten in lap being driven: best of class at once
+    update_class_best_sectors(output)
+    assert output.dataSet[1].classBestSectors == (29.2, 30.8, 29.0)
+    assert sectors.best == [30.0, 31.0, 29.0]  # personal bests from completed laps only
+
+
+def test_running_lap_clock():
+    """Player telemetry time (smooth), scoring time once telemetry is frozen or stale (garage, monitor, spectating)"""
+    from neopedal.widget._modern.drivers import session_now
+
+    assert session_now(1000.15, 1000.0) == 1000.15
+    assert session_now(980.0, 1000.0) == 1000.0  # telemetry frozen: scoring time goes on
+    assert session_now(0.0, 1000.0) == 1000.0
+    assert session_now(1000.15, 0.0) == 1000.15
+    assert session_now(3000.0, 12.0) == 12.0  # other session
 
 
 def test_laptime_cell_parts(ui_env, bundled_fonts):
@@ -334,9 +350,14 @@ def test_laptime_cell_parts(ui_env, bundled_fonts):
     car.classBestSectors = (best[0], best[1] - 0.5, 0.0)
     parts = widget.sector_parts(car, context)
     assert [color for color, _ in parts] == [theme.best, theme.positive, theme.caution]  # purple, green, yellow (as app)
-    car.sectors.sector, car.sectors.current = 1, (best[0] - 0.3, 0.0)  # S1 beaten during lap: not green yet
+    car.sectors.sector, car.sectors.current = 1, (best[0] - 0.3, 0.0)  # S1 beaten during lap: green at once
+    car.classBestSectors = (best[0] - 1.0, best[1] - 0.5, 0.0)
     parts = widget.sector_parts(car, context, running=best[0] - 0.3 + best[1] / 2)
-    assert parts[0][0] == theme.caution and parts[1] == (theme.text_dim, pytest.approx(0.5)) and parts[2][0] is None
+    assert parts[0][0] == theme.positive and parts[1] == (theme.text_dim, pytest.approx(0.5)) and parts[2][0] is None
+    car.classBestSectors = (best[0] - 0.3, best[1] - 0.5, 0.0)  # best of class (sectors of laps driven count)
+    assert widget.sector_parts(car, context)[0][0] == theme.best
+    car.sectors.current = (best[0] + 0.3, 0.0)
+    assert widget.sector_parts(car, context)[0][0] == theme.caution  # personal best not improved: yellow
     car.sectors.sector = 0
     car.sectors.last_kind = "OUT"
     assert widget.laptime_cell(car, context).text == "OUT"

@@ -199,7 +199,9 @@ def test_unavailable_channels_greyed(viewer):  # noqa: F811
     assert menu["all:tyre_temp"]["title"] == "All 4 wheels"
     panel = next(panel for panel in backend.panels if panel["column"] == "delta")
     assert not panel["available"] and panel["note"]
-    del backend.data.laps[0].data.columns["brake"]  # channel not recorded
+    lap = backend.data.laps[0]  # channel not recorded
+    backend.data.laps[0] = lap._replace(data=LapData(
+        lap.data.name, {name: values for name, values in lap.data.columns.items() if name != "brake"}, lap.data.info))
     backend.rebuild_chart()
     assert not {item["column"]: item for item in backend.channelMenu}["brake"]["available"]
 
@@ -222,12 +224,12 @@ def test_cursor_state_and_differences(viewer):  # noqa: F811
 def test_time_axis_map_cursor_follows_each_lap(viewer):  # noqa: F811
     backend = viewer.backend
     backend.setTimeAxis(True)
-    points = backend.mapCursor(30.0)  # 30 s into each lap: slower lap behind
+    points = backend.mapPointer.mapCursor(30.0)  # 30 s into each lap: slower lap behind
     reference, compared = backend.data.laps
     assert backend.data.lap_distance_at_x(reference, 30.0) > backend.data.lap_distance_at_x(compared, 30.0)
     assert (points[0]["x"], points[0]["y"]) != (points[1]["x"], points[1]["y"])
     backend.setTimeAxis(False)
-    points = backend.mapCursor(500.0)  # distance axis: same place
+    points = backend.mapPointer.mapCursor(500.0)  # distance axis: same place
     assert points[0]["x"] == pytest.approx(points[1]["x"], abs=1) and points[0]["y"] == pytest.approx(points[1]["y"], abs=1)
 
 
@@ -317,7 +319,7 @@ def test_map_rotation_and_slip_points(viewer):  # noqa: F811
     backend.rotateMap()  # quarter clockwise on screen (y down)
     turned = backend._map_lines[0][0]
     assert turned.xs[10] == pytest.approx(-y, abs=1e-6) and turned.ys[10] == pytest.approx(x, abs=1e-6)
-    position = backend.mapPick(turned.xs[10], turned.ys[10], 5.0)
+    position = backend.mapPointer.mapPick(turned.xs[10], turned.ys[10], 5.0)
     assert position == pytest.approx(line.distances[10], abs=1)
     for _ in range(3):
         backend.rotateMap()
@@ -460,10 +462,10 @@ def test_map_modes_cursor_gap_and_sectors(viewer):  # noqa: F811
         backend.setMapMode(mode)
         assert (VertexStore.get(backend.trackMap["colored"]).vertex_count > 0) == filled, mode
     assert {key: value for key, value in backend.mapLegend.items() if key not in ("items", "zones", "tones")} == {}
-    gap = backend.mapCursor(1000.0)[1]["gap"]
+    gap = backend.mapPointer.mapCursor(1000.0)[1]["gap"]
     assert gap.startswith("+") and gap.endswith(" s")  # compared lap behind
     backend.setTimeAxis(True)
-    assert backend.mapCursor(30.0)[1]["gap"].endswith(" m")
+    assert backend.mapPointer.mapCursor(30.0)[1]["gap"].endswith(" m")
     backend.setTimeAxis(False)
     # Sector times from lap info: reference sector time & gap of compared lap
     distance = [float(index) for index in range(0, 3001, 10)]
@@ -487,7 +489,7 @@ def test_marker_shapes_and_faded_band():
     points = [(0.0, 0.0, 0.0), (10.0, 0.0, math.pi / 2)]
     counts = {shape: lines.markers(points, shape, 2.0).vertex_count for shape in lines.MARKER_SHAPES}
     assert counts == {"diamond": 12, "dot": 72, "triangle": 6, "square": 12, "ring": 144, "hollow_triangle": 36,
-                      "cross": 24, "hollow_diamond": 48}
+                      "cross": 24, "hollow_diamond": 48, "hollow_square": 48}
     tip = lines.markers([(0.0, 0.0, 0.0)], "triangle", 2.0).data[:2]
     assert list(tip) == pytest.approx([1.0, 0.0])  # points toward heading
     faded = lines.colored_band([0.0, 1.0], [0.0, 0.0], [QColor("red")] * 2, 1.0, [0.0, 1.0])
@@ -554,14 +556,14 @@ def test_map_markers_picking_and_card(viewer, laps):  # noqa: F811
     backend.setMapView(0, 0, 3.0)  # same scale step again: cached vertices
     assert VertexStore.get(track_map["road"]).data is cached
     point = track_map["points"][0]
-    found = backend.mapPointAt(point["x"], point["y"], 2.0, ["brake", "apex", "exit"])
+    found = backend.mapPointer.mapPointAt(point["x"], point["y"], 2.0, ["brake", "apex", "exit"])
     assert found["tip"] and found["corner"] >= 0
-    assert backend.mapPointAt(point["x"], point["y"], 2.0, []) == {}  # kind hidden
+    assert backend.mapPointer.mapPointAt(point["x"], point["y"], 2.0, []) == {}  # kind hidden
     line, lap = backend._map_lines[1]
     assert lap is not backend.data.reference
-    hit = backend.mapPickLap(line.xs[100], line.ys[100], 3.0)
+    hit = backend.mapPointer.mapPickLap(line.xs[100], line.ys[100], 3.0)
     assert hit["x"] == pytest.approx(line.distances[100], abs=1)
-    assert backend.mapPickLap(1e6, 1e6, 3.0) == {}
+    assert backend.mapPointer.mapPickLap(1e6, 1e6, 3.0) == {}
     card = backend.cornerTable.card(0)
     assert card["title"] == "T1" and len(card["laps"]) == 2 and card["laps"][1]["gap"]
     assert backend.cornerTable.card(99) == {}
@@ -658,7 +660,7 @@ def test_map_follows_back_overlays_and_projection(viewer):  # noqa: F811
     # Projected between samples: point between two samples gives distance between them
     middle_x, middle_y = (line.xs[index] + line.xs[index + 1]) / 2, (line.ys[index] + line.ys[index + 1]) / 2
     expected = (line.distances[index] + line.distances[index + 1]) / 2
-    assert backend.mapPick(middle_x, middle_y, 5.0) == pytest.approx(expected, abs=0.05)
+    assert backend.mapPointer.mapPick(middle_x, middle_y, 5.0) == pytest.approx(expected, abs=0.05)
     backend.setMapRange(500.0, 900.0)  # chart markers A & B on map
     assert VertexStore.get(backend.trackMap["rangeKey"]).vertex_count > 0
     backend.setMapRange(-1, -1)

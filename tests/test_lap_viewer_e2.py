@@ -379,18 +379,18 @@ def test_consistency_map(backend):
     backend.setMapMode("consistency")
     backend.wait_jobs()  # laps of session not shown: mini-sector times read in background
     legend = backend.mapLegend
-    assert legend["consistency"] and legend["scope"] == "session" == backend.consistencyScope
-    assert backend._consistency["laps"] == 3 and max(backend._consistency["spreads"]) > 0
+    assert legend["consistency"] and legend["scope"] == "session" == backend.mapConsistency.scope
+    assert backend.mapConsistency.found["laps"] == 3 and max(backend.mapConsistency.found["spreads"]) > 0
     assert legend["low"] and legend["high"] and "3 laps" in legend["text"]
     assert backend._map["colored"] and backend.trackMap
-    backend.setConsistencyScope("shown")  # one lap shown: not enough
+    backend.mapConsistency.setScope("shown")  # one lap shown: not enough
     assert "3 clean laps" in backend.mapLegend["text"] and "low" not in backend.mapLegend
     lap2 = next(entry for entry in backend.entries if entry.file.path == lap_path(backend, 2))
     lap2.info["kind"] = "in"  # pit entry after lap 1: stint of lap 1 ends there
-    backend.setConsistencyScope("stint")
-    assert backend.consistency_paths() == [lap_path(backend, 1)]
-    backend.setConsistencyScope("bad")
-    assert backend.consistencyScope == "stint"
+    backend.mapConsistency.setScope("stint")
+    assert backend.mapConsistency.paths() == [lap_path(backend, 1)]
+    backend.mapConsistency.setScope("bad")
+    assert backend.mapConsistency.scope == "stint"
     from neopedal.ui.quick import lap_map
     from neopedal.userfile.lap_geometry import MapLine
 

@@ -529,16 +529,16 @@ class DriverTable(TableMixin, ModernOverlay):
             in_race=api.read.session.in_race(),
             player=player,
             player_pit_request=bool(player is not None and player.pitRequested),
-            now=api.read.timing.elapsed(),  # player telemetry time: running lap times move smoothly
+            now=session_now(api.read.timing.elapsed(), api.read.session.elapsed()),
         )
 
     def show_sample(self):
         """Rows of a sample race, without session (Overlay Options live preview)"""
-        from .sample_field import sample_field
+        from .sample_field import SAMPLE_NOW, sample_field
 
         field = sample_field()
         self.show_field(field, Context(in_race=True, player=field.vehicles[field.player_index],
-                                       player_pit_request=False))
+                                       player_pit_request=False, now=SAMPLE_NOW))
 
     def show_field(self, field, ctx: Context):
         """Rows of sample field (override)"""
@@ -576,8 +576,9 @@ class DriverTable(TableMixin, ModernOverlay):
         return LapTimeExtra(sectors, trend, self.time_width, self.side_width, self.bars_width)
 
     def lap_result_cell(self, veh, sectors: tuple, show_delta: bool = False) -> Cell:
-        """Completed lap: purple fastest last lap of class, green personal best, red invalid; OUT / IN for out & in
-        laps; delta to personal best in place of time if show_delta (& any); trend against lap before"""
+        """Completed lap: purple best lap of class in session, green personal best (improved or set), yellow slower,
+        red invalid; OUT / IN for out & in laps; delta to personal best in place of time if show_delta (& any); trend
+        against lap before"""
         theme = self.theme
         wcfg = self.wcfg
         kind = veh.sectors.last_kind if wcfg.get("show_out_and_in_laps", True) else ""
@@ -596,10 +597,12 @@ class DriverTable(TableMixin, ModernOverlay):
             if not veh.isValidLap and wcfg.get("show_invalid_lap_in_red", True):
                 text, color = laptime_text(last), theme.negative
             elif wcfg.get("show_highlighted_fastest_last_laptime", True) and veh.isValidLap and 0 < last < MAX_SECONDS:
-                if veh.classBestLap and abs(last - veh.classBestLap) < SAME_TIME:
+                if veh.classBestLap and last < veh.classBestLap + SAME_TIME:
                     color = theme.best  # best lap of class in session
-                elif 0 < best < MAX_SECONDS and abs(last - best) < SAME_TIME:
+                elif not 0 < best < MAX_SECONDS or last < best + SAME_TIME:
                     color = theme.positive  # personal best
+                else:
+                    color = theme.caution  # personal best not improved
         return Cell(LAPTIME, text, role, color, extra=self.laptime_extra(sectors, trend))
 
     @staticmethod
@@ -653,6 +656,15 @@ FILL_STEPS = 64  # drawn steps of sector bar being driven (see sector_fill)
 RESULT_SECONDS = 8.0  # seconds after the line the completed lap is shown (lap time, then delta), then running time
 LAP_SECONDS = 4.0  # seconds lap time is shown before delta (in turn without running time)
 ARROW_GAP = 0.15  # space between time slot & trend arrow (font size units, see table.draw_laptime)
+STALE_SECONDS = 1.0  # player telemetry time this far from scoring time: frozen (scoring updates 5 times a second)
+
+
+def session_now(telemetry: float, scoring: float) -> float:
+    """Session time of running lap times: player telemetry time (moves smoothly, a little ahead of scoring), scoring
+    time if telemetry is frozen or stale (player in garage, in monitor, spectating; other session)"""
+    if telemetry > 0 and (scoring <= 0 or abs(telemetry - scoring) < STALE_SECONDS):
+        return telemetry
+    return scoring
 
 
 def running_text(seconds: float) -> str:

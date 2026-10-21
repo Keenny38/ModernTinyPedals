@@ -230,7 +230,10 @@ def test_real_overlay_paint_serial(ui_env, monkeypatch):
     widget = create_widget(import_module("neopedal.widget.gear"), cfg, "gear")
     try:
         widget.start()
-        process_events(0.3)
+        for _ in range(30):  # first paint: up to 3 s on a loaded machine (coverage, every CPU busy)
+            process_events(0.1)
+            if "paint_serial" in widget.__dict__:
+                break
         serial = widget.paint_serial
         assert serial <= PaintCounter.count
         process_events(0.05)

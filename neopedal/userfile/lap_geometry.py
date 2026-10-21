@@ -670,8 +670,15 @@ def mini_sector_job(folder: str, paths: list[str], bounds: list[float], referenc
     return found
 
 
-def session_values(folder: str, todo: list[tuple[str, float]]) -> dict[str, tuple[float, dict]]:
-    """Off track & track limits count, tyre wear used of session laps (path, file time): path: (file time, values)"""
+def session_values(folder: str, todo: list[tuple[str, float]], corners: Sequence[tuple[int, float, float, float]] = (),
+                   ) -> dict[str, tuple[float, dict]]:
+    """Off track & track limits count, tyre wear used of session laps (path, file time): path: (file time, values)
+
+    Corners (number, start, apex, end distances of reference lap): driving of each lap in each of them, values
+    "corners": {number: [minimum speed km/h, braking point m, corner time s]} (-1 if not found).
+    """
+    from .corner_analysis import Corner, ResampledLap, corner_stats
+
     found = {}
     for path, mtime in todo:
         try:
@@ -683,5 +690,13 @@ def session_values(folder: str, todo: list[tuple[str, float]]) -> dict[str, tupl
         wears = [lap.columns.get(f"tyre_wear_{wheel}") or [] for wheel in ("fl", "fr", "rl", "rr")]
         if all(wears) and any(wears[0]) and all(column[0] >= column[-1] for column in wears):  # else tyres changed
             values["wear"] = sum(column[0] - column[-1] for column in wears) / 4
+        if corners and "speed_kph" in lap.columns:
+            sampled = ResampledLap(lap)
+            driving = {}
+            for number, start, apex, end in corners:
+                stats = corner_stats(sampled, Corner(number, start, apex, end))
+                driving[str(number)] = ([round(stats.min_speed, 2), round(stats.brake_point, 1), round(stats.time, 3)]
+                                        if stats is not None else [-1.0, -1.0, -1.0])
+            values["corners"] = driving
         found[path] = (mtime, values)
     return found

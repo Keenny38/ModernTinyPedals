@@ -552,6 +552,32 @@ TRANSLATION = MappingProxyType({
     "First lap under safety car (lap of the plan)": "Premier tour sous voiture de sécurité (tour du plan)",
     "Laps under safety car": "Tours sous voiture de sécurité",
     "Pit Time": "Temps aux stands",
+    "Pit Menu": "Menu des stands",
+    "Safety Car Risk": "Risque de voiture de sécurité",
+    "Lap Time per °C": "Temps au tour par °C",
+    "Lap time change per °C of air temperature (slower when hotter: positive), 0 = none: with the temperature trend, added to track evolution": "Variation du temps au tour par °C de température de l'air (plus lent quand il fait plus chaud : positif), 0 = aucune : avec la tendance de température, ajoutée à l'évolution de la piste",
+    "Temperature Trend": "Tendance de température",
+    "Air temperature change per hour of race (weather forecast of the Live tab)": "Variation de la température de l'air par heure de course (prévisions météo de l'onglet Direct)",
+    "Safety cars coming at random: chance of one, stops saved, and for each stint whether to stop under it (laps, consumption & pit time of the Safety Car section)": "Voitures de sécurité au hasard : probabilité d'en avoir une, arrêts économisés, et pour chaque relais s'il faut s'arrêter sous elle (tours, consommation et temps aux stands de la section Voiture de sécurité)",
+    "Safety Cars per Hour": "Fréquence par heure",
+    "Safety cars (or full course yellows) per hour of race on average": "Voitures de sécurité (ou neutralisations) par heure de course en moyenne",
+    "Gain": "Gain",
+    "Stop under it": "S'arrêter dessous",
+    "Stay out": "Rester en piste",
+    "Choice": "Choix",
+    "Set the refill of the next stop in the game pit menu (LMU, in a session): fuel, or virtual energy of a car using it, as in the tank after the stop": "Règle le remplissage du prochain arrêt dans le menu des stands du jeu (LMU, en session) : carburant, ou énergie virtuelle d'une voiture qui en utilise, comme dans le réservoir après l'arrêt",
+    "No pit stop in the plan": "Aucun arrêt dans le plan",
+    "Pit menu set for the next stop:": "Menu des stands réglé pour le prochain arrêt :",
+    "The game refused the pit menu change": "Le jeu a refusé la modification du menu des stands",
+    "No refill in the game pit menu (LMU, in a session)": "Pas de remplissage dans le menu des stands du jeu (LMU, en session)",
+    "Game not answering: pit menu not set": "Le jeu ne répond pas : menu des stands non réglé",
+    "Used Tyre Pace Loss": "Perte de rythme des pneus usés",
+    "Lap time lost per 10% of tread used before the stint (tyres kept for one more stint, used tyres). Tyres proposed for a change when it costs less than the time lost, 0 = none": "Temps au tour perdu par tranche de 10 % de gomme usée avant le relais (pneus gardés un relais de plus, pneus usés). Changement de pneus proposé quand il coûte moins que le temps perdu, 0 = aucun",
+    "Compound Comparison": "Comparaison des gommes",
+    "Whole race on each compound: tyres changed when worn or when used tyres lose more than a change costs, best one in bold": "Course entière sur chaque gomme : pneus changés quand ils sont usés ou quand des pneus usés perdent plus qu'un changement ne coûte, la meilleure en gras",
+    "Tyre Changes": "Changements de pneus",
+    "selected": "choisie",
+    "Set the lap time difference of each compound (gear button of the tyre stock) to compare their pace": "Indiquez l'écart de temps au tour de chaque gomme (bouton engrenage du stock de pneus) pour comparer leur rythme",
     "Race Time": "Temps de course",
     "Gap": "Écart",
     "Without safety car": "Sans voiture de sécurité",
@@ -1432,8 +1458,27 @@ TRANSLATION = MappingProxyType({
     "No release notes for this version.": "Aucune note de version pour cette version.",
     "Later": "Plus tard",
     "Install Now": "Installer maintenant",
-    "Show Technical Details": "Afficher les détails techniques",
-    "Hide Technical Details": "Masquer les détails techniques",
+    "Technical Details": "Détails techniques",
+    "Before / After": "Avant / après",
+    "Loading image...": "Chargement de l'image...",
+    "Screenshot": "Capture d'écran",
+    "Previous image": "Image précédente",
+    "Next image": "Image suivante",
+    "Open in image viewer": "Ouvrir dans la visionneuse d'images",
+    "Show the notes of another version": "Afficher les notes d'une autre version",
+    "Search the notes": "Rechercher dans les notes",
+    "Go to this part": "Aller à cette partie",
+    "Nothing found in these notes": "Rien trouvé dans ces notes",
+    "Show after each update": "Afficher après chaque mise à jour",
+    "What's new is shown once at the first start of a new version":
+        "Les nouveautés s'affichent une fois au premier démarrage d'une nouvelle version",
+    "Try": "Essayer",
+    "Options of": "Options de",
+    "Open the options of this overlay": "Ouvrir les options de cet overlay",
+    "Turn this overlay on in the loaded preset": "Activer cet overlay dans le preset chargé",
+    "Open option": "Ouvrir l'option",
+    "Updated from": "Mise à jour depuis la",
+    "Image not available, click to open it online": "Image indisponible, cliquez pour l'ouvrir en ligne",
     "Release Notes": "Nouveautés",
     "Opens the download in your browser, extract the ZIP and run the installer":
         "Ouvre le téléchargement dans le navigateur, extrayez le ZIP et lancez l'installateur",
@@ -2681,14 +2726,50 @@ TRANSLATION = MappingProxyType({
     "Open modules": "Ouvrir les modules",
     "Open driver stats": "Ouvrir les statistiques pilote",
     "Last Session": "Dernière session",
-    "Before Driving": "Avant de rouler",
-    "Game Setup": "Réglage du jeu",
-    "Set the game display mode to Borderless or Windowed (exclusive fullscreen hides the overlay). "
-    "Le Mans Ultimate: enable Settings > Gameplay > Enable plugins. "
-    "rFactor 2: install the shared memory plugin.":
-        "Mettez le jeu en mode Sans bordure ou Fenêtré (le plein écran exclusif cache l'overlay). Le Mans "
-        "Ultimate : activez Paramètres > Gameplay > Activer les plugins. rFactor 2 : installez le plugin de "
-        "mémoire partagée.",
+    "Session Debrief": "Débrief de session",
+    "Open telemetry": "Ouvrir la télémétrie",
+    "New personal best": "Nouveau record personnel",
+    "vs personal best": "par rapport au record",
+    "Work on": "À travailler",
+    "vs your personal best lap": "par rapport à votre tour record",
+    "typical lap vs your best lap of the session": "tour type par rapport à votre meilleur tour de la session",
+    "Goal": "Objectif",
+    "reached": "atteint",
+    "to find": "à trouver",
+    "Set the game display mode to Borderless or Windowed (exclusive fullscreen hides the overlay), "
+    "then enable Settings > Gameplay > Enable plugins.":
+        "Mettez le jeu en mode Sans bordure ou Fenêtré (le plein écran exclusif cache l'overlay), puis activez "
+        "Paramètres > Gameplay > Activer les plugins.",
+    "Set the game display mode to Borderless or Windowed (exclusive fullscreen hides the overlay), "
+    "then install the rFactor 2 shared memory plugin.":
+        "Mettez le jeu en mode Sans bordure ou Fenêtré (le plein écran exclusif cache l'overlay), puis installez "
+        "le plugin de mémoire partagée de rFactor 2.",
+    "Checks": "Vérifications",
+    "Game not running": "Jeu non lancé",
+    "Game running without data": "Jeu lancé sans données",
+    "Enable Settings > Gameplay > Enable plugins in the game, then restart it.":
+        "Activez Paramètres > Gameplay > Activer les plugins dans le jeu, puis relancez-le.",
+    "Active State Override is on": "Forçage de l'état actif activé",
+    "Overlays stay shown whatever the game does.": "Les overlays restent affichés quoi que fasse le jeu.",
+    "No overlay enabled": "Aucun overlay activé",
+    "Turn on overlays to see them in game.": "Activez des overlays pour les voir en jeu.",
+    "Open Overlays": "Ouvrir la page Overlays",
+    "Your overlays show another driver.": "Vos overlays affichent un autre pilote.",
+    "Open Spectate": "Ouvrir la page Spectateur",
+    "Lap recording is off": "Enregistrement des tours désactivé",
+    "Session debrief & telemetry need recorded laps: turn on the Recorder module.":
+        "Le debrief de session et la télémétrie ont besoin de tours enregistrés : activez le module Enregistreur.",
+    "Open Modules": "Ouvrir la page Modules",
+    "Game connected, overlays on.": "Jeu connecté, overlays actifs.",
+    "API settings of the game": "Réglages de l'API du jeu",
+    "Switch Preset": "Changer de preset",
+    "Primary preset loads automatically": "Le preset principal se charge automatiquement",
+    "Primary preset auto load off": "Chargement automatique du preset principal désactivé",
+    "Load another preset": "Charger un autre preset",
+    "All Presets...": "Tous les presets...",
+    "Driver stats of this track & car": "Statistiques pilote de ce circuit et de cette voiture",
+    "Open Telemetry": "Voir la télémétrie",
+    "Open this corner in telemetry": "Ouvrir ce virage dans la télémétrie",
     "Quick Access": "Accès rapide",
     "Unlock Overlay": "Déverrouiller l'overlay",
     "Drag overlays to move them": "Faites glisser les overlays pour les déplacer",
@@ -3212,4 +3293,307 @@ TRANSLATION = MappingProxyType({
     # UI/UX audit 2026-10-18
     "Columns, sort & colors of the table": "Colonnes, tri et couleurs du tableau",
     "Reload, backups & delete": "Recharger, sauvegardes et suppression",
+    # Overlays page: favorites, sort, screen view, preset & overlay descriptions (2026-10-20)
+    "Add to Favorites": "Ajouter aux favoris",
+    "Remove from Favorites": "Retirer des favoris",
+    "Favorite": "Favori",
+    "Favorites": "Favoris",
+    "Recently Edited": "Modifiés récemment",
+    "Click to load another preset": "Cliquer pour charger un autre preset",
+    "Loaded preset (locked)": "Preset chargé (verrouillé)",
+    "Manage Presets...": "Gérer les presets...",
+    "Drag an overlay to move it, click to open its settings":
+        "Glissez un overlay pour le déplacer, cliquez dessus pour ouvrir ses réglages",
+    "Enable overlays to see them here at their place on your screens.":
+        "Activez des overlays pour les voir ici à leur place sur vos écrans.",
+    "Enabled First": "Activés d'abord",
+    "Enabled overlays that could not start are not shown here":
+        "Les overlays activés qui n'ont pas pu démarrer ne sont pas montrés ici",
+    "Main screen": "Écran principal",
+    "No favorite overlay yet: click the star of a card": "Aucun overlay favori : cliquez sur l'étoile d'une carte",
+    "No overlay running": "Aucun overlay en marche",
+    "No running overlay matches the filters": "Aucun overlay en marche ne correspond aux filtres",
+    "Outlined overlays cover part of another one": "Les overlays entourés cachent une partie d'un autre",
+    "Overlaps another overlay": "Chevauche un autre overlay",
+    "Overlays marked with a star (every preset)": "Overlays marqués d'une étoile (dans tous les presets)",
+    "Overlays whose options you saved last, last first":
+        "Overlays dont vous avez enregistré les options en dernier, le plus récent d'abord",
+    "Place overlays on a game screenshot, with alignment guides":
+        "Placer les overlays sur une capture du jeu, avec des guides d'alignement",
+    "Running overlays at their place on your screens": "Overlays en marche à leur place sur vos écrans",
+    "Shown only in some sessions, on track or in pits (Visibility Context option)":
+        "Affiché seulement dans certaines sessions, en piste ou aux stands (option Afficher pendant)",
+    "Shown only on screen, never on stream": "Affiché seulement à l'écran, jamais sur le stream",
+    "Shown only on stream (browser sources), hidden on screen":
+        "Affiché seulement sur le stream (sources navigateur), masqué à l'écran",
+    "Sort by Category": "Trier par catégorie",
+    "Sort by Name": "Trier par nom",
+    "Sort overlays": "Trier les overlays",
+    "Acceleration times over a speed range you set: current, last, best and delta.":
+        "Temps d'accélération sur une plage de vitesse choisie : en cours, dernier, meilleur et écart.",
+    "Battery charge of hybrid cars: level, drain, regeneration and net change per lap.":
+        "Charge de la batterie des hybrides : niveau, décharge, régénération et bilan par tour.",
+    "Brake bias, change from baseline and live brake migration.":
+        "Répartition de freinage, écart avec la base et migration du freinage en direct.",
+    "Braking rate in g and wheel lock time per lap.":
+        "Décélération au freinage en g et durée de blocage des roues par tour.",
+    "Brake pressure applied on each wheel, as bars.": "Pression de freinage appliquée sur chaque roue, en barres.",
+    "Temperature of each brake disc, colored by heatmap.":
+        "Température de chaque disque de frein, colorée selon la carte thermique.",
+    "Wear of each brake and laps left (LMU).": "Usure de chaque frein et tours restants (LMU).",
+    "Chat messages of the game, newest at bottom (LMU).": "Messages du chat du jeu, le plus récent en bas (LMU).",
+    "Next corner against your reference lap: braking point and apex speed.":
+        "Prochain virage comparé à votre tour de référence : point de freinage et vitesse à la corde.",
+    "Compass, elevation, odometer and distance into lap.":
+        "Boussole, altitude, compteur kilométrique et distance dans le tour.",
+    "Car damage drawn on the car: body, aero, suspension and wheels.":
+        "Dégâts dessinés sur la voiture : carrosserie, aéro, suspensions et roues.",
+    "Integrity left of aero, body, suspension and tyres, in numbers.":
+        "Intégrité restante de l'aéro, de la carrosserie, des suspensions et des pneus, en chiffres.",
+    "Delta to reference lap along the lap, as a graph.":
+        "Écart avec le tour de référence le long du tour, en graphique.",
+    "Live delta to your best lap, with a bar.": "Écart en direct avec votre meilleur tour, avec une barre.",
+    "Live delta to several references at once: best, session, stint, last lap.":
+        "Écart en direct avec plusieurs références à la fois : meilleur, session, relais, dernier tour.",
+    "Differential locking on power and coast.": "Blocage du différentiel à l'accélération et en roue libre.",
+    "Your Driver Rank, Safety Rank and track limits points (LMU).":
+        "Votre Driver Rank, votre Safety Rank et vos points de limites de piste (LMU).",
+    "DRS (rear flap) availability and use.": "Disponibilité et utilisation du DRS (volet arrière).",
+    "Electric motor temperature, RPM, torque, power and regeneration level.":
+        "Température, régime, couple, puissance et niveau de régénération du moteur électrique.",
+    "Elevation profile of the lap with your car on it.": "Profil d'altitude du tour avec votre voiture dessus.",
+    "Engine oil & water temperatures, turbo, RPM, torque and power.":
+        "Températures d'huile et d'eau, turbo, régime, couple et puissance du moteur.",
+    "Oil & water temperatures, their trend and overheating warning.":
+        "Températures d'huile et d'eau, leur tendance et l'alerte de surchauffe.",
+    "Flags, pit state, penalties, start lights and warnings, as chips.":
+        "Drapeaux, état des stands, pénalités, feux de départ et alertes, en pastilles.",
+    "G forces, downforce ratio and car weight.": "Forces G, part d'appui aérodynamique et poids de la voiture.",
+    "G force drawn in a circle, with recent trace.": "Force G dessinée dans un cercle, avec la trace récente.",
+    "Fuel left, use per lap, laps left, refuel needed and pit stops.":
+        "Carburant restant, consommation par tour, tours restants, plein nécessaire et arrêts.",
+    "Target fuel or energy use per lap to stretch the stint by one or more laps.":
+        "Consommation de carburant ou d'énergie visée par tour pour allonger le relais d'un tour ou plus.",
+    "Gaps to cars ahead and behind, and how they change lap after lap.":
+        "Écarts avec les voitures devant et derrière, et leur évolution tour après tour.",
+    "Gear, speed, RPM bar and speed limiter.": "Rapport engagé, vitesse, barre de régime et limiteur de vitesse.",
+    "Car yaw, slip angle and heading lines.": "Lacet de la voiture, angle de dérive et lignes de cap.",
+    "Dashboard lights: headlights, ignition, clutch, wheel lock and spin.":
+        "Voyants du tableau de bord : phares, contact, embrayage, blocage et patinage des roues.",
+    "Lap number, overall & class position and track limits points.":
+        "Numéro du tour, position générale et dans la catégorie, points de limites de piste.",
+    "Lap times of the last laps with delta, fuel and wear.": "Temps des derniers tours avec écart, carburant et usure.",
+    "LEDs for lift and coast, TC & ABS activation, wheel slip & lock (LMU).":
+        "Voyants de lever de pied, d'activation TC et ABS, de patinage et de blocage (LMU).",
+    "Zoomed track map centered on your car, with cars around.":
+        "Carte de la piste zoomée centrée sur votre voiture, avec les voitures autour.",
+    "Onboard settings: ABS, TC, brake migration, motor map, anti-roll bars (LMU).":
+        "Réglages embarqués : ABS, TC, migration du freinage, cartographie moteur, barres antiroulis (LMU).",
+    "Pace notes of the current track, shown as you drive.":
+        "Notes de pilotage de la piste en cours, affichées pendant que vous roulez.",
+    "Throttle, brake & clutch inputs and force feedback.": "Accélérateur, frein, embrayage et retour de force.",
+    "Pit lane help: speed limit, limiter and distances, shown near and in the pit lane.":
+        "Aide pour la voie des stands : limite de vitesse, limiteur et distances, près et dans la voie des stands.",
+    "Estimated pit stop duration, refill and pit occupancy (LMU).":
+        "Durée estimée de l'arrêt au stand, plein et occupation des stands (LMU).",
+    "Push to pass charge and activation timer.": "Charge du push to pass et minuterie d'activation.",
+    "Short race messages: positions, penalties, fastest laps, flags.":
+        "Courts messages de course : positions, pénalités, meilleurs tours, drapeaux.",
+    "Next pit stop of your Race Calculator plan: lap, fuel, tyres.":
+        "Prochain arrêt de votre plan du calculateur de course : tour, carburant, pneus.",
+    "Cars around you seen from above, with overlap warnings.":
+        "Voitures autour de vous vues du dessus, avec alertes de chevauchement.",
+    "Rake angle of the car from ride heights.": "Angle d'assiette de la voiture d'après les hauteurs de caisse.",
+    "Cars just ahead and behind you on track, with gaps.":
+        "Voitures juste devant et derrière vous en piste, avec les écarts.",
+    "Estimated finish order between the leader and you, with refuel needed.":
+        "Ordre d'arrivée estimé entre le leader et vous, avec le plein nécessaire.",
+    "Ride height of each corner of the car, as bars.": "Hauteur de caisse de chaque coin de la voiture, en barres.",
+    "Cars ahead and behind you in your class, by standings.":
+        "Voitures devant et derrière vous dans votre catégorie, selon le classement.",
+    "Front and rear roll angles of the car.": "Angles de roulis avant et arrière de la voiture.",
+    "Shift lights by RPM.": "Témoins de passage de rapport selon le régime.",
+    "Sector times against your best and the session best.":
+        "Temps des secteurs comparés à votre meilleur et au meilleur de la session.",
+    "Session name and time left, system clock and estimated laps.":
+        "Nom et temps restant de la session, horloge du système et tours estimés.",
+    "Slip angle of each tyre, as bars.": "Angle de dérive de chaque pneu, en barres.",
+    "Slip ratio of each tyre, as bars.": "Taux de glissement de chaque pneu, en barres.",
+    "Speed difference to reference laps at the same point of the lap.":
+        "Écart de vitesse avec les tours de référence au même point du tour.",
+    "Speed, with recent minimum & maximum and fastest speed.":
+        "Vitesse, avec minimum et maximum récents et vitesse la plus élevée.",
+    "Side bars lit while a car is alongside.": "Barres latérales allumées quand une voiture est à votre hauteur.",
+    "Race standings of every car, by class.": "Classement de la course de toutes les voitures, par catégorie.",
+    "Steering and wheel angles, steering ratio and turning radius.":
+        "Angles du volant et des roues, démultiplication de la direction et rayon de braquage.",
+    "Steering input as a bar from center.": "Braquage du volant en barre partant du centre.",
+    "Steering wheel turning with your inputs.": "Volant qui tourne avec vos mouvements.",
+    "Past stints: laps, time, fuel, tyre wear and consistency.":
+        "Relais passés : tours, temps, carburant, usure des pneus et régularité.",
+    "Stint time and driving time of each driver, for endurance races.":
+        "Temps du relais et temps de conduite de chaque pilote, pour l'endurance.",
+    "Suspension force of each corner and front & rear ratio.":
+        "Effort de suspension de chaque coin et rapport avant / arrière.",
+    "Suspension position of each corner, as bars.": "Position de la suspension de chaque coin, en barres.",
+    "Suspension travel used: bump, rebound and live position.":
+        "Débattement de suspension utilisé : compression, détente et position en direct.",
+    "CPU and memory use of the computer and of the app.":
+        "Utilisation du processeur et de la mémoire par l'ordinateur et par l'application.",
+    "Live speed, pedals & steering against your reference lap.":
+        "Vitesse, pédales et volant en direct comparés à votre tour de référence.",
+    "Lap times: current, last, best, session best and estimated.":
+        "Temps au tour : en cours, dernier, meilleur, meilleur de la session et estimé.",
+    "Track time of day, time scale and sunlight phase.":
+        "Heure de la journée en piste, accélération du temps et phase d'ensoleillement.",
+    "Track map with every car on it.": "Carte de la piste avec toutes les voitures.",
+    "Track notes of the current track, shown as you drive.":
+        "Notes de piste de la piste en cours, affichées pendant que vous roulez.",
+    "Nearest traffic: slower cars ahead and faster cars catching you.":
+        "Trafic le plus proche : voitures plus lentes devant et plus rapides qui vous rattrapent.",
+    "Pedals, steering and force feedback drawn over the last seconds.":
+        "Pédales, volant et retour de force tracés sur les dernières secondes.",
+    "Tyre carcass temperature of each tyre.": "Température de la carcasse de chaque pneu.",
+    "Vertical deflection of each tyre, as bars.": "Écrasement vertical de chaque pneu, en barres.",
+    "Inner layer temperature of each tyre.": "Température de la couche interne de chaque pneu.",
+    "Load on each tyre and its share.": "Charge sur chaque pneu et sa part.",
+    "Every tyre reading in one card per tyre: temperatures, pressure, wear.":
+        "Toutes les mesures des pneus, une carte par pneu : températures, pression, usure.",
+    "Pressure of each tyre and compound.": "Pression de chaque pneu et gomme.",
+    "Surface temperature trend of each tyre, as small charts.":
+        "Tendance de la température de surface de chaque pneu, en petits graphiques.",
+    "Surface temperature of each tyre, colored by heatmap.":
+        "Température de surface de chaque pneu, colorée selon la carte thermique.",
+    "Tyre tread left, wear per lap and laps left.": "Gomme restante, usure par tour et tours restants des pneus.",
+    "Virtual energy left, use per lap, laps left and refill needed.":
+        "Énergie virtuelle restante, consommation par tour, tours restants et recharge nécessaire.",
+    "Track & air temperatures, rain, wetness and wind.":
+        "Températures de la piste et de l'air, pluie, humidité de la piste et vent.",
+    "Weather forecast of the session: rain chance and temperatures.":
+        "Prévisions météo de la session : risque de pluie et températures.",
+    "Weight distribution: front to rear, left to right and cross weight.":
+        "Répartition des masses : avant / arrière, gauche / droite et poids croisé.",
+    "Camber angle of each wheel.": "Carrossage de chaque roue.",
+    "All-in-one HUD: tyre & brake temperatures, lock & spin, ABS, TC, bias, pedals.":
+        "Affichage tout-en-un : températures pneus et freins, blocage et patinage, ABS, TC, répartition, pédales.",
+    "Front and rear tyre radius measured while driving.": "Rayon des pneus avant et arrière mesuré en roulant.",
+    "Toe angle of each wheel.": "Pincement de chaque roue.",
+    "Wind direction and speed relative to your car.": "Direction et vitesse du vent par rapport à votre voiture.",
+    # Driver Stats Viewer 2026-10-20
+    "Days": "Jours",
+    "Breakdown": "Répartition",
+    "Hide lap time limits of levels": "Masquer les limites de temps des niveaux",
+    "Show lap time limits of levels": "Afficher les limites de temps des niveaux",
+    "% Clean": "% propres",
+    "Ahead-Behind": "Devant-derrière",
+    "All Conditions": "Toutes conditions",
+    "All Versions": "Toutes les versions",
+    "Average places gained from start to finish in races (start position recorded since this version, else from race results)": "Places gagnées en moyenne du départ à l'arrivée des courses (position de départ enregistrée depuis cette version, sinon d'après les résultats de course)",
+    "Beginner": "Niveau débutant",
+    "Intermediate": "Intermédiaire",
+    "Best lap driven with the latest game version of your session history": "Meilleur tour avec la version du jeu la plus récente de votre historique",
+    "Best lap on a damp or wet road (road conditions recorded since this version)": "Meilleur tour sur piste humide ou mouillée (conditions enregistrées depuis cette version)",
+    "Change...": "Modifier...",
+    "Clean Streak": "Série propre",
+    "Compare a Personal Best Code...": "Comparer un code de record...",
+    "Copy Personal Best Card": "Copier la carte du record",
+    "Copy Personal Best Code": "Copier le code du record",
+    "Driving time by class": "Temps de roulage par catégorie",
+    "Driving time by track": "Temps de roulage par circuit",
+    "Dry road": "Piste sèche",
+    "Filters": "Filtres",
+    "Find track": "Chercher un circuit",
+    "Find vehicle": "Chercher un véhicule",
+    "Game Version": "Version du jeu",
+    "Group Vehicles by Class": "Grouper les véhicules par catégorie",
+    "Lap Time Goal": "Objectif de temps",
+    "Lap Time Goal...": "Objectif de temps...",
+    "Lap time to beat with this vehicle, saved: a message tells you once it is beaten": "Temps à battre avec ce véhicule, enregistré : un message vous prévient quand il est battu",
+    "Last 12 Months": "12 derniers mois",
+    "Latest races in a row without contact nor penalty": "Dernières courses d'affilée sans contact ni pénalité",
+    "Never driven here": "Jamais roulé ici",
+    "Next daily races of RaceControl with your best laps on their track (View menu to hide)": "Prochaines courses quotidiennes de RaceControl avec vos meilleurs tours sur leur circuit (menu Affichage pour masquer)",
+    "No driving in this period.": "Pas de roulage sur cette période.",
+    "No goal yet: set a lap time to beat.": "Pas encore d'objectif : fixez un temps à battre.",
+    "No personal best code found in this text.": "Aucun code de record trouvé dans ce texte.",
+    "No personal best for this vehicle yet.": "Pas encore de record pour ce véhicule.",
+    "No row matches the search or class filter.": "Aucune ligne ne correspond à la recherche ou à la catégorie.",
+    "Not a lap time: write it as 1:52.300 or 112.3": "Ce n'est pas un temps au tour : écrivez 1:52.300 ou 112.3",
+    "Official Races to Come": "Prochaines courses officielles",
+    "Official Races to Come (RaceControl)": "Prochaines courses officielles (RaceControl)",
+    "Official races could not be read.": "Impossible de lire les courses officielles.",
+    "Online & Offline": "Online et hors ligne",
+    "Other Tracks": "Autres circuits",
+    "PB This Version": "Record de la version",
+    "People of your class met in several online races: times finished ahead & behind, best lap gap": "Pilotes de votre catégorie croisés dans plusieurs courses online : arrivées devant et derrière, écart au meilleur tour",
+    "Period shown": "Période affichée",
+    "Personal Best": "Record personnel",
+    "Personal Best Code": "Code de record",
+    "Personal best card copied: paste it in a chat.": "Carte du record copiée : collez-la dans une discussion.",
+    "Personal best code (NP1:pb:...):": "Code de record (NP1:pb:...) :",
+    "Personal best code copied: paste it in a chat.": "Code du record copié : collez-le dans une discussion.",
+    "Personal best of selected vehicle as a picture or a code, codes of other drivers compared": "Record du véhicule sélectionné en image ou en code, codes d'autres pilotes comparés",
+    "Places Gained": "Places gagnées",
+    "Races without contact nor penalty, in percent of races found in race results": "Courses sans contact ni pénalité, en pourcentage des courses trouvées dans les résultats",
+    "Reached": "Atteint",
+    "Read Again": "Relire",
+    "Reading official races...": "Lecture des courses officielles...",
+    "Rivals": "Rivaux",
+    "Road": "État de la piste",
+    "Dry Road": "Sur piste sèche",
+    "Wet Road": "Sur piste mouillée",
+    "Online Only": "Online seulement",
+    "Offline Only": "Hors ligne seulement",
+    "Road Wetness (%)": "Humidité de la piste (%)",
+    "Rows of one class only": "Lignes d'une seule catégorie",
+    "Save Personal Best Card...": "Enregistrer la carte du record...",
+    "Sessions of a road condition, online or offline, since a game version": "Sessions d'un état de piste, online ou hors ligne, depuis une version du jeu",
+    "Set...": "Définir...",
+    "Shared personal best": "Record partagé",
+    "Start Position": "Position de départ",
+    "Track Temperature (°C)": "Température de la piste (°C)",
+    "Wet PB": "Record mouillé",
+    "You are faster.": "Vous êtes plus rapide.",
+    "You have no lap time on this track & class yet.": "Vous n'avez pas encore de temps sur ce circuit dans cette catégorie.",
+    "Turn on online ranks (RaceControl) in Configuration to see the official races to come.": "Activez les rangs online (RaceControl) dans la configuration pour voir les prochaines courses officielles.",
+    "No official race to come found (game closed, or not signed in to RaceControl).": "Aucune course officielle à venir trouvée (jeu fermé, ou pas connecté à RaceControl).",
+    "race": "course",
+    "races": "courses",
+    # Lap viewer: chassis & aero channels, track notes, lap sharing, session values
+    "Throttle (Car)": "Accélérateur (voiture)",
+    "Brake (Car)": "Frein (voiture)",
+    "Throttle: Driver & Car": "Accélérateur : pilote & voiture",
+    "Brake: Driver & Car": "Frein : pilote & voiture",
+    "Throttle Cut": "Coupure accélérateur",
+    "Brake Cut": "Relâchement frein",
+    "Downforce Front": "Appui avant",
+    "Downforce Rear": "Appui arrière",
+    "Downforce": "Appui aéro",
+    "Aero Balance": "Équilibre aéro",
+    "Rake": "Rake (assiette)",
+    "Damper Velocity": "Vitesse amortisseur",
+    "Driving Aids": "Aides au pilotage",
+    "Aero": "Aéro",
+    "Bottoming": "Talonnage",
+    "Lockups, wheelspin & bottoming": "Blocages, patinage & talonnage",
+    "Front wheel lockups under braking (ring), rear wheelspin on throttle (triangle) & bottoming (square)": "Blocages des roues avant au freinage (anneau), patinage arrière à l'accélération (triangle) & talonnage (carré)",
+    "Note text (empty to remove):": "Texte de la note (vide pour la supprimer) :",
+    "Add Track Note Here": "Ajouter une note de piste ici",
+    "Edit Track Note": "Modifier la note de piste",
+    "Remove Track Note": "Supprimer la note de piste",
+    "Double-click: edit · right-click on charts: notes menu": "Double-clic : modifier · clic droit sur les courbes : menu des notes",
+    "Share Lap...": "Partager le tour...",
+    "NeoPedal Lap": "Tour NeoPedal",
+    "CSV, Visible Part...": "CSV, partie visible...",
+    "MoTeC, Reference Lap A ↔ B...": "MoTeC, tour de référence A ↔ B...",
+    "Value shown for each lap": "Valeur affichée pour chaque tour",
+    "Change per lap over the session of the value shown": "Évolution par tour de la valeur affichée sur la session",
+    "Sector Time": "Temps du secteur",
+    "Minimum Speed": "Vitesse minimale",
+    "Braking Point": "Point de freinage",
+    "Corner Time": "Temps dans le virage",
+    "This overlay shows a fixed sample: it is not played": "Cet overlay montre un exemple fixe : il n'est pas animé",
+    "Pause: still picture of the simulated race": "Pause : image fixe de la course simulée",
+    "Play: overlay on a simulated race driving a corner in a loop":
+        "Lecture : overlay sur une course simulée qui passe un virage en boucle",
 })

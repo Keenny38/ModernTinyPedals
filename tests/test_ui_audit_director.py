@@ -5,7 +5,6 @@ league logo or the captured classification, accent color checked, Broadcast Dire
 pages, pages load without QML warnings"""
 
 import re
-from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QMetaObject, QObject, Qt
@@ -94,8 +93,11 @@ def test_kinds_told_by_shape_not_color_alone():
     assert 'fallback: row.wall ? "■" : "●"' in incidents
     for name in ("DirectorLaps", "DirectorSheet"):
         assert '"◆ "' in qml(name), name  # best of class
-    timing = Path(__file__).resolve().parents[1] / "neopedal" / "ui" / "quick" / "director_timing.py"
-    assert '"◆ "' in timing.read_text(encoding="utf-8")  # timing cells made in Python
+    from neopedal.ui.quick.director_timing import timing_cell  # timing cells made in Python
+
+    row = {"best": "1:30.000", "bestTone": "fastest", "last": "1:31.000", "lastTone": ""}
+    assert timing_cell(row, "best") == {"text": "◆ 1:30.000", "tone": "fastest"}  # best of class
+    assert timing_cell(row, "last") == {"text": "1:31.000", "tone": ""}  # plain: no mark
     assert 'toneName === "fastest" ? 0.5' in qml("DirectorCars")  # sector bar heights
     assert '"◉" : row.yellow ? "⚠"' in qml("DirectorTiming")  # on air / yellow marks
     assert "◆ " in qml("StandingsPanel")

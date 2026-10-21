@@ -483,8 +483,7 @@ class ModuleBackend(PageBackend):
         """Enable modules off that enabled overlays or modules need"""
         names = [row["key"] for row in self._rows if row["needed"]]
         if names:
-            for name in names:
-                self._control.toggle(name)
+            self._control.set_enabled(names, True)  # saved & on demand modules updated once
             app_signal.refresh.emit(True)
             self.refresh()
 
@@ -506,7 +505,6 @@ class ModuleBackend(PageBackend):
             else:
                 self._control.disable_all()
         else:
-            for name in names:
-                self._control.toggle(name)
+            self._control.set_enabled(names, enable)  # saved & on demand modules updated once
         app_signal.refresh.emit(True)  # other pages & menus follow, rows updated by refresh
         self.refresh()

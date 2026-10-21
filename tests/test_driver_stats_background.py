@@ -10,7 +10,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QFontMetricsF
 
 from neopedal.setting import cfg
-from neopedal.ui.quick import game_pictures, stats_backend
+from neopedal.ui.quick import game_pictures, stats_backend, stats_common, stats_core, stats_edits, stats_io, stats_table
 from neopedal.userfile import driver_history
 from neopedal.userfile.driver_history import SessionRecord, read_records, record_line
 from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
@@ -160,15 +160,16 @@ def big_history(monkeypatch):
     """Every history read in background, threads reading it recorded"""
     driver_history.save_history(cfg.path.config, HISTORY)
     driver_history.forget_records()
-    monkeypatch.setattr(stats_backend, "SYNC_HISTORY_BYTES", 0)
+    monkeypatch.setattr(stats_core, "SYNC_HISTORY_BYTES", 0)
     threads = []
-    original = stats_backend.load_history
+    original = stats_io.load_history
 
     def load_history(path, strict=False):
         threads.append(threading.current_thread())
         return original(path, strict)
 
-    monkeypatch.setattr(stats_backend, "load_history", load_history)
+    monkeypatch.setattr(stats_io, "load_history", load_history)
+    monkeypatch.setattr(stats_edits, "load_history", load_history)
     return threads
 
 
@@ -209,13 +210,13 @@ def test_edit_saved_on_worker_with_history_loaded_once(backend, dialogs, monkeyp
     driver_history.save_history(cfg.path.config, HISTORY)
     backend.reload_stats()
     calls = []
-    real_replace = stats_backend.replace_records
+    real_replace = stats_edits.replace_records
 
     def replace_records(*args):
         calls.append((threading.current_thread(), args))
         return real_replace(*args)
 
-    monkeypatch.setattr(stats_backend, "replace_records", replace_records)
+    monkeypatch.setattr(stats_edits, "replace_records", replace_records)
     backend.selectRow(OREGA)
     backend.removeVehicle()
     assert backend.editing and not backend.canUndo  # saved in background
@@ -231,7 +232,7 @@ def test_rollback_delay_on_worker(backend, dialogs, monkeypatch):  # noqa: F811
 
     driver_history.save_history(cfg.path.config, HISTORY)
     sleeps = []
-    real_replace = stats_backend.replace_records
+    real_replace = stats_edits.replace_records
     calls = []
 
     def flaky_replace(*args):
@@ -240,7 +241,7 @@ def test_rollback_delay_on_worker(backend, dialogs, monkeypatch):  # noqa: F811
             raise PermissionError(13, "locked")
         return real_replace(*args)
 
-    monkeypatch.setattr(stats_backend, "replace_records", flaky_replace)
+    monkeypatch.setattr(stats_edits, "replace_records", flaky_replace)
 
     class Clock:
         """time module, sleep recorded"""
@@ -252,13 +253,13 @@ def test_rollback_delay_on_worker(backend, dialogs, monkeypatch):  # noqa: F811
         def sleep(seconds):
             sleeps.append(threading.current_thread())
 
-    monkeypatch.setattr(stats_backend, "time", Clock())
+    monkeypatch.setattr(stats_edits, "time", Clock())
     with monkeypatch.context() as patch:
         patch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
         backend.selectRow("Hyper - Ferrari")
         backend.removeVehicle()
         settle(backend)
-    assert len(sleeps) == stats_backend.ROLLBACK_ATTEMPTS - 1
+    assert len(sleeps) == stats_common.ROLLBACK_ATTEMPTS - 1
     assert threading.main_thread() not in sleeps
     assert backend.canUndo and "Undo" in dialogs[-1]  # history changed only
 
@@ -334,7 +335,7 @@ def test_column_texts_measured_once(backend, monkeypatch):  # noqa: F811
             measured.append(text)
             return super().horizontalAdvance(text, *args)
 
-    monkeypatch.setattr(stats_backend, "QFontMetricsF", Metrics)
+    monkeypatch.setattr(stats_table, "QFontMetricsF", Metrics)
     backend._text_widths.clear()
     backend.refresh_table()
     first = len(measured)

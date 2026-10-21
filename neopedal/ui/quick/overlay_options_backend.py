@@ -79,7 +79,7 @@ from .option_kinds import (
     parse_number,
     parse_path,
 )
-from .overlay_backend import CATEGORY_COLORS, CATEGORY_ORDER, widget_category
+from .overlay_backend import CATEGORY_COLORS, CATEGORY_ORDER, LiveRunner, widget_category
 from .overlay_sections import (
     GENERAL_KEYS,
     ITEM_PREFIX,
@@ -251,6 +251,8 @@ class OverlayOptionsBackend(PageBackend):
     filterChanged = Signal()
     highlightChanged = Signal()
     previewChanged = Signal()
+    liveChanged = Signal()  # picture of played preview
+    playingChanged = Signal()
 
     def __init__(self, parent, host: OverlayOptionsHost, control: ModuleControl):
         super().__init__(parent, "Overlay options")
@@ -304,6 +306,13 @@ class OverlayOptionsBackend(PageBackend):
         self._test_connected = False  # page told when test on screen ends (see testOnScreen)
         self._preview_signature: object = None  # inputs of picture shown (see render_preview)
         self._preview_bytes = 0  # size of picture in store
+        # Preview played on a moving simulated race (a corner in a loop), on unless animation effects are off
+        from . import system_animations
+
+        self._preview_playing = system_animations()
+        self._live_url = ""
+        self._live_signature: object = None  # inputs of played preview (preview signature when started)
+        self.live = LiveRunner(self._make_live, self._live_frame, f"{self._preview_key}#live", self)
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(PREVIEW_DELAY_MS)
@@ -1052,6 +1061,20 @@ class OverlayOptionsBackend(PageBackend):
         """Size of picture (previewWidth & previewHeight) relative to overlay size"""
         return self._preview_scale
 
+    @Property(bool, notify=playingChanged)
+    def previewPlaying(self) -> bool:
+        return self._preview_playing
+
+    @Property(str, notify=liveChanged)
+    def liveUrl(self) -> str:
+        """Picture of played preview, "" while not played (still picture shown)"""
+        return self._live_url
+
+    @Property(bool, notify=liveChanged)
+    def previewAnimated(self) -> bool:
+        """Selected overlay can be played (not a sample picture, lap trace or driver list drawn once)"""
+        return self._overlay not in self.live.still
+
     # Navigation & filters
     @Slot(str)
     def showOption(self, oid: str):
@@ -1763,6 +1786,7 @@ class OverlayOptionsBackend(PageBackend):
             self._preview_timer.stop()
             self._warm_timer.stop()
             self.drop_big_preview()
+            self.sync_live()
         set_showing(self, active)
 
     def drop_big_preview(self):
@@ -1787,8 +1811,44 @@ class OverlayOptionsBackend(PageBackend):
             self._preview_timer.stop()
             self._preview_state = PREVIEW_OFF
             self._preview_url = ""
+            self.sync_live()
         self.previewChanged.emit()
         self.schedule_preview(now=True)
+
+    @Slot(bool)
+    def setPreviewPlaying(self, playing: bool):
+        """Play preview on a moving simulated race, or show the still picture"""
+        if playing != self._preview_playing:
+            self._preview_playing = playing
+            self.playingChanged.emit()
+            self.sync_live()
+
+    def _make_live(self, name: str):
+        """Animated picture source of overlay with unsaved values, zoom & race situation (None: not animated)"""
+        from ..widget_preview import live_preview
+
+        values = self.values(name)
+        if self._preview_compare and can_compare(name):
+            values = other_design_values(values)
+        return live_preview(cfg, name, values, None, self._preview_zoom, self._preview_scenario)
+
+    def _live_frame(self, url: str):
+        self._live_url = url
+        self.liveChanged.emit()
+
+    def sync_live(self):
+        """Preview played while shown & ready (valid values), started again once what it draws changed (values,
+        design, zoom, race situation, style: the still picture's inputs)"""
+        name = self._overlay
+        if not (self._preview_playing and self._preview_enabled and self._preview_visible and self._active
+                and name and self._preview_state == PREVIEW_READY):
+            self.live.stop()
+            return
+        if self.live.name == name and self._preview_signature == self._live_signature:
+            return
+        self._live_signature = self._preview_signature
+        self.live.restart(name)
+        self.liveChanged.emit()  # another overlay: whether it can be played
 
     @Property(list, constant=True)
     def scenarioNames(self) -> list[str]:
@@ -1873,6 +1933,7 @@ class OverlayOptionsBackend(PageBackend):
             self.schedule_preview(now=True)
         else:
             self._preview_timer.stop()
+            self.sync_live()
 
     def schedule_preview(self, now: bool = False):
         if not self._preview_enabled or not self._preview_visible or not self._active or not self._overlay:
@@ -1891,6 +1952,7 @@ class OverlayOptionsBackend(PageBackend):
             if self._preview_state != PREVIEW_INVALID:
                 self._preview_state = PREVIEW_INVALID
                 self.previewChanged.emit()
+            self.sync_live()  # invalid value: last picture kept still
             return
         values = self.values(name)
         if self._preview_compare and can_compare(name):
@@ -1899,6 +1961,7 @@ class OverlayOptionsBackend(PageBackend):
         # Same values, overlay style, zoom & shared inputs (page shown again, edit undone): picture kept
         signature = preview_signature(name, values, zoom, self._preview_scenario)
         if signature == self._preview_signature and self._preview_state in (PREVIEW_READY, PREVIEW_UNAVAILABLE):
+            self.sync_live()
             return
         self._preview_signature = signature
         image = render_overlay(name, values, zoom, self._preview_scenario)
@@ -1916,12 +1979,14 @@ class OverlayOptionsBackend(PageBackend):
             self._preview_size = (round(image.width() / ratio), round(image.height() / ratio))
             self._preview_scale = drawn_scale(cfg.user.config["overlay_style"].get("overlay_scale", 1.0), zoom)
         self.previewChanged.emit()
+        self.sync_live()
 
     def close(self):
         """Page closed (older name of release)"""
         self.release()
 
     def release_resources(self):
+        self.live.stop()
         self._preview_timer.stop()
         self._warm_timer.stop()
         self._info_timer.stop()

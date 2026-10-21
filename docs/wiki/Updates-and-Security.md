@@ -13,10 +13,15 @@ The app checks GitHub for a new release at startup (`check_for_updates_on_startu
 
 ### What's New page
 
-- Shows the version, its release date and one card per topic of the release notes. Technical details (commits, SHA-256 checksums) are folded: `Show Technical Details`.
+- Shows the version, its release date and the release notes as they are written: groups (`New`, `Improvements`, `Fixes`...), one card per topic, bullets with their sub-bullets, and the screenshots of the changelog in their card (space kept while they load, decoded at the shown size; click one for the viewer: arrows browse the others, `Esc` closes). Before / after visuals and technical details (commits, SHA-256 checksums) are folded at the end.
+- Skipped versions: when you skipped updates, the notes of every version since the installed one follow (newest first, up to 12), each with its header; the chips at the top jump to a version (or to a group when one version is shown).
+- `Search the notes` (`Ctrl+F`) keeps only the cards with every word typed, accents and case ignored, technical details included.
+- The version menu (top right) shows the notes of any older version, from the changelog shipped with the app (offline).
+- Option names written in the notes (`show_apex_speed`) are links: a click opens that option (the overlay of the card first, `Find Option` when several overlays have it). A topic naming an overlay offers `Try <overlay>` (turns it on in the loaded preset), then `Options of <overlay>`.
 - The notes are in the app language: French notes come from `CHANGELOG.fr.md` at the release tag, English notes from the GitHub release. When a translation is missing, the English notes are shown.
 - Buttons: `View On GitHub`, `Skip This Version`, `Later` (or `Close`) and `Install Now` (or `Download And Install`).
 - The notes of the version you have installed are always available offline: `Release Notes` button on the `Home` page.
+- After an update, the page opens once at the first start of the new version, with the notes of every version since the one you ran before (`show_release_notes_after_update`, also the `Show after each update` switch of the page). Not at the very first start, nor when an older copy is started.
 
 ### Download and install
 

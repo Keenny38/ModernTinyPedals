@@ -22,6 +22,8 @@ Stats module
 
 from __future__ import annotations
 
+import logging
+import threading
 from time import localtime, strftime, time
 
 from .. import calculation as calc
@@ -29,6 +31,7 @@ from .. import realtime_state
 from ..api_control import api
 from ..const_api import API_LMU_NAME
 from ..const_common import FLOAT_INF
+from ..game_rest_cache import REQUEST_TIMEOUT, fetch_game, lmu_address
 from ..module_info import StatsInfo, minfo
 from ..process.results_index import game_version_text
 from ..userfile.brands import select_brand_name
@@ -43,6 +46,10 @@ from ..userfile.driver_stats import DriverStats, load_driver_stats, save_driver_
 from ..validator import generator_init
 from ._base import MODULE_STOP, PENDING_CHECK, WAIT_STATE_CHANGE, DataModule, PendingLap
 from ._lap_state import LOAD, SKIP, LapState
+
+logger = logging.getLogger(__name__)
+
+JOIN_ROUTE = "/rest/multiplayer/join/state"  # "JOIN_JOINED_SERVER" while on an online server (LMU)
 
 
 class Realtime(DataModule):
@@ -128,6 +135,55 @@ def live_game_version() -> str:
     return game_version_text(api.read.state.version())
 
 
+class OnlineCheck:
+    """Whether the stint is driven on an online server (LMU Rest API), asked once per stint on a thread: the
+    stats module never waits for the game (result: 1 online, 0 offline, -1 unknown)"""
+
+    __slots__ = ("result", "_generation", "_lock")
+
+    def __init__(self):
+        self.result = -1
+        self._generation = 0
+        self._lock = threading.Lock()
+
+    def start(self):
+        """Stint started: asked again (answer of an older stint arriving late dropped)"""
+        with self._lock:
+            self._generation += 1
+            generation = self._generation
+            self.result = -1
+        if api.name != API_LMU_NAME:
+            return
+        try:
+            address = lmu_address()
+        except Exception:  # settings not loaded: unknown
+            logger.debug("STATS: Rest API address unknown", exc_info=True)
+            return
+        if address is None:  # Rest API access disabled
+            return
+
+        def ask():
+            try:
+                status, body = fetch_game(address, JOIN_ROUTE, REQUEST_TIMEOUT)
+            except Exception:  # game closing, bad answer: unknown
+                logger.debug("STATS: online state not read", exc_info=True)
+                return
+            if status == 200:
+                with self._lock:
+                    if generation == self._generation:
+                        self.result = int(b"JOIN_JOINED_SERVER" in body)
+
+        threading.Thread(target=ask, daemon=True, name="Stats online check").start()
+
+
+def compound_text() -> str:
+    """Tyre compound of the car as recorded laps write it: name, front & rear names if they differ"""
+    names = api.read.tyre.compound_name()
+    if not isinstance(names, (tuple, list)):
+        return ""
+    return "/".join(dict.fromkeys(name.strip() for name in names if isinstance(name, str) and name.strip()))
+
+
 def finish_position(podium_by_class: bool) -> int:
     """Get finish position"""
     # Overall position
@@ -172,6 +228,11 @@ def record_driver_stats(
     session_type = 0
     finish_place = 0
     finish_state = 0
+    start_place = 0
+    online = OnlineCheck()
+    best_conditions = (-1.0, 0.0, "")  # road wetness, track temperature & compound of stint best lap
+    stint_wetness = -1.0  # wettest road of stint (no best lap)
+    track_temp = 0.0
     is_pit_lap = 0  # set on reset
     last_lap_stime = FLOAT_INF
     last_best_laptime = FLOAT_INF
@@ -190,6 +251,12 @@ def record_driver_stats(
         elif lap_session_type == 4 and driver_stats.rb > laptime_valid:
             driver_stats.rb = laptime_valid
 
+    def best_lap_conditions():
+        """Conditions of stint best lap (lap just validated)"""
+        nonlocal best_conditions
+        best_conditions = (api.read.session.wetness_average(), api.read.session.track_temperature(),
+                           compound_text())
+
     def resolved_lap(lap: PendingLap, valid: bool):
         """Count lap completed before player left track: valid & best lap time once validated by game"""
         nonlocal last_lap_stime, last_raw_laptime, last_best_laptime, is_pit_lap
@@ -204,6 +271,7 @@ def record_driver_stats(
             if last_best_laptime > laptime_valid:
                 last_best_laptime = laptime_valid
                 best_laptime(laptime_valid, lap_session_type)
+                best_lap_conditions()
         elif laptime_valid > 0:  # not validated in time: counted as at 2s after line
             driver_stats.valid += 1
         elif not lap_pit:  # only count non-pit invalid lap
@@ -218,12 +286,17 @@ def record_driver_stats(
             filepath=filepath,
         )
         if all(key_list) and worth_recording(driver_stats.valid, driver_stats.invalid, driver_stats.seconds):
+            if best_conditions[0] >= 0:
+                wetness, temperature, compound = best_conditions
+            else:  # no best lap: wettest road of stint
+                wetness, temperature, compound = stint_wetness, track_temp, ""
             append_record(filepath, session_record(
                 track=key_list[0], vehicle=key_list[1], session=session_type,
                 best=driver_stats.pb, valid=driver_stats.valid, invalid=driver_stats.invalid,
                 meters=driver_stats.meters, seconds=driver_stats.seconds,
                 position=finish_place, finish=finish_state, time=time(), vehicle_class=vehicle_class,
-                game_version=game_version,
+                game_version=game_version, wetness=wetness, track_temp=temperature, compound=compound,
+                start_position=start_place, online=online.result,
             ))
         lap_state.delayed_save = False
 
@@ -260,6 +333,11 @@ def record_driver_stats(
             race_started = False
             finish_place = 0
             finish_state = 0
+            start_place = 0
+            best_conditions = (-1.0, 0.0, "")
+            stint_wetness = -1.0
+            track_temp = 0.0
+            online.start()
 
         # General
         lap_stime = api.read.timing.start()
@@ -273,6 +351,11 @@ def record_driver_stats(
             abs(last_valid_laptime - last_raw_laptime) < 0.001):  # validate lap time
             last_best_laptime = last_valid_laptime
             best_laptime(last_valid_laptime, session_type)
+            best_lap_conditions()
+
+        # Road conditions (stint without best lap: wettest road)
+        stint_wetness = max(stint_wetness, api.read.session.wetness_average())
+        track_temp = api.read.session.track_temperature()
 
         # Driven distance
         gps_curr = api.read.vehicle.position_xyz()
@@ -322,6 +405,7 @@ def record_driver_stats(
             if not race_started and not api.read.session.pre_race():
                 race_started = True
                 driver_stats.starts += 1
+                start_place = finish_position(podium_by_class)  # grid position (class or overall, as finish)
 
             # Penalties
             num_penalties = api.read.vehicle.number_penalties()

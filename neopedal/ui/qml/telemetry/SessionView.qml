@@ -29,6 +29,9 @@ Item {
     readonly property var session: sessionState.data || ({})
     readonly property var laps: session.laps || []
     readonly property var trend: session.trend || ({})
+    // Value of chart: lap time, sector time or corner value (minimum speed, braking point, corner time)
+    readonly property var metric: session.metric || ({"key": "time", "time": true, "unit": "s", "decimals": 3, "higherBetter": false})
+    readonly property bool lapTimes: metric.key === "time"
     property int hoverIndex: -1
     // Numbers with decimal separator of app language (lap times keep their dot)
     function num(value, decimals) { return Number(value).toFixed(decimals).replace(".", theme.decimalPoint) }
@@ -40,10 +43,11 @@ Item {
     component LapPoint: Item {
         property var lap: ({})
         property real best: 0
+        property bool higherBetter: false  // best is highest value (speed), else lowest (time)
         property real grow: 1
         readonly property real size: theme.em * (lap.shown ? 0.85 : 0.6) * grow
         readonly property color tone: lap.shown ? lap.color
-            : (lap.valid && lap.time <= best + 1e-6 ? theme.gold : theme.text)
+            : (lap.valid && (higherBetter ? lap.time >= best - 1e-6 : lap.time <= best + 1e-6) ? theme.gold : theme.text)
         visible: lap.time > 0
         opacity: lap.outlier ? 0.4 : 1
         Rectangle {
@@ -59,6 +63,7 @@ Item {
     }
     function timeText(seconds) {
         if (!(seconds > 0)) return "—"
+        if (!metric.time) return num(seconds, metric.decimals) + " " + metric.unit
         var minutes = Math.floor(seconds / 60)
         var rest = seconds - minutes * 60
         return (minutes > 0 ? minutes + ":" + (rest < 10 ? "0" : "") : "") + rest.toFixed(3)
@@ -86,6 +91,22 @@ Item {
             currentIndex: root.sessions.findIndex(function(item) { return item.key === root.sessionState.key })
             onActivated: function(index) { backend.session.choose(root.sessions[index].key) }
         }
+        // Value of chart: lap time, sector time, corner value of every lap (corners of reference lap)
+        TpCombo {
+            id: metricBox
+            objectName: "metricBox"
+            Connections {
+                target: metricBox.popup
+                function onClosed() { if (root.chart) root.chart.forceActiveFocus() }
+            }
+            Layout.fillWidth: true
+            tip: i18n.tr("Value shown for each lap")
+            visible: root.laps.length > 0
+            model: backend.session.metrics
+            textRole: "title"
+            currentIndex: backend.session.metrics.findIndex(function(item) { return item.key === backend.session.metric })
+            onActivated: function(index) { backend.session.setMetric(backend.session.metrics[index].key) }
+        }
 
         // Summary
         Flow {
@@ -95,7 +116,7 @@ Item {
             Text { text: "★ " + i18n.tr("Best") + " " + root.timeText(root.session.best); color: theme.gold; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
             Text { text: i18n.tr("Average") + " " + root.timeText(root.stats.mean); color: theme.text; font.features: { "tnum": 1 } }
             Text {
-                text: i18n.tr("Consistency") + " ±" + root.num(root.stats.deviation, 3) + " s"
+                text: i18n.tr("Consistency") + " ±" + root.num(root.stats.deviation, root.metric.decimals) + " " + root.metric.unit
                 color: theme.text
                 font.features: { "tnum": 1 }
                 visible: root.stats.count > 1
@@ -125,13 +146,18 @@ Item {
                 MouseArea { id: paceArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             }
             Text {
+                // Worse each lap: slower (time) or lower (speed, later braking point is higher)
+                readonly property real worse: (root.trend.slope || 0) * (root.metric.higherBetter ? -1 : 1)
+                readonly property real threshold: root.metric.time ? 0.02 : root.metric.decimals > 0 ? 0.1 : 1
                 visible: root.trend.slope !== undefined
-                text: ((root.trend.slope || 0) > 0.02 ? "▲ " : (root.trend.slope || 0) < -0.02 ? "▼ " : "")
-                      + i18n.tr("Trend") + " " + root.signedText(root.trend.slope || 0, 3) + " s/" + i18n.tr("lap")
-                color: (root.trend.slope || 0) > 0.02 ? theme.loss : (root.trend.slope || 0) < -0.02 ? theme.gain : theme.text
+                text: ((root.trend.slope || 0) > threshold ? "▲ " : (root.trend.slope || 0) < -threshold ? "▼ " : "")
+                      + i18n.tr("Trend") + " " + root.signedText(root.trend.slope || 0, root.metric.time ? 3 : root.metric.decimals + 1)
+                      + " " + root.metric.unit + "/" + i18n.tr("lap")
+                color: worse > threshold ? theme.loss : worse < -threshold ? theme.gain : theme.text
                 font.features: { "tnum": 1 }
                 ToolTip.visible: trendArea.containsMouse
-                ToolTip.text: i18n.tr("Lap time change per lap over the session (tyre wear, fuel burnt, track evolution)")
+                ToolTip.text: root.lapTimes ? i18n.tr("Lap time change per lap over the session (tyre wear, fuel burnt, track evolution)")
+                                            : i18n.tr("Change per lap over the session of the value shown")
                 ToolTip.delay: theme.tipDelay
                 MouseArea { id: trendArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
             }
@@ -194,6 +220,7 @@ Item {
                         "top": theme.em * 0.6, "bottom": timeHeight - theme.em * 0.4, "low": range[0], "high": range[1],
                         "stripTops": [timeHeight + stripGap, timeHeight + stripGap * 2 + stripHeight],
                         "stripHeight": stripHeight, "em": theme.em, "best": root.session.best || 0,
+                        "higherBetter": root.metric.higherBetter === true,
                         "window": "" + theme.window, "text": "" + theme.text, "gold": "" + theme.gold,
                         "fuelColor": "" + theme.seriesFuel, "wearColor": "" + theme.seriesWear
                     })
@@ -299,6 +326,7 @@ Item {
                     visible: hovering && lap.time > 0
                     lap: hovering ? root.laps[root.hoverIndex] : ({})
                     best: root.session.best || 0
+                    higherBetter: root.metric.higherBetter === true
                     grow: 1.3
                     x: chartCanvas.xAt(Math.max(root.hoverIndex, 0))
                     y: chartCanvas.yAt(lap.time || 0)
@@ -382,7 +410,8 @@ Item {
                     text: {
                         var lap = parent.lap
                         if (!lap) return ""
-                        var lines = [i18n.tr("Lap") + " " + lap.number + " · " + lap.text + (lap.valid ? "" : " · " + i18n.tr("invalid"))
+                        var lines = [i18n.tr("Lap") + " " + lap.number + " · " + lap.text + (lap.lapText ? " · " + lap.lapText : "")
+                                     + (lap.valid ? "" : " · " + i18n.tr("invalid"))
                                      + (lap.outlier ? " · " + i18n.tr("left out of long run") : "")]
                         var details = []
                         if (lap.fuel >= 0) details.push(i18n.tr("Fuel") + " " + root.num(lap.fuel * (root.session.fuelScale || 1), 2) + " " + (root.session.fuelUnit || ""))

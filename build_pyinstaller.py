@@ -14,6 +14,7 @@ executable before registering it: games never load the DLL from lib, rewritten b
 
 import argparse
 import os
+import re
 import shutil
 import sys
 from glob import glob
@@ -48,10 +49,25 @@ OPENXR_LAYER_BUILD = os.path.join("native", "openxr_layer", "build", "bin")
 OPENXR_LAYER_FILES = ("NeoPedalXrLayer.dll", "NeoPedalXrLayer.json")
 OPENXR_LAYER_FOLDER = "openxr_layer_bundle"  # in lib folder (sys._MEIPASS)
 
+def changelog_images(changelogs: list[str]) -> list[str]:
+    """Screenshots (docs/changes) of newest version section of changelogs: What's New shows them offline,
+    older ones are downloaded when shown (neopedal/update.py changelog_image_file)"""
+    files = set()
+    for changelog in changelogs:
+        with open(changelog, encoding="utf-8") as file:
+            sections = re.split(r"^## ", file.read(), flags=re.MULTILINE)
+        if len(sections) > 1:  # text before first version left out
+            files.update(re.findall(r"/docs/changes/(\w[\w.-]*\.(?:png|jpe?g|gif|webp))\)", sections[1]))
+    return sorted(path for name in files if os.path.isfile(path := os.path.join("docs", "changes", name)))
+
+
+CHANGELOGS = ["CHANGELOG.md", *glob("CHANGELOG.*.md")]  # changelog translations
+
 # Files that must stay next to executable (loaded with relative path)
 DATA_FILES = {
-    "": ["LICENSE.txt", "NOTICE.md", "README.md", "CHANGELOG.md", *glob("CHANGELOG.*.md")],  # changelog translations
+    "": ["LICENSE.txt", "NOTICE.md", "README.md", *CHANGELOGS],
     "docs": ["docs/customization.md", "docs/contributors.md"],
+    "docs/changes": changelog_images(CHANGELOGS),
     "docs/licenses": glob("docs/licenses/*"),
     "fonts": [*glob("fonts/*.ttf"), *glob("fonts/OFL*.txt")],
     "images": [

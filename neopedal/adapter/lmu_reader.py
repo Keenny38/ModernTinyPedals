@@ -849,6 +849,10 @@ class Timing(_reader.Timing, DataAdapter):
         """Current lap start time (seconds)"""
         return rmnan(self.shmm.lmuTeleVeh(index).mLapStartET)
 
+    def scoring_start(self, index: int | None = None) -> float:
+        """Current lap start time of scoring (seconds): known for every car, telemetry or not"""
+        return rmnan(self.shmm.lmuScorVeh(index).mLapStartET)
+
     def elapsed(self, index: int | None = None) -> float:
         """Current lap elapsed time (seconds)"""
         return rmnan(self.shmm.lmuTeleVeh(index).mElapsedTime)

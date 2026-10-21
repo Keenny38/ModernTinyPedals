@@ -1,0 +1,10 @@
+{
+  "description": "Le Mans Ultimate 1.42, Lusail Short Circuit, offline practice with 38 AI cars, Ferrari 499P (Hyper): app started mid-lap, end of that lap, pit in lap, pit stop with refuel, out lap, start of next lap (250 s at 2 frames per second, player renamed Test Driver)",
+  "track": "Lusail Short Circuit",
+  "vehicle_class": "Hyper",
+  "session_type": 1,
+  "vehicles": 38,
+  "pit_stops": 1,
+  "refuel": true,
+  "pit_speed_limit_kph": 60
+}

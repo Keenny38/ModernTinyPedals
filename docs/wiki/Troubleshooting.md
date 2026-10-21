@@ -11,7 +11,7 @@ Check, in this order:
 3. **Game connection**: the status bar of the main window must show your game as connected. If not, see [Game not detected](#game-not-detected).
 4. **Overlay turned on**: on the `Overlays` page, its switch must be on. Its `visibility_context` option may limit it to some sessions or to the pits.
 5. **Off screen**: an overlay left outside every screen (monitor unplugged, preset made on another computer) is shown on the nearest screen at startup, its saved position kept (`Config` > `Compatibility` > `enable_window_position_correction`). You can also use `Tools` > `Layout Editor`, or right-click an overlay > `Move to Screen`. Positions are remembered per screen setup.
-6. **Maps**: Track Map, Navigation and Elevation need one complete, valid lap of the track (recorded by the Mapping module) before they draw anything.
+6. **Maps**: with Le Mans Ultimate, Track Map, Navigation and Elevation use the official circuit of the game (Rest API access on; Elevation once a car drove on track). With rFactor 2 or the Rest API off, they need one complete, valid lap of the track (recorded by the Mapping module) before they draw anything.
 7. **Overlay shown but empty**: a data module it needs may be off. The `Module` page flags in orange the modules turned off that enabled overlays need: `Enable Them` turns them back on.
 
 ### Linux

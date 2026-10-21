@@ -99,6 +99,7 @@ MODULE_DEFAULT = {
         "enable_lap_recording_during_replay": False,
         "enable_out_and_in_lap_recording": False,
         "enable_compressed_lap_files": False,
+        "enable_100hz_lap_recording": False,
         "enable_auto_replay_recording": False,
         "enable_replay_skip_inactive_frames": True,
         "number_of_saved_replays": 20,

@@ -17,45 +17,55 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-What's new: release notes of an available update
+What's new: release notes of an available update, of the running version, or of the versions since the
+last one run (shown once after an update)
 
-Notes are the Markdown body of the GitHub release (tools/gen_release_notes.py): changelog
-section of the version (themes with bullets) first, then "## Commits" (commits by kind) and
-SHA256 checksums. The changelog part is shown in the app language when translated
-(CHANGELOG.<code>.md, see update.localize_release_notes). Shown as a header (version, date,
-installed version), one card per theme, and technical details (commits, checksums) folded
-below. Also asks to install a new version (prompt mode).
+Notes are the Markdown body of the GitHub release (tools/gen_release_notes.py): changelog section of the
+version first ("### New" groups of "#### theme" cards, bullets with sub-bullets), then "## Commits"
+(commits by kind), before / after Visuals and SHA256 checksums. The changelog part is shown in the app
+language when translated (CHANGELOG.<code>.md, see update.localize_release_notes); sections of versions
+skipped since the installed one follow (update.UpdateChecker.earlier_notes). Qt Quick page
+(qml/home/ReleaseNotes.qml), state & actions in quick/release_backend.py; this dialog hosts it and runs
+install, download & skip. Also asks to install a new version (prompt mode).
 """
 
 from __future__ import annotations
 
 import html
+import logging
 import re
-from typing import NamedTuple
+from collections.abc import Collection, Sequence
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QDate, QLocale, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QVBoxLayout
 
-from ..const_app import VERSION
+from ..const_file import ConfigType
 from ..i18n import current_language, tr
-from ..update import RELEASE_DETAILS_HEADING, release_url
+from ..setting import cfg
+from ..update import (
+    RELEASE_DETAILS_HEADING,
+    RELEASE_VISUALS_HEADING,
+    ChangelogEntry,
+    changelog_image_name,
+    entries_between,
+    release_url,
+)
 from ..version import __version__ as app_version
 from ..version_check import parse_version_string
-from ._common import BaseDialog, FocusRingButton, UIScaler
+from ._common import BaseDialog, UIScaler, find_dialog_host
 from .notification import download_progress_text
+
+if TYPE_CHECKING:
+    from PySide6.QtQuickWidgets import QQuickWidget
+
+logger = logging.getLogger(__name__)
 
 DETAILS_HEADING = RELEASE_DETAILS_HEADING  # technical part of notes starts here
 COMMIT_KINDS = ("Added", "Fixed", "Changed")  # see tools/gen_release_notes.py
+VISUALS_GROUP = RELEASE_VISUALS_HEADING.removeprefix("### ")  # before / after images (tools/gen_release_notes.py)
+MAX_LEVEL = 2  # deepest sub-bullet level shown
 # Portable ZIP is no longer published: installer installed into the portable folder keeps its data
 PORTABLE_UPDATE_NOTE = (
     "Portable copy (ZIP): download the setup ZIP from the releases page and install it into the folder of this copy, "
@@ -63,61 +73,109 @@ PORTABLE_UPDATE_NOTE = (
 )
 _bold = re.compile(r"\*\*(.+?)\*\*")
 _code = re.compile(r"`([^`]+)`")
-_link = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
-_image = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")  # Markdown image line
+_link = re.compile(r"\[([^\]]+)\]\((https?://[^)\s\"]+)\)")
+_image = re.compile(r"^!\[([^\]]*)\]\(([^)]*)\)$")  # Markdown image line
+_heading = re.compile(r"^(#{2,4})\s+(.*)$")
+_bullet = re.compile(r"^[-*+]\s+(.*)$")
+_markup = re.compile(r"\*\*|`")
+
+
+class NotesItem(NamedTuple):
+    """Bullet, paragraph or changelog screenshot of a card"""
+
+    text: str  # Markdown (image line for a screenshot)
+    level: int = 0  # 0 bullet or paragraph, 1 & 2 sub-bullets
+    bullet: bool = True
 
 
 class NotesSection(NamedTuple):
-    """Theme of release notes: title & items (bullets or paragraphs, Markdown)"""
+    """Card of release notes: "#### theme" (or bullets right under a "### group"), its items in notes order"""
 
     title: str
-    items: list[str]
+    items: list[NotesItem]
+    group: str = ""  # "### heading" the card belongs to ("New", "Fixes"...), empty before the first one
 
 
-def inline_html(text: str) -> str:
-    """Inline Markdown (bold, code, links) as rich text"""
+def inline_html(text: str, option_keys: Collection[str] = ()) -> str:
+    """Inline Markdown (bold, code, links) as rich text, code spans naming an option as option:<key> links"""
     text = html.escape(text, quote=False)
     text = _link.sub(r'<a href="\2">\1</a>', text)
     text = _bold.sub(r"<b>\1</b>", text)
-    return _code.sub(r"<code>\1</code>", text)
+
+    def code(match: re.Match) -> str:
+        value = match.group(1)
+        if value in option_keys:
+            return f'<a href="option:{value}"><code>{value}</code></a>'
+        return f"<code>{value}</code>"
+
+    return _code.sub(code, text)
+
+
+def plain_text(text: str) -> str:
+    """Markdown text without markup (search)"""
+    return _markup.sub("", _link.sub(r"\1", text))
+
+
+def notes_image(item: str) -> tuple[str, str] | None:
+    """(caption, url) of changelog screenshot item, None if item is not one"""
+    match = _image.match(item)
+    if match is None or not changelog_image_name(match.group(2)):
+        return None
+    return match.group(1), match.group(2)
+
+
+def _indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 def parse_sections(markdown: str) -> list[NotesSection]:
-    """Headings (## or ###) start a section, bullets & paragraphs are its items"""
+    """Cards of notes: "### group" headings group "#### theme" cards (bullets right under a group: card without
+    title); bullets keep their level (indented "- " is a sub-bullet), wrapped lines join their bullet, changelog
+    screenshots are items of their own. Other images (not a changelog screenshot of app repository) are left out.
+    """
     sections: list[NotesSection] = []
+    group = ""
     for raw_line in markdown.splitlines():
         line = raw_line.strip()
-        if not line or _image.match(line):  # changelog screenshots are online only
+        if not line:
             continue
-        heading = re.match(r"^#{2,4}\s+(.*)$", line)
+        image = _image.match(line)
+        if image and notes_image(line) is None:
+            continue
+        heading = _heading.match(line)
         if heading:
-            sections.append(NotesSection(heading.group(1).strip(), []))
+            title = heading.group(2).strip()
+            if len(heading.group(1)) == 4:
+                sections.append(NotesSection(title, [], group))
+            else:
+                group = title
+                sections.append(NotesSection("", [], group))
             continue
         if not sections:
-            sections.append(NotesSection("", []))
-        bullet = re.match(r"^[-*]\s+(.*)$", line)
+            sections.append(NotesSection("", [], group))
+        items = sections[-1].items
+        if image:  # own item, never part of a wrapped bullet
+            items.append(NotesItem(line, 0, False))
+            continue
+        indent = _indent(raw_line)
+        bullet = _bullet.match(line)
         if bullet:
-            sections[-1].items.append(bullet.group(1))
-        elif sections[-1].items and raw_line.startswith((" ", "\t")):
-            sections[-1].items[-1] += " " + line  # wrapped bullet
+            items.append(NotesItem(bullet.group(1), min(indent // 2, MAX_LEVEL), True))
+        elif items and indent and _image.match(items[-1].text) is None:
+            items[-1] = items[-1]._replace(text=f"{items[-1].text} {line}")  # wrapped bullet
         else:
-            sections[-1].items.append(line)
+            items.append(NotesItem(line, 0, False))
     return [section for section in sections if section.items]
 
 
 def split_notes(notes: str) -> tuple[list[NotesSection], list[NotesSection]]:
-    """(what's new themes, technical details: commits & checksums)"""
+    """(what's new themes, technical details: commits, visuals & checksums)"""
     summary, _, details = notes.partition(DETAILS_HEADING)
     if not details and summary.lstrip().startswith("### "):
         # No written changelog: notes are commits only, shown as themes
         return parse_sections(summary), []
     return parse_sections(summary), parse_sections(details)
-
-
-def items_html(items: list[str]) -> str:
-    """Bullets of a section as rich text list"""
-    rows = "".join(f"<li style='margin-bottom:{UIScaler.pixel(5)}px'>{inline_html(item)}</li>" for item in items)
-    return f"<ul style='margin-left:{UIScaler.pixel(-14)}px'>{rows}</ul>"
 
 
 def format_release_date(date: tuple[int, int, int]) -> str:
@@ -132,32 +190,16 @@ def version_text(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
 
 
-class NotesCard(QFrame):
-    """Card: theme title & its bullets"""
+class Release(NamedTuple):
+    """Notes of one version shown by the page"""
 
-    def __init__(self, parent, section: NotesSection, monospace: bool = False):
-        super().__init__(parent)
-        self.setObjectName("notesCard")
-        layout = QVBoxLayout(self)
-        margin = UIScaler.pixel(12)
-        layout.setContentsMargins(margin, UIScaler.pixel(10), margin, UIScaler.pixel(6))
-        layout.setSpacing(UIScaler.pixel(4))
-        if section.title:
-            self.label_title = QLabel(inline_html(section.title))
-            self.label_title.setObjectName("notesCardTitle")
-            self.label_title.setTextFormat(Qt.TextFormat.RichText)
-            layout.addWidget(self.label_title)
-        self.label_items = QLabel(items_html(section.items))
-        self.label_items.setObjectName("notesMono" if monospace else "notesItems")
-        self.label_items.setTextFormat(Qt.TextFormat.RichText)
-        self.label_items.setWordWrap(True)
-        self.label_items.setOpenExternalLinks(True)
-        self.label_items.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        layout.addWidget(self.label_items)
+    version: tuple[int, int, int]
+    date: tuple[int, int, int]  # DATE_NA if unknown
+    notes: str  # Markdown: changelog section, then technical details for a GitHub release
 
 
 class ReleaseNotesDialog(BaseDialog):
-    """What's new of an available update, optionally asking to install it
+    """What's new of an available update (optionally asking to install it), or of the running version
 
     Install of installed Windows app: download progress shown with Cancel (page kept open),
     installer then runs (see UpdateInstaller). Skip This Version hides the update notice.
@@ -168,149 +210,64 @@ class ReleaseNotesDialog(BaseDialog):
 
     def __init__(self, parent, notes: str, version: tuple[int, int, int], date: tuple[int, int, int],
                  can_install: bool = False, prompt: bool = False, download_url: str = "", portable: bool = False,
-                 installer=None, can_skip: bool = False):
+                 installer=None, can_skip: bool = False, earlier: Sequence[ChangelogEntry] = (),
+                 current: bool = False, since: str = ""):
         """
         Args:
             installer: UpdateInstaller (download state & progress), shown while downloading.
             can_skip: update notice of this version can be skipped.
+            earlier: changelog sections of versions between installed (or since) & this one, newest first.
+            current: notes of running version: nothing to install.
+            since: version run before an update (notes of the versions since then), empty if none.
         """
+        from .quick import create_quick_view
+        from .quick.release_backend import ReleaseNotesBackend
+
         super().__init__(parent)
         self.prompt = prompt
-        self.can_install = can_install  # installed Windows app: downloads & runs installer
+        self.can_install = can_install and not current  # installed Windows app: downloads & runs installer
         self.download_url = download_url  # else: download opened in browser (installer, or release page)
         self.portable = portable  # portable ZIP copy: updated by hand from release page
-        self.installer = installer if can_install and not portable else None
+        self.installer = installer if self.can_install and not portable else None
         self.set_utility_title(tr("Update Available") if prompt else tr("Release Notes"))  # page title
-        self.themes, self.details = split_notes(notes)
-
-        # Header: version (newer than installed one or not), date, installed version
-        title = QLabel(f"{tr('Version')} {version_text(version)}")
-        title.setObjectName("notesTitle")
-        newer = version > parse_version_string(app_version)  # development suffix left out
-        chip = QLabel(tr("New Version") if newer else tr("Installed"))
-        chip.setObjectName("notesChip")
-        layout_title = QHBoxLayout()
-        layout_title.addWidget(title)
-        layout_title.addWidget(chip, alignment=Qt.AlignmentFlag.AlignVCenter)
-        layout_title.addStretch(1)
-        released = format_release_date(date)
-        detail = " · ".join(text for text in (
-            f"{tr('Released')} {released}" if released else "",
-            f"{tr('Installed version')} {VERSION}",
-        ) if text)
-        self.label_detail = QLabel(detail)
-        self.label_detail.setEnabled(False)  # muted
-
-        # Body: themes, then technical details folded
-        body = QWidget()
-        body.setObjectName("notesBody")
-        layout_body = QVBoxLayout(body)
-        layout_body.setContentsMargins(0, 0, UIScaler.pixel(4), 0)
-        layout_body.setSpacing(UIScaler.pixel(10))
-        for section in self.themes:
-            layout_body.addWidget(NotesCard(body, section))
-        if not self.themes:
-            empty = QLabel(tr("No release notes for this version."))
-            empty.setEnabled(False)
-            layout_body.addWidget(empty)
-        self.button_details = QPushButton()
-        self.button_details.setObjectName("notesToggle")
-        self.button_details.setCheckable(True)
-        self.button_details.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.button_details.toggled.connect(self.toggle_details)
-        self.details_box = QWidget()
-        layout_details = QVBoxLayout(self.details_box)
-        layout_details.setContentsMargins(0, 0, 0, 0)
-        layout_details.setSpacing(UIScaler.pixel(10))
-        for section in self.details:
-            if section.title in COMMIT_KINDS:  # commit kind headings of release notes, translated
-                section = section._replace(title=tr(section.title))
-            layout_details.addWidget(NotesCard(self.details_box, section, monospace=section.title == "SHA256"))
-        layout_body.addWidget(self.button_details, alignment=Qt.AlignmentFlag.AlignLeft)
-        layout_body.addWidget(self.details_box)
-        layout_body.addStretch(1)
-        self.button_details.setHidden(not self.details)
-        self.toggle_details(False)
-
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(body)
-
-        # Actions
-        button_github = QPushButton(tr("View On GitHub"))
-        button_github.clicked.connect(lambda: QDesktopServices.openUrl(release_url()))
-        self.button_skip = FocusRingButton(tr("Skip This Version"))
-        self.button_skip.setToolTip(tr("Not shown again for this version, shown again for a newer one"))
-        self.button_skip.clicked.connect(self.request_skip)
-        self.button_skip.setVisible(can_skip and newer)
-        self.button_close = QPushButton(tr("Later") if prompt else tr("Close"))
-        self.button_close.clicked.connect(self.close)
-        self.button_install = QPushButton(tr("Install Now") if prompt else tr("Download And Install"))
-        self.button_install.setObjectName("notesPrimary")
-        self.button_install.clicked.connect(self.request_install)
-        self.button_install.setDefault(True)
-        if portable:
-            self.button_install.setText(tr("Open Releases Page"))
-            self.button_install.setToolTip(tr(PORTABLE_UPDATE_NOTE))
-        elif not can_install:
-            self.button_install.setToolTip(tr("Opens the download in your browser, extract the ZIP and run the installer"))
-        layout_buttons = QHBoxLayout()
-        layout_buttons.addWidget(button_github)
-        layout_buttons.addWidget(self.button_skip)
-        layout_buttons.addStretch(1)
-        layout_buttons.addWidget(self.button_close)
-        layout_buttons.addWidget(self.button_install)
-
-        # Download progress (installed app), with cancel
-        self.download_box = QWidget(self)
-        self.progress_bar = QProgressBar(self.download_box)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setAccessibleName(tr("Download progress"))
-        self.label_progress = QLabel(self.download_box)
-        self.button_cancel = FocusRingButton(tr("Cancel Download"), self.download_box)
-        self.button_cancel.clicked.connect(self.cancel_download)
-        layout_download = QHBoxLayout(self.download_box)
-        layout_download.setContentsMargins(0, 0, 0, 0)
-        layout_download.addWidget(self.label_progress)
-        layout_download.addWidget(self.progress_bar, stretch=1)
-        layout_download.addWidget(self.button_cancel)
-        self.download_box.setHidden(True)
+        releases = [Release(version, date, notes)]
+        releases.extend(Release(parse_version_string(entry.version), entry.date, entry.body) for entry in earlier)
+        self.backend = ReleaseNotesBackend(
+            self, releases, newer=not current and version > parse_version_string(app_version), prompt=prompt,
+            installable=not current, can_install=self.can_install, portable=portable, can_skip=can_skip,
+            since=since)
+        # Actions that close the page run once QML handled the click (page deleted inside onClicked: Qt abort)
+        queued = Qt.ConnectionType.QueuedConnection
+        self.backend.installClicked.connect(self.request_install, queued)
+        self.backend.skipClicked.connect(self.request_skip, queued)
+        self.backend.closeClicked.connect(self.close, queued)
+        self.backend.cancelClicked.connect(self.cancel_download)
+        self.view: QQuickWidget = create_quick_view(self, "ReleaseNotes.qml", {"backend": self.backend})
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
+        self.setFocusProxy(self.view)
+        self.setMinimumSize(UIScaler.size(30), UIScaler.size(24))
+        self.resize(UIScaler.size(42), UIScaler.size(40))
         if self.installer is not None:
             self.installer.busy_changed.connect(self.download_state)
             self.installer.progress.connect(self.download_progress)
-
-        # Header & actions stay, notes fill the rest of the window (scrolled when longer)
-        layout_main = QVBoxLayout(self)
-        margin = UIScaler.pixel(14)
-        layout_main.setContentsMargins(margin, margin, margin, margin)
-        layout_main.setSpacing(UIScaler.pixel(8))
-        layout_main.addLayout(layout_title)
-        layout_main.addWidget(self.label_detail)
-        layout_main.addSpacing(UIScaler.pixel(4))
-        layout_main.addWidget(scroll, stretch=1)
-        if portable:  # installer would install another copy elsewhere, without presets & data
-            note = QLabel(tr(PORTABLE_UPDATE_NOTE))
-            note.setWordWrap(True)
-            layout_main.addWidget(note)
-        layout_main.addWidget(self.download_box)
-        layout_main.addLayout(layout_buttons)
-        self.resize(UIScaler.size(42), UIScaler.size(40))
-        if self.installer is not None and self.installer.busy:  # page opened while downloading
-            self.download_state(True)
+            if self.installer.busy:  # page opened while downloading
+                self.download_state(True)
 
     def showEvent(self, event):
         """Shown as page: page has its own Close button (Later kept when asking to install)"""
+        self.backend.set_close_visible(not self.in_app_page or self.prompt)
+        self.backend.page_shown()
         super().showEvent(event)
-        if self.in_app_page and not self.prompt:
-            self.button_close.hide()
 
-    def toggle_details(self, shown: bool):
-        """Commits & checksums folded by default"""
-        self.details_box.setVisible(shown)
-        label = tr("Hide Technical Details") if shown else tr("Show Technical Details")
-        self.button_details.setText(f"{label} ({tr('commits, SHA256')})")
+    def hideEvent(self, event):
+        self.backend.page_hidden()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self.release_page()
+        super().closeEvent(event)
 
     def request_install(self):
         """Installed Windows app or run from source on Windows: install asked (downloaded & run by caller),
@@ -337,27 +294,80 @@ class ReleaseNotesDialog(BaseDialog):
 
     def download_state(self, busy: bool):
         """Downloading: progress & cancel shown, install & skip disabled"""
-        self.download_box.setVisible(busy)
-        self.button_install.setEnabled(not busy)
-        self.button_skip.setEnabled(not busy)
-        self.button_cancel.setEnabled(busy)
+        self.backend.set_downloading(busy)
         if busy and self.installer is not None:
             self.download_progress(self.installer.received, self.installer.total)
-            self.button_cancel.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def download_progress(self, received: int, total: int):
         """Percent & size downloaded (busy bar while size is unknown)"""
-        if total > 0:
-            self.progress_bar.setRange(0, 1000)
-            self.progress_bar.setValue(min(round(received * 1000 / total), 1000))
-        else:
-            self.progress_bar.setRange(0, 0)
         text = download_progress_text(received, total) if received else ""
-        self.label_progress.setText(f"{tr('Downloading Update...')} {text}".strip())
-        self.progress_bar.setAccessibleDescription(text)
+        self.backend.set_progress(min(received / total, 1.0) if total > 0 else -1.0,
+                                  f"{tr('Downloading Update...')} {text}".strip())
 
     def cancel_download(self):
         """Stop download, partial file removed"""
         if self.installer is not None:
-            self.button_cancel.setEnabled(False)
+            self.backend.set_cancelling()
             self.installer.cancel()
+
+
+def running_version_dialog(parent) -> ReleaseNotesDialog:
+    """What's new in running version (local changelog in app language, works offline)"""
+    from .home_view import base_version, local_changelog
+
+    version = base_version()
+    entries = local_changelog(current_language())
+    entry = next((entry for entry in entries if entry.version == version), entries[0] if entries else None)
+    if entry is None:
+        return ReleaseNotesDialog(parent, "", parse_version_string(version), (0, 0, 0), current=True)
+    return ReleaseNotesDialog(parent, entry.body, parse_version_string(entry.version), entry.date, current=True)
+
+
+def remember_version_run() -> str:
+    """Version run before this start ("" if none recorded), newest version run kept (an older copy started
+    in between, source checkout & installed app, never shows the same notes again)"""
+    from .home_view import base_version
+
+    previous = str(cfg.application["last_run_version"])
+    current = base_version()
+    if parse_version_string(current) > parse_version_string(previous):
+        cfg.application["last_run_version"] = current
+        cfg.save(0, config_type=ConfigType.CONFIG)
+    return previous
+
+
+def notes_after_update(previous: str, language: str = "en") -> tuple[ChangelogEntry, list[ChangelogEntry]] | None:
+    """Changelog sections of versions run for the first time: (running version, versions between), None if the
+    running version is not newer than previous one, none recorded (first start of this feature or of the app),
+    or not in the changelog"""
+    from .home_view import base_version, local_changelog
+
+    if not previous:
+        return None
+    current = parse_version_string(base_version())
+    entries = entries_between(local_changelog(language), parse_version_string(previous), current)
+    if not entries or parse_version_string(entries[0].version) != current:
+        return None
+    return entries[0], entries[1:]
+
+
+def show_notes_after_update(window, previous: str) -> ReleaseNotesDialog | None:
+    """First start after an update: what's new since previous version run, as page (waits inside app while
+    window is hidden in tray), unless show_release_notes_after_update is off"""
+    if not cfg.application["show_release_notes_after_update"]:
+        return None
+    found = notes_after_update(previous, current_language())
+    if found is None:
+        return None
+    entry, earlier = found
+    dialog = ReleaseNotesDialog(window, entry.body, parse_version_string(entry.version), entry.date,
+                                earlier=earlier, current=True, since=previous)
+    logger.info("UPDATES: what's new since %s shown", previous)
+    if window.isVisible() and not window.isMinimized():
+        dialog.open()
+        return dialog
+    host = find_dialog_host(window)
+    if host is None or not host.show_dialog_page(dialog, bring_to_front=False):
+        dialog.deleteLater()  # no page to wait in
+        return None
+    return dialog

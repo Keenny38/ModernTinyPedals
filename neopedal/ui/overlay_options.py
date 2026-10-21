@@ -250,8 +250,12 @@ class OverlayOptions(BaseDialog):
         import_overlay_settings(self, self)
 
     def applied(self, names: list[str]):
-        """Options saved: edited overlays restarted once saving is finished, other pages follow"""
+        """Options saved: edited overlays restarted once saving is finished, other pages follow (Overlays page:
+        first of Recently Edited)"""
+        from .quick.overlay_backend import note_edited
+
         show_toast(self, tr("Options saved"))
+        note_edited(names)
         run_after_saving(partial(restart_overlays, self.module_control, names))
 
 

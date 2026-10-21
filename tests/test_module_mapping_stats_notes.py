@@ -41,9 +41,10 @@ def tele(ui_env, monkeypatch):
         "vehicle.vehicle_name": "SimCar #1",
         "lap.track_length": 4000.0,
     }
-    groups = ("session", "lap", "timing", "vehicle", "inputs", "switch", "engine", "state")
+    groups = ("session", "lap", "timing", "vehicle", "tyre", "inputs", "switch", "engine", "state")
     monkeypatch.setattr(api, "read", SimpleNamespace(**{name: Group(values, name) for name in groups}))
     monkeypatch.setattr(realtime_state, "active", True)
+    monkeypatch.setattr(module_stats, "lmu_address", lambda: None)  # online state never asked to a running game
     return values
 
 

@@ -219,12 +219,16 @@ class Marker(NamedTuple):
 class ReplayWriter:
     """Write frames to replay file (current format)"""
 
-    def __init__(self, file: BinaryIO, frame_size: int, rate: int, header_extra: dict | None = None):
+    def __init__(
+        self, file: BinaryIO, frame_size: int, rate: int, header_extra: dict | None = None, compress_level: int = 1,
+    ):
         """
         Args:
             header_extra: source API name, zone layout ([name, size], ...), info...
+            compress_level: zlib level of frames & snapshots, 1 while recording (fast), 9 for small files.
         """
         self._file = file
+        self._level = compress_level
         self._frame_size = frame_size
         self._last = b""
         self._rest_fields: dict[str, str] = {}  # json of each field of last written Rest API snapshot
@@ -246,7 +250,7 @@ class ReplayWriter:
             raise ValueError(f"frame size {len(frame)} != {self._frame_size}")
         keyframe = self._count % KEYFRAME_INTERVAL == 0
         raw = frame if keyframe else xor_bytes(frame, self._last)
-        self._write(elapsed, int(keyframe), zlib.compress(raw, 1))
+        self._write(elapsed, int(keyframe), zlib.compress(raw, self._level))
         self._last = frame
         self._count += 1
         self._elapsed = elapsed
@@ -269,7 +273,7 @@ class ReplayWriter:
         encoded = prefix + ", ".join(f"{json.dumps(name)}: {fields[name]}" for name in names) + "}"
         self._rest_fields = fields
         self._rest_count += 1
-        self._write(elapsed, REST_FRAME, zlib.compress(encoded.encode("utf-8"), 1))
+        self._write(elapsed, REST_FRAME, zlib.compress(encoded.encode("utf-8"), self._level))
         return True
 
     def write_marker(self, elapsed: float, kind: str, text: str = "") -> None:

@@ -11,6 +11,7 @@ from neopedal.ui.quick import overlay_backend
 from neopedal.ui.quick.overlay_backend import (
     CATEGORY_ALL,
     CATEGORY_COLORS,
+    CATEGORY_FAVORITES,
     CATEGORY_OTHER,
     FILTER_ACTIVE,
     FILTER_INACTIVE,
@@ -39,6 +40,7 @@ class FakeControl:
         self.failing = set(failing)
         self.toggled: list[str] = []
         self.batch: list[str] = []
+        self.grouped: list[tuple[list[str], bool]] = []
         self.reloaded: list[str] = []
 
     @property
@@ -55,6 +57,14 @@ class FakeControl:
     def toggle(self, name):
         self.toggled.append(name)
         cfg.user.setting[name]["enable"] = not cfg.user.setting[name]["enable"]
+
+    def set_enabled(self, names, enable):
+        """Grouped switch: names changed (recorded as toggles too)"""
+        changed = [name for name in names if bool(cfg.user.setting[name]["enable"]) != enable]
+        self.grouped.append((changed, enable))
+        for name in changed:
+            self.toggle(name)
+        return changed
 
     def enable_all(self):
         self.batch.append("enable")
@@ -175,7 +185,9 @@ def test_search_in_french_labels(overlays):
 def test_counts_follow_other_filters(overlays):
     chips = overlays.categories
     assert chips[0]["key"] == CATEGORY_ALL
-    assert [chip["key"] for chip in chips[1:]] == ["Timing", "Brakes", "Engine & Energy", CATEGORY_OTHER]
+    # Favorites chip always (found by users), recently edited only once something was edited
+    assert [chip["key"] for chip in chips[1:]] == [
+        CATEGORY_FAVORITES, "Timing", "Brakes", "Engine & Energy", CATEGORY_OTHER]
     assert overlays.categoryCounts[CATEGORY_ALL] == len(NAMES)
     overlays.setStateFilter(FILTER_ACTIVE)
     counts = overlays.categoryCounts
@@ -211,6 +223,7 @@ def test_batch_toggle_shown_only(overlays, monkeypatch):
     overlays.setCategory("Brakes")
     overlays.enableShown()
     assert control.toggled == ["brake_wear"] and not control.batch  # only shown & off
+    assert control.grouped == [(["brake_wear"], True)]  # one grouped switch: saved & demand updated once
     assert "2 shown" not in overlays.test_answers[0] and "1 shown overlays" in overlays.test_answers[0]
     overlays.clearFilters()
     overlays.disableShown()

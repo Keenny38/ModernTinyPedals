@@ -1970,6 +1970,7 @@ class RacePlanConfig(WidgetConfig):
     pit_window_laps: float
     warning_color_pit_window: str
     enable_live_replan: bool
+    enable_live_consumption: bool
     show_next_stop: bool
     prefix_next_stop: str
     font_color_next_stop: str

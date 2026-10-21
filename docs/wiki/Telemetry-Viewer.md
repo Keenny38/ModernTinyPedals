@@ -19,8 +19,9 @@ Main options of the Recorder module:
 | `save_invalid_laps` | On |
 | `enable_out_and_in_lap_recording` | Off |
 | `enable_compressed_lap_files` | Off (`.csv.gz`, about 5 times smaller) |
+| `enable_100hz_lap_recording` | Off (a sample every 10 ms instead of 20 ms: finer suspension, lockups and kerbs, files about twice larger) |
 
-Recorded channels include pedals, steering, speed, gear, RPM, fuel, position, G forces, TC and ABS activity, battery, and per wheel: tyre temperatures (inner, middle, outer), pressures, wear, load, brake temperature, wheel speed, ride height, suspension, slip angle and camber. Brake bias, TC and ABS levels, engine map, water and oil temperatures and the steering wheel rotation (degrees lock to lock) are recorded too, and with LMU the name of the setup loaded in the game. Each lap also gets a binary copy, so the viewer opens it without reading the CSV again.
+Recorded channels include pedals, steering, speed, gear, RPM, fuel, position, G forces, TC and ABS activity, battery, and per wheel: tyre temperatures (inner, middle, outer), pressures, wear, load, brake temperature, wheel speed, ride height, suspension, slip angle and camber. Newer laps also keep the pedals the car gets after driving aids (traction control cut, ABS, throttle blip), front and rear downforce and the wheel camber angle. Brake bias, TC and ABS levels, engine map, water and oil temperatures and the steering wheel rotation (degrees lock to lock) are recorded too, and with LMU the name of the setup loaded in the game. Each lap also gets a binary copy, so the viewer opens it without reading the CSV again.
 
 ## Choose and compare laps
 
@@ -44,11 +45,12 @@ Lap list tools:
 - **Cursor**: move the mouse to read every lap's value and its gap to the reference.
 - **Markers A and B** (right-click, or `A` / `B` keys) and the `Range` tab: time of each lap between the markers, gap to the reference, minimum, maximum and mean of each channel.
 - **Distance to Center** and **Track Position**: the game's values when the lap recorded them, else measured on the map once track edges are known.
-- **Calculated channels**: wheel slip (lock under braking, spin on throttle), steering rate, fuel used, tyre temperature spread. `Math Channels...` adds your own formulas (`+ - * /`, `abs`, `min`, `max`, `d()` change per second) and has built-in understeer angle, brake release rate and throttle application rate.
+- **Calculated channels**: wheel slip (lock under braking, spin on throttle), steering rate, fuel used, tyre temperature spread, throttle and brake cut by the driving aids (driver pedal minus pedal the car gets; below 0 for a throttle blip), aero balance (front share of downforce), rake (rear minus front ride height) and damper velocity of each wheel. Presets `Driving Aids` and `Aero` show them. `Math Channels...` adds your own formulas (`+ - * /`, `abs`, `min`, `max`, `d()` change per second) and has built-in understeer angle, brake release rate and throttle application rate.
 - **Display**: `Smoothing` for noisy channels, `Min / max band` of the shown laps (3 laps or more), `Time axis` (charts along lap time instead of distance).
 - **Align on braking**: right-click > `Align Laps on Braking Point Here` shifts laps so their braking starts line up with the reference.
 - **Playback**: the bar under the charts (same place in the simple view) plays the reference lap at real speed (0.1x to 4x, `Space`), with optional loop between markers A and B; drag its position bar to move along the lap.
-- **Right-click menu**: markers, zoom to sector or between markers, copy values or picture, `Open Replay Here` when a [Session recorder](Connections.md#session-recorder) replay covers the lap.
+- **Right-click menu**: markers, zoom to sector or between markers, copy values or picture, `Open Replay Here` when a [Session recorder](Connections.md#session-recorder) replay covers the lap, `Add Track Note Here` / `Edit Track Note` / `Remove Track Note`.
+- **Track notes**: a note at a track distance ("brake at the 100 board") shows on the charts and the map of every lap of the track. Notes are the track notes file of the [Track Notes](Overlays.md) overlay: a note added here shows in game, and notes written for the overlay show here (pit lane notes left out). Double-click a note to edit it.
 
 Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Reset` to reset. Click `S1`, `S2`, `S3` to zoom on a sector. Drag a channel name to reorder channels, drag a panel edge to resize it. Right-click a panel and choose `Fit Values to Visible Part` to scale its values to the zoomed part.
 
@@ -62,7 +64,7 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 - **Driving points** of each lap in each corner: braking, apex (minimum speed), exit (back to full throttle) and track-out, with the margin to the track edge.
 - **Off track** (2 wheels or more on grass, dirt or gravel) and **track limits exceeded** (4 wheels out), counted per lap.
 - **Line coloring**: `Laps`, `Gain / Loss`, `Speed`, `Pedals`, `Racing Line`, `Gear`, `Elevation`, `Delta per corner`, `Mini-sectors` (with the ideal lap of the shown laps) and `Consistency` (spread of mini-sector times over the stint, session or shown laps).
-- Sector times, direction arrows, front lockups and rear wheelspin, pedal zones, cursor trail, distance marks, ruler (`M`), colorblind colors.
+- Sector times, direction arrows, front lockups, rear wheelspin and bottoming (a wheel ride height near 0: floor on the track or a kerb), track notes, pedal zones, cursor trail, distance marks, ruler (`M`), colorblind colors.
 - Zoom synchronized with the charts (or separate), large map over the charts, minimap, follow the cars during playback, `Export Map Picture...` and `Copy Map Picture`.
 
 ### Corners
@@ -77,7 +79,7 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 ### G Circle, Session and XY
 
 - **G Circle**: lateral against longitudinal acceleration of each lap, with the grip envelope.
-- **Session**: every lap of the session with fuel and tyre wear per lap, off tracks and track limits, **long-run pace** (clean laps, slow laps left out), stints split on pit stops (refuel, tyre change), lap time **trend** per lap (also per % of tyre wear) and consistency. Click a lap to show or hide it.
+- **Session**: every lap of the session with fuel and tyre wear per lap, off tracks and track limits, **long-run pace** (clean laps, slow laps left out), stints split on pit stops (refuel, tyre change), lap time **trend** per lap (also per % of tyre wear) and consistency. The value menu shows sector times, or for one corner the minimum speed, braking point or time in the corner of every lap, with its trend over the session. Click a lap to show or hide it.
 - **XY**: one channel against another as a scatter plot (presets: speed / lateral G, steering / lateral G, throttle / wheel slip...) or a histogram. Limited to the zoomed part when zoomed.
 
 ### Simple View
@@ -97,6 +99,7 @@ The [Telemetry Compare](Overlays.md#telemetry-compare) overlay shows the referen
 
 - `Add File...` adds laps from another folder or track, or imports a **MoTeC i2 log** (`.ld`), for example one from the LMU built-in logger or a lap shared by another driver. You can also drop a `.ld` file on the main window. Laps are named with the log date, and engine temperatures, inner/middle/outer tyre temperatures, brake bias, tyre load and track position are imported too. Laps already imported are not copied again.
 - `Imported Laps...` opens the library of imported laps: search, add to the viewer, rename, delete (moved to the trash, with `Undo`).
+- Right-click a lap > `Share Lap...` saves it as one `.csv.gz` file (track, car, your name and lap time in its name) to send to another driver, who adds it with `Add File...`: the lap shows "shared by" with your name.
 - `Import Folder...` imports laps of the same track and class from another folder (a teammate, a shared folder). They are marked as foreign. Importing the same folder again only adds its new laps.
 - Only laps of the reference lap's circuit are compared: a lap of another circuit stays in the list, greyed out, and is not shown (a message tells why). To look at it, set it as reference lap.
 
@@ -104,9 +107,9 @@ The [Telemetry Compare](Overlays.md#telemetry-compare) overlay shows the referen
 
 The `Export` menu saves:
 
-- MoTeC i2 logs (`.ld`): `Reference Lap...`, `Displayed Laps...` or `All Laps of Track...`;
+- MoTeC i2 logs (`.ld`): `Reference Lap...`, `Displayed Laps...` or `All Laps of Track...`, and `MoTeC, Reference Lap A ↔ B...` for the part between the markers;
 - `Reference Lap as Delta Best...`;
-- CSV for spreadsheets: `CSV, Displayed Laps...`, `CSV, Displayed Laps on Time Base...`, `CSV, Passage A ↔ B...`;
+- CSV for spreadsheets: `CSV, Displayed Laps...`, `CSV, Displayed Laps on Time Base...`, `CSV, Passage A ↔ B...`, `CSV, Visible Part...` (zoomed part);
 - pictures: `Picture (PNG)...`, `Copy Picture` (to paste in Discord), `Picture of Passage A ↔ B...`.
 
 ## Keyboard
@@ -117,6 +120,7 @@ Click the `?` button for the full list. Main keys: `Space` play / pause, `Left` 
 
 - Laps load in the background with a progress bar. Heavy computations (track limits, session values, MoTeC imports) run in a separate process, so the page stays fluid. Lap details are kept in an index (`telemetry/.lap_cache/info`), so tracks with hundreds of laps open quickly.
 - On long laps, charts, map, delta to the best lap and MoTeC export are made in the background, so the page does not freeze, and the side tabs open without a stall.
+- A lap read from its binary copy loads only the channels shown (the others when first shown): about half the memory per lap.
 - When the page stays in the background for 3 minutes, loaded laps are released from memory, then reloaded with the same zoom when you come back.
 
 ## Track Map Viewer

@@ -265,7 +265,10 @@ Row {{
         QApplication.processEvents()
         assert first.property("activeFocus") and first.property("visualFocus")
         QTest.keyClick(view, Qt.Key.Key_Return)
-        QTest.qWait(200)  # animateClick
+        for _ in range(100):  # animateClick (100 ms timer): up to 2 s, a GC pause under coverage can pass 200 ms
+            if root.property("clicks") == 2:
+                break
+            QTest.qWait(20)
         assert root.property("clicks") == 2
         QTest.keyClick(view, Qt.Key.Key_Tab)
         QTest.keyClick(view, Qt.Key.Key_Space)

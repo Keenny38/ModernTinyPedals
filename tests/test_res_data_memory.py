@@ -3,7 +3,6 @@ drivers history released, game Rest API answers dropped once stale"""
 
 import os
 import random
-import re
 import time
 import types
 import xml.etree.ElementTree as ET
@@ -14,6 +13,7 @@ from neopedal.process import director as dr
 from neopedal.process import driver_history as dh
 from neopedal.process import results_file as rf
 from neopedal.replay import KEYFRAME_INTERVAL, ReplayFile, ReplayWriter
+from tests.test_broadcast_director import director_page  # noqa: F401
 
 DRIVER = """<Driver><Name>{name}</Name><CarClass>GT3</CarClass><Position>{position}</Position><isPlayer>1</isPlayer>
 <Laps>2</Laps><Swap startLap="0" endLap="2">{name}</Swap>
@@ -204,11 +204,18 @@ def test_drivers_history_cleared_while_scan_runs(monkeypatch, tmp_path):
     assert history.records("ann") == []
 
 
-def test_director_release_clears_drivers_history():
-    from neopedal.ui.quick import director_backend
-
-    with open(director_backend.__file__, encoding="utf-8") as file:
-        source = file.read()
-    release = source[source.index("    def release_resources(self):"):]
-    release = release[:release.index("\n    def ", 10)]
-    assert re.search(r"driver_history\.clear\(\)", release)
+def test_director_release_clears_drivers_history(director_page, monkeypatch, tmp_path):  # noqa: F811
+    """Broadcast Director closed: race history of every driver released (read again once opened)"""
+    path = str(tmp_path / "2026_10_05_22_34_33-70R1.xml")
+    with open(path, "wb") as file:
+        file.write(b"x")
+    monkeypatch.setattr(rf, "results_files", lambda folder: [path])
+    monkeypatch.setattr(dh.history, "read", lambda found: {"ann": dh.RaceRecord(found, 1.0, "Spa", "GT3", 1, True, 3)})
+    try:
+        assert dh.history.scan([str(tmp_path)])
+        assert len(dh.history.records("ann")) == 1
+        director_page.backend.release()
+        assert dh.history.records("ann") == []
+        assert not dh.history._files  # file stamps gone too: whole file read again
+    finally:
+        dh.DriverHistory.clear(dh.history)  # never left filled for later tests

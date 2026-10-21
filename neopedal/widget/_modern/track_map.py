@@ -22,8 +22,8 @@ Track map Widget, modern design
 Track drawn as road with dark edge (readable over any background, optional panel), checkered
 start line, sector marks in accent. Cars as dots with position, filled with class color (multi
 class) or race status color, player larger with ring, proximity ring around player. Safety car
-pill, pit out prediction rings (accent: estimated stop) with stop duration badges. Temporary
-circle map until track is recorded. Sector performance: road of each sector colored by player's
+pill, pit out prediction rings (accent: estimated stop) with stop duration badges. Official
+circuit of game until a lap is recorded (no map: a line of text, no made-up circle). Sector performance: road of each sector colored by player's
 most recent time in it, as game live timing (purple: best of class in session, green: personal best,
 orange: slower). Cars close to player on track (time gap within threshold) ringed. Official corner numbers (or
 names) in small badges outside their bend.
@@ -155,10 +155,11 @@ class Realtime(TrackMapMixin, ModernOverlay):
     def update_map(self, data):
         """Map update: paths & static layer"""
         if self.map_changed(data):
-            raw_data = minfo.mapping.coordinates if data != -1 else None
-            sector_paths, map_full_path = self.create_map_path(raw_data)
+            track = self.take_map(data)
+            sector_paths, map_full_path = self.create_map_path(track.coordinates)
             self.map_paths = (map_full_path,)
-            self.sector_paths = tuple(sector_paths) if self.map_scaled else ()
+            # Sector performance: one road part per sector (none while sector lines not known)
+            self.sector_paths = tuple(sector_paths) if self.map_scaled and isinstance(track.sectors, tuple) else ()
             self.map_corners = None  # placed again on new map
             self.car_positions = None  # map scale changed
             self.redraw_static()
@@ -181,7 +182,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         version = minfo.vehicles.dataSetVersion
         if version != self.last_veh_data_version or self.car_positions is None:
             self.last_veh_data_version = version
-            self.car_positions = self.vehicle_positions(self.unit)
+            self.car_positions = self.vehicle_positions()
         positions = self.car_positions
         safetycar = self.update_safetycar()
         show_duration = self.show_prediction and self.wcfg["show_pitstop_duration"]
@@ -220,20 +221,23 @@ class Realtime(TrackMapMixin, ModernOverlay):
         if self.show_sector_performance:
             self.draw_sector_performance(painter)
         if self.map_scaled:
-            sectors = minfo.mapping.sectors
+            sectors = self.track_map.sectors
             if self.wcfg["show_sector_line"] and isinstance(sectors, tuple):
                 painter.setPen(self.pen_sector)
                 for index in sectors:
                     if 0 <= index < len(self.map_scaled) - 1:
                         x1, y1, x2, y2 = self.map_line(index, self.road * 1.4)
                         painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-            if self.wcfg["show_start_line"] and len(self.map_scaled) > 1:
+            if self.wcfg["show_start_line"] and len(self.map_scaled) > 1 and self.track_map.start_known():
                 (x1, y1), (x2, y2) = self.map_scaled[0], self.map_scaled[1]
                 self.draw_start_line(painter, QPointF(x1, y1), degrees(atan2(y2 - y1, x2 - x1)))
             if self.show_corner_numbers:
                 self.draw_corner_numbers(painter)
-        elif self.wcfg["show_start_line"]:
-            self.draw_start_line(painter, QPointF(self.area_margin, self.area_size * 0.5), 90.0)
+        else:
+            painter.setFont(self.fonts["small"])
+            painter.setPen(theme.text_muted)
+            painter.drawText(QRectF(self.area_margin, self.area_margin, self.temp_map_size, self.temp_map_size),
+                             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.no_map_text())
 
     def draw_corner_numbers(self, painter: QPainter):
         """Official corner numbers (or names) in badges outside their bend"""

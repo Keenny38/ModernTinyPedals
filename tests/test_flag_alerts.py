@@ -29,6 +29,7 @@ def keep_minfo(ui_env, monkeypatch):
     monkeypatch.setattr(minfo.mapping, "pitSpeedLimit", 0.0)
     monkeypatch.setattr(minfo.vehicles, "finishTimeOffset", 0.0)
     monkeypatch.setattr(minfo.vehicles, "finishLapOffset", 0.0)
+    monkeypatch.setattr(minfo.vehicles, "finishLapOffsetLeader", 0.0)
 
 
 def chips(widget) -> dict:
@@ -106,6 +107,26 @@ def test_last_lap_timed_race(monkeypatch):
     assert on_last_lap(True)
     reader(monkeypatch, "session", "remaining", 130.0)
     assert not on_last_lap(True)
+
+
+def test_last_lap_timed_race_extra_lap(monkeypatch):
+    """Timed race: leader crosses the line after the player once the timer ended, player does one more lap"""
+    reader(monkeypatch, "session", "in_race", True)
+    reader(monkeypatch, "session", "finish_type", False)
+    completed_laps(monkeypatch, 5)
+    reader(monkeypatch, "lap", "progress", 0.5)
+    reader(monkeypatch, "timing", "current_laptime", 50.0)
+    monkeypatch.setattr(minfo.delta, "lapTimePace", 100.0)
+    reader(monkeypatch, "session", "remaining", 30.0)
+    monkeypatch.setattr(minfo.vehicles, "finishLapOffsetLeader", 1.0)
+    assert not on_last_lap(True)  # timer ends during this lap, flag on the next one
+    reader(monkeypatch, "session", "remaining", 0.0)
+    reader(monkeypatch, "lap", "progress", 0.9)
+    assert not on_last_lap(True)  # timer ended, player still ahead of leader
+    completed_laps(monkeypatch, 6)
+    reader(monkeypatch, "lap", "progress", 0.1)
+    monkeypatch.setattr(minfo.vehicles, "finishLapOffsetLeader", 0.0)  # leader now ahead on track
+    assert on_last_lap(True)
 
 
 def test_last_lap_chip(widgets, monkeypatch):

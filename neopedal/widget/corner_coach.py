@@ -140,8 +140,8 @@ class CornerCoachMixin:
             self.track_time = now
             self.track = lap_folder_name(api.read.session.combo_name())
         self.loader.poll(self.track, now, api.read.lap.track_length())
-        mapping = minfo.mapping
-        self.prepared.poll(self.loader.trace, self.track, mapping.coordinates, mapping.elevations)
+        track_map = minfo.mapping.trackMap  # taken once: coordinates & distances of the same map
+        self.prepared.poll(self.loader.trace, self.track, track_map.coordinates, track_map.elevations)
         return self.prepared.reference
 
     def demo_reference(self) -> CoachReference:

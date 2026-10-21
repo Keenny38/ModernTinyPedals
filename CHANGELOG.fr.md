@@ -3,6 +3,108 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.27.0 (2026-10-21)
+
+Une nouvelle page d'accueil avec le débrief de ta dernière session, une page Nouveautés plus riche, une page Overlays plus vivante, le circuit officiel de Le Mans Ultimate sur la carte dès les premiers mètres, un calculateur de course qui suit la vraie course (pilotes, pénalités, menu des stands), de nouvelles courbes de télémétrie, des objectifs et les conditions de piste dans Statistiques pilote, et des animations plus fluides sur les écrans rapides.
+
+### Nouveautés
+
+#### La carte dès les premiers mètres (Le Mans Ultimate)
+
+- **Carte de piste** et **Navigation** affichent le circuit officiel du jeu dès qu'il répond, sans rouler un tour avant (`enable_restapi_access`, activé par défaut) :
+  - le tracé tout de suite, avec les voitures dessus ;
+  - la ligne de départ (et le profil d'**Altitude**, le Coach de virages) dès qu'une voiture roule en piste ;
+  - les lignes de secteur quand tu les franchis, puis la carte est enregistrée comme carte du circuit.
+- Un court gel de l'app ou du jeu pendant l'enregistrement d'un tour ne le perd plus : le tour est affiché avec son trou et le tour suivant sans trou est enregistré. Un vrai saut (retour au garage, partie du tour sautée) n'est toujours pas gardé.
+- Sans aucune carte, Carte de piste affiche `Carte après un tour` au lieu d'un cercle inventé.
+- rFactor 2, ou API REST désactivée : il faut toujours un tour complet.
+
+![Circuit officiel avant le premier tour](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-official-track-map.png)
+
+#### Page d'accueil
+
+- **Vérifications** : ce qui empêche les overlays de s'afficher correctement, le plus important en premier, chacun avec un bouton pour le corriger : `Jeu lancé sans données` (Le Mans Ultimate ouvert avec les plugins désactivés), `Jeu non lancé`, `Forçage de l'état actif activé`, `Aucun overlay activé`, `Mode spectateur activé`, `Enregistrement des tours désactivé`, `Mise à jour disponible`. Quand tu roules et que tout va bien : `Prêt`.
+- **`Débrief de session`** de ta dernière session : meilleur tour face à ton record, rythme et régularité, meilleur tour théorique, carburant par tour, et `À travailler` : les trois virages où tu perds le plus de temps, avec la cause probable (`Freine 6 m plus tôt`, `Vitesse minimale inférieure de 4 km/h`...). **Clique sur un virage** pour ouvrir la télémétrie dessus, courbes zoomées ; `Voir la télémétrie` ouvre les deux tours. Ton objectif de temps (Statistiques pilote) avec une barre de progression.
+- `Changer de preset` depuis la carte du preset, la dernière session ouvre son circuit et sa voiture dans Statistiques pilote, la carte du jeu ouvre les options de l'API.
+- **Carte pilote** : évolution depuis ton Driver Rank et Safety Rank précédents, et une courbe de chaque rang dans le temps.
+- La page est maintenant dessinée en Qt Quick (1 à 3 colonnes) et ne lit le jeu et les fichiers que lorsqu'elle est affichée.
+
+![Page d'accueil avec le débrief de session](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-home-page.png)
+
+#### Page Nouveautés
+
+- Les notes de version telles qu'elles sont écrites : groupes (`Nouveautés`, `Améliorations`, `Corrections`), une carte par sujet, les sous-points, et les **captures d'écran** du journal dans leur carte (clique pour agrandir, les flèches passent aux autres).
+- **Versions sautées** : les notes de chaque version depuis celle installée (jusqu'à 12), avec des pastilles pour aller à une version.
+- `Rechercher dans les notes` (`Ctrl+F`), et le menu des versions affiche n'importe quelle version plus ancienne, hors ligne.
+- **Les noms d'options sont des liens** : un clic ouvre cette option. Un sujet qui nomme un overlay propose de l'essayer (il l'active), puis ses options.
+- **Après une mise à jour**, la page s'ouvre une fois au premier démarrage de la nouvelle version (`show_release_notes_after_update`, ou l'interrupteur `Afficher après chaque mise à jour` de la page).
+
+![Page Nouveautés](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-whats-new-page.png)
+
+#### Page Overlays
+
+- **Les aperçus s'animent au survol** : l'overlay tourne sur une course simulée qui enchaîne un virage en boucle.
+- **Vue écran** : les overlays lancés à leur place sur tes écrans, chevauchements entourés ; fais-en glisser un pour le déplacer (`Annuler`), clique dessus pour ses options.
+- Pastilles **`Favoris`** (étoile d'une carte, `Ctrl+F`) et **`Modifiés récemment`**, bouton de **tri** (nom, activés d'abord, catégorie) ; un overlay activé ou désactivé reste à sa place.
+- Ce que montre chaque overlay, dans son infobulle et dans la liste compacte ; badges pour les overlays affichés seulement dans certaines sessions (`Course`, `Aux stands`...) ou seulement sur le stream ou l'écran.
+- Le **preset** chargé en haut : clique dessus pour en charger un autre.
+- Activer ou désactiver beaucoup d'overlays d'un coup se fait en une étape (un enregistrement, un redémarrage des modules).
+- **Options des overlays** : l'aperçu fait tourner l'overlay sur la course simulée (pédales, vitesse, rapport, G, freins qui chauffent, charges), avec un bouton lecture / pause dessous ; les overlays qui montrent un exemple fixe restent immobiles.
+
+![Page Overlays avec favoris, badges et preset](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-page.png)
+
+![Vue écran de la page Overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-screen-view.png)
+
+#### Calculateur de course
+
+- **Course en direct avec les vrais pilotes** : le pilote dans la voiture et le temps de conduite de chaque relais viennent de la course (ordre de l'équipe LMU), avec les **pénalités** à purger et une **réparation** en attente dans le recalcul.
+- **Où tu ressors** (sous `Rivaux de la catégorie`) : place dans la catégorie et écarts si tu t'arrêtes à la fin de ce tour.
+- **`Menu des stands`** (LMU, en session) : règle le ravitaillement du prochain arrêt dans le menu des stands du jeu (énergie virtuelle pour une voiture qui l'utilise, sinon carburant).
+- **`Risque de voiture de sécurité`** : probabilité d'une voiture de sécurité sur la course, la partie de la course où elle fait gagner un arrêt, et pour chaque relais s'il faut s'arrêter sous voiture de sécurité (`Fréquence par heure`).
+- **Rythme des pneus** : `Perte de rythme des pneus usés` (pneus changés quand ça paie), écart de temps au tour de chaque gomme (bouton engrenage du stock de pneus), et **`Comparaison des gommes`** de toute la course en tendres, mediums, durs.
+- **Température** : `Temps au tour par °C` avec la `Tendance de température` des prévisions météo (onglet `Direct`).
+- **Minimums de conduite** impossibles à caser dans la course : indiqués sur la carte `Temps de conduite` au lieu d'être planifiés en relais d'un tour ; un pilote en dessous de son minimum roule des tours entiers jusqu'à l'atteindre.
+- Overlay **Plan de course** : `enable_live_consumption` (activé par défaut) planifie la fin de course avec le temps au tour et la consommation de tes derniers tours de course, même page fermée.
+- Objectif d'économie, comparaisons de stratégies et de gommes, et risque de voiture de sécurité sont calculés en arrière-plan : la saisie reste fluide sur une longue course.
+
+#### Visionneuse de télémétrie
+
+- **Nouvelles courbes** : coupure de l'accélérateur et du frein par les aides au pilotage, équilibre aéro, assiette, vitesse des amortisseurs (préréglages `Aides au pilotage` et `Aéro`), et marques de **talonnage** sur la carte.
+- **`enable_100hz_lap_recording`** (désactivé par défaut) : un point toutes les 10 ms au lieu de 20 ms ; les nouveaux tours gardent aussi les pédales après les aides au pilotage, l'appui aéro avant et arrière et le carrossage.
+- **Notes de piste** : `Ajouter une note de piste ici` sur les courbes ; ce sont les notes de l'overlay Notes de piste (une note ajoutée ici s'affiche en jeu).
+- **`Partager le tour...`** : un seul fichier `.csv.gz` pour un autre pilote, qui l'ajoute avec `Ajouter un fichier...` (affiché « partagé par » toi).
+- Onglet **Session** : temps des secteurs, ou pour un virage la vitesse minimale, le point de freinage ou le temps dans le virage de chaque tour.
+- Exports `CSV, partie visible...`, `CSV, passage A ↔ B...` et MoTeC entre les marqueurs.
+- Un tour lu depuis sa copie binaire ne charge que les courbes affichées : environ la moitié de la mémoire par tour.
+
+#### Statistiques pilote
+
+- **Conditions de piste** de chaque session (piste sèche ou mouillée, température de la piste, gomme), position de départ et en ligne ou hors ligne : filtre par **piste**, **serveur** ou **depuis une version du jeu**, avec un **record sur le mouillé** et un **record de la dernière version du jeu**.
+- **`Objectif de temps`** par voiture (proposé d'après le niveau communautaire suivant) : barre de progression, ligne d'objectif sur la courbe de progression, un message une fois battu.
+- **Places gagnées**, taux et série de **courses propres**, **`Rivaux`** croisés dans plusieurs courses en ligne, historique des rangs.
+- **Recherche** dans le tableau, **filtre de catégorie**, `Grouper les véhicules par catégorie` ; combinaisons non roulées depuis 30 jours signalées ; activité de n'importe quelle année avec le temps de conduite **par circuit et par catégorie** (`Répartition`).
+- `Prochaines courses officielles (RaceControl)` (désactivé par défaut) avec tes meilleurs tours sur leur circuit.
+- **Partage** de ton record en image ou en code à coller dans un chat (`Copier la carte du record`, `Copier le code du record`, `Comparer un code de record...`).
+
+![Statistiques pilote : objectif, filtres et record sur le mouillé](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-goal-filters.png)
+
+![Statistiques pilote : temps de conduite par circuit et par catégorie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-all-tracks.png)
+
+### Améliorations
+
+- **Animations plus fluides** : les pages s'animent et défilent à la fréquence de l'écran (jusqu'à 125 images par seconde sur un écran 240 Hz, 143 en 144 Hz) au lieu de 62 (Windows).
+- **Couleurs des temps au tour et des secteurs** (Classement, Relatif, Rivaux et secteurs de Carte de piste, design moderne) : violet pour le meilleur de la catégorie, y compris les secteurs du tour en cours, donc un secteur battu en plein tour est tout de suite le seul violet ; vert pour un record personnel dès qu'il est fait ; un dernier tour valide plus lent est jaune.
+- **Chrono du tour en cours** pour toutes les voitures, même celles sans télémétrie, et quand ta propre télémétrie est figée (garage, moniteur, spectateur).
+- **De vraies sessions de jeu rejouées** dans les tests automatiques, à travers chaque module de données et chaque overlay, et comparées aux valeurs du jeu.
+
+### Corrections
+
+- **Carburant** : le tour rejoint en cours de route (app lancée ou preset chargé en piste) comptait comme un tour complet, avec une consommation partielle dans l'historique et le calculateur de course.
+- **Drapeau** : en course au temps, l'alerte de dernier tour s'allume aussi pour le tour supplémentaire quand le leader passe la ligne après toi.
+- **Carte de piste, Navigation, Altitude, Coach de virages** : la carte est lue d'un seul bloc, jamais à moitié l'ancienne et à moitié la nouvelle pendant qu'elle est remplacée.
+- **Démarrage** : la fenêtre n'affiche plus une première image aux couleurs par défaut de Windows (gris avec la couleur d'accent) avant le thème de l'app.
+- Libellés des boutons et en-têtes de colonne courts (`PB`) qui ne sont plus coupés pour une fraction de pixel.
+
 ## 0.26.0 (2026-10-19)
 
 Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en ligne, de nouvelles alertes de drapeau, des panneaux plus sombres, deux overlays de TinyPedal 2.51, et trois audits des bugs, des performances et de l'interface.

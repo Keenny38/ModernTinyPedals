@@ -27,44 +27,46 @@ race (plan of the rest of the race) & race plan files.
 Every input change calculates at once (one calculation per change, see batch), scenarios
 (saving target, strategy comparison, safety car & rain against none) once quick changes settle.
 Dialogs, toasts & undo history belong to the page hosting the QML view (RaceHost).
+
+Parts of the page are mixins of RaceBackend sharing its state (base: race_base.RaceBase): data source & files
+(race_files), consumption history & team stints (race_history), tyre tab & undo (race_tyre_tab), live tab
+(race_live_tab). This module keeps page state, properties, results, inputs & calculation.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import os
 import time
 import weakref
-from collections import Counter, deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import replace
 from functools import partial
 from typing import Any, Protocol
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
-from ... import app_signal, game_rest, units
+from ... import app_signal, units
 from ... import calculation as calc
 from ...api_control import api
-from ...const_file import ConfigType, FileExt, FileFilter
+from ...const_file import ConfigType
 from ...fuel_strategy import (
     MAX_DRIVERS,
     RaceState,
     Strategy,
     StrategyInput,
+    compare_compounds,
     compare_strategies,
     consumption,
+    copy_strategy,
     driver_table_text,
     estimate_pace,
-    full_tank_laps,
     history_laps,
     plan,
     remaining_input,
     representative_laps,
     reserves,
+    safety_car_risk,
     saving_input,
     saving_target,
     strategy_input_from_values,
@@ -72,119 +74,73 @@ from ...fuel_strategy import (
 from ...game_rest import GameRequest
 from ...i18n import tr, trm
 from ...module_info import ConsumptionDataSet, minfo
-from ...process.team_usage import StintUsage, combine_usage, driver_usage, parse_usage, stint_usage, tank_capacity
-from ...process.team_usage import tyre_allocation as game_tyre_allocation
+from ...process.team_usage import StintUsage
 from ...race_live import RivalTracker, StopCounter
-from ...race_live import clock as race_clock
-from ...race_live import read_race_state as read_live
-from ...race_live_data import GARAGE_RESOURCES, GarageData, LiveValue, collect_rain, parse_garage
-from ...race_live_data import collect as collect_live
+from ...race_live_data import GARAGE_RESOURCES, GarageData, LiveValue
 from ...setting import cfg
-from ...userfile import atomic_path, atomic_write, write_text_file
-from ...userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
 from ...userfile.tyre_strategy import (
     DEFAULT_TYRE_SET,
-    HEADER_TYREPLAN,
-    export_tyre_strategy_file,
-    load_tyre_strategy_file,
-    save_tyre_strategy_file,
-    validate_tyre_strategy,
 )
-from ..file_drop import DROP_HISTORY, DROP_RACE_PLAN, DROP_TYRE_PLAN, race_file_kind
 from . import race_results as results
-from .formatting import clock_seconds
 from .game_pictures import LogoCache, notifier
 from .models import DictListModel
 from .page_backend import PageBackend
+from .race_base import TABS
+from .race_files import (  # noqa: F401  (re-exported)
+    MAX_RECENT,
+    RECENT_OPTIONS,
+    RECENT_SEPARATOR,
+    RaceFiles,
+    missing_files_of,
+    network_path,
+    same_file,
+)
+from .race_history import (  # noqa: F401  (re-exported)
+    COLUMN_OPTION_TITLES,
+    HISTORY_COLUMNS,
+    TEAM_COLUMNS,
+    USAGE_RESOURCES,
+    HistoryTeam,
+    file_stamp,
+    history_signature,
+    read_team_usage,
+    without_laps,
+    write_history,
+)
+from .race_live_tab import FILLED_KEYS, LIVE_GROUPS, LIVE_PART_SIGNALS, LiveTab  # noqa: F401  (re-exported)
 from .race_model import DRIVER_SPECS as DRIVER_INPUT_SPECS
 from .race_model import (
     INPUT_SPECS,
-    INVALID_COLOR,
-    PLAN_FILE,
-    RACE_PLAN_FORMAT,
-    RACE_PLAN_FORMATS,
-    RACE_PLAN_VERSION,
-    RACE_SESSION,
     SAVED_INPUTS,
-    checked_inputs,
     clamp_input,
     clamp_number,
     clock_text,
-    convert_fuel_inputs,
     day_time_text,
     driver_rows,
     input_spec,
     laptime_text,
-    live_race_length,
     parse_laptime,
     parse_start_time,
-    plan_markdown,
     ranged_inputs,
     start_time_text,
     unit_text,
-    write_plan_csv,
 )
+from .race_tyre_tab import TyreTab
 from .race_tyres import (
-    AUTOSAVE_NAME,
     MEASURED_DEFAULT,
-    WHEELS,
     TyrePlan,
-    save_tyre_strategy_file_path,
-    set_tyre_strategy_file_path,
-    tread_color,
 )
-
-logger = logging.getLogger(__name__)
 
 SCENARIO_DELAY_MS = 150  # quick input changes (arrow held): scenarios calculated once settled
+SCENARIO_JOBS = True  # scenarios calculated on a worker thread (only the newest handed over), False: at once
 LIVE_REFRESH_MS = 2000  # live history check, live race state, rivals
 TEAM_REFRESH_MS = 15000  # game asked again while team tab shown
 GARAGE_REFRESH_MS = 10000  # LMU garage screens asked again while live tab shown or inputs follow live
 SAVE_DELAY_MS = 500  # tyre plan autosave & plan input of race plan widget, once changes settle
-USAGE_RESOURCES = ("/rest/strategy/usage", "/rest/garage/UIScreen/RepairAndRefuel")
 TYRE_SCREEN = ("/rest/garage/UIScreen/TireManagement",)
-TABS = ("fuel", "tyres", "team", "live")
-LIVE_GROUPS = (  # live tab groups: key, title
-    ("race", "Race"), ("pace", "Pace & Consumption"), ("start", "Race Start"), ("pit", "Pit Stop"),
-    ("tyres", "Tyres"), ("weather", "Weather"),
-)
-FILLED_KEYS = frozenset((  # live values Load Live & Follow Live fill in from laps (fill_in_data)
-    "race_length", "input_lap_time", "input_fuel_per_lap", "input_energy_per_lap", "input_wear_per_lap",
-    "input_tank_capacity",
-))
-HISTORY_COLUMNS = (  # key, title, option of config "fuel_calculator" (always shown if none), selectable
-    ("lap", "Lap", ""),
-    ("time", "Time", ""),
-    ("fuel", "Fuel", ""),
-    ("energy", "Energy", ""),
-    ("ratio", "F/E Ratio", "show_column_fuel_ratio"),
-    ("drain", "Drain", "show_column_battery_drain"),
-    ("regen", "Regen", "show_column_battery_regen"),
-    ("net", "Net", "show_column_battery_net_change"),
-    ("tyre", "Tyre", "show_column_tyre_wear"),
-    ("tank", "Tank", "show_column_tank_capacity"),
-)
-COLUMN_OPTION_TITLES = {  # history column menu (option name made readable, as before)
-    "show_column_fuel_ratio": "Fuel Ratio",
-    "show_column_battery_drain": "Battery Drain",
-    "show_column_battery_regen": "Battery Regen",
-    "show_column_battery_net_change": "Battery Net Change",
-    "show_column_tyre_wear": "Tyre Wear",
-    "show_column_tank_capacity": "Tank Capacity",
-}
-TEAM_COLUMNS = ("Driver", "Stint", "Laps", "Laps counted", "Fuel", "Energy", "Tyre")
 HISTORY_ROLES = ("serial", "valid", "cells", "selected")
 TEAM_ROLES = ("key", "number", "enabled", "cells", "selected")  # number: of stint in team_stints
 LIVE_ROLES = ("key", "header", "title", "game", "calc", "source", "tip", "known", "auto", "followed", "differs")
-LIVE_PART_SIGNALS = {"status": "liveDataStatusChanged", "busy": "liveBusyChanged", "differing": "liveDifferingChanged",
-                     "tyres": "liveTyresChanged", "race": "liveRaceChanged"}
-RECENT_OPTIONS = {  # files opened or saved last (newest first), option of config "fuel_calculator" by kind
-    DROP_HISTORY: "recent_history_file_names",
-    DROP_RACE_PLAN: "recent_race_plan_file_names",
-    DROP_TYRE_PLAN: "recent_tyre_plan_file_names",
-}
-MAX_RECENT = 8
-RECENT_SEPARATOR = "|"  # never in a Windows file name
 
 
 class RaceHost(Protocol):
@@ -205,67 +161,37 @@ class RaceHost(Protocol):
     def is_page_visible(self) -> bool: ...
 
 
-def file_stamp(full_path: str) -> tuple[int, int] | None:
-    """Modified time & size of a file, None if missing"""
-    try:
-        stat = os.stat(full_path)
-    except OSError:
-        return None
-    return stat.st_mtime_ns, stat.st_size
-
-
-def write_history(filepath: str, filename: str, extension: str, laps: Sequence[ConsumptionDataSet]) -> bool:
-    """Consumption history file rewritten with laps kept, removed when none left,
-    False if file left as it was (locked by another program, read-only)"""
-    full_path = f"{filepath}{filename}{extension}"
-    if not laps:
-        try:
-            if os.path.exists(full_path):
-                os.remove(full_path)
-        except OSError:
-            return False
-        return True
-    dataset = list(laps) if len(laps) > 1 else [*laps, ConsumptionDataSet()]  # placeholder: skipped on load
-    stamp = file_stamp(full_path)
-    save_consumption_history_file(dataset=dataset, filepath=filepath, filename=filename, extension=extension)
-    return file_stamp(full_path) != stamp  # failed save only logged: file not replaced
-
-
-def history_signature(dataset: Sequence[ConsumptionDataSet]) -> tuple:
-    return (len(dataset), dataset[0] if dataset else None)
-
-
-def without_laps(history: Sequence[ConsumptionDataSet], removed: Sequence[ConsumptionDataSet],
-                 ) -> deque[ConsumptionDataSet]:
-    """Live history (newest lap first) less removed laps (each once) as a new data set: stint module & overlays
-    may be iterating current one (copy on write, never changed in place), same length limit, placeholder if no
-    lap left (stint module reads first entry: never empty)"""
-    left = Counter(removed)
-    kept = []
-    for lap in history:
-        if left[lap] > 0:
-            left[lap] -= 1
-        else:
-            kept.append(lap)
-    return deque(kept if history_laps(kept) else [ConsumptionDataSet()],
-                 history.maxlen if isinstance(history, deque) else None)
-
-
-def same_file(path: str, other: str) -> bool:
-    return os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(other))
-
-
-def network_path(path: str) -> bool:
-    """UNC path (network share): checking it may wait seconds for a server gone (never on the UI thread)"""
-    return path.startswith(("\\\\", "//"))
-
-
-def missing_files_of(serial: int, paths: Sequence[str]) -> tuple[int, set[str]]:
-    """Paths that are not files, with the serial given (worker thread: network shares)"""
-    return serial, {path for path in paths if not os.path.isfile(path)}
-
-
 _active: weakref.ReferenceType | None = None  # backend of the open Race Calculator page (hotkey, palette, rail)
+
+
+def scenario_results(strategy: Strategy, plan_setup: StrategyInput, setup: StrategyInput, laps_target: int,
+                     safety_car: bool, rain: bool, symbol_fuel: str,
+                     compounds: tuple[tuple[str, float, float, float], ...] = (), compound: str = "",
+                     sc_risk: float = 0.0, sc_laps: int = 0) -> dict:
+    """Saving target, strategies compared, safety car & rain against none, race on each compound,
+    safety car risk (no Qt: worker thread)"""
+    has_energy = setup.energy_per_lap > 0
+    ready = strategy.ready
+    target = saving_target(plan_setup, strategy)
+    aimed = None
+    if laps_target > 0 and ready:
+        aimed_setup = saving_input(plan_setup, laps_target)
+        aimed = (aimed_setup, plan(aimed_setup))
+    scenarios = results.saving_texts(strategy, plan_setup, setup, target, aimed, symbol_fuel)
+    variants = compare_strategies(plan_setup, strategy) if ready and strategy.feasible else []
+    scenarios["comparison"] = results.comparison(variants, has_energy, symbol_fuel)
+    for name, enabled, without_input in (
+        ("safetyCar", safety_car, replace(plan_setup, sc_lap=0, sc_laps=0, sc_pit=False)),
+        ("rain", rain, replace(plan_setup, rain_lap=0, rain_tyres=False)),
+    ):
+        without = plan(without_input) if enabled and ready else None
+        scenarios[name] = results.scenario_text("rain" if name == "rain" else "sc", strategy, without) \
+            if enabled else ""
+    plans = compare_compounds(plan_setup, compounds) if ready and strategy.feasible else []
+    scenarios["compounds"] = results.compound_comparison(plans, compound)
+    risk = safety_car_risk(plan_setup, strategy, sc_risk, sc_laps) if sc_risk > 0 else None
+    scenarios["risk"] = results.safety_car_risk_view(risk, sc_risk > 0)
+    return scenarios
 
 
 def race_page() -> RaceBackend | None:
@@ -279,16 +205,7 @@ def race_status() -> str:
     return "" if backend is None else "on" if backend.game_data else "off"
 
 
-def read_team_usage(resources: Sequence[str]) -> tuple[list[StintUsage] | None, float]:
-    """Team request work (background thread): stints of strategy usage (None if no answer) & tank capacity
-    (liters) of repair & refuel screen, parsed off the UI thread (whole race of every driver late in a 24 h race)"""
-    usage, refuel = (game_rest.request_game(resource) for resource in resources)
-    if usage is None:
-        return None, 0.0
-    return stint_usage(parse_usage(usage)), tank_capacity(refuel)
-
-
-class RaceBackend(PageBackend):
+class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     """Race calculator state for QML, see module docstring"""
 
     inputsChanged = Signal()
@@ -835,26 +752,28 @@ class RaceBackend(PageBackend):
             wear_per_lap=setup.wear_per_lap * link.wear_factor(),
         )
 
-        def tyre_times() -> tuple[float, ...]:  # proposed changes cost 4 tyres until tyres are planned
-            return tuple(link.stop_change_times()) if link.has_tyres() else ()
+        def tyre_times() -> tuple[tuple[float, ...], tuple[float, ...]]:
+            """(change time of each stop, compound pace of each stint): proposed changes cost 4 tyres
+            until tyres are planned"""
+            return (tuple(link.stop_change_times()) if link.has_tyres() else ()), link.stint_pace()
 
-        extra = tyre_times()
-        strategy = plan(replace(setup, stop_extra_seconds=extra))
+        extra, pace = tyre_times()
+        strategy = plan(replace(setup, stop_extra_seconds=extra, stint_pace=pace))
         rows_changed = False
         if self.race_state is None:
             for _ in range(3):
                 rows_changed |= link.set_stints(strategy)
-                new_extra = tyre_times()
-                if new_extra == extra:
+                new_extra, new_pace = tyre_times()
+                if (new_extra, new_pace) == (extra, pace):
                     break
-                extra = new_extra
-                strategy = plan(replace(setup, stop_extra_seconds=extra))
+                extra, pace = new_extra, new_pace
+                strategy = plan(replace(setup, stop_extra_seconds=extra, stint_pace=pace))
             else:
                 rows_changed |= link.set_stints(strategy)
         if rows_changed:
             self.tyresChanged.emit()
             self._autosave_timer.start()
-        self.race_setup = self.plan_setup = replace(setup, stop_extra_seconds=extra)
+        self.race_setup = self.plan_setup = replace(setup, stop_extra_seconds=extra, stint_pace=pace)
         self.race_strategy = strategy
         self.proposed_tyre_rows = [index for index, stop in enumerate(strategy.stops, 1) if stop.tyres]
         changes = link.stop_tyre_changes()
@@ -920,7 +839,7 @@ class RaceBackend(PageBackend):
             "fuelRatio": f"{fuel_ratio:.3f}" if has_energy else results.DASH,
         })
         self.publish("tiles", results.key_figures(strategy, setup, self.symbol_fuel, self.is_gallon, tyre_status))
-        self.publish("summary", results.summary(strategy, self.race_state))
+        self.publish("summary", results.summary(strategy, self.race_state, setup.pit_seconds))
         self.publish("timeline", results.timeline(strategy, drivers, self.symbol_fuel, self.time_text))
         self.publish("fuelLevels", results.fuel_levels(strategy, plan_setup, has_fuel))
         self.publish("plan", {
@@ -958,27 +877,22 @@ class RaceBackend(PageBackend):
 
     def update_scenarios(self):
         """Saving target (and one stop less of details), strategies compared, safety car & rain
-        against none"""
-        strategy, plan_setup = self.strategy, self.plan_setup
-        setup = self.strategy_input()
-        has_energy = setup.energy_per_lap > 0
-        ready = strategy.ready
-        target = saving_target(plan_setup, strategy)
-        laps_target = self.values["input_target_stint_laps"]
-        aimed = None
-        if laps_target > 0 and ready:
-            aimed_setup = saving_input(plan_setup, laps_target)
-            aimed = (aimed_setup, plan(aimed_setup))
-        scenarios = results.saving_texts(strategy, plan_setup, setup, target, aimed, self.symbol_fuel)
-        variants = compare_strategies(plan_setup, strategy) if ready and strategy.feasible else []
-        scenarios["comparison"] = results.comparison(variants, has_energy, self.symbol_fuel)
-        for name, enabled, without_input in (
-            ("safetyCar", self.values["enable_safety_car"], replace(plan_setup, sc_lap=0, sc_laps=0, sc_pit=False)),
-            ("rain", self.values["enable_rain"], replace(plan_setup, rain_lap=0, rain_tyres=False)),
-        ):
-            without = plan(without_input) if enabled and ready else None
-            scenarios[name] = results.scenario_text("rain" if name == "rain" else "sc", strategy, without) \
-                if enabled else ""
+        against none: many plans (10 to 40 ms for a long race), on a worker thread"""
+        wear = self.values["input_wear_per_lap"]
+        compounds = tuple((name, pace, wear * factor, tread)
+                          for name, pace, factor, tread in self.tyres.compound_options())
+        work = partial(scenario_results, copy_strategy(self.strategy), self.plan_setup, self.strategy_input(),
+                       self.values["input_target_stint_laps"], bool(self.values["enable_safety_car"]),
+                       bool(self.values["enable_rain"]), self.symbol_fuel, compounds, self.tyres.compound,
+                       self.values["input_sc_risk"] if self.values["enable_sc_risk"] else 0.0,
+                       int(self.values["input_sc_laps"]))
+        if SCENARIO_JOBS:
+            self.jobs.run("race scenarios", work, self.scenarios_done, key="scenarios")
+        else:
+            self.scenarios_done(work())
+
+    def scenarios_done(self, scenarios: dict):
+        """Scenarios of the newest plan shown (UI thread)"""
         self.publish("scenarios", scenarios)
         details = self.sections.get("details")
         if details:  # one stop less in details
@@ -1070,192 +984,12 @@ class RaceBackend(PageBackend):
             "Not enough laps: stints of 3 laps or more at race pace needed")
         self.notesChanged.emit()
 
-    # Data source: live session or file
-    def set_source(self, live: bool, name: str):
-        self.live_source = live
-        self.source_name = name
-        self.headerChanged.emit()
-
-    @Slot()
-    def loadLive(self):
-        """Laps of live session, race length of a live race and every live value followed (live tab)
-        filled in, LMU garage screens asked (filled in once answered)"""
-        if self.game_data_refused():
-            return
-        with self.batch():
-            self.show_live_data(fill_inputs=True)
-            self.apply_live(followed=True)
-        self.set_plan_inputs(False)
-        self.refresh_garage(apply=True)
-
-    def show_live_data(self, fill_inputs: bool):
-        """History of live session in table, inputs filled in from it (and race length) or kept"""
-        history_data = history_laps(minfo.history.consumptionDataSet)
-        self._live_signature = history_signature(history_data)
-        if fill_inputs:
-            self.fill_in_data(history_data, live_race_length(), skip=self.unfollowed_live())
-        self.refresh_history(history_data)
-        self.set_source(True, api.read.session.combo_name())
-
-    @Slot()
-    def loadFile(self):
-        """Laps of a consumption history file (or CSV file)"""
-        filename_full = self.host.open_file(cfg.path.fuel_delta, ";;".join((FileFilter.CONSUMPTION, FileFilter.CSV)))
-        if filename_full:
-            self.load_history_file(filename_full)
-
-    def load_history_file(self, filename_full: str) -> bool:
-        """Laps of a consumption history file (or CSV file) in table & filled in, True once loaded"""
-        filepath = os.path.dirname(filename_full) + "/"
-        filename, extension = os.path.splitext(os.path.basename(filename_full))
-        history_data = history_laps(load_consumption_history_file(
-            filepath=filepath, filename=filename, extension=extension))
-        if not history_data:
-            self.forget_recent(DROP_HISTORY, filename_full)
-            self.host.warn(trm(f"Unable to read consumption history: {filename}{extension}"))
-            return False
-        self.fill_in_data(history_data, live=False)
-        self.refresh_history(history_data)
-        self.history_file = (filepath, filename, extension)
-        self.set_source(False, filename)
-        self.set_plan_inputs(False)
-        self.remember_recent(DROP_HISTORY, filename_full)
-        return True
-
-    # Files opened or saved last (Recent menus), files dropped on page
-    @staticmethod
-    def read_recent() -> dict[str, list[str]]:
-        """Recent files of each kind kept in config (newest first), missing files left out (network shares kept:
-        checked in background, see check_network_recent)"""
-        config = cfg.user.config["fuel_calculator"]
-        recent = {}
-        for kind, option in RECENT_OPTIONS.items():
-            value = config.get(option, "")
-            paths = value.split(RECENT_SEPARATOR) if isinstance(value, str) else []
-            recent[kind] = [path for path in paths
-                            if path and (network_path(path) or os.path.isfile(path))][:MAX_RECENT]
-        return recent
-
-    def check_network_recent(self):
-        """Files of Recent menus on network shares checked on a worker thread, missing ones then left out"""
-        paths = tuple({path for paths in self._recent.values() for path in paths if network_path(path)})
-        if paths:
-            # Serial in the result: done callback a bound method (held weakly, never keeps the page alive)
-            self.jobs.run("recent files", partial(missing_files_of, self._recent_serial, paths),
-                          self.network_recent_checked, key="recent")
-
-    def network_recent_checked(self, result: tuple[int, set[str]]):
-        """Network check over: missing files out of their menu (unless a file was opened or saved meanwhile:
-        checked again at next menu opening)"""
-        serial, missing = result
-        if not missing or serial != self._recent_serial:
-            return
-        for kind, paths in list(self._recent.items()):
-            kept = [path for path in paths if path not in missing]
-            if kept != paths:
-                self.keep_recent(kind, kept)
-
-    def keep_recent(self, kind: str, paths: list[str]):
-        """Recent files of a kind kept for next time, Recent menus told if changed"""
-        paths = paths[:MAX_RECENT]
-        changed = paths != self._recent.get(kind)
-        self._recent[kind] = paths
-        config = cfg.user.config["fuel_calculator"]
-        value = RECENT_SEPARATOR.join(paths)
-        if config.get(RECENT_OPTIONS[kind]) != value:
-            config[RECENT_OPTIONS[kind]] = value
-            cfg.save(config_type=ConfigType.CONFIG)
-        if changed:
-            self.recentChanged.emit()
-
-    def remember_recent(self, kind: str, filename_full: str):
-        """File opened or saved: first of its Recent menu"""
-        path = os.path.abspath(filename_full).replace("\\", "/")
-        self._recent_serial += 1  # network check running: may have missed this file (saved meanwhile)
-        self.keep_recent(kind, [path, *(item for item in self._recent.get(kind, []) if not same_file(item, path))])
-
-    def forget_recent(self, kind: str, filename_full: str):
-        """File missing or unreadable: out of its Recent menu"""
-        paths = self._recent.get(kind, [])
-        if any(same_file(item, filename_full) for item in paths):
-            self.keep_recent(kind, [item for item in paths if not same_file(item, filename_full)])
-
+    # Recent files (race_files) & page options
     @Property(dict, notify=recentChanged)
     def recentFiles(self) -> dict:
         """Recent files of each kind (history, race_plan, tyre_plan): list of path & name, newest first"""
         return {kind: [{"path": path, "name": os.path.basename(path)} for path in paths]
                 for kind, paths in self._recent.items()}
-
-    @Slot()
-    def refreshRecent(self):
-        """Recent menu about to open: files deleted or moved meanwhile left out (network shares: once checked)"""
-        recent = self.read_recent()
-        for kind, paths in recent.items():
-            if paths != self._recent.get(kind):
-                self.keep_recent(kind, paths)
-        self.check_network_recent()
-
-    @Slot(str, str)
-    def openRecent(self, kind: str, path: str):
-        """File of a Recent menu opened (removed from menu if missing or unreadable)"""
-        if not os.path.isfile(path):
-            self.forget_recent(kind, path)
-            self.host.warn(trm(f"File not found: {path}"))
-            return
-        self.open_file_of_kind(kind, path)
-
-    def open_file_of_kind(self, kind: str, path: str) -> bool:
-        if kind == DROP_HISTORY:
-            return self.load_history_file(path)
-        if kind == DROP_RACE_PLAN:
-            return self.load_race_plan(path)
-        if kind == DROP_TYRE_PLAN:
-            return self.open_tyre_plan_file(path)
-        return False
-
-    @Slot(list, result=bool)
-    def canDrop(self, urls: list) -> bool:
-        """Files dragged over page: True if any can be opened (consumption history, race plan, tyre plan)"""
-        return any(race_file_kind(path) for path in self.local_paths(urls))
-
-    @Slot(list)
-    def dropFiles(self, urls: list):
-        """Files dropped on page opened like their Open action"""
-        self.open_dropped(self.local_paths(urls))
-
-    def open_dropped(self, paths: Sequence[str]) -> int:
-        """Consumption history, race plan & tyre plan files opened, other files told; files opened returned"""
-        if self.game_data_refused():
-            return 0
-        opened = 0
-        unsupported = []
-        for path in paths:
-            kind = race_file_kind(path)
-            if not kind:
-                unsupported.append(os.path.basename(path))
-            elif self.open_file_of_kind(kind, path):
-                opened += 1
-        if unsupported:
-            self.host.toast(trm(f"Unsupported file: <b>{', '.join(unsupported)}</b>"))
-        return opened
-
-    @staticmethod
-    def local_paths(urls: Sequence) -> list[str]:
-        """Local file paths of file urls (QML drop urls)"""
-        paths = []
-        for item in urls:
-            url = item if isinstance(item, QUrl) else QUrl(str(item))
-            if url.isLocalFile():
-                paths.append(url.toLocalFile())
-        return paths
-
-    @staticmethod
-    def set_plan_inputs(from_plan: bool):
-        """Inputs of a race plan (kept when page opens) or of laps (filled in from live laps)"""
-        config = cfg.user.config["fuel_calculator"]
-        if config.get("enable_plan_inputs") != from_plan:
-            config["enable_plan_inputs"] = from_plan
-            cfg.save(config_type=ConfigType.CONFIG)
 
     def set_option(self, name: str, value) -> bool:
         """Option of config "fuel_calculator" kept for next time, True if changed"""
@@ -1308,925 +1042,9 @@ class RaceBackend(PageBackend):
         names = [item for item in self.collapsed_sections() if item != name] + ([name] if collapsed else [])
         self.set_option("collapsed_sections", ",".join(names))
 
-    # Live session
-    def refresh_live(self):
-        """Every few seconds: stops counted, and while page shown: new laps, live race state,
-        plan of car & track, class rivals"""
-        if not self.game_data:
-            return
-        live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
-        if not self.active:
-            return
-        self.refresh_live_history()
-        self.refresh_race_state(live)
-        self.auto_load_combo_plan()
-        self.refresh_rivals()
-        if self.tab == TABS.index("live"):
-            self.publish_live_data()
-        combo = self.combo_name()
-        if combo != self._shown_combo:
-            self._shown_combo = combo
-            self.headerChanged.emit()
-
-    def refresh_live_history(self):
-        """New live laps added to history (inputs left as they are, or followed)"""
-        if not self.live_source:
-            return
-        history_data = history_laps(minfo.history.consumptionDataSet)
-        signature = history_signature(history_data)
-        if signature != self._live_signature:
-            self._live_signature = signature
-            self.refresh_history(history_data)
-            if cfg.user.config["fuel_calculator"].get("enable_follow_live"):
-                with self.batch():
-                    self.fill_in_data(history_data, skip=self.unfollowed_live())
-                    self.apply_live(followed=True)
-
-    def refresh_race_state(self, live=None):
-        """Rest of race planned again at each lap & stop (not while in the pits), status shown
-        next to Live Race (values read from the game in its tooltip, to check them)"""
-        if not self.game_data:  # whole race planned, nothing read
-            if (self.live_status, self.live_tip) != ("", ""):
-                self.live_status, self.live_tip = "", ""
-                self.liveChanged.emit()
-            if self._race_key is not None:
-                self._race_key = None
-                self.set_race_state(None)
-            return
-        if live is None:
-            live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
-        checked = bool(cfg.user.config["fuel_calculator"].get("enable_live_race"))
-        state: RaceState | None = live.state if checked else None
-        if not checked:
-            status = ""
-        elif state is not None:
-            status = f"{tr('from lap')} {state.laps_done + 1}" + (f" · {tr('in the pits')}" if live.in_pits else "")
-            if api.read.lap.safety_car_active():
-                status += f" · {tr('Safety Car')}"
-            elif api.read.session.yellow_flag_state() > 0:
-                status += f" · {tr('Full Course Yellow')}"
-        else:
-            status = tr("waiting for the race") if not live.text else tr("waiting for lap 1")
-        tip = (f"{tr('Lap')} (+{tr('progress')}) · {tr('race time')} / {tr('time left')} · {tr('fuel')} · "
-               f"{tr('energy')} · {tr('tread')} · {tr('stops')} ({tr('game')})<br>{live.text}" if live.text else "")
-        if (status, tip) != (self.live_status, self.live_tip):
-            self.live_status, self.live_tip = status, tip
-            self.liveChanged.emit()
-        if state is not None and live.in_pits:
-            return
-        key = (state.laps_done, state.stops_done) if state is not None else None
-        if key != self._race_key:
-            self._race_key = key
-            self.set_race_state(state)
-
-    @staticmethod
-    def race_stints() -> list:
-        """Stints of the race in progress (stint history of live session), newest first"""
-        if api.read.session.session_type() != RACE_SESSION:
-            return []
-        return [stint for stint in minfo.history.stintDataSet if stint.totalLaps > 0]
-
-    def race_stint_drivers(self) -> tuple[str, ...]:
-        """Driver of each stint of the race in progress (stops counted), oldest first"""
-        if api.read.session.session_type() != RACE_SESSION:
-            return ()
-        return self.stop_counter.stint_drivers()
-
-    def refresh_rivals(self):
-        """Cars of the player class in a live race"""
-        if api.read.session.session_type() != RACE_SESSION or not api.read.state.active():
-            rivals = results.class_rivals([], 0)
-        else:
-            rivals = results.class_rivals(self.rival_tracker.update(), full_tank_laps(self.plan_setup))
-        if rivals != self._rivals:
-            self._rivals = rivals
-            self.rivalsChanged.emit()
-
-    # Plan of car & track
-    @staticmethod
-    def combo_name() -> str:
-        return api.read.session.combo_name() if api.read.state.active() else ""
-
-    @staticmethod
-    def combo_plan_path(combo: str) -> str:
-        return f"{cfg.path.fuel_delta}{combo}{FileExt.RACEPLAN}"
-
-    @Slot()
-    def saveComboPlan(self):
-        """Race plan opened again when this car & track are driven"""
-        combo = self.combo_name()
-        if combo:
-            self.save_race_plan(self.combo_plan_path(combo))
-            self._combo_loaded = combo
-
-    @Slot(bool)
-    def setAutoComboPlan(self, checked: bool):
-        self.set_option("enable_auto_load_combo_plan", checked)
-        if checked:
-            self.auto_load_combo_plan()
-
-    def auto_load_combo_plan(self):
-        """Race plan of car & track driven opened once per car & track"""
-        if not cfg.user.config["fuel_calculator"].get("enable_auto_load_combo_plan", True):
-            return
-        combo = self.combo_name()
-        if not combo or combo == self._combo_loaded:
-            return
-        self._combo_loaded = combo
-        filename = self.combo_plan_path(combo)
-        if os.path.exists(filename) and self.load_race_plan(filename, quiet=True):
-            self.host.toast(trm(f"Race plan of {combo} opened"))
-
-    # Race plan file: race setup, fuel & tyre plan
-    def race_plan_data(self) -> dict:
-        inputs = self.input_values()
-        inputs["input_measured_compound"] = self.measured_index
-        return {
-            "format": RACE_PLAN_FORMAT,
-            "version": RACE_PLAN_VERSION,
-            "plan_name": self.tyres.name,
-            "fuel_unit": self.fuel_unit,  # of fuel inputs, converted when opened in another unit
-            "inputs": inputs,
-            "tyre_strategy": self.tyres.capture_data(),
-        }
-
-    @Slot()
-    def saveRacePlan(self):
-        self.save_race_plan()
-
-    def save_race_plan(self, filename_full: str = ""):
-        """Save race plan file (asked when no file name given, then first of Recent menu)"""
-        chosen = not filename_full
-        if chosen:
-            name = self.tyres.name or tr("Untitled plan")
-            filename_full = self.host.save_file(set_tyre_strategy_file_path(f"{name}{FileExt.RACEPLAN}"),
-                                                FileFilter.RACEPLAN)
-            if not filename_full:
-                return
-            save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
-        if not write_text_file(filename_full, json.dumps(self.race_plan_data(), indent=4)):
-            self.host.warn(trm(f"Unable to save race plan:<br><b>{filename_full}</b>"))
-            return
-        if chosen:
-            self.remember_recent(DROP_RACE_PLAN, filename_full)
-        self.host.toast(trm(f"Race plan saved at:<br><b>{filename_full}</b>"))
-
-    @Slot()
-    def openRacePlan(self):
-        self.load_race_plan()
-
-    def load_race_plan(self, filename_full: str = "", quiet: bool = False) -> bool:
-        """Open race plan file (asked when no file name given): race setup, fuel & tyre plan
-        replaced (undoable), True once opened. Opened by user (not quiet): first of Recent menu"""
-        if not filename_full:
-            filename_full = self.host.open_file(set_tyre_strategy_file_path(), FileFilter.RACEPLAN)
-            if not filename_full:
-                return False
-            save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
-        try:
-            with open(filename_full, encoding="utf-8") as file:
-                data = json.load(file)
-        except (OSError, ValueError):
-            data = None
-        if not self.apply_race_plan(data, os.path.splitext(os.path.basename(filename_full))[0]):
-            if not quiet:
-                self.forget_recent(DROP_RACE_PLAN, filename_full)
-                self.host.warn(trm(f"Invalid race plan file: {os.path.basename(filename_full)}"))
-            return False
-        if not quiet:
-            self.remember_recent(DROP_RACE_PLAN, filename_full)
-        return True
-
-    def apply_race_plan(self, data, name: str) -> bool:
-        """Race setup, fuel & tyre plan of race plan data replaced, False if not a race plan
-        (plan saved without fuel unit by an older version: fuel unit of page)"""
-        try:
-            if not isinstance(data, dict) or data.get("format") not in RACE_PLAN_FORMATS:
-                raise ValueError
-            inputs: dict = data["inputs"] if isinstance(data.get("inputs"), dict) else {}
-            tyre_data = validate_tyre_strategy(data.get("tyre_strategy") or {})
-        except (ValueError, TypeError, AttributeError):
-            return False
-        # Inputs checked & in the fuel unit of the page before anything is applied: never half applied
-        plan_unit = data.get("fuel_unit") or self.fuel_unit
-        values = ranged_inputs(convert_fuel_inputs(checked_inputs(inputs), plan_unit, self.fuel_unit))
-        # One calculation with the whole plan loaded: rows of the new tyre plan follow the new
-        # stints, not the ones of the plan replaced (whose rows kept aside are dropped)
-        with self.batch():
-            index = inputs.get("input_measured_compound", MEASURED_DEFAULT)
-            if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(DEFAULT_TYRE_SET):
-                self.measured_index = index
-                self.tyres.measured = tuple(DEFAULT_TYRE_SET)[index]
-            self.tyres.load(tyre_data, str(data.get("plan_name") or name))
-            self.values = values
-            self.tyresChanged.emit()
-        self.autosave_tyres()
-        self.set_plan_inputs(True)
-        return True
-
-    # Pit stop plan export
-    def plan_columns(self) -> list[int]:
-        """Columns of the plan shown in the page (indexes of PLAN_COLUMNS)"""
-        hidden = results.plan_hidden(self.strategy, self.values["input_energy_per_lap"] > 0,
-                                     self.values["input_drivers"])
-        return [index for index, key in enumerate(results.PLAN_COLUMNS) if key not in hidden]
-
-    def visible_plan(self) -> tuple[list[str], list[tuple[str, ...]]]:
-        """Header & rows of the plan, columns hidden in the page left out"""
-        columns = self.plan_columns()
-        header = results.plan_header(self.symbol_fuel)
-        rows = results.plan_rows(self.strategy, self.values["input_energy_per_lap"] > 0, self.time_text,
-                                 self.plan_setup.clock_offset)
-        return [header[column] for column in columns], [tuple(row[column] for column in columns) for row in rows]
-
-    def plan_text(self) -> str:
-        return results.plan_text(self.strategy, self.symbol_fuel, self.values["input_energy_per_lap"] > 0,
-                                 self.values["input_drivers"], self.time_text)
-
-    @Slot()
-    def copyPlanText(self):
-        QGuiApplication.clipboard().setText(self.plan_text())
-        self.host.toast(tr("Pit stop plan copied"))
-
-    @Slot()
-    def copyPlanMarkdown(self):
-        """Pit stop plan for Discord (table in a code block)"""
-        header, rows = self.visible_plan()
-        QGuiApplication.clipboard().setText(plan_markdown(
-            results.plan_title(self.strategy), header, rows, results.plan_footer(self.strategy)))
-        self.host.toast(tr("Pit stop plan copied"))
-
-    @staticmethod
-    def export_folder() -> str:
-        """Folder of last export (CSV, image), config folder at first"""
-        folder = cfg.user.config["fuel_calculator"].get("export_path", "")
-        return folder if isinstance(folder, str) and folder and os.path.isdir(folder) else cfg.path.config
-
-    @staticmethod
-    def keep_export_folder(filename: str):
-        folder = os.path.dirname(filename) + "/"
-        config = cfg.user.config["fuel_calculator"]
-        if config.get("export_path") != folder:
-            config["export_path"] = folder
-            cfg.save(config_type=ConfigType.CONFIG)
-
-    @Slot()
-    def exportPlanCsv(self):
-        """Pit stop plan as spreadsheet"""
-        filename = self.host.save_file(os.path.join(self.export_folder(), f"{tr('Pit Stop Plan')}.csv"),
-                                       FileFilter.CSV)
-        if not filename:
-            return
-        header, rows = self.visible_plan()
-        try:
-            with atomic_path(filename) as temp_filename:  # file open in a spreadsheet: left whole
-                write_plan_csv(temp_filename, header, rows)
-        except OSError as error:  # file open in a spreadsheet, read-only folder
-            self.host.warn(trm(f"Unable to export: {error}"))
-            return
-        self.keep_export_folder(filename)
-        self.host.toast_file(trm(f"Exported: <b>{os.path.basename(filename)}</b>"), filename)
-
-    def plan_image(self):
-        """Strategy timeline & pit stop plan as a picture"""
-        from .race_picture import plan_picture
-
-        header, rows = self.visible_plan()
-        columns = self.plan_columns()
-        tyres = results.PLAN_COLUMNS.index("tyres")
-        return plan_picture(results.plan_title(self.strategy), self.symbol_fuel, self.sections.get("timeline", {}),
-                            header, rows, results.plan_footer(self.strategy),
-                            tyres_column=columns.index(tyres) if tyres in columns else -1)
-
-    @Slot()
-    def savePlanImage(self):
-        """Strategy & pit stop plan as image (to share)"""
-        filename = self.host.save_file(os.path.join(self.export_folder(), f"{tr('Pit Stop Plan')}.png"),
-                                       FileFilter.PNG)
-        if not filename:
-            return
-        image = self.plan_image()
-        try:
-            with atomic_path(filename) as temp_filename:
-                if not image.save(temp_filename, "PNG"):
-                    raise OSError(f"unable to write {temp_filename}")
-        except OSError:
-            self.host.warn(trm(f"Unable to save picture: {filename}"))
-            return
-        self.keep_export_folder(filename)
-        self.host.toast_file(trm(f"Exported: <b>{os.path.basename(filename)}</b>"), filename)
-
-    @Slot()
-    def copyPlanImage(self):
-        """Strategy & pit stop plan as image in the clipboard (to paste in Discord)"""
-        QGuiApplication.clipboard().setImage(self.plan_image())
-        self.host.toast(tr("Plan image copied"))
-
-    # Race plan widget input (plan made again with race calculator closed)
-    def plan_file_data(self) -> dict:
-        return {"version": 1, "setup": asdict(self.race_setup), "tyre_changes": list(self.race_tyre_changes)}
-
-    def schedule_plan_file(self):
-        """Plan input written for the race plan widget once changed (not at every key)"""
-        data = self.plan_file_data()
-        if data != self._plan_file_data:
-            self._plan_file_data = data
-            self._plan_file_timer.start()
-
-    def flush_plan_file(self):
-        """Plan input change not written yet: written now (page closed)"""
-        if self._plan_file_timer.isActive():
-            self._plan_file_timer.stop()
-            self.write_plan_file()
-
-    def write_plan_file(self):
-        try:
-            with atomic_write(f"{cfg.path.config}{PLAN_FILE}", raise_error=True) as file:  # error logged
-                file.write(json.dumps(self._plan_file_data))
-        except OSError as error:
-            self.save_failure("plan", trm(f"Unable to update the Race Plan overlay: {error}"))
-            return
-        self.save_success("plan")
-
-    def save_failure(self, kind: str, text: str):
-        """Automatic save failed: told once per failure streak (saves retried at each change)"""
-        if kind not in self.save_failed:
-            self.save_failed.add(kind)
-            self.host.toast(text)
-
-    def save_success(self, kind: str):
-        if kind in self.save_failed:
-            self.save_failed.discard(kind)
-            logger.info("RACE CALCULATOR: %s saved again", kind)
-
-    # Consumption history
-    def refresh_history(self, dataset: Sequence[ConsumptionDataSet]):
-        """Laps of history (newest first): new laps of a live session get new serials, laps kept
-        keep theirs (selection kept), oldest dropped when history is full"""
-        dataset = list(dataset)
-        old = self.history_data
-        added = next((count for count in range(1, min(len(dataset), 5) + 1)
-                      if old and dataset[count:] == old[:len(dataset) - count]), 0)
-        selection = self.history_selection
-        if added:
-            newest = self.history_serials[0] if self.history_serials else -1
-            kept = self.history_serials[:len(dataset) - added]
-            self.history_serials = [newest + added - offset for offset in range(added)] + kept
-        elif dataset != old:
-            self.history_serials = list(range(len(dataset) - 1, -1, -1))
-            self._history_cache.clear()  # same serials, other laps
-            selection = set()
-        self.history_data = dataset
-        self.set_history_selection(selection & set(self.history_serials), notify_rows=False)
-        self.publish_history()
-
-    def publish_history(self, rows: bool = True):
-        """History shown again: rows synced in place by serial (rows=False: view only, rows unchanged),
-        view (columns, sort...) notified only when changed"""
-        if rows:
-            serials = set(self.history_serials)
-            self._history_cache = {serial: item for serial, item in self._history_cache.items() if serial in serials}
-            selection = self.history_selection
-            self.history_model.sync([
-                {"serial": row["serial"], "valid": row["valid"], "cells": row["cells"],
-                 "selected": row["serial"] in selection}
-                for row in self.history_rows()], key="serial")
-        view = self.history_view()
-        if view != self._history_view:
-            self._history_view = view
-            self.historyViewChanged.emit()
-        self.historyChanged.emit()
-
-    def set_history_selection(self, selection: set[int], notify_rows: bool = True):
-        """Selected laps (serials): selected role of rows changed in place, notified only when changed"""
-        if selection == self.history_selection:
-            return
-        self.history_selection = selection
-        if notify_rows:
-            self.history_model.update_rows(lambda row: {"selected": row["serial"] in selection})
-        self.historySelectionChanged.emit()
-
-    def shown_serials(self) -> list[int]:
-        """Serials of the laps shown, in their order (last rows published)"""
-        return [row["serial"] for row in self.history_model.rows]
-
-    def history_columns(self) -> list[dict]:
-        config = cfg.user.config["fuel_calculator"]
-        symbol = self.symbol_fuel
-        units_of = {"fuel": f" ({symbol})", "energy": " (%)", "drain": " (%)", "regen": " (%)", "net": " (%)",
-                    "tyre": " (%)", "tank": f" ({symbol})"}
-        return [{"key": key, "title": tr(title) + units_of.get(key, ""), "option": option,
-                 "visible": not option or bool(config.get(option, True))} for key, title, option in HISTORY_COLUMNS]
-
-    def history_row(self, lap: ConsumptionDataSet, serial: int) -> dict:
-        """Row of a lap, formatted once per lap (kept while its serial is the same lap): never changed"""
-        cached = self._history_cache.get(serial)
-        if cached is not None and (cached[0] is lap or cached[0] == lap):
-            return cached[1]
-        row = self.format_history_row(lap, serial)
-        self._history_cache[serial] = (lap, row)
-        return row
-
-    def format_history_row(self, lap: ConsumptionDataSet, serial: int) -> dict:
-        fuel = self.unit_fuel(lap.lastLapUsedFuel)
-        ratio = calc.fuel_to_energy_ratio(lap.lastLapUsedFuel, lap.lastLapUsedEnergy)
-        net = lap.batteryRegenLast - lap.batteryDrainLast
-        tank = self.unit_fuel(lap.capacityFuel)
-        values = (lap.lapNumber, lap.lapTimeLast, fuel, lap.lastLapUsedEnergy, ratio, lap.batteryDrainLast,
-                  lap.batteryRegenLast, net, lap.tyreAvgWearLast, tank)
-        cells = [f"{lap.lapNumber}", calc.sec2laptime_full(lap.lapTimeLast), f"{fuel:.3f}",
-                 f"{lap.lastLapUsedEnergy:.3f}", f"{ratio:.3f}", f"{lap.batteryDrainLast:.3f}",
-                 f"{lap.batteryRegenLast:.3f}", f"{net:+.3f}", f"{lap.tyreAvgWearLast:.3f}", f"{tank:.3f}"]
-        return {"serial": serial, "valid": bool(lap.isValidLap), "cells": cells, "values": values}
-
-    def history_rows(self) -> list[dict]:
-        """Rows shown: invalid laps left out (valid only), sorted by column clicked"""
-        valid_only = bool(cfg.user.config["fuel_calculator"].get("enable_valid_laps_only"))
-        rows = [self.history_row(lap, serial) for lap, serial in zip(self.history_data, self.history_serials)
-                if lap.isValidLap or not valid_only]
-        if 0 <= self.sort_column < len(HISTORY_COLUMNS):
-            rows.sort(key=lambda row: row["values"][self.sort_column], reverse=not self.sort_ascending)
-        return rows
-
-    def history_view(self) -> dict:
-        """History table without its rows (see historyRows)"""
-        return {
-            "columns": self.history_columns(), "empty": not self.history_data,
-            "sortColumn": self.sort_column, "sortAscending": self.sort_ascending,
-            "validOnly": bool(cfg.user.config["fuel_calculator"].get("enable_valid_laps_only")),
-            "invalidColor": INVALID_COLOR,
-            "menu": [{"option": option, "title": tr(COLUMN_OPTION_TITLES[option]),
-                      "checked": bool(cfg.user.config["fuel_calculator"].get(option, True))}
-                     for _, _, option in HISTORY_COLUMNS if option],
-        }
-
-    @Slot(int)
-    def sortHistory(self, column: int):
-        """Laps sorted by a column (numbers by value), clicked again: other way"""
-        if column == self.sort_column:
-            self.sort_ascending = not self.sort_ascending
-        else:
-            self.sort_column, self.sort_ascending = column, True
-        self.publish_history()
-
-    @Slot(bool)
-    def setValidOnly(self, checked: bool):
-        """Invalid laps hidden (kept for next time)"""
-        self.set_option("enable_valid_laps_only", checked)
-        if checked:
-            valid = {serial for lap, serial in zip(self.history_data, self.history_serials) if lap.isValidLap}
-            self.set_history_selection(self.history_selection & valid)
-        self.publish_history()
-
-    @Slot(str)
-    def toggleHistoryColumn(self, option: str):
-        if option in COLUMN_OPTION_TITLES:
-            config = cfg.user.config["fuel_calculator"]
-            self.set_option(option, not config.get(option, True))
-            self.publish_history(rows=False)  # rows hold every column
-
-    @Slot(int, int)
-    def selectLap(self, serial: int, mode: int):
-        """Lap clicked: mode 0 alone, 1 added or removed (Ctrl), 2 range from last clicked (Shift)"""
-        shown = self.shown_serials()
-        if serial not in shown:
-            return
-        if mode == 1:
-            selection = self.history_selection ^ {serial}
-            self._history_anchor = serial
-        elif mode == 2 and self._history_anchor in shown:
-            first, last = sorted((shown.index(self._history_anchor), shown.index(serial)))
-            selection = self.history_selection | set(shown[first:last + 1])
-        else:
-            selection = {serial}
-            self._history_anchor = serial
-        self._history_cursor = serial
-        self.set_history_selection(selection)
-
-    @Slot(int, bool, result=int)
-    def moveLapSelection(self, step: int, extend: bool) -> int:
-        """Up / Down (Shift: range from the lap clicked first) in the history table: row index shown, -1 if none"""
-        shown = self.shown_serials()
-        if not shown:
-            return -1
-        cursor: int | None = self._history_cursor
-        if cursor not in shown:
-            cursor = self._history_anchor if self._history_anchor in shown else None
-        if cursor is None:
-            index = 0 if step > 0 else len(shown) - 1
-        else:
-            index = max(0, min(shown.index(cursor) + step, len(shown) - 1))
-        anchor = self._history_anchor
-        self.selectLap(shown[index], 2 if extend and anchor in shown else 0)
-        if extend and anchor in shown:  # range kept from the anchor, never added to an older selection
-            first, last = sorted((shown.index(anchor), index))
-            self.set_history_selection(set(shown[first:last + 1]))
-        return index
-
-    @Slot()
-    def selectAllLaps(self):
-        self.set_history_selection(set(self.shown_serials()))
-
-    @Slot()
-    def clearLapSelection(self):
-        self.set_history_selection(set())
-
-    def selected_indexes(self) -> set[int]:
-        """Indexes in history data of selected laps"""
-        return {index for index, serial in enumerate(self.history_serials) if serial in self.history_selection}
-
-    @Slot()
-    def addSelectedLaps(self):
-        """Average of selected valid laps filled in"""
-        selected = [self.history_data[index] for index in sorted(self.selected_indexes())]
-        if not selected:
-            self.host.warn(tr("No data selected."))
-            return
-        used = [lap for lap in selected if lap.isValidLap]
-        skipped = len(selected) - len(used)
-        if not used:
-            self.host.warn(tr("Selected laps are all invalid."))
-            return
-        with self.batch():
-            self.setInput("input_lap_time", calc.dataset_mean([lap.lapTimeLast for lap in used]))
-            self.setInput("input_fuel_per_lap", calc.dataset_mean([self.unit_fuel(lap.lastLapUsedFuel) for lap in used]))
-            self.setInput("input_energy_per_lap", calc.dataset_mean([lap.lastLapUsedEnergy for lap in used]))
-            self.setInput("input_wear_per_lap", calc.dataset_mean([lap.tyreAvgWearLast for lap in used]))
-            capacity = max(self.unit_fuel(lap.capacityFuel) for lap in used)
-            if capacity:
-                self.setInput("input_tank_capacity", capacity)
-        self.fill_source = trm(f"Average of {len(used)} selected lap(s)")
-        text = trm(f"Average of {len(used)} lap(s) added")
-        if skipped:
-            text += " · " + trm(f"{skipped} invalid lap(s) left out")
-        self.history_added = text
-        self.notesChanged.emit()
-
-    @Slot()
-    def deleteSelectedLaps(self):
-        self.delete_laps(self.selected_indexes())
-
-    @Slot()
-    def deleteAllLaps(self):
-        self.delete_laps(None)
-
-    def delete_laps(self, indexes: set[int] | None):
-        """Delete laps (indexes in history data), or whole history (None), after confirmation"""
-        dataset = self.history_data
-        if indexes is not None and not indexes:
-            self.host.warn(tr("No data selected."))
-            return
-        removed = [lap for index, lap in enumerate(dataset) if indexes is None or index in indexes]
-        kept_index = [index for index in range(len(dataset)) if indexes is not None and index not in indexes]
-        kept = [dataset[index] for index in kept_index]
-        if not removed:
-            return
-        message = (trm(f"Delete <b>{len(removed)}</b> lap(s) from consumption history?")
-                   if indexes is not None else tr("<b>Delete whole consumption history?</b>"))
-        if not self.host.confirm(message + "<br><br>" + trm("This cannot be undone!")):
-            return
-        if self.live_source:
-            filename, extension = api.read.session.combo_name(), FileExt.CONSUMPTION
-            # Replaced in one step, never changed in place (stint module & overlays read it from other threads),
-            # saved under the lock stint module adds laps & saves with: lap added meanwhile kept, none saved back
-            with minfo.history.consumptionLock:
-                history = without_laps(minfo.history.consumptionDataSet, removed)
-                minfo.history.consumptionDataSet = history
-                minfo.history.consumptionDataVersion += 1
-                saved = not filename or write_history(cfg.path.fuel_delta, filename, extension, history_laps(history))
-        else:
-            filepath, filename, extension = self.history_file
-            saved = not filename or write_history(filepath, filename, extension, kept)
-        if not saved:
-            self.host.warn(trm(f"Unable to save consumption history: {filename}{extension}"))
-            if not self.live_source:
-                return  # file unchanged: laps still listed
-        serials = [self.history_serials[index] for index in kept_index]
-        self.history_data, self.history_serials = kept, serials
-        self.set_history_selection(self.history_selection & set(serials), notify_rows=False)
-        self._live_signature = history_signature(kept)
-        self.history_added = trm(f"{len(removed)} lap(s) deleted")
-        self.publish_history()
-        self.notesChanged.emit()
-
-    # Tyre plan
-    def tyre_plan_changed(self, user_edit: bool = True):
-        """Tyre plan edited: page marked modified (user edit), kept, strategy calculated again
-        (tyre change time)"""
-        if user_edit:
-            self.host.set_modified()
-        self.tyresChanged.emit()
-        self._autosave_timer.start()
-        self.update_input()
-
-    def autosave_path(self) -> tuple[str, str]:
-        return cfg.path.config, f"{AUTOSAVE_NAME}{FileExt.TYRESTRATEGY}"
-
-    def autosave_tyres(self):
-        """Tyre plan saved to config folder, reopened next time"""
-        self._autosave_timer.stop()
-        filepath, filename = self.autosave_path()
-        try:
-            save_tyre_strategy_file(dict_user=self.tyres.capture_data(), filename=filename, filepath=filepath)
-        except OSError as error:  # logged by write_json
-            self.save_failure("tyres", trm(f"Unable to save tyre plan automatically: {error}"))
-            return
-        self.save_success("tyres")
-        config = cfg.user.config["tyre_strategy_planner"]
-        if config.get("last_file_name") != self.tyres.name:
-            config["last_file_name"] = self.tyres.name
-            cfg.save(config_type=ConfigType.CONFIG)
-
-    def tyres_kept(self) -> bool:
-        """Page closing: change waiting or last autosave failed saved now, True if tyre plan is kept"""
-        if self._autosave_timer.isActive() or "tyres" in self.save_failed:
-            self.autosave_tyres()
-        return "tyres" not in self.save_failed
-
-    def load_tyre_autosave(self):
-        """Tyre plan of last time, new plan if none"""
-        filepath, filename = self.autosave_path()
-        user_data = load_tyre_strategy_file(filepath=filepath, filename=filename) \
-            if os.path.exists(f"{filepath}{filename}") else None
-        if user_data is None:
-            self.tyres.new_plan()
-            return
-        self.tyres.load(user_data, cfg.user.config["tyre_strategy_planner"].get("last_file_name") or tr("Untitled plan"))
-
-    @Slot(str, "QVariant")
-    def setTyreRule(self, key: str, value: Any):
-        if self.tyres.set_rule(key, value):
-            self.tyre_plan_changed()
-
-    @Slot(bool)
-    def setHighlightNew(self, checked: bool):
-        self.tyres.highlight_new = checked
-        self.tyresChanged.emit()
-
-    @Slot(str)
-    def setStockCompound(self, name: str):
-        """Compound added to stock, and of proposed tyre changes (strategy wear follows)"""
-        if name in self.tyres.compounds and name != self.tyres.compound:
-            self.tyres.compound = name
-            self.tyres.forget_stints()
-            self.tyres.refresh()
-            self.tyre_plan_changed(user_edit=False)
-
-    @Slot(str)
-    def setPlanName(self, name: str):
-        name = "".join(char for char in name if char not in '\\/:*?"<>|').strip()
-        if name and name != self.tyres.name:
-            self.tyres.name = name
-            self.tyresChanged.emit()
-            self._autosave_timer.start()
-
-    @Slot(int, int, str)
-    def assignTyre(self, row: int, corner: int, name: str):
-        """Tyre of stock dropped (or picked) on a wheel of a stint"""
-        error = self.tyres.assign(row, corner, name)
-        if error:
-            self.host.toast(error)
-            return
-        self.tyre_plan_changed()
-
-    @Slot(int, int)
-    def clearTyre(self, row: int, corner: int):
-        self.tyres.clear_cells([(row, corner)])
-        self.tyre_plan_changed()
-        self.toast_undo(tr("Tyre taken off"))
-
-    @Slot(int)
-    def clearRow(self, row: int):
-        self.tyres.clear_cells([(row, corner) for corner in range(WHEELS)])
-        self.tyre_plan_changed()
-        self.toast_undo(tr("Row cleared"))
-
-    @Slot(int, bool)
-    def insertRow(self, row: int, above: bool):
-        """New empty row above or below a row (manual plan)"""
-        self.tyres.insert_row(row if above else row + 1)
-        self.tyre_plan_changed()
-
-    @Slot()
-    def addRow(self):
-        self.tyres.insert_row(-1)
-        self.tyre_plan_changed()
-
-    @Slot(int)
-    def duplicateRow(self, row: int):
-        self.tyres.insert_row(row + 1, copy_from=row)
-        self.tyre_plan_changed()
-
-    @Slot(int)
-    def deleteRow(self, row: int):
-        if self.host.confirm(tr("<b>Delete selected row?</b>")):
-            self.tyres.delete_rows([row])
-            self.tyre_plan_changed()
-
-    @Slot()
-    def proposeChanges(self):
-        """New tyres where the strategy proposes them (minimum tread), within tyres allowed"""
-        if self.tyres.has_tyres() and not self.host.confirm(tr("<b>Replace tyre plan with proposed changes?</b>")):
-            return
-        self.tyres.propose()
-        self.tyre_plan_changed()
-
-    @Slot()
-    def addTyre(self):
-        self.tyres.add_tyre()
-        self.tyre_plan_changed()
-
-    @Slot(str)
-    def removeTyre(self, name: str):
-        """Tyre taken out of stock (and off the plan) after confirmation"""
-        if self.host.confirm("<b>Remove selected tyre from list?</b><br><br>"  # translated by message rules
-                             "Corresponding tyre will be removed from table."):
-            self.tyres.remove_tyres([name])
-            self.tyre_plan_changed()
-
-    @Slot()
-    def clearTyres(self):
-        if self.tyres.stock and self.host.confirm("<b>Remove all tyres from list?</b><br><br>"  # message rules
-                                                  "All allocated tyres will be removed from table."):
-            self.tyres.remove_tyres(list(self.tyres.stock))
-            self.tyre_plan_changed()
-
-    @Slot()
-    def removeUnusedTyres(self):
-        unused = self.tyres.unused_tyres()
-        if unused:
-            self.tyres.remove_tyres(unused)
-            self.tyre_plan_changed()
-            self.toast_undo(tr("Unused tyres removed"))
-        else:
-            self.host.toast(tr("No unused tyre in stock"))
-
-    def toast_undo(self, text: str):
-        """Change done without confirmation: toast with an Undo button (host without one: plain toast)"""
-        toast_undo = getattr(self.host, "toast_undo", None)
-        if callable(toast_undo):
-            toast_undo(text)
-        else:
-            self.host.toast(text)
-
-    @Slot(bool)
-    def sortStock(self, by_stints: bool):
-        self.tyres.sort_stock(by_stints)
-        self.tyre_plan_changed()
-
-    @Slot()
-    def newTyrePlan(self):
-        if self.tyres.has_tyres() and not self.host.confirm(tr("<b>Start a new tyre plan?</b>")):
-            return
-        self.tyres.new_plan()
-        self.tyre_plan_changed(user_edit=False)
-
-    @Slot()
-    def openTyrePlan(self):
-        """Tyre strategy file opened"""
-        filename_full = self.host.open_file(set_tyre_strategy_file_path(), FileFilter.TYRESTRATEGY)
-        if filename_full:
-            self.open_tyre_plan_file(filename_full)
-
-    def open_tyre_plan_file(self, filename_full: str) -> bool:
-        """Tyre strategy file replacing tyre plan (first of Recent menu), True once opened"""
-        filepath = os.path.dirname(filename_full) + "/"
-        filename = os.path.basename(filename_full)
-        user_data = load_tyre_strategy_file(filepath=filepath, filename=filename)
-        if user_data is None:
-            self.forget_recent(DROP_TYRE_PLAN, filename_full)
-            self.host.warn(trm("Cannot open selected file.<br><br>Invalid tyre strategy file."))
-            return False
-        save_tyre_strategy_file_path(filepath)
-        self.apply_tyre_strategy(user_data, os.path.splitext(filename)[0])
-        self.remember_recent(DROP_TYRE_PLAN, filename_full)
-        return True
-
-    def apply_tyre_strategy(self, user_data: dict, name: str):
-        """Tyre strategy (validated file) replacing tyre plan"""
-        self.tyres.load(user_data, name)
-        self.tyre_plan_changed(user_edit=False)
-
-    @Slot()
-    def saveTyrePlan(self):
-        """Tyre strategy file saved"""
-        filename_full = self.host.save_file(set_tyre_strategy_file_path(self.tyres.name or tr("Untitled plan")),
-                                            FileFilter.TYRESTRATEGY)
-        if not filename_full:
-            return
-        filepath = os.path.dirname(filename_full) + "/"
-        filename = os.path.basename(filename_full)
-        try:
-            save_tyre_strategy_file(dict_user=self.tyres.file_data(), filename=filename, filepath=filepath)
-        except OSError as error:  # file locked by another program, read-only folder
-            self.host.warn(trm(f"Unable to save tyre strategy file:<br><br>{error}"))
-            return
-        save_tyre_strategy_file_path(filepath)
-        self.remember_recent(DROP_TYRE_PLAN, filename_full)
-        self.tyres.name = os.path.splitext(filename)[0]
-        self.tyresChanged.emit()
-        self.host.set_unmodified()
-        self.host.toast(trm(f"Tyre strategy file saved at:<br><b>{filename_full}</b>"))
-
-    @Slot()
-    def exportTyrePlanCsv(self):
-        """Tyre strategy as spreadsheet (CSV): rules, stock, plan with tread of each wheel"""
-        filename_full = self.host.save_file(set_tyre_strategy_file_path(self.tyres.name or tr("Untitled plan")),
-                                            FileFilter.CSV)
-        if not filename_full:
-            return
-        from ...formatter import format_option_name
-        from ...userfile.tyre_strategy import HEADER_TYREPLAN
-
-        rule = self.tyres.rule
-        rule_data = [[format_option_name(name) for name in rule], list(rule.values())]
-        stock_data: list[list] = [["Tyre Stock", "Stints"]]
-        stock_data += [[name, self.tyres.uses[name]] for name in self.tyres.stock]
-        header = ["Stint"]
-        for index, name in enumerate(HEADER_TYREPLAN):
-            header.append(name)
-            if index < WHEELS:
-                header.append("Tread (%)")
-        plan_data: list[list] = [header]
-        for row_index, row in enumerate(self.tyres.rows):
-            line: list = [row_index + 1]
-            for corner, name in enumerate(row):
-                line.append(name)
-                info = self.tyres.cells[row_index][corner] if row_index < len(self.tyres.cells) else {}
-                line.append(f"{info['remaining'] * 100:.2f} - {max(info['end'], 0.0) * 100:.2f}" if info else "0.0")
-            seconds = self.tyres.change_times[row_index] if row_index < len(self.tyres.change_times) else 0.0
-            line.append(f"{seconds:+.1f}s" if seconds > 0 else tr("N/A"))
-            plan_data.append(line)
-        filepath = os.path.dirname(filename_full) + "/"
-        try:
-            export_tyre_strategy_file(rule_data=rule_data, stock_data=stock_data, plan_data=plan_data,
-                                      filename=os.path.basename(filename_full), filepath=filepath)
-        except OSError as error:  # file open in a spreadsheet, read-only folder
-            self.host.warn(trm(f"Unable to export: {error}"))
-            return
-        save_tyre_strategy_file_path(filepath)
-        self.host.toast(trm(f"Tyre strategy file exported at:<br><b>{filename_full}</b>"))
-
-    @Slot()
-    def configureCompound(self):
-        """Starting tread & wear per stint of compound selected in stock"""
-        self.host.open_compound_config(self.tyres.compound, self.tyres.user_data["tyre_set"], self.compound_changed)
-
-    def compound_changed(self, *_):
-        self.tyres.forget_stints()
-        self.tyres.refresh()
-        self.tyre_plan_changed()
-
-    @Slot()
-    def tyreAllocationFromGame(self):
-        """Tyres allowed by the session asked to game (LMU)"""
-        if not self.game_data_refused() and self.tyre_request.start():
-            self.tyresChanged.emit()
-
     @Property(bool, notify=tyresChanged)
     def askingGame(self) -> bool:
         return self.tyre_request.busy
-
-    def received_allocation(self, answers: list):
-        allocation = game_tyre_allocation(answers[0])
-        self.tyre_request.busy = False
-        if allocation is None:
-            self.tyresChanged.emit()
-            self.host.toast(tr("No tyre allocation from game: LMU not running or not in a session"))
-            return
-        self.setTyreRule("maximum_tyre", allocation.maximum)
-        self.tyresChanged.emit()
-        self.host.toast(trm(f"Tyre allocation from game: {allocation.maximum} tyre(s), {allocation.new_left} new left"))
-
-    def allocation_request_failed(self):
-        """Game request raised an error: busy indicator cleared"""
-        self.tyre_request.busy = False
-        self.tyresChanged.emit()
-        self.host.toast(tr("No tyre allocation from game: LMU not running or not in a session"))
-
-    # Undo & redo: inputs & tyre plan
-    def capture_state(self) -> dict:
-        return {"tyres": self.tyres.capture_state(), "inputs": self.input_values(), "measured": self.measured_index}
-
-    def restore_state(self, state: dict):
-        with self.batch():
-            self.tyres.restore_state(state["tyres"])
-            self.values = dict(state["inputs"])
-            index = state.get("measured", self.measured_index)
-            self.measured_index = index
-            self.tyres.measured = tuple(DEFAULT_TYRE_SET)[index]
-        self.tyresChanged.emit()
-        self._autosave_timer.start()
-
-    @Slot()
-    def undo(self):
-        self.host.undo()
-        self.undoChanged.emit()
-
-    @Slot()
-    def redo(self):
-        self.host.redo()
-        self.undoChanged.emit()
 
     @Property(bool, notify=undoChanged)
     def canUndo(self) -> bool:
@@ -2269,500 +1087,4 @@ class RaceBackend(PageBackend):
     @Property(int, notify=liveDifferingChanged)
     def liveDiffering(self) -> int:
         return self._live_parts["differing"]
-
-    @staticmethod
-    def unfollowed_live() -> set[str]:
-        """Live values the user turned off: left out of Load Live, Follow Live & Fill In All"""
-        text = cfg.user.config["fuel_calculator"].get("live_unfollowed", "")
-        return {key for key in text.split(",") if key} if isinstance(text, str) else set()
-
-    def update_garage_timer(self):
-        """LMU garage screens asked at once, then every few seconds while the live tab is shown or
-        inputs follow live"""
-        follow = bool(cfg.user.config["fuel_calculator"].get("enable_follow_live"))
-        if self.active and self.game_data and (self.tab == TABS.index("live") or follow):
-            if not self._garage_timer.isActive():
-                self._garage_timer.start()
-                self.refresh_garage()
-        else:
-            self._garage_timer.stop()
-
-    @Slot()
-    def refreshGarage(self):
-        if self.game_data_refused():
-            return
-        self.refresh_garage()
-        self.publish_live_data()
-
-    def refresh_garage(self, apply: bool = False):
-        """LMU garage screens asked (game in a session only), apply: followed values filled in once
-        answered"""
-        if not self.game_data or not api.read.state.active():
-            self._apply_garage = False
-            if self.garage != GarageData():  # values of a session left behind
-                self.garage = GarageData()
-                self.garage_time = ""
-            return
-        if apply:
-            self._apply_garage = True
-        self.garage_request.start()
-
-    def received_garage(self, answers: list):
-        """Game answers: repair & refuel screen, tyre screen, session settings"""
-        self.garage_request.busy = False
-        refuel, tyres, session = (list(answers) + [None] * 3)[:3]
-        self.garage = parse_garage(refuel, tyres, session)
-        self.garage_time = clock_seconds() if self.garage.available else ""
-        apply = self._apply_garage or bool(cfg.user.config["fuel_calculator"].get("enable_follow_live"))
-        self._apply_garage = False
-        values = None
-        if apply and self.garage.available and self.live_source:
-            self.apply_live(followed=True)
-            values = self.live_values
-        self.publish_live_data(values)
-
-    def garage_request_failed(self):
-        """Game request raised an error: asked again by the garage timer"""
-        self.garage_request.busy = False
-        self._apply_garage = False
-        self.publish_live_data()
-
-    def dry_plan_laps(self) -> int:
-        """Laps of the whole race plan without rain scenario (wet laps of the forecast), from the
-        inputs of now (not the last calculation: values filled in together agree)"""
-        setup = replace(self.strategy_input(), rain_lap=0, rain_laps=0, rain_tyres=False,
-                        tyre_change_seconds=self.tyres.full_change_seconds())
-        last, laps = self._dry_plan
-        if setup != last:  # planned again only when an input changed (live tab asks every few seconds)
-            strategy = plan(setup)
-            laps = strategy.race_laps if strategy.ready else 0
-            self._dry_plan = (setup, laps)
-        return laps
-
-    def collect_live_values(self) -> list[LiveValue]:
-        return collect_live(history_laps(minfo.history.consumptionDataSet), self.garage, self.unit_fuel,
-                            self.symbol_fuel, self.dry_plan_laps(), tuple(DEFAULT_TYRE_SET))
-
-    def apply_live(self, keys: set[str] | None = None, followed: bool = False, filled: bool = False) -> int:
-        """Live values filled in: those of keys, or every value followed (filled: values Load Live
-        fills in from laps too), count filled in"""
-        unfollowed = self.unfollowed_live()
-
-        def wanted(item: LiveValue) -> bool:
-            if item.value is None:
-                return False
-            if keys is not None:
-                return item.key in keys
-            return (followed and item.follow and item.key not in unfollowed
-                    and (filled or item.key not in FILLED_KEYS))
-
-        count = 0
-        values = self.collect_live_values()  # game read once per action
-        with self.batch():
-            for item in values:
-                if item.key != "rain" and wanted(item) and not self.live_matches(item):
-                    self.apply_live_value(item)
-                    count += 1
-            # Rain laps last: race laps follow the values just filled in (only rain planned again)
-            if count and values and values[-1].key == "rain":
-                values[-1] = collect_rain(self.garage, self.dry_plan_laps())
-            rain = next((item for item in values if item.key == "rain"), None)
-            if rain is not None and wanted(rain) and not self.live_matches(rain):
-                self.apply_live_value(rain)
-                count += 1
-        self.live_values = values  # as filled in: shown by publish_live_data of the same action
-        return count
-
-    def apply_live_value(self, item: LiveValue):
-        """One live value filled in (inputs, tyre rules or rain scenario)"""
-        key, value = item.key, item.value
-        if key == "race_length":
-            kind, length = value
-            self.setInput("input_race_laps" if kind == "laps" else "input_race_minutes", length)
-            self.setInput("enable_lap_race", kind == "laps")
-        elif key == "input_measured_compound":
-            self.set_measured_compound(int(value))
-        elif key in ("tyre_change_times", "maximum_tyre"):
-            rules: tuple[tuple[str, Any], ...]
-            if key == "maximum_tyre":
-                rules = (("maximum_tyre", value),)
-            else:
-                two, four = value
-                rules = (("tyre_change_time_1", two), ("tyre_change_time_2", two),
-                         ("tyre_change_time_3", four), ("tyre_change_time_4", four))
-            changed = False
-            for rule, number in rules:
-                changed |= self.tyres.set_rule(rule, number)
-            if changed:
-                self.tyre_plan_changed(user_edit=False)
-        elif key == "rain":
-            wet, first, laps = value
-            self.setInput("enable_rain", bool(wet))
-            if wet:
-                self.setInput("input_rain_lap", first)
-                self.setInput("input_rain_laps", laps)
-        else:
-            self.setInput(key, value)
-
-    def live_matches(self, item: LiveValue) -> bool:
-        """Calculator already holds the live value (to the decimals of the input)"""
-        key, value, values = item.key, item.value, self.values
-        if value is None:
-            return True
-        if key == "race_length":
-            kind, length = value
-            laps = kind == "laps"
-            return values["enable_lap_race"] == laps and values["input_race_laps" if laps else "input_race_minutes"] == length
-        if key == "input_measured_compound":
-            return self.measured_index == value
-        rule = self.tyres.rule
-        if key == "tyre_change_times":
-            two, four = value
-            return all(abs(float(rule[f"tyre_change_time_{count}"]) - seconds) < 0.05
-                       for count, seconds in ((1, two), (2, two), (3, four), (4, four)))
-        if key == "maximum_tyre":
-            return int(rule["maximum_tyre"]) == value
-        if key == "rain":
-            wet, first, laps = value
-            if not wet:
-                return not values["enable_rain"]
-            return bool(values["enable_rain"]) and values["input_rain_lap"] == first and values["input_rain_laps"] == laps
-        current = values.get(key)
-        if isinstance(value, bool) or isinstance(current, bool):
-            return bool(current) == bool(value)
-        spec = INPUT_SPECS.get(key)
-        decimals = spec.decimals if spec is not None else 3
-        if not isinstance(current, (int, float)):
-            return False
-        return abs(float(current) - float(value)) < 0.5 * 10 ** -decimals + 1e-9
-
-    def live_current(self, key: str) -> str:
-        """Value of the calculator a live value would replace, as text"""
-        values, symbol = self.values, self.symbol_fuel
-        rule = self.tyres.rule
-        if key == "race_length":
-            if values["enable_lap_race"]:
-                return trm(f"{values['input_race_laps']} laps")
-            return f"{values['input_race_minutes']} min"
-        if key == "input_formation_laps":
-            return trm(f"{values[key]:g} lap(s)")
-        if key == "input_race_start_minutes":
-            return start_time_text(values[key]) if values[key] >= 0 else results.DASH
-        if key == "input_drivers":
-            return f"{values[key]}"
-        if key == "input_lap_time":
-            return laptime_text(values[key])
-        if key == "input_measured_compound":
-            return tuple(DEFAULT_TYRE_SET)[self.measured_index]
-        if key in ("input_fuel_start", "input_energy_start") and values[key] <= 0:
-            return tr("Full Tank")
-        if key == "tyre_change_times":
-            return f"{float(rule['tyre_change_time_2']):.1f} s / {float(rule['tyre_change_time_4']):.1f} s"
-        if key == "maximum_tyre":
-            return f"{int(rule['maximum_tyre'])}"
-        if key == "rain":
-            if not values["enable_rain"]:
-                return tr("Off")
-            first, laps = values["input_rain_lap"], values["input_rain_laps"]
-            return trm(f"Laps {first}-{first + laps - 1}") if laps > 0 else trm(f"From lap {first}")
-        value = values.get(key)
-        if isinstance(value, bool):
-            return tr("On") if value else tr("Off")
-        spec = INPUT_SPECS.get(key)
-        if spec is None or not isinstance(value, (int, float)):
-            return f"{value}"
-        decimals = {"input_tank_capacity": 1, "input_fuel_start": 1, "input_energy_start": 1, "input_tread_start": 1,
-                    "input_pit_seconds": 1, "input_driver_change_seconds": 1}.get(key, spec.decimals)
-        unit = unit_text(spec.unit, symbol)
-        return f"{value:.{decimals}f} {unit}".strip()
-
-    def live_race_items(self) -> list[dict]:
-        """Race under way read from the game: lap, race time, amounts, stops, track state, penalties,
-        repair, class position (empty out of a race)"""
-        read = api.read
-        session = read.session
-        if session.session_type() != RACE_SESSION or not read.state.active() or not session.in_race():
-            return []
-        elapsed = max(session.elapsed() - max(session.start(), 0.0), 0.0)
-        left = session.remaining()
-        lap_race = session.finish_type() == 1
-        laps_done = read.lap.completed_laps()
-        maximum = read.lap.maximum()
-        if read.lap.safety_car_active():
-            track, warning = tr("Safety Car"), True
-        elif session.yellow_flag_state() > 0:
-            track, warning = tr("Full Course Yellow"), True
-        else:
-            track, warning = tr("Green Flag"), False
-        penalties = read.vehicle.number_penalties()
-        repair = read.vehicle.repair_time()
-        pit_time = read.vehicle.pit_stop_time()
-        player = read.vehicle.player_index()
-        place, cars = 0, 0
-        for index in range(read.vehicle.total_vehicles()):
-            if index == player or read.vehicle.same_class(index):
-                cars += 1
-                if index != player and read.vehicle.place(index) < read.vehicle.place():
-                    place += 1
-        items = [
-            {"title": tr("Lap"), "value": f"{laps_done + 1}" + (f" / {maximum}" if lap_race and 0 < maximum < 100000 else ""),
-             "warning": False},
-            {"title": tr("Race Time"), "value": race_clock(elapsed), "warning": False},
-            {"title": tr("Time left"), "value": race_clock(max(left, 0.0)) if not lap_race else results.DASH,
-             "warning": False},
-            {"title": tr("Fuel"), "value": f"{self.unit_fuel(read.engine.fuel()):.1f} {self.symbol_fuel}",
-             "warning": False},
-            {"title": tr("Energy"), "value": f"{read.engine.virtual_energy() * 100:.0f} %", "warning": False},
-            {"title": tr("Tread"), "value": f"{sum(read.tyre.wear()) * 25:.0f} %", "warning": False},
-            {"title": tr("Pit Stops"), "value": f"{read.vehicle.number_pitstops()}", "warning": False},
-            {"title": tr("Track"), "value": track, "warning": warning},
-            {"title": tr("Penalties"), "value": f"{penalties}", "warning": penalties > 0},
-        ]
-        if cars:
-            items.append({"title": tr("Class Position"), "value": f"P{place + 1} / {cars}", "warning": False})
-        if repair > 0:
-            items.append({"title": tr("Pending Repair"), "value": f"{repair:.0f} s", "warning": True})
-        if pit_time > 0:
-            items.append({"title": tr("Next Stop (Game)"), "value": f"{pit_time:.1f} s", "warning": False})
-        return items
-
-    def garage_tyres(self) -> dict:
-        """Tyres the pit menu offers (LMU): allocation, new compounds, used tyres of each wheel"""
-        garage = self.garage
-        wheels = []
-        for wheel, offers in zip(HEADER_TYREPLAN, garage.used_tyres):
-            wheels.append({"wheel": tr(wheel), "tyres": [
-                {"text": f"{offer.compound} {offer.tread:.0f}%", "color": tread_color(offer.tread / 100),
-                 "compound": offer.compound, "tip": offer.text} for offer in offers]})
-        return {
-            "known": bool(garage.new_compounds or garage.used_tyres or garage.tyres_allowed),
-            "allowed": garage.tyres_allowed, "newLeft": garage.new_tyres_left,
-            "newCompounds": list(garage.new_compounds), "wheels": wheels,
-            "used": sum(len(offers) for offers in garage.used_tyres),
-        }
-
-    def live_data_status(self) -> str:
-        if not api.read.state.active():
-            return tr("Game not running or not in a session: values of the car & session needed")
-        if self.garage_request.busy and not self.garage_time:
-            return tr("Asking game...")
-        if self.garage_time:
-            return trm("LMU garage data at {}").replace("{}", self.garage_time, 1)
-        return tr("No LMU garage data: pit stop times, tyres & team come from LMU in a session")
-
-    def publish_live_data(self, values: list[LiveValue] | None = None):
-        """Live tab shown again where anything changed: values of the game against the calculator (values:
-        collected by apply_live in the same action, else collected now), rows synced in place, other parts
-        notified only when changed (race time changes at each refresh: race card only)"""
-        if not self.game_data:  # calculator off: page empty, game not read
-            return
-        if values is None:
-            values = self.collect_live_values()
-        self.live_values = values
-        unfollowed = self.unfollowed_live()
-        rows = []
-        for item in values:
-            known = item.value is not None
-            rows.append({
-                "key": item.key, "group": item.group, "header": False, "title": tr(item.title),
-                "game": trm(tr(item.text)), "calc": self.live_current(item.key),
-                "source": trm(tr(item.source)), "tip": trm(tr(item.tip)), "known": known, "auto": item.follow,
-                "followed": item.follow and item.key not in unfollowed,
-                "differs": known and not self.live_matches(item),
-            })
-        parts = {
-            "status": self.live_data_status(), "busy": self.garage_request.busy,
-            "differing": sum(1 for row in rows if row["differs"] and row["followed"]),
-            "tyres": self.garage_tyres(), "race": self.live_race_items(),
-        }
-        changed = [name for name, value in parts.items() if value != self._live_parts[name]]
-        rows_changed = rows != self._live_rows
-        if rows_changed:
-            self._live_rows = rows
-            shown = []
-            for key, title in LIVE_GROUPS:  # title row before each group
-                members = [row for row in rows if row["group"] == key]
-                if members:
-                    shown.append({"key": f"hdr:{key}", "header": True, "title": tr(title), "game": "", "calc": "",
-                                  "source": "", "tip": "", "known": True, "auto": False, "followed": False,
-                                  "differs": False})
-                    shown.extend(members)
-            self.live_model.sync(shown)
-        for name in changed:
-            self._live_parts[name] = parts[name]
-            getattr(self, LIVE_PART_SIGNALS[name]).emit()
-        if changed or rows_changed:
-            self.liveDataChanged.emit()
-
-    @Slot()
-    def addGameTyres(self):
-        """Used tyres the pit menu offers added to the tyre stock with their tread (fitted by hand),
-        tyre allocation of the game set"""
-        tyres = [(offer.compound, offer.tread) for offers in self.garage.used_tyres for offer in offers]
-        if not tyres:
-            return
-        added = self.tyres.add_used_tyres(tyres)
-        if self.garage.tyres_allowed > 0:
-            self.tyres.set_rule("maximum_tyre", self.garage.tyres_allowed)
-        self.tyre_plan_changed()
-        self.host.toast(trm(f"{len(added)} used tyre(s) added to stock"))
-
-    @Slot(str)
-    def applyLiveValue(self, key: str):
-        """Live value of a row filled in (followed or not)"""
-        if self.apply_live(keys={key}):
-            self.publish_live_data(self.live_values)
-
-    @Slot()
-    def applyAllLive(self):
-        """Every live value followed filled in"""
-        count = self.apply_live(followed=True, filled=True)
-        self.host.toast(trm(f"{count} live value(s) filled in") if count else tr("Calculator already holds the live values"))
-        self.publish_live_data(self.live_values)
-
-    @Slot(str, bool)
-    def setLiveFollowed(self, key: str, followed: bool):
-        """Live value filled in by Load Live, Follow Live & Fill In All, or left out (kept for next time)"""
-        names = self.unfollowed_live() - {key}
-        if not followed:
-            names.add(key)
-        self.set_option("live_unfollowed", ",".join(sorted(names)))
-        self.publish_live_data()
-
-    # Team stints (game strategy data)
-    def update_team_timer(self):
-        """Game asked at once, then every few seconds while team tab is shown"""
-        if self.active and self.game_data and self.tab == TABS.index("team"):
-            if not self._team_timer.isActive():
-                self._team_timer.start()
-                self.refresh_team()
-        else:
-            self._team_timer.stop()
-
-    @Slot()
-    def refresh_team(self):
-        if self.game_data and self.team_request.start(partial(read_team_usage, USAGE_RESOURCES)):
-            self.team_status_changed()
-
-    @Slot()
-    def refreshTeam(self):
-        if not self.game_data_refused():
-            self.refresh_team()
-
-    def team_status_changed(self):
-        """Status line & busy state shown again (rows & drivers left as they are)"""
-        self.teamStatusChanged.emit()
-        self.teamChanged.emit()
-
-    def received_team(self, answer: tuple[list[StintUsage] | None, float]):
-        """Game answers read in background (read_team_usage): stints, tank capacity (liters)"""
-        self.team_request.busy = False
-        stints, capacity = answer
-        if stints is None:
-            self.team_status = tr("No data from game: LMU not running or not in a session")
-            self.team_status_changed()
-            return
-        self.show_team_stints(stints, self.unit_fuel(capacity) if capacity else 0.0)
-        self.team_status = trm("Updated from game at {}").replace("{}", clock_seconds(), 1)
-        self.team_status_changed()
-
-    def team_request_failed(self):
-        """Game request raised an error: busy indicator cleared (asked again by team timer)"""
-        self.team_request.busy = False
-        self.team_status = tr("No data from game: LMU not running or not in a session")
-        self.team_status_changed()
-
-    def car_capacity(self) -> float:
-        """Tank capacity (fuel unit): of the car from game, else of calculator, else of live car"""
-        return (self.team_capacity or self.values["input_tank_capacity"]
-                or self.unit_fuel(api.read.engine.tank_capacity()))
-
-    def show_team_stints(self, stints: Sequence[StintUsage], capacity: float):
-        """Stints of the team (selection kept when same stints)"""
-        selected = {(usage.driver, usage.stint) for usage in self.selected_stints()}
-        self.team_stints = list(stints)
-        self.team_capacity = capacity
-        selection = {index for index, usage in enumerate(self.team_stints)
-                     if (usage.driver, usage.stint) in selected and usage.laps}
-        selection_changed = selection != self.team_selection
-        self.team_selection = selection
-        self.publish_team()
-        if selection_changed:
-            self.teamSelectionChanged.emit()
-
-    def publish_team(self):
-        """Team view built once: stints synced in place (by driver & stint), columns, drivers & fill in
-        notified only when changed"""
-        view = self.team_view()
-        self.team_model.sync(view.pop("rows"))
-        if view != self._team_info:
-            self._team_info = view
-            self.teamInfoChanged.emit()
-        self.teamChanged.emit()
-
-    def team_view(self) -> dict:
-        capacity = self.car_capacity()
-        rows = []
-        for index, usage in enumerate(self.team_stints):
-            fuel = usage.fuel * capacity
-            cells = [usage.driver, f"{usage.stint}", f"{usage.first_lap}-{usage.last_lap}", f"{usage.laps}",
-                     f"{fuel:.3f}" if usage.laps and capacity else results.DASH,
-                     f"{usage.energy * 100:.3f}" if usage.laps else results.DASH,
-                     f"{usage.wear:.3f}" if usage.laps else results.DASH]
-            rows.append({"key": f"{usage.driver}|{usage.stint}", "number": index, "enabled": usage.laps > 0,
-                         "selected": index in self.team_selection, "cells": cells})
-        drivers = []
-        for usage in driver_usage(self.team_stints):
-            if not usage.laps:
-                drivers.append({"name": usage.driver, "text": tr("No lap counted")})
-                continue
-            parts = [f"{usage.laps} {tr('laps')}"]
-            if capacity:
-                parts.append(f"{usage.fuel * capacity:.2f} {self.symbol_fuel}")
-            if usage.energy:
-                parts.append(f"{usage.energy * 100:.2f} % {tr('Energy').lower()}")
-            parts.append(f"{usage.wear:.2f} % {tr('Tyre').lower()}")
-            drivers.append({"name": usage.driver, "text": " · ".join(parts)})
-        columns = [tr(name) for name in TEAM_COLUMNS]
-        columns[4] += f" ({self.symbol_fuel})"
-        columns[5] += " (%)"
-        columns[6] += " (%)"
-        return {"columns": columns, "rows": rows, "drivers": drivers, "count": len(rows),
-                "canFill": any(usage.laps for usage in self.team_stints)}
-
-    @Slot(int, int)
-    def selectStint(self, index: int, mode: int):
-        """Team stint clicked: mode 0 alone, 1 added or removed (Ctrl), 2 range (Shift)"""
-        if not 0 <= index < len(self.team_stints) or not self.team_stints[index].laps:
-            return
-        if mode == 1:
-            selection = self.team_selection ^ {index}
-        elif mode == 2 and self.team_selection:
-            first, last = sorted((min(self.team_selection), index))
-            selection = self.team_selection | {row for row in range(first, last + 1) if self.team_stints[row].laps}
-        else:
-            selection = {index}
-        if selection == self.team_selection:
-            return
-        self.team_selection = selection
-        self.team_model.update_rows(lambda row: {"selected": row["number"] in selection})
-        self.teamSelectionChanged.emit()
-
-    def selected_stints(self) -> list[StintUsage]:
-        return [self.team_stints[index] for index in sorted(self.team_selection) if 0 <= index < len(self.team_stints)]
-
-    @Slot()
-    def fillInTeam(self):
-        """Average per lap of selected stints (all if none selected) filled in"""
-        usage = combine_usage(self.selected_stints() or self.team_stints)
-        capacity = self.car_capacity()
-        if usage.laps <= 0:
-            return
-        with self.batch():
-            if capacity > 0:
-                self.setInput("input_tank_capacity", capacity)
-                self.setInput("input_fuel_per_lap", usage.fuel * capacity)
-            self.setInput("input_energy_per_lap", usage.energy * 100)
-            self.setInput("input_wear_per_lap", usage.wear)
-        self.set_fill_source(trm(f"Average of {usage.laps} team lap(s) from game"))
 

@@ -608,6 +608,10 @@ class Timing(ABC):
         """Current lap start time (seconds)"""
 
     @abstractmethod
+    def scoring_start(self, index: int | None = None) -> float:
+        """Current lap start time of scoring (seconds): known for every car, telemetry or not"""
+
+    @abstractmethod
     def elapsed(self, index: int | None = None) -> float:
         """Current lap elapsed time (seconds)"""
 

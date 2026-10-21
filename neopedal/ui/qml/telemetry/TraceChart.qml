@@ -59,6 +59,16 @@ FocusScope {
                                          "available": false, "weight": 1, "note": "" })
     // Lists read once from backend (each read converts a Python list)
     readonly property var sectors: backend.sectorLines
+    readonly property var trackNotes: backend.trackNotes.items  // notes at track distances (Track Notes overlay file)
+    // Track note nearest to axis position within a few pixels: index in notes file, -1 if none
+    function trackNoteAt(value) {
+        var best = -1, gap = theme.em * 0.8
+        for (var i = 0; i < trackNotes.length; i++) {
+            var distance = Math.abs(xOf(trackNotes[i].x) - xOf(value))
+            if (distance <= gap) { best = trackNotes[i].index; gap = distance }
+        }
+        return best
+    }
     readonly property var marks: backend.cornerTable.marks
     readonly property real pinX: backend.pinnedX
     readonly property var legendLaps: backend.legend  // shown laps (changed with chart: passage times built again)
@@ -885,7 +895,8 @@ FocusScope {
         id: marksStrip
         anchors { left: parent.left; right: parent.right; top: passageRow.bottom; leftMargin: chart.labelWidth }
         height: visible ? theme.em * 1.35 : 0
-        visible: chart.chartsShown && chart.legendLaps.length > 0 && (chart.sectors.length > 0 || chart.marks.length > 0)
+        visible: chart.chartsShown && chart.legendLaps.length > 0
+                 && (chart.sectors.length > 0 || chart.marks.length > 0 || chart.trackNotes.length > 0)
         clip: true
         Text {
             visible: chart.sectors.length > 0 && chart.xOf(0) >= -theme.em
@@ -915,6 +926,35 @@ FocusScope {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: chart.zoomSector(modelData.index + 1)
+                }
+            }
+        }
+        // Track notes: click moves cursor there, double-click edits
+        Repeater {
+            model: chart.trackNotes
+            Text {
+                readonly property real px: chart.xOf(modelData.x)
+                visible: px >= -width && px <= marksStrip.width
+                x: Math.round(px) + 2
+                width: Math.min(implicitWidth, theme.em * 12)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "✎ " + modelData.text
+                elide: Text.ElideRight
+                color: noteArea.containsMouse ? theme.text : theme.accent
+                font.pointSize: theme.fontCaption
+                font.italic: true
+                ToolTip.visible: noteArea.containsMouse
+                ToolTip.delay: theme.tipDelay
+                ToolTip.text: modelData.text + " · " + modelData.place + "\n"
+                              + i18n.tr("Double-click: edit · right-click on charts: notes menu")
+                MouseArea {
+                    id: noteArea
+                    anchors.fill: parent
+                    anchors.margins: -3
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: chart.setCursor(modelData.x)
+                    onDoubleClicked: backend.trackNotes.edit(modelData.index)
                 }
             }
         }
@@ -1191,6 +1231,19 @@ FocusScope {
                 }
             }
 
+            // Track notes (their text in strip above panels)
+            Repeater {
+                model: chart.trackNotes
+                Rectangle {
+                    readonly property real px: chart.xOf(modelData.x)
+                    visible: px >= 0 && px <= plotArea.width
+                    x: Math.round(px)
+                    width: 1
+                    height: plotArea.height
+                    color: theme.accent
+                    opacity: 0.45
+                }
+            }
             // Sector lines & corner apexes of reference lap (their names in strip above panels)
             Repeater {
                 model: chart.sectors
@@ -1526,6 +1579,22 @@ FocusScope {
             onTriggered: backend.charts.alignBrakingAt(chart.cursorX)
         }
         Action { text: i18n.tr("Stop Aligning Laps"); enabled: chart.alignInfo.label !== undefined; onTriggered: backend.charts.alignBraking(-1) }
+        MenuSeparator {}
+        Action {
+            text: i18n.tr("Add Track Note Here")
+            enabled: chart.hasCursor && backend.trackNotes.available
+            onTriggered: backend.trackNotes.addAt(chart.cursorX)
+        }
+        Action {
+            text: i18n.tr("Edit Track Note")
+            enabled: chart.hasCursor && chart.trackNoteAt(chart.cursorX) >= 0
+            onTriggered: backend.trackNotes.edit(chart.trackNoteAt(chart.cursorX))
+        }
+        Action {
+            text: i18n.tr("Remove Track Note")
+            enabled: chart.hasCursor && chart.trackNoteAt(chart.cursorX) >= 0
+            onTriggered: backend.trackNotes.remove(chart.trackNoteAt(chart.cursorX))
+        }
         MenuSeparator {}
         Action { text: i18n.tr("Copy Values"); enabled: chart.hasCursor; onTriggered: backend.copyValues(chart.cursorX) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: chart.pictureRequested(true) }

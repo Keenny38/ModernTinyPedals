@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "../components"
 
-// Overlay row of Overlays page (compact list): category dot, name, category, settings & on/off switch.
-// Preview shown in a tooltip while hovering the row. Click opens settings, right-click the menu.
+// Overlay row of Overlays page (compact list): category dot, name, when it shows (if not always), category & what
+// it shows, favorite star, settings & on/off switch. Preview shown in a tooltip while hovering the row. Click opens
+// settings, right-click the menu.
 Item {
     id: row
     required property int index
@@ -18,6 +19,9 @@ Item {
     required property int previewState
     required property int previewWidth
     required property int previewHeight
+    required property string description
+    required property bool favorite
+    required property var badges  // [{kind, text, tip}]: shown only in some situations
     property bool menuOpen: false  // no preview over the menu
     readonly property bool current: GridView.isCurrentItem && GridView.view.activeFocus
     readonly property bool hovered: area.containsMouse
@@ -36,7 +40,8 @@ Item {
 
     Accessible.role: Accessible.ListItem
     Accessible.name: label + ", " + categoryLabel + ", " + (active ? i18n.tr("Enabled") : i18n.tr("Disabled"))
-                     + (failed ? ", " + i18n.tr("Error") : "")
+                     + (favorite ? ", " + i18n.tr("Favorite") : "") + (failed ? ", " + i18n.tr("Error") : "")
+    Accessible.description: description
 
     Rectangle {
         id: surface
@@ -78,19 +83,41 @@ Item {
             anchors.left: dot.right
             anchors.leftMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(implicitWidth, controls.x - x - theme.space4)
+            width: Math.min(implicitWidth, controls.x - x - theme.space4 - badgeIcons.width)
             text: row.label
             color: row.active ? theme.text : theme.dimOn(surface.color)
             font.weight: row.active ? Font.DemiBold : Font.Normal
             elide: Text.ElideRight
         }
-        Text {
+        // Shown only in some situations: icon per limit, text in its tooltip
+        Row {
+            id: badgeIcons
             anchors.left: nameText.right
+            anchors.leftMargin: row.badges.length ? theme.space3 : 0
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: theme.space2
+            Repeater {
+                model: row.badges
+                Icon {
+                    required property var modelData
+                    glyph: modelData.kind === "stream" ? "" : modelData.kind === "screen" ? "" : ""
+                    fallback: "•"
+                    size: theme.em * 0.8
+                    color: theme.dimOn(surface.color)
+                    MouseArea { id: iconArea; anchors.fill: parent; hoverEnabled: true }
+                    ToolTip.visible: iconArea.containsMouse
+                    ToolTip.text: modelData.text + ": " + modelData.tip
+                    ToolTip.delay: theme.tipDelay
+                }
+            }
+        }
+        Text {
+            anchors.left: badgeIcons.right
             anchors.leftMargin: theme.space5
             anchors.right: controls.left
             anchors.rightMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
-            text: row.categoryLabel
+            text: row.description !== "" ? row.categoryLabel + "  \u00b7  " + row.description : row.categoryLabel
             color: theme.dimOn(surface.color)
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight
@@ -126,6 +153,19 @@ Item {
                 ToolTip.visible: failedArea.containsMouse
                 ToolTip.text: i18n.tr("Overlay could not start, see log (Help menu)")
                 ToolTip.delay: theme.tipDelay
+            }
+            TpButton {
+                flat: true
+                size: "sm"
+                glyph: row.favorite ? "" : ""  // star filled : outline
+                fallback: row.favorite ? "★" : "☆"
+                tip: row.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")
+                opacity: row.favorite || row.hovered || hovered || visualFocus || row.current ? 1 : 0
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    row.GridView.view.currentIndex = row.index
+                    backend.toggleFavorite(row.name)
+                }
             }
             TpButton {
                 flat: true

@@ -338,6 +338,40 @@ class TyrePlan:
         selected = average_setting(self.setting(self.compound), CORNER_WEAR_PER_STINT)
         return selected / reference if reference > 0 and selected > 0 else 1.0
 
+    def compound_pace(self, tyre_key: str) -> float:
+        """Lap time difference of a compound to the measured compound (seconds)"""
+        return (float(self.setting(tyre_key).get("lap_time_delta", 0.0))
+                - float(self.setting(self.measured).get("lap_time_delta", 0.0)))
+
+    def stint_pace(self) -> tuple[float, ...]:
+        """Lap time difference of each row (stint) to the measured compound: mean of its 4 wheels,
+        () without tyres or lap time differences"""
+        if not self.has_tyres():
+            return ()
+        paces = []
+        for row in self.rows:
+            keys = [extract_tyre_key(name) for name in row if name]
+            paces.append(sum(self.compound_pace(key) for key in keys) / len(keys) if keys else 0.0)
+        return tuple(paces) if any(paces) else ()
+
+    def compound_options(self) -> list[tuple[str, float, float, float]]:
+        """Dry compounds to compare (whole race on one compound): Soft, Medium, Hard & compounds of
+        the stock; (name, lap time difference & wear relative to the measured compound, tread of
+        new tyres)"""
+        dry = [key for key in self.compounds if not key.startswith("Q-") and "wet" not in key.casefold()
+               and "inter" not in key.casefold()]
+        stocked = {extract_tyre_key(name) for name in self.stock}
+        keys = [key for key in dry if key in stocked or key in ("Soft", "Medium", "Hard")]
+        reference = average_setting(self.setting(self.measured), CORNER_WEAR_PER_STINT)
+        options = []
+        for key in keys:
+            setting = self.setting(key)
+            wear = average_setting(setting, CORNER_WEAR_PER_STINT)
+            factor = wear / reference if reference > 0 and wear > 0 else 1.0
+            options.append((key, self.compound_pace(key), factor,
+                            min(average_setting(setting, CORNER_STARTING_TREAD), 100.0)))
+        return options
+
     def stop_change_times(self) -> list[float]:
         """Tyre change seconds of each stop (rows after start)"""
         return list(self.change_times[1:])

@@ -438,7 +438,9 @@ def test_overlays_never_hide_base_methods():
              "change_options", "disable_overlay", "menu_actions", "centering_rect", "should_hide",
              "screen_opacity")
     assignment = re.compile(rf"self\.({'|'.join(names)})\s*=[^=]")
-    folders = [pathlib.Path("neopedal/widget"), pathlib.Path("plugins")]
+    root = pathlib.Path(__file__).resolve().parents[1]  # repository, whatever the working folder
+    folders = [root / "neopedal" / "widget", root / "plugins"]
+    assert folders[0].is_dir()
     found = [
         f"{path}: {match.group(0)}"
         for folder in folders if folder.is_dir()

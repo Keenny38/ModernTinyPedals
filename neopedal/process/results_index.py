@@ -65,6 +65,16 @@ REPLAY_NAME = re.compile(r"^(?P<track>.+?)\s+(?P<code>[PQWR])\d*\s+\d+$", re.I) 
 VERSION = re.compile(r"^\s*v?(?P<major>\d+)\.(?P<minor>\d+)\s*$", re.I)
 
 
+class Rival(NamedTuple):
+    """Other person of the player's class in a race (results file): class position (0 if none), finish status, best
+    lap (s, 0 if none)"""
+
+    name: str
+    class_position: int
+    status: str
+    best_lap: float
+
+
 class ResultSummary(NamedTuple):
     """What the player did in a session (results file), None values never: 0 / "" when unknown"""
 
@@ -96,6 +106,9 @@ class ResultSummary(NamedTuple):
     impacts: int  # with objects
     penalties: int
     track_limits: float  # points at end of session
+    grid: int = 0  # start position (race), 0 if unknown
+    class_grid: int = 0  # start position in class (race), 0 if unknown
+    rivals: tuple[Rival, ...] = ()  # other people of player class (race), AI left out
 
 
 class ReplayFile(NamedTuple):
@@ -257,7 +270,17 @@ def summarize(result: SessionResult, end: float, names: Iterable[str] = ()) -> R
         impacts=sum(contacts.get(name, (0, 0))[1] for name in names),
         penalties=sum(penalties.get(name, 0) for name in names),
         track_limits=max((limits.get(name, 0.0) for name in names), default=0.0),
+        grid=entry.grid, class_grid=entry.class_grid, rivals=rivals_of(result, entry),
     )
+
+
+def rivals_of(result: SessionResult, entry: Entry) -> tuple[Rival, ...]:
+    """Other people of the class of entry in a race (driver at end of race), AI cars left out"""
+    if result.kind != "Race":
+        return ()
+    return tuple(Rival(other.name, other.class_position, other.status, other.best_lap)
+                 for other in result.entries
+                 if other is not entry and other.human and other.car_class == entry.car_class and other.name)
 
 
 def player_names(folders: Iterable[str]) -> dict[str, tuple[str, ...]]:

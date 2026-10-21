@@ -78,6 +78,7 @@ def tele(monkeypatch):
     monkeypatch.setattr(api, "read", SimpleNamespace(**{name: Group(values, name) for name in groups}))
     monkeypatch.setattr(api, "_api", SimpleNamespace(NAME="Le Mans Ultimate"))
     monkeypatch.setattr(realtime_state, "active", True)
+    monkeypatch.setattr(module_stats, "lmu_address", lambda: None)  # online state never asked to a running game
     return values
 
 
@@ -489,7 +490,8 @@ def test_missing_sector_file_created(tele, tmp_path):
 @pytest.fixture
 def history_env(tele, monkeypatch):
     monkeypatch.setattr(minfo, "delta", SimpleNamespace(lapTimeCurrent=5.0, lapTimeLast=90.0, isValidLap=True))
-    monkeypatch.setattr(minfo, "fuel", SimpleNamespace(lastLapConsumption=3.0, capacity=100.0))
+    monkeypatch.setattr(minfo, "fuel", SimpleNamespace(lastLapConsumption=3.0, capacity=100.0,
+                                                           lastLapPartial=False))
     monkeypatch.setattr(minfo, "energy", SimpleNamespace(lastLapConsumption=0.0))
     monkeypatch.setattr(minfo, "hybrid", SimpleNamespace(batteryDrainLast=0.0, batteryRegenLast=0.0))
     monkeypatch.setattr(minfo, "wheels", SimpleNamespace(lastLapTreadWear=(1.0, 1.0, 1.0, 1.0)))

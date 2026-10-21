@@ -20,16 +20,29 @@
 Mapping module
 """
 
+import logging
+import threading
+import time
+from collections.abc import Callable
+
 from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
 from ..const_file import FileExt
-from ..module_info import MapCoords, MappingInfo, minfo
+from ..module_info import NO_TRACK_MAP, MapCoords, MappingInfo, TrackMap
 from ..setting import cfg
 from ..userfile.track_info import load_track_info, save_track_info
 from ..userfile.track_map import load_track_map_file, save_track_map_file
+from ..userfile.track_map_official import OfficialMap, Point, fetch_official_points
 from ..validator import file_last_modified, generator_init
 from ._base import MODULE_STOP, WAIT_STATE_CHANGE, DataModule, data_stamp
+
+logger = logging.getLogger(__name__)
+
+MAX_NODE_GAP = 400.0  # meters between two nodes of a lap: farther is a teleport (back to garage, skipped part of lap)
+MAX_SPEED = 125.0  # m/s (450 km/h): gap farther than driven at this speed since last node is a teleport
+
+OfficialFetch = Callable[[str, float], "list[Point] | None"]  # (track name, track length) -> circuit points
 
 
 class Realtime(DataModule):
@@ -48,13 +61,15 @@ class Realtime(DataModule):
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update
 
+        output = self.ctx.minfo.mapping
         gen_record_track_map = record_track_map(
-            output=minfo.mapping,
+            output=output,
             filepath=self.cfg.path.track_map,
             min_node_distance=min(max(self.mcfg["minimum_node_distance"], 0.1), 50.0),
+            official=fetch_official_points,
         )
         gen_record_track_info = record_track_info(
-            output=minfo.mapping,
+            output=output,
         )
 
         try:
@@ -183,9 +198,38 @@ def record_track_info(output: MappingInfo):
         output.pitPassTime = pitlane_length / pit_speed if pit_speed else 0.0
 
 
+def start_official_fetch(fetch: OfficialFetch, track_name: str, track_length: float) -> list:
+    """Official circuit asked in a background thread (game Rest API: blocking), list filled with its points (None
+    if none) once answered"""
+    result: list = []
+
+    def fetching() -> None:
+        points = None
+        try:
+            points = fetch(track_name, track_length)
+        except Exception:  # unexpected answer: recorded laps only
+            logger.exception("TRACK MAP: unable to read official circuit of %s", track_name)
+        result.append(points)
+
+    threading.Thread(target=fetching, name="track map official", daemon=True).start()
+    return result
+
+
+def publish_map(output: MappingInfo, coords: tuple[tuple[float, float], ...] | None,
+                dists: tuple[tuple[float, float], ...] | None, sectors: tuple[int, int] | None) -> None:
+    """Track map shown by overlays replaced as a whole (new publish time: overlays draw it again)"""
+    output.trackMap = TrackMap(coords, dists, sectors, max(time.time(), output.trackMap.lastModified + 0.001))
+
+
 @generator_init
-def record_track_map(output: MappingInfo, filepath: str, min_node_distance: float = 5.0):
-    """Record map data, a node every min_node_distance meters at least"""
+def record_track_map(output: MappingInfo, filepath: str, min_node_distance: float = 5.0,
+                     official: OfficialFetch | None = None):
+    """Record map data, a node every min_node_distance meters at least
+
+    A stall of app or game (gap in lap distance a car can drive since last node) keeps the lap: shown, but saved only
+    once a lap without gap is recorded. Official circuit of game (official: fetch function, None: recorded laps only)
+    shown until a lap is recorded, saved as track map once its start & both sector lines are known.
+    """
     last_reset = None  # reset check
     delayed_save = False
 
@@ -195,8 +239,13 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
     last_lap_stime = -1.0  # last lap start time
     pos_last = 0.0  # last checked player vehicle position
     pos_recorded = 0.0  # position of last recorded node
+    time_recorded = 0.0  # elapsed time of last recorded node
     is_pit_lap = False  # recording lap visited pit lane
     temp_pit_lap = False  # validating lap visited pit lane
+    lap_gaps = 0  # stalls of recording lap
+    temp_gaps = 0  # stalls of validating lap
+    shown_gaps = -1  # stalls of recorded lap shown but not saved, -1 none shown
+    shown_lap = ("", NO_TRACK_MAP)  # track & recorded lap shown but not saved (kept after a vehicle reset)
     # File info
     map_exist = False
     last_modified = 0.0
@@ -205,6 +254,12 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
     output_data = MapCoords()
     recorder_data = MapCoords()
     temp_data = MapCoords()
+    # Official circuit
+    official_track = ""  # track asked to game
+    official_result: list = []  # filled by fetch thread
+    official_map: OfficialMap | None = None
+    official_car = 0  # car sampled next (start line placement)
+    official_sector = -1  # last sector index of player
 
     while True:
         reset = yield None
@@ -249,16 +304,25 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
                 filename=filename,
             )
             if output_data.is_valid():
-                output.coordinates = output_data.coords
-                output.elevations = output_data.dists
-                output.sectors = output_data.sectors
-                output.lastModified = last_modified
+                output.trackMap = TrackMap(output_data.coords, output_data.dists, output_data.sectors, last_modified)
                 map_exist = True
+                official_map = None
                 #logger.info("map exist")
             else:
                 output.reset_map()
                 map_exist = False
                 #logger.info("map not exist")
+                if official is not None and official_track != filename:  # asked once per track
+                    official_track = filename
+                    official_map = None
+                    official_result = start_official_fetch(official, filename, api.read.lap.track_length())
+                elif official_map is not None:  # same track after a reset: shown again
+                    publish_map(output, official_map.coords, official_map.dists, official_map.sector_indexes())
+                if shown_lap[0] == filename and shown_lap[1].coordinates:  # same track after a reset: shown again
+                    output.trackMap = shown_lap[1]
+                else:
+                    shown_lap = ("", NO_TRACK_MAP)
+                    shown_gaps = -1
 
             # Reset to defaults
             output_data.clear()
@@ -270,10 +334,53 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
             last_lap_stime = -1.0
             pos_last = pos_recorded = 0.0
             is_pit_lap = temp_pit_lap = False
+            official_sector = -1
 
         # Recording map data
         if map_exist:
             continue
+
+        # Official circuit: shown once answered, start line placed from a car on track, sector lines from player
+        if official_result:
+            points = official_result.pop()
+            official_map = OfficialMap.build(points, api.read.lap.track_length())
+            if official_map is None:
+                official_track = ""  # asked again after next reset (game in session, other layout)
+            elif shown_gaps < 0:
+                publish_map(output, official_map.coords, None, None)
+        if official_map is not None:
+            changed = False
+            if not official_map.placed:
+                total = api.read.vehicle.total_vehicles()
+                if total > 0:  # a car per update: path projected only for a car's first & second sample
+                    car = official_car % total
+                    official_car = car + 1
+                    if not api.read.vehicle.in_pits(car):
+                        changed = official_map.sample(
+                            car,
+                            api.read.vehicle.position_longitudinal(car),
+                            api.read.vehicle.position_lateral(car),
+                            api.read.lap.distance(car),
+                        )
+            sector_idx = api.read.lap.sector_index()
+            if official_sector != sector_idx:
+                if 0 <= official_sector == sector_idx - 1 and not api.read.vehicle.in_pits():  # crossed a line
+                    changed |= official_map.sector_crossed(official_sector, api.read.lap.distance())
+                official_sector = sector_idx
+            if changed:
+                sectors = official_map.sector_indexes()
+                if sectors is not None:  # complete: saved as track map, loaded in next loop
+                    output_data.coords = official_map.coords
+                    output_data.dists = official_map.dists
+                    output_data.sectors = sectors
+                    official_map = None
+                    recording = False
+                    validating = False
+                    delayed_save = True
+                    last_reset = None
+                    continue
+                if shown_gaps < 0:  # recorded lap shown has a start line
+                    publish_map(output, official_map.coords, official_map.dists, None)
 
         # Lap start & finish detection
         # Init reset
@@ -291,12 +398,14 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
                 temp_data.dists = tuple(recorder_data.dists)
                 temp_data.sectors = tuple(recorder_data.sectors)
                 temp_pit_lap = is_pit_lap
+                temp_gaps = lap_gaps
                 validating = True
             # Reset
             recorder_data.reset()
             last_lap_stime = lap_stime
             pos_last = pos_recorded = 0.0
             is_pit_lap = False
+            lap_gaps = 0
             recording = True
             #logger.info("map recording")
 
@@ -305,16 +414,25 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
             laptime_curr = api.read.timing.current_laptime()
             # Save data
             if 1 < laptime_curr <= 8 and api.read.timing.last_laptime() > 0 and not temp_pit_lap:
-                output_data.coords = temp_data.coords
-                output_data.dists = temp_data.dists
-                output_data.sectors = temp_data.sectors
-                # Reset
-                temp_data.clear()
-                recorder_data.clear()
-                recording = False
-                validating = False
-                delayed_save = True
-                last_reset = None  # load recorded map in next loop
+                if temp_gaps:  # lap with gaps: shown unless a better map is, next laps recorded on
+                    if ((official_map is None or not official_map.placed)
+                            and (shown_gaps < 0 or temp_gaps < shown_gaps)):
+                        publish_map(output, temp_data.coords, temp_data.dists, temp_data.sectors)
+                        shown_gaps = temp_gaps
+                        shown_lap = (filename, output.trackMap)
+                    temp_data.clear()
+                    validating = False
+                else:
+                    output_data.coords = temp_data.coords
+                    output_data.dists = temp_data.dists
+                    output_data.sectors = temp_data.sectors
+                    # Reset
+                    temp_data.clear()
+                    recorder_data.clear()
+                    recording = False
+                    validating = False
+                    delayed_save = True
+                    last_reset = None  # load recorded map in next loop
             # Switch off validating after 8s
             elif 8 < laptime_curr < 10:
                 temp_data.clear()
@@ -338,16 +456,24 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
             pos_curr = api.read.lap.distance()
             if 0 <= pos_curr != pos_last:
                 delta_pos = pos_curr - pos_recorded
+                record = delta_pos >= min_node_distance  # further than last node
                 if delta_pos > 100:
-                    if recorder_data.coords:  # teleported (back to garage, skipped part of lap): lap not recorded
+                    if not recorder_data.coords:  # lap distance of previous lap still read at lap start: wait for its reset
+                        record = False
+                    elif (delta_pos > MAX_NODE_GAP
+                            or delta_pos > (api.read.timing.elapsed() - time_recorded) * MAX_SPEED):
+                        # teleported (back to garage, skipped part of lap): lap not recorded
                         recording = False
                         recorder_data.clear()
-                    # else lap distance of previous lap still read at lap start: wait for its reset
-                elif delta_pos >= min_node_distance:  # further than last node
+                        record = False
+                    else:  # app or game stalled (busy disk, CPU load) while driving: gap kept in lap
+                        lap_gaps += 1
+                if record:
                     pos_x = api.read.vehicle.position_longitudinal()
                     pos_y = api.read.vehicle.position_lateral()
                     pos_z = api.read.vehicle.position_vertical()
                     recorder_data.coords.append((pos_x, pos_y))
                     recorder_data.dists.append((pos_curr, pos_z))
                     pos_recorded = pos_curr
+                    time_recorded = api.read.timing.elapsed()
                 pos_last = pos_curr  # reset last position

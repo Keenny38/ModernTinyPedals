@@ -522,7 +522,8 @@ class UpdatesNotifyButton(QPushButton):
             self, update_checker.notes(current_language()), update_checker.latest_version(), update_checker.latest_date(),
             can_install=self.can_install(), prompt=prompt,
             download_url=installer.url if installer is not None and not portable else "", portable=portable,
-            installer=update_installer(), can_skip=update_checker.is_updates())
+            installer=update_installer(), can_skip=update_checker.is_updates(),
+            earlier=update_checker.earlier_notes(current_language()))
         # Page may outlive this button (kept when view is rebuilt in new language): not only bound to it
         dialog.install_requested.connect(
             lambda button=self: button.install_from_notes() if shiboken6.isValid(button) else install_from_notes())

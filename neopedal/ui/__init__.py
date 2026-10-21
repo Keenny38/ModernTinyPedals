@@ -710,46 +710,6 @@ def set_style_window(base_font_pt: int) -> str:
         #navRailScroll QScrollBar::handle:vertical {{
             margin: 1px;
         }}
-        #homeCard {{
-            background: {color_active_base};
-            border: 1px solid {color_active_midlight};
-            border-radius: {border_radius_card}px;
-        }}
-        #homeCard[clickable="true"]:hover {{
-            border-color: {color_active_highlight};
-        }}
-        #homeCard[clickable="true"]:focus {{
-            border: 2px solid {color_active_highlight};
-        }}
-        #homeCardTitle, #homeDetail, #homeSubtitle {{
-            color: {color_disabled_window_text};
-        }}
-        #homeGlyph {{
-            color: {color_active_highlight};
-        }}
-        #homeValue {{
-            font-size: {font_pt_app_name}pt;
-        }}
-        #homeHeader {{
-            font-size: {font_pt_app_name}pt;
-        }}
-        #homeHero {{
-            background: {color_active_base};
-            border: 1px solid {color_active_midlight};
-            border-left: 3px solid {color_active_highlight};
-            border-radius: {border_radius_card}px;
-        }}
-        #homeChip {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-            border-radius: 0.6em;
-            padding: 0.1em 0.6em;
-            font-weight: bold;
-        }}
-        #homeSectionTitle {{
-            font-size: {font_pt_item_button}pt;
-            font-weight: bold;
-        }}
         #pickerCard {{
             background: {color_active_base};
             border: 1px solid {color_active_midlight};
@@ -771,24 +731,6 @@ def set_style_window(base_font_pt: int) -> str:
             padding: 1.5em 0.5em;
         }}
         #editorPrimary {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-            border-color: {color_active_highlight};
-            font-weight: bold;
-        }}
-        #homeLink {{
-            border: 1px solid transparent;
-            background: transparent;
-            color: {color_active_highlight};
-            padding: 0.1em 0.4em;
-        }}
-        #homeLink:hover {{
-            text-decoration: underline;
-        }}
-        #homeLink:focus {{
-            border-color: {color_active_highlight};
-        }}
-        #homePrimary {{
             color: {color_active_highlighted_text};
             background: {color_active_highlight};
             border-color: {color_active_highlight};
@@ -1016,59 +958,6 @@ def set_style_window(base_font_pt: int) -> str:
             font-size: {font_pt_item_button}pt;
             font-weight: bold;
             padding: 0.2em 0.5em;
-        }}
-
-        /* What's new: header, version chip, theme cards, primary action */
-        ReleaseNotesDialog #notesBody {{
-            background: transparent;
-        }}
-        ReleaseNotesDialog #notesTitle {{
-            font-size: {font_pt_app_name}pt;
-            font-weight: bold;
-        }}
-        ReleaseNotesDialog #notesChip {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-            border-radius: 0.6em;
-            padding: 0.1em 0.6em;
-            font-weight: bold;
-        }}
-        ReleaseNotesDialog #notesCard {{
-            background: {color_active_base};
-            border: 1px solid {color_active_midlight};
-            border-radius: {border_radius_card}px;
-        }}
-        ReleaseNotesDialog #notesCardTitle {{
-            font-size: {font_pt_item_button}pt;
-            font-weight: bold;
-            color: {color_active_highlight};
-        }}
-        ReleaseNotesDialog #notesItems {{
-            font-size: {font_pt_item_toggle}pt;
-        }}
-        ReleaseNotesDialog #notesMono {{
-            font-family: "Cascadia Mono", "Consolas", monospace;
-            font-size: {font_pt_text_browser}pt;
-        }}
-        ReleaseNotesDialog #notesToggle {{
-            border: none;
-            background: transparent;
-            color: {color_disabled_window_text};
-            padding: 0.2em 0;
-        }}
-        ReleaseNotesDialog #notesToggle:hover {{
-            color: {color_active_window_text};
-        }}
-        ReleaseNotesDialog #notesPrimary {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-            border-color: {color_active_highlight};
-            font-weight: bold;
-        }}
-        ReleaseNotesDialog #notesPrimary:disabled {{
-            color: {color_disabled_window_text};
-            background: {color_active_window};
-            border-color: {color_active_mid};
         }}
 
         /* About dialog */

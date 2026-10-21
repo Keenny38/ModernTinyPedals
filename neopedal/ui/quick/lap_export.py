@@ -37,7 +37,19 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Protocol
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QLocale, QObject, QPointF, QRectF, Qt, QUrl, Slot
+from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
+    QIODevice,
+    QLocale,
+    QObject,
+    QPointF,
+    QRectF,
+    QStandardPaths,
+    Qt,
+    QUrl,
+    Slot,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -53,6 +65,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+from ...formatter import strip_invalid_char
 from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile.lap_cache import load_cached_lap
@@ -71,7 +84,9 @@ from ...userfile.telemetry_lap import (
     length_ratio,
     monotonic_distance,
     official_lap_time,
+    read_lap_info,
     same_circuit,
+    share_lap_job,
 )
 from ..lap_viewer import CHANNEL_MAP, Channel, LapEntry, PlotLap, channel_title, format_laptime, lap_label
 from . import lap_map
@@ -202,6 +217,30 @@ class ExportHost(Protocol):
     def set_status(self, text: str, transient: bool = True): ...
     def run_job(self, name: str, work: Callable[[], Any], done: Callable[[Any], None]): ...
     def run_process_job(self, name: str, done: Callable[[Any], None], function: Callable, *args): ...
+
+
+def driver_name() -> str:
+    """Player name (online ranks profile), empty if unknown"""
+    from ...rank_info import ranks
+
+    player = ranks.player
+    return str(player.name) if player is not None and player.name else ""
+
+
+def share_folder() -> str:
+    """Folder a shared lap is saved to first: Documents"""
+    return QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation) or os.path.expanduser("~")
+
+
+def shared_lap_name(path: str) -> str:
+    """File name of shared lap: track, vehicle, driver & lap time ("Atlanta - Porsche 963 - Steven 1m10.907s.csv.gz")"""
+    info = read_lap_info(path)
+    lap_time = lap_time_of(os.path.basename(path)) or official_lap_time(LapData("", {}, info))
+    minutes, seconds = divmod(round(lap_time, 3), 60)
+    parts = [str(info.get(key, "")) for key in ("track", "vehicle") if info.get(key)]
+    parts.append(" ".join(part for part in (driver_name(), f"{int(minutes)}m{seconds:06.3f}s" if lap_time > 0 else "")
+                          if part))
+    return strip_invalid_char(" - ".join(part for part in parts if part) or lap_stem(path)) + ".csv.gz"
 
 
 class LapExports(PagePart):
@@ -510,6 +549,56 @@ class LapExports(PagePart):
         venue = os.path.basename(os.path.dirname(path)).split(" - ")[0]
         self._page.run_process_job("MoTeC export", exported, export_lap_job, self._page.folder, path, filename, venue)
 
+    @Slot(float, float)
+    def exportPassageMotec(self, start: float, end: float):
+        """Reference lap between two axis positions (markers A & B) to MoTeC .ld file, by worker process"""
+        path = self._page.reference_key
+        if not path or (path in self._lap_cache and self._lap_cache[path] is None):  # unreadable lap
+            return
+        low, high = sorted((self._page.data.distance_at_x(start), self._page.data.distance_at_x(end)))
+        filename, _ = QFileDialog.getSaveFileName(
+            self._page.widget, tr("Export MoTeC..."), f"{lap_stem(path)} {low:.0f}-{high:.0f}m.ld", "MoTeC i2 (*.ld)")
+        if not filename:
+            return
+
+        def exported(error):
+            self._exports -= 1
+            if error == "":
+                self._page.set_status(trm(f"Exported: {os.path.basename(filename)}"))
+            else:  # None: job failed (logged)
+                self._page.set_status(trm(f"Unable to export lap: {error or tr('Unknown error')}"))
+
+        self._exports += 1
+        venue = os.path.basename(os.path.dirname(path)).split(" - ")[0]
+        self._page.run_process_job("MoTeC export", exported, export_lap_job, self._page.folder, path, filename, venue,
+                                   (low, high))
+
+    @Slot(str)
+    def shareLap(self, path: str = ""):
+        """Lap (reference lap by default) as one compressed file to send to another driver, who adds it to their
+        lap viewer with Add File (lap info tells who shared it), written by worker process"""
+        path = path or self._page.reference_key
+        if not path or not os.path.isfile(path):
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self._page.widget, tr("Share Lap..."), os.path.join(share_folder(), shared_lap_name(path)),
+            f"{tr('NeoPedal Lap')} (*.csv.gz)")
+        if not filename:
+            return
+        if not filename.lower().endswith(".csv.gz"):
+            filename = filename.removesuffix(".gz").removesuffix(".csv") + ".csv.gz"
+
+        def shared(error):
+            self._exports -= 1
+            if error == "":
+                self._page.set_status(trm(f"Lap saved to share: <b>{html.escape(os.path.basename(filename))}</b> · "
+                                          "send this file, the other driver adds it with Add File..."))
+            else:  # None: job failed (logged)
+                self._page.set_status(trm(f"Unable to share lap: {html.escape(error or tr('Unknown error'))}"))
+
+        self._exports += 1
+        self._page.run_process_job("lap share", shared, share_lap_job, path, filename, driver_name())
+
     @Slot(bool)
     def exportMotecMany(self, whole_track: bool):
         """Export displayed laps, or every lap of track, to folder (in background)"""
@@ -779,7 +868,8 @@ class LapExports(PagePart):
 
     @Slot(float, float)
     def exportPassageCsv(self, start: float, end: float):
-        """Displayed charts of displayed laps between markers A & B to CSV, every meter"""
+        """Displayed charts of displayed laps between two axis positions (markers A & B, zoomed part) to CSV,
+        every meter"""
         if not self._page.data.laps:
             self._page.set_status(tr("Check laps to export first."))
             return

@@ -261,7 +261,7 @@ def test_official_corner_won_by_corner_covering_it(viewer):  # noqa: F811
     covering = Row(Corner(2, 250.0, 350.0, 300.0), -0.20)  # covers official corner 1
     far = Row(Corner(3, 1500.0, 1560.0, 1530.0), 0.05)  # no official corner within 200 m
     backend.cornerTable.rows = [near, covering, far]
-    points = backend.official_points()
+    points = backend.mapMarks.official_points()
     first = points[0]
     assert first["delta"] == signed(-0.20, 2) and first["row"] == 1  # covering corner wins
     assert points[1]["delta"] == "" and points[1]["row"] == -1
@@ -294,8 +294,8 @@ def test_reference_without_positions(viewer, monkeypatch):  # noqa: F811
     assert len(backend._map_lines) == 1 and backend.reference_map_line() is None
     assert not any(line["reference"] for line in backend._map["lines"])  # compared lap not taken for reference
     road = backend._map_lines[0][0]
-    assert backend.mapPick(road.xs[40], road.ys[40], 20.0) == -1.0  # nothing at reference distances
-    assert backend.map_sector_labels() == [] and backend.mapBounds(0.0, 500.0) == []
+    assert backend.mapPointer.mapPick(road.xs[40], road.ys[40], 20.0) == -1.0  # nothing at reference distances
+    assert backend.mapMarks.sector_labels() == [] and backend.mapPointer.mapBounds(0.0, 500.0) == []
     backend.setPinned(500.0)
     assert backend.mapPin == {}
     backend.setMapMode("gain")  # compared lap colored by time gain
@@ -308,9 +308,9 @@ def test_reference_without_positions(viewer, monkeypatch):  # noqa: F811
     backend.rebuild_chart()
     line = backend.reference_map_line()
     assert line is backend._road and backend.cornerTable.rows
-    assert backend.mapPick(line.xs[40], line.ys[40], 20.0) == pytest.approx(backend.data.x_at_distance(
+    assert backend.mapPointer.mapPick(line.xs[40], line.ys[40], 20.0) == pytest.approx(backend.data.x_at_distance(
         line.distances[40]), abs=1.0)
-    assert len(backend.map_corner_points()) == len(backend.cornerTable.rows)
+    assert len(backend.mapMarks.corner_points()) == len(backend.cornerTable.rows)
     assert colored_count(backend) > 0  # speed of reference lap along circuit
     assert backend.mapPin
     backend.clearPinned()

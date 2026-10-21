@@ -259,7 +259,7 @@ def lap_page(ui_env, monkeypatch):
 
 
 def test_replay_looked_for_in_background(lap_page, monkeypatch):
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_xy
 
     lap_page.checked = {lap_path(lap_page, 1)}
     lap_page.reference_key = lap_path(lap_page, 1)
@@ -273,7 +273,7 @@ def test_replay_looked_for_in_background(lap_page, monkeypatch):
         assert gate.wait(5)
         return None
 
-    monkeypatch.setattr(lap_backend, "find_replay", find)
+    monkeypatch.setattr(lap_xy, "find_replay", find)
     lap_page.openReplay(0.0, "")
     assert lap_page.status == "Looking for the replay of this lap…"  # page never waits for replay files
     lap_page.openReplay(0.0, "")  # lookup running: not asked twice
@@ -298,10 +298,10 @@ def test_find_replay_reads_files_in_folder(tmp_path, monkeypatch):
 
 
 def test_undo_stack(lap_page, monkeypatch):
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_actions
 
     first, second, third = (lap_path(lap_page, number) for number in (1, 2, 3))
-    monkeypatch.setattr(lap_backend, "UNDO_DEPTH", 2)
+    monkeypatch.setattr(lap_actions, "UNDO_DEPTH", 2)
     for path in (first, second, third):
         lap_page.deleteLap(path)
         wait_loaded(lap_page)

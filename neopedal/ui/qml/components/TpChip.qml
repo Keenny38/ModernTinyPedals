@@ -9,6 +9,7 @@ AbstractButton {
     id: chip
     property color dotColor: "transparent"
     property bool showDot: false
+    property string glyph: ""  // icon before the text (Segoe icon code)
     property int count: -1  // shown when 0 or more
     property bool selected: false
     property bool multi: false  // several chips can be selected (check box for screen readers)
@@ -60,6 +61,12 @@ AbstractButton {
             ColorDot {
                 visible: chip.showDot
                 color: chip.dotColor
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Icon {  // hidden without glyph (or icon font)
+                glyph: chip.glyph
+                size: theme.em * 0.8
+                color: chip.selected ? theme.accent : chip.dimmed ? theme.dimText : theme.text
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {

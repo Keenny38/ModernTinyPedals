@@ -49,7 +49,10 @@ MAX_RECORDS = 50000  # oldest records dropped (file rewritten when loaded over l
 MIN_SESSION_SECONDS = 60  # stint without lap shorter than this not recorded (garage exit...)
 # Session filter: all, practice (test day, practice, warmup), qualifying, race
 SESSION_GROUPS: tuple[tuple[int, ...], ...] = ((), (0, 1, 3), (2,), (4,))
-TEXT_FIELDS = ("vehicle_class", "game_version")
+TEXT_FIELDS = ("vehicle_class", "game_version", "compound")
+# Fields of newer records written only when known (older records & lines stay as they were)
+KNOWN_FIELDS = {"wetness": -1.0, "track_temp": 0.0, "start_position": 0, "online": -1}
+WET_THRESHOLD = 0.05  # road wetness (fraction) from which a lap counts as wet: damp road laps far from dry ones
 TAIL_BYTES = 64 * 1024  # end of file read for last record (hundreds of records)
 CHECK_BYTES = 512  # start of file & bytes before end of parsed lines compared: file only appended since
 _last_records: dict[str, tuple[tuple[int, int], SessionRecord | None]] = {}  # path: file time & size, record
@@ -75,6 +78,20 @@ class SessionRecord(NamedTuple):
     finish: int = 0  # finish state: 0 = none, 1 = finished, 2 = DNF, 3 = DQ
     vehicle_class: str = ""  # game class name (vehicle key may be vehicle name only)
     game_version: str = ""  # game version when driven ("1.42"), "" if unknown (rF2, older records)
+    wetness: float = -1.0  # road wetness (fraction) of best lap (most of stint without one), -1 if unknown
+    track_temp: float = 0.0  # track temperature (Celsius) of best lap, unknown if wetness unknown
+    compound: str = ""  # tyre compound of best lap ("Medium", front & rear "Soft/Medium"), "" if unknown
+    start_position: int = 0  # position at race start (same scope as position: class or overall), 0 if unknown
+    online: int = -1  # 1 on an online server, 0 offline, -1 unknown (older records, rF2)
+
+    @property
+    def conditions_known(self) -> bool:
+        return self.wetness >= 0
+
+    @property
+    def wet(self) -> bool:
+        """Wet or damp road (best lap)"""
+        return self.wetness >= WET_THRESHOLD
 
 
 def history_path(filepath: str) -> str:
@@ -303,9 +320,16 @@ def record_line(record: SessionRecord) -> str:
     data = record._asdict()
     for name in ("best", "meters", "seconds"):
         data[name] = round(data[name], 3)
+    data["wetness"] = round(data["wetness"], 3)
+    data["track_temp"] = round(data["track_temp"], 1)
     for name in TEXT_FIELDS:
         if not data[name]:
             del data[name]
+    for name, default in KNOWN_FIELDS.items():
+        if data[name] == default:
+            del data[name]
+    if record.wetness < 0:
+        data.pop("track_temp", None)  # conditions unknown
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
@@ -436,14 +460,18 @@ def worth_recording(valid: int, invalid: int, seconds: float) -> bool:
 def session_record(
     track: str, vehicle: str, session: int, best: float, valid: int, invalid: int,
     meters: float, seconds: float, position: int, finish: int, time: float, vehicle_class: str = "",
-    game_version: str = "",
+    game_version: str = "", wetness: float = -1.0, track_temp: float = 0.0, compound: str = "",
+    start_position: int = 0, online: int = -1,
 ) -> SessionRecord:
-    """Record of a driving stint, invalid best lap time (none) saved as 0"""
+    """Record of a driving stint, invalid best lap time (none) saved as 0, conditions rounded as saved"""
+    known = 0 <= wetness <= 1 and math.isfinite(track_temp)
     return SessionRecord(
         time=time, track=track, vehicle=vehicle, session=session,
         best=best if 0 < best < MAX_SECONDS else 0.0,
         valid=valid, invalid=invalid, meters=meters, seconds=seconds,
         position=position, finish=finish, vehicle_class=vehicle_class, game_version=game_version,
+        wetness=round(wetness, 3) if known else -1.0, track_temp=round(track_temp, 1) if known else 0.0,
+        compound=compound, start_position=max(start_position, 0), online=online if online in (0, 1) else -1,
     )
 
 

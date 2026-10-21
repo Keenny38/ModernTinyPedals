@@ -473,7 +473,7 @@ def test_rival_tracker_keeps_stop_on_driver_swap(monkeypatch):
             slot_id=lambda index: 100 + index, driver_name=lambda index: cars["driver"][index],
             number_pitstops=lambda index: cars["stops"][index], place=lambda index: index + 1,
             in_pits=lambda index: False),
-        lap=SimpleNamespace(completed_laps=lambda index: cars["laps"][index]),
+        lap=SimpleNamespace(completed_laps=lambda index: cars["laps"][index], progress=lambda index: 0.5),
     )
     monkeypatch.setattr(race_live.api, "read", read)
     tracker = race_live.RivalTracker()

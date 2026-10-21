@@ -77,28 +77,34 @@ def test_deferred_repaint_after_stop_does_nothing(make_widget, monkeypatch):
 # Track map: repaint when a car moves a device pixel
 @pytest.mark.parametrize("modern", (False, True))
 def test_track_map_repaints_on_visible_move_only(make_widget, monkeypatch, modern):
-    from neopedal.module_info import minfo
+    import math
 
+    from neopedal.module_info import TrackMap, minfo
+
+    oval = tuple((600 * math.cos(i / 200 * math.tau), 350 * math.sin(i / 200 * math.tau)) for i in range(200))
+    monkeypatch.setattr(minfo.mapping, "trackMap", TrackMap(oval, tuple((i * 20.0, 0.0) for i in range(200)),
+                                                            (66, 133), 3.0))
     widget = make_widget("track_map", modern)
     widget.max_repaint_rate = 0
     calls = count_updates(monkeypatch, widget)
     monkeypatch.setattr(minfo.relative, "drawOrder", [0, 1])
     car = minfo.vehicles.dataSet[1]
-    monkeypatch.setattr(car, "currentLapProgress", 0.25)
+    monkeypatch.setattr(car, "worldPositionX", 600.0)
+    monkeypatch.setattr(car, "worldPositionY", 0.0)
 
-    def tick(progress: float):
-        car.currentLapProgress = progress
+    def tick(pos_y: float):
+        car.worldPositionY = pos_y
         minfo.vehicles.dataSetVersion += 1
         widget.timerEvent(None)
 
     monkeypatch.setattr(minfo.vehicles, "dataSetVersion", 1000)
-    tick(0.25)
+    tick(0.0)
     first = len(calls)
     assert first >= 1
     assert widget.car_positions is not None and [index for index, *_ in widget.car_positions] == [0, 1]
-    tick(0.25 + 1e-6)  # far less than a pixel on temporary circle map: no repaint
+    tick(1e-4)  # far less than a pixel on track map: no repaint
     assert len(calls) == first
-    tick(0.3)
+    tick(200.0)
     assert len(calls) == first + 1
     widget.timerEvent(None)  # same data
     assert len(calls) == first + 1

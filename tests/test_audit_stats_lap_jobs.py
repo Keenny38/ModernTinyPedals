@@ -6,6 +6,7 @@ import json
 import os
 import threading
 
+from neopedal.ui.quick import stats_io
 from tests.test_driver_stats_e2 import OREGA, SPA, stats_page, wait_stints  # noqa: F401
 from tests.test_driver_stats_viewer import SHEET, settle
 from tests.test_lap_viewer_e2 import START, TRACK
@@ -14,15 +15,14 @@ from tests.test_lap_viewer_fix_backend import backend, write_other_track  # noqa
 
 # --- 40. Recorded laps of selected vehicle read once selection settles, older reads never overwrite newer ones
 def test_stints_read_debounced_and_stale_read_ignored(stats_page, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import stats_backend
 
     calls: list[str] = []
-    real = stats_backend.read_laps
+    real = stats_io.read_laps
     def counted(path, *args, **kwargs):
         calls.append(path)
         return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(stats_backend, "read_laps", counted)
+    monkeypatch.setattr(stats_io, "read_laps", counted)
     stats_page.selectTrack(SPA)
     stats_page.selectRow(OREGA)
     for _ in range(5):  # selection changing quickly (arrow keys)
@@ -68,9 +68,9 @@ def test_reference_kept_when_cache_not_written(stats_page, monkeypatch):  # noqa
 # --- 41. Lap infos of a track with many new lap files read in background, stale reads ignored
 def test_track_infos_read_in_background(backend, monkeypatch):  # noqa: F811
     from neopedal.setting import cfg
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_library
 
-    monkeypatch.setattr(lap_backend, "INFO_BACKGROUND", 1)
+    monkeypatch.setattr(lap_library, "INFO_BACKGROUND", 1)
     folder = cfg.path.telemetry.rstrip("/")
     other = "Other - GT3"
     for number in range(1, 4):

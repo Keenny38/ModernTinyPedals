@@ -10,7 +10,7 @@ from PySide6.QtCore import QCoreApplication, QTimerEvent
 from PySide6.QtGui import QColor, QImage
 
 from neopedal.api_control import api
-from neopedal.module_info import minfo
+from neopedal.module_info import TrackMap, minfo
 from neopedal.setting import cfg
 from neopedal.template.setting_widget import WIDGET_DEFAULT
 from neopedal.widget._modern import create_widget, modern_module
@@ -216,10 +216,9 @@ def oval(monkeypatch):
     nodes = 200
     coords = tuple((600 * math.cos(i / nodes * math.tau), 350 * math.sin(i / nodes * math.tau)) for i in range(nodes))
     mapping = minfo.mapping
-    for name, value in (
-        ("coordinates", coords), ("elevations", tuple((i / nodes * 4000.0, 0.0) for i in range(nodes))),
-        ("sectors", (66, 133)), ("lastModified", 2.0), ("pitEntryPosition", 3800.0), ("pitExitPosition", 200.0),
-    ):
+    monkeypatch.setattr(mapping, "trackMap", TrackMap(
+        coords, tuple((i / nodes * 4000.0, 0.0) for i in range(nodes)), (66, 133), 2.0))
+    for name, value in (("pitEntryPosition", 3800.0), ("pitExitPosition", 200.0)):
         monkeypatch.setattr(mapping, name, value)
     monkeypatch.setattr(minfo.delta, "deltaBestData", tuple((i / 100 * 4000.0, i / 100 * 90.0) for i in range(101)))
     monkeypatch.setattr(minfo.delta, "lapTimePace", 91.0)
@@ -263,17 +262,17 @@ def test_track_map_cars_safety_car_and_predictions(widgets, oval, monkeypatch):
     assert has_color(image, theme.negative)  # prediction ring
 
 
-def test_track_map_class_colors_and_circle_map(widgets, oval, monkeypatch):
+def test_track_map_class_colors_and_no_map_text(widgets, oval, monkeypatch):
     widget = widgets("track_map", enable_multi_class_styling=True, show_custom_player_color_in_multi_class=True)
     update(widget)
     cars = minfo.vehicles.dataSet
     opponent = next(car for car in cars if not car.isPlayer and not car.inPit and not car.isYellow)
     assert widget.car_color(cars[minfo.vehicles.playerIndex]) == widget.theme.accent
     assert widget.car_color(opponent) not in (widget.theme.accent, widget.theme.text)
-    monkeypatch.setattr(minfo.mapping, "coordinates", None)
-    circle = widgets("track_map", show_vehicle_class_standings=True)
-    assert visible_pixels(update(circle)) > 100
-    assert circle.map_scaled is None
+    monkeypatch.setattr(minfo.mapping, "trackMap", minfo.mapping.trackMap._replace(coordinates=None))
+    no_map = widgets("track_map", show_vehicle_class_standings=True)
+    assert visible_pixels(update(no_map)) > 0  # text, no made-up circle with cars
+    assert no_map.map_scaled is None and no_map.state == ()
 
 
 # --- Radar

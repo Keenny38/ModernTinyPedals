@@ -1,5 +1,6 @@
 """Driver stats viewer (Qt Quick page, quick/stats_backend.py): edits, undo, history, All Tracks, export, page"""
 
+import inspect
 import json
 import os
 import sys
@@ -8,13 +9,14 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 from test_lap_reference import SHEET
 
 from neopedal.const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from neopedal.setting import cfg
+from neopedal.ui.quick import stats_common, stats_edits, stats_selection, stats_table
 from neopedal.userfile import driver_history, driver_stats, lap_reference
 from neopedal.userfile.driver_history import SessionRecord
 from neopedal.userfile.driver_stats import DriverStats, validate_stats_file
@@ -46,9 +48,9 @@ def opens_on_game_track(monkeypatch):
     """Page opens on game track (tests written for a track shown), not on All Tracks"""
     from neopedal.ui.quick import stats_backend
 
-    REAL_INITIAL_TRACK.setdefault("initial_track", vars(stats_backend.DriverStatsBackend)["initial_track"])
+    REAL_INITIAL_TRACK.setdefault("initial_track", inspect.getattr_static(stats_backend.DriverStatsBackend, "initial_track"))
     monkeypatch.setattr(stats_backend.DriverStatsBackend, "initial_track", lambda self: (
-        self.game_track() if self.game_track() in self.stats_temp else stats_backend.ALL_TRACKS))
+        self.game_track() if self.game_track() in self.stats_temp else stats_common.ALL_TRACKS))
 
 
 def write_stats(stats: dict):
@@ -247,21 +249,20 @@ def test_reset_lap_time_clears_history_best(backend):
 
 def test_plurals_and_dates(backend, monkeypatch):
     from neopedal import i18n
-    from neopedal.ui.quick import stats_backend
 
     tiles = {tile["title"]: tile for tile in backend.tiles}
     assert tiles["Races"]["detail"] == "1 win · 1 podium"
-    assert stats_backend.plural(2, "session", "sessions") == "2 sessions"
+    assert stats_common.plural(2, "session", "sessions") == "2 sessions"
     i18n.set_language("Français")
     try:
-        assert stats_backend.plural(1, "win", "wins") == "1 victoire"
-        assert stats_backend.plural(0, "win", "wins") == "0 victoire"
-        monkeypatch.setattr(stats_backend.QLocale, "system", staticmethod(lambda: stats_backend.QLocale("en_US")))
-        date = stats_backend.format_date(1_760_000_000)  # 2025-10-09
+        assert stats_common.plural(1, "win", "wins") == "1 victoire"
+        assert stats_common.plural(0, "win", "wins") == "0 victoire"
+        monkeypatch.setattr(QLocale, "system", staticmethod(lambda: QLocale("en_US")))
+        date = stats_common.format_date(1_760_000_000)  # 2025-10-09
         assert date.startswith(("09/10/", "9/10/"))  # French day first
     finally:
         i18n.set_language("English")
-    assert stats_backend.format_date(0) == "-"
+    assert stats_common.format_date(0) == "-"
 
 
 # --- Quick improvements & additions
@@ -309,10 +310,9 @@ def test_next_level_and_qualifying_mark(backend):
 
 
 def test_durations_and_derived_columns(backend, monkeypatch):
-    from neopedal.ui.quick import stats_backend
 
-    assert stats_backend.format_duration(45 * 60) == "45 min"
-    assert stats_backend.format_duration(12 * 3600 + 5 * 60) == "12 h 05 min"
+    assert stats_common.format_duration(45 * 60) == "45 min"
+    assert stats_common.format_duration(12 * 3600 + 5 * 60) == "12 h 05 min"
     assert {tile["title"]: tile["value"] for tile in backend.tiles}["Driving Time"] == "30 min"
     assert text_of(backend, OREGA, "valid_rate") == "75 %"
     assert text_of(backend, OREGA, "speed") == "100.0"  # 50 km in half an hour
@@ -321,8 +321,8 @@ def test_durations_and_derived_columns(backend, monkeypatch):
     assert text_of(backend, OREGA, "avg_finish") == "2.0"
     assert text_of(backend, "Hyper - Ferrari", "speed") == "-"
     monkeypatch.setitem(cfg.units, "speed_unit", "MPH")
-    assert stats_backend.header_label("speed") == "Avg. Speed (mph)"
-    assert stats_backend.derived_value("win_rate", {"races": 4, "wins": 1}) == 25  # no starts recorded
+    assert stats_common.header_label("speed") == "Avg. Speed (mph)"
+    assert stats_common.derived_value("win_rate", {"races": 4, "wins": 1}) == 25  # no starts recorded
 
 
 def test_columns_hidden_resized_and_reset(backend):
@@ -432,7 +432,7 @@ def test_all_tracks_view_actions_and_letters(backend):
 
 
 def test_colorblind_level_colors(backend):
-    from neopedal.ui.quick.stats_backend import COLORBLIND_LEVEL_COLORS
+    from neopedal.ui.quick.stats_common import COLORBLIND_LEVEL_COLORS
 
     normal = backend.cell(OREGA, "level").color
     backend.setColorblind(True)
@@ -444,7 +444,6 @@ def test_colorblind_level_colors(backend):
 
 
 def test_theoretical_best_read_again_when_changed(backend, monkeypatch):
-    from neopedal.ui.quick import stats_backend
     from neopedal.userfile.sector_best import save_sector_best_file
 
     save_sector_best_file(cfg.path.sector_best, f"{SPA} - LMP2_ELMS", (0, 0, 0), [40.0] * 3, [40.0] * 3,
@@ -453,8 +452,8 @@ def test_theoretical_best_read_again_when_changed(backend, monkeypatch):
     assert text_of(backend, OREGA, "theory") == "2:00.500" and text_of(backend, OREGA, "potential") == "1.000"
     assert text_of(backend, "Hyper - Ferrari", "theory") == TEXT_NOLAPTIME
     reads = []
-    original = stats_backend.load_theoretical_best
-    monkeypatch.setattr(stats_backend, "load_theoretical_best", lambda *args: reads.append(1) or original(*args))
+    original = stats_table.load_theoretical_best
+    monkeypatch.setattr(stats_table, "load_theoretical_best", lambda *args: reads.append(1) or original(*args))
     backend.reload_stats()
     assert not reads  # file unchanged: cached
     save_sector_best_file(cfg.path.sector_best, f"{SPA} - LMP2_ELMS", (0, 0, 0), [40.0] * 3, [40.0] * 3,
@@ -529,7 +528,6 @@ def test_page_opens_on_all_tracks(window, monkeypatch):
 
 @pytest.mark.parametrize("released", [False, True])
 def test_back_to_all_tracks_after_page_hidden_a_while(backend, monkeypatch, released):
-    from neopedal.ui.quick import stats_backend
 
     assert backend.currentTrack == SPA
     backend.page_hidden()
@@ -538,7 +536,7 @@ def test_back_to_all_tracks_after_page_hidden_a_while(backend, monkeypatch, rele
     backend.page_hidden()
     if released:
         backend.release_history()
-    monkeypatch.setattr(backend, "_hidden_since", time.monotonic() - stats_backend.HOME_RESET_DELAY - 1)
+    monkeypatch.setattr(backend, "_hidden_since", time.monotonic() - stats_common.HOME_RESET_DELAY - 1)
     backend.page_shown()
     settle(backend)
     assert backend.allTracks and backend.currentTrack == ""
@@ -630,11 +628,10 @@ def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
 def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, rollback_failures):
     """Stats not saved & history change undo fails: tried again, else history-only undo recorded & warned
     (was: single attempt, error suppressed, history and stats out of sync without undo)"""
-    from neopedal.ui.quick import stats_backend
     from neopedal.userfile import json_setting
 
     driver_history.save_history(cfg.path.config, EDIT_HISTORY)
-    real_replace = stats_backend.replace_records
+    real_replace = stats_edits.replace_records
     calls = []
     locked = [True]
 
@@ -644,8 +641,8 @@ def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, 
             raise PermissionError(13, "locked")
         real_replace(*args)
 
-    monkeypatch.setattr(stats_backend, "replace_records", flaky_replace)
-    monkeypatch.setattr(stats_backend, "ROLLBACK_DELAY", 0)
+    monkeypatch.setattr(stats_edits, "replace_records", flaky_replace)
+    monkeypatch.setattr(stats_edits, "ROLLBACK_DELAY", 0)
     with monkeypatch.context() as patch:
         patch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
         backend.selectRow("Hyper - Ferrari")
@@ -653,11 +650,11 @@ def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, 
         settle(backend)
     locked[0] = False
     assert "Hyper - Ferrari" in load_stats()[SPA]
-    if rollback_failures < stats_backend.ROLLBACK_ATTEMPTS:
+    if rollback_failures < stats_common.ROLLBACK_ATTEMPTS:
         assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY  # undone on retry
         assert not backend.canUndo and dialogs == ["Unable to save stats file."]
         return
-    assert len(calls) == 1 + stats_backend.ROLLBACK_ATTEMPTS
+    assert len(calls) == 1 + stats_common.ROLLBACK_ATTEMPTS
     assert driver_history.read_records(cfg.path.config) != EDIT_HISTORY  # history changed only
     assert backend.canUndo and "Undo" in dialogs[-1]
     stats_before = load_stats()
@@ -765,7 +762,6 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
 
 def test_open_map_loaded_in_page_already_open(backend, monkeypatch):
     """Track map viewer already open as page: shown instead, on the track asked (not the one shown before)"""
-    from neopedal.ui.quick import stats_backend
 
     loaded = []
     open_page = SimpleNamespace(backend=SimpleNamespace(load_map=lambda path, name: loaded.append(name)))
@@ -780,7 +776,7 @@ def test_open_map_loaded_in_page_already_open(backend, monkeypatch):
         def shown_dialog(self):
             return open_page
 
-    monkeypatch.setattr(stats_backend, "TrackMapViewer", Viewer)
+    monkeypatch.setattr(stats_selection, "TrackMapViewer", Viewer)
     backend.selected_stats_key = "Spa"
     backend.openMap()
     assert loaded == ["Spa"]

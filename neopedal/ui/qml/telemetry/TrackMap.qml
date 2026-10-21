@@ -103,15 +103,15 @@ FocusScope {
     }
     function pointShown(kind) {
         if (kind === "brake") return backend.mapBraking
-        if (kind === "lock" || kind === "spin") return backend.mapSlip
+        if (kind === "lock" || kind === "spin" || kind === "bottom") return backend.mapSlip
         return options[kind] === true
     }
     function shownKinds() {
-        return ["brake", "apex", "exit", "trackout", "lock", "spin", "offtrack", "limit"].filter(function(kind) { return root.pointShown(kind) })
+        return ["brake", "apex", "exit", "trackout", "lock", "spin", "bottom", "offtrack", "limit"].filter(function(kind) { return root.pointShown(kind) })
     }
     // Kinds hovered points are picked among: told to backend only when they change (not on every hover)
     readonly property string kindsShown: shownKinds().join(",")
-    onKindsShownChanged: backend.setMapKinds(shownKinds())
+    onKindsShownChanged: backend.mapPointer.setMapKinds(shownKinds())
     function hasEvents(kind) {
         var events = info.events || []
         for (var i = 0; i < events.length; i++) if (events[i].kind === kind) return true
@@ -130,7 +130,7 @@ FocusScope {
         if (synced && chart && Math.abs(chart.targetStart - synced[0]) < 1e-6 && Math.abs(chart.targetEnd - synced[1]) < 1e-6) return
         if (!backend.mapFollow || !chart || tracking) return
         if (!chart.zoomed) { canvas.reset(true); return }
-        var bounds = backend.mapBounds(chart.targetStart, chart.targetEnd)
+        var bounds = backend.mapPointer.mapBounds(chart.targetStart, chart.targetEnd)
         if (bounds.length === 4) canvas.fit(bounds[0], bounds[1], bounds[2], bounds[3], true)
     }
     // Thick lines rebuilt for this map scale (two maps: side panel & focus mode)
@@ -151,7 +151,7 @@ FocusScope {
         var x = hoverPosition[0], y = hoverPosition[1]
         if (rulerMode) return
         var scrub = !!chart && !chart.playing
-        var hover = backend.mapHover(x, y, theme.em * 0.8 * canvas.metersPerPixel, theme.em * 1.2 * canvas.metersPerPixel,
+        var hover = backend.mapPointer.mapHover(x, y, theme.em * 0.8 * canvas.metersPerPixel, theme.em * 1.2 * canvas.metersPerPixel,
                                      highlightKey, scrub)
         hoverPoint = hover.point.tip !== undefined ? hover.point : null
         if (!scrub) return
@@ -195,7 +195,7 @@ FocusScope {
             if (visible && chart && chart.hasCursor) chart.fetchCursor()  // cursor positions skipped while hidden
         }
     }
-    Component.onCompleted: { labelScale = canvas.mapScale; reportShown(); backend.setMapKinds(shownKinds()) }
+    Component.onCompleted: { labelScale = canvas.mapScale; reportShown(); backend.mapPointer.setMapKinds(shownKinds()) }
     Component.onDestruction: if (reportedShown) backend.setMapShown(false)
     function exportPicture(copy) {
         canvas.grabToImage(function(result) {
@@ -340,7 +340,7 @@ FocusScope {
         ["apex", "● " + i18n.tr("Apex"), i18n.tr("Minimum speed point of each lap in each corner") + " (C)"],
         ["exit", "▲ " + i18n.tr("Exit"), i18n.tr("Where each lap is back at full throttle after each apex") + " (S)"],
         ["trackout", "■ " + i18n.tr("Track-out"), i18n.tr("Where each lap comes closest to the outside edge after each apex (track limits needed)") + " (O)"],
-        ["slip", "○ " + i18n.tr("Lockups"), i18n.tr("Front wheel lockups under braking (ring) & rear wheelspin on throttle (triangle)") + " (L)"],
+        ["slip", "○ " + i18n.tr("Lockups"), i18n.tr("Front wheel lockups under braking (ring), rear wheelspin on throttle (triangle) & bottoming (square)") + " (L)"],
         ["offtrack", "◇ " + i18n.tr("Off track"), i18n.tr("Where 2 wheels or more go on grass, dirt or gravel (laps recorded with this version)") + " (G)"],
         ["limit", "✕ " + i18n.tr("Limits"), i18n.tr("Where car goes beyond track edge, four wheels out (game track edges needed)") + " (X)"],
     ]
@@ -487,15 +487,15 @@ FocusScope {
                     root.rulerPoints = root.rulerPoints.length >= 2 ? [[x, y]] : root.rulerPoints.concat([[x, y]])
                     return
                 }
-                var point = backend.mapPointAt(x, y, theme.em * 0.8 * canvas.metersPerPixel, root.shownKinds())
+                var point = backend.mapPointer.mapPointAt(x, y, theme.em * 0.8 * canvas.metersPerPixel, root.shownKinds())
                 if (point.corner !== undefined && point.corner >= 0) { root.zoomCorner(point.corner); return }
                 if (!root.chart) return
                 if (canvas.clickModifiers & Qt.ControlModifier) {  // Ctrl+click a line: lap highlighted everywhere
-                    var hit = backend.mapPickLap(x, y, theme.em * 1.5 * canvas.metersPerPixel)
+                    var hit = backend.mapPointer.mapPickLap(x, y, theme.em * 1.5 * canvas.metersPerPixel)
                     root.chart.pinnedKey = hit.lap === undefined || root.chart.pinnedKey === hit.lap ? "" : hit.lap
                     return
                 }
-                var position = backend.mapPick(x, y, theme.em * 1.5 * canvas.metersPerPixel)
+                var position = backend.mapPointer.mapPick(x, y, theme.em * 1.5 * canvas.metersPerPixel)
                 if (position >= 0) {  // position kept: charts & map show it until cleared
                     root.scrubbing = false
                     backend.setPinned(position)
@@ -705,6 +705,43 @@ FocusScope {
                     }
                 }
 
+                // Track notes (Track Notes overlay file): pinned at their distance, double-click edits
+                Repeater {
+                    model: backend.trackNotes.items
+                    Rectangle {
+                        readonly property real anchorX: modelData.mapX !== undefined ? canvas.screenX(modelData.mapX) : -1
+                        readonly property real anchorY: modelData.mapY !== undefined ? canvas.screenY(modelData.mapY) : -1
+                        visible: anchorX >= 0 && anchorX <= canvas.width && anchorY >= 0 && anchorY <= canvas.height
+                        x: Math.max(2, Math.min(anchorX + 4, canvas.width - width - 2))
+                        y: anchorY - height - 4
+                        width: Math.min(noteText.implicitWidth, theme.em * 12) + theme.em * 0.8
+                        height: noteText.implicitHeight + 4
+                        radius: height / 2
+                        color: theme.tint(theme.window, 0.85)
+                        border.width: 1
+                        border.color: mapNoteArea.containsMouse ? theme.accent : theme.tint(theme.accent, 0.5)
+                        Text {
+                            id: noteText
+                            anchors.centerIn: parent
+                            width: Math.min(implicitWidth, theme.em * 12)
+                            text: "✎ " + modelData.text
+                            elide: Text.ElideRight
+                            color: theme.accent
+                            font.pointSize: theme.fontCaption
+                            font.italic: true
+                        }
+                        ToolTip.visible: mapNoteArea.containsMouse
+                        ToolTip.delay: theme.tipDelay
+                        ToolTip.text: modelData.text + " · " + modelData.place
+                        MouseArea {
+                            id: mapNoteArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onDoubleClicked: backend.trackNotes.edit(modelData.index)
+                        }
+                    }
+                }
                 // Sector times: reference lap time, gap of compared lap
                 Repeater {
                     model: root.options.sectors === true ? (root.cornerInfo.sectors || []) : []
@@ -1223,6 +1260,7 @@ FocusScope {
                 model: [
                     ["brake", "◆", i18n.tr("Braking")], ["apex", "●", i18n.tr("Apex")], ["exit", "▲", i18n.tr("Exit")],
                     ["trackout", "■", i18n.tr("Track-out")], ["lock", "○", i18n.tr("Lockup")], ["spin", "△", i18n.tr("Wheelspin")],
+                    ["bottom", "□", i18n.tr("Bottoming")],
                     ["offtrack", "◇", i18n.tr("Off track")], ["limit", "✕", i18n.tr("Track limits exceeded")],
                 ]
                 Text {
@@ -1288,8 +1326,8 @@ FocusScope {
                 readonly property var scopes: ["stint", "session", "shown"]
                 name: i18n.tr("Consistency")
                 options: [i18n.tr("This stint"), i18n.tr("This session"), i18n.tr("Shown laps")]
-                currentIndex: scopes.indexOf(backend.consistencyScope)
-                onActivated: function(index) { backend.setConsistencyScope(scopes[index]) }
+                currentIndex: scopes.indexOf(backend.mapConsistency.scope)
+                onActivated: function(index) { backend.mapConsistency.setScope(scopes[index]) }
             }
             GradientLegend {
                 visible: root.mode === "consistency" && root.mapLegend.low !== undefined

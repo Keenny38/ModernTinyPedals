@@ -7,7 +7,7 @@ their first word: Add... (Added), Fix... (Fixed), everything else (Changed).
 Before / after images of overlay changes added in the same commits under docs/changes
 (tools/make_change_visual.py) follow in a Visuals section, captioned by their Title.
 Used by the "Build and Release" workflow; the app shows the same notes in its
-update notification, without the Visuals section. Write clear commit titles, and
+update notification, Visuals section folded. Write clear commit titles, and
 describe notable releases in CHANGELOG.md (optional).
 
 CHANGELOG.md is in English (GitHub release notes). Its translations (CHANGELOG.fr.md) have
@@ -36,7 +36,7 @@ RAW_URL = "https://raw.githubusercontent.com/Keenny38/ModernTinyPedals"
 VISUALS_DIR = "docs/changes"
 CHANGELOG = "CHANGELOG.md"
 CHANGELOG_VERSION = re.compile(r"^## (\d+\.\d+\.\d+)\b")
-VISUALS_HEADING = "### Visuals"  # app cuts notes here (images are not shown in its dialog)
+VISUALS_HEADING = "### Visuals"  # app shows it folded, after the commits (see neopedal/ui/release_notes.py)
 TAG_PATTERN = re.compile(r"^v\d+\.\d+\.\d+$")
 SKIP_PATTERN = re.compile(r"\[skip ci\]|^Merge |^Update changelog", re.IGNORECASE)
 KINDS = (

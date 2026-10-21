@@ -30,10 +30,19 @@ from html import escape
 from math import ceil, floor
 
 from ... import calculation as calc
-from ...fuel_strategy import RaceState, SavingTarget, Strategy, StrategyInput, Variant, race_result
+from ...fuel_strategy import (
+    CompoundPlan,
+    RaceState,
+    SafetyCarRisk,
+    SavingTarget,
+    Strategy,
+    StrategyInput,
+    Variant,
+    race_result,
+)
 from ...i18n import tr, trm
 from ...module_info import StintDataSet
-from ...race_live import Rival
+from ...race_live import PitExit, Rival
 from .race_model import DRIVER_COLORS, RAIN_COLOR, SAFETY_CAR_COLOR, duration_text, laps_text
 
 PLAN_COLUMNS = ("stop", "lap", "window", "time", "fuel", "energy", "tyres", "driver", "seconds")
@@ -175,8 +184,9 @@ def key_figures(strategy: Strategy, setup: StrategyInput, symbol: str, is_gallon
     return tiles
 
 
-def summary(strategy: Strategy, race_state: RaceState | None) -> dict:
-    """Strategy line under the timeline: stints, stops, tyres, time in the pits, problem"""
+def summary(strategy: Strategy, race_state: RaceState | None, pit_seconds: float = 0.0) -> dict:
+    """Strategy line under the timeline: stints, stops, tyres, time in the pits, problem, penalties
+    & repair of a race under way"""
     if not strategy.ready:
         impossible = strategy.impossible
         return {"text": problem_text(strategy) if impossible else "", "warning": impossible}
@@ -187,6 +197,11 @@ def summary(strategy: Strategy, race_state: RaceState | None) -> dict:
         live = f"<b>{tr('Live Race')}</b>: {tr('rest of race from lap')} {strategy.first_lap}"
         in_car = race_state.stint_drivers[-1] if race_state.stint_drivers else ""
         parts.append(live + (f" ({escape(in_car)})" if in_car else ""))
+        if race_state.penalties > 0:
+            parts.append(trm(f"{race_state.penalties} penalty(ies) to serve: "
+                             f"{race_state.penalty_loss(pit_seconds):.0f} s counted"))
+        if race_state.repair_seconds > 0 and strategy.stops:
+            parts.append(trm(f"repair {race_state.repair_seconds:.0f} s at next stop"))
     parts.append(trm(f"{len(strategy.stints)} stint(s), {strategy.race_laps} race laps"))
     stops = len(strategy.stops)
     pit_laps = ", ".join(str(stop.lap) for stop in strategy.stops)
@@ -200,7 +215,10 @@ def summary(strategy: Strategy, race_state: RaceState | None) -> dict:
     sc_first, sc_laps = strategy.safety_car
     if sc_laps:
         parts.append(f"{tr('Safety Car')} {sc_first}-{sc_first + sc_laps - 1}")
-    if strategy.driver_issues:
+    if strategy.drivers_short > 0:
+        parts.append(trm(f"minimum driving times {ceil(strategy.drivers_short / 60):.0f} min over the race: "
+                         "planned without them"))
+    elif strategy.driver_issues:
         parts.append(tr("driving time limits not met (Driving Time)"))
     return {"text": " · ".join(parts), "warning": bool(strategy.driver_issues)}
 
@@ -434,6 +452,48 @@ def comparison(variants: Sequence[Variant], has_energy: bool, symbol: str) -> di
             "hidden": [] if has_energy else [2]}
 
 
+def safety_car_risk_view(risk: SafetyCarRisk | None, enabled: bool = True) -> dict:
+    """Safety car risk: chance, stops saved, stop under it or stay out for each stint"""
+    columns = [tr("Stint"), tr("Choice"), tr("Gain"), tr("Pit Stops")]
+    if risk is None or not enabled:
+        return {"visible": False, "columns": columns, "rows": [], "text": ""}
+    rows = []
+    for index, window in enumerate(risk.windows, 1):  # gain: time the choice shown wins over the other
+        rows.append([f"{index} ({window.first}-{window.last})",
+                     tr("Stop under it") if window.gain > 0.05 else tr("Stay out"),
+                     f"{abs(window.gain):.1f} s" if abs(window.gain) > 0.05 else DASH, str(window.stops)])
+    text = trm(f"{risk.chance * 100:.0f} % chance of a safety car at least") + " · " + trm(
+        f"one stop saved in {risk.fewer_stops * 100:.0f} % of the race")
+    return {"visible": True, "columns": columns, "rows": rows, "text": text}
+
+
+def compound_comparison(plans: Sequence[CompoundPlan], selected: str = "") -> dict:
+    """Race on each compound side by side: lap time difference, stops, tyre changes, race result
+    (best in bold), note when no compound has a lap time difference"""
+    columns = [tr("Compound"), tr("Lap Time"), tr("Pit Stops"), tr("Tyre Changes"), tr("Pit Time"), tr("Laps"),
+               tr("Race Time"), tr("Gap")]
+    plans = [item for item in plans if item.strategy.ready and item.strategy.feasible]
+    if len(plans) < 2:
+        return {"visible": False, "columns": columns, "rows": [], "best": -1, "note": ""}
+    best = min(plans, key=lambda item: race_result(item.strategy))
+    rows = []
+    for item in plans:
+        strategy = item.strategy
+        if strategy.race_laps != best.strategy.race_laps:
+            gap = f"{strategy.race_laps - best.strategy.race_laps:+d} {tr('laps')}"
+        else:
+            gap = f"{strategy.race_seconds - best.strategy.race_seconds:+.1f} s"
+        name = item.compound + (f" ({tr('selected')})" if item.compound == selected else "")
+        rows.append([
+            name, f"{item.pace:+.2f} s" if item.pace else DASH, str(len(strategy.stops)),
+            str(len(strategy.tyre_stops)), f"{strategy.pit_seconds:.0f} s", str(strategy.race_laps),
+            duration_text(strategy.race_seconds), gap if item is not best else DASH,
+        ])
+    note = "" if any(item.pace for item in plans) else tr(
+        "Set the lap time difference of each compound (gear button of the tyre stock) to compare their pace")
+    return {"visible": True, "columns": columns, "rows": rows, "best": plans.index(best), "note": note}
+
+
 def scenario_text(kind: str, strategy: Strategy, without: Strategy | None) -> str:
     """Plan with safety car or rain against plan without"""
     if without is None or not strategy.ready or not without.ready:
@@ -464,7 +524,7 @@ def driver_times(strategy: Strategy, drivers: int, limits: Sequence[tuple[float,
     """Driving time of each driver: stints, time, limits not met"""
     columns = [tr("Driver"), tr("Stints"), tr("Time"), tr("Limits")]
     if drivers < 2 or not strategy.ready:
-        return {"visible": False, "columns": columns, "rows": [], "warning": False}
+        return {"visible": False, "columns": columns, "rows": [], "warning": False, "note": ""}
     rows = []
     for index in range(drivers):
         stints = sum(1 for driver in strategy.stint_drivers if driver == index + 1)
@@ -477,7 +537,10 @@ def driver_times(strategy: Strategy, drivers: int, limits: Sequence[tuple[float,
             limit += "  " + " · ".join(tr("below minimum") if kind == "min" else tr("above maximum")
                                         for kind in problems)
         rows.append([str(index + 1), str(stints), duration_text(seconds), limit or DASH])
-    return {"visible": True, "columns": columns, "rows": rows, "warning": bool(strategy.driver_issues)}
+    note = trm(f"Minimum times add up to {ceil(strategy.drivers_short / 60):.0f} min more than the race "
+               "leaves to drive: plan made without them") if strategy.drivers_short > 0 else ""
+    return {"visible": True, "columns": columns, "rows": rows, "warning": bool(strategy.driver_issues),
+            "note": note}
 
 
 def plan_against_race(stints: Sequence[StintDataSet], strategy: Strategy, setup_fuel: float, setup_energy: float,
@@ -508,11 +571,12 @@ def plan_against_race(stints: Sequence[StintDataSet], strategy: Strategy, setup_
     return {"visible": True, "columns": columns, "rows": rows, "hidden": hidden}
 
 
-def class_rivals(rivals: Sequence[Rival], stint_laps: int) -> dict:
-    """Cars of the player class by place, next stop from your stint length (same class, close consumption)"""
+def class_rivals(rivals: Sequence[Rival], stint_laps: int, exit_place: PitExit | None = None) -> dict:
+    """Cars of the player class by place, next stop from your stint length (same class, close
+    consumption), where you rejoin if you stop at the end of this lap"""
     columns = [tr("Place"), tr("Driver"), tr("Laps"), tr("Pit Stops"), tr("Since Stop"), tr("Next Stop")]
     if len(rivals) < 2:
-        return {"visible": False, "columns": columns, "rows": [], "player": -1}
+        return {"visible": False, "columns": columns, "rows": [], "player": -1, "exit": ""}
     rows = []
     player_row = -1
     for row, rival in enumerate(rivals):
@@ -527,7 +591,20 @@ def class_rivals(rivals: Sequence[Rival], stint_laps: int) -> dict:
             str(since) if known else f"~{since}",
             (str(next_stop) if known else f"~{next_stop}") if stint_laps else DASH,
         ])
-    return {"visible": True, "columns": columns, "rows": rows, "player": player_row}
+    return {"visible": True, "columns": columns, "rows": rows, "player": player_row,
+            "exit": pit_exit_text(exit_place) if exit_place is not None else ""}
+
+
+def pit_exit_text(place: PitExit) -> str:
+    """Rejoin after a stop at the end of this lap: class place, gaps to the cars around"""
+    parts = [trm(f"Stop at the end of this lap ({place.loss:.0f} s): back on track P{place.place} in class")]
+    if place.ahead is not None:
+        parts.append(trm(f"{place.ahead[1]:.1f} s behind ") + escape(place.ahead[0]))
+    if place.behind is not None:
+        parts.append(trm(f"{place.behind[1]:.1f} s ahead of ") + escape(place.behind[0]))
+    if place.passed:
+        parts.append(trm(f"{place.passed} car(s) pass you"))
+    return " · ".join(parts)
 
 
 def stint_laps_of(strategy: Strategy, full_tank: float) -> int:

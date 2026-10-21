@@ -7,6 +7,7 @@ import random
 import subprocess
 import sys
 import threading
+from dataclasses import replace
 
 import pytest
 
@@ -302,17 +303,25 @@ def golden_module(tmp_path_factory):
         sys.modules.pop(spec.name, None)
 
 
+def same_repr(strategy) -> str:
+    """Plan text of the golden copy: fields added since left out"""
+    return repr(replace(strategy, drivers_short=0.0)).replace("drivers_short=0.0, ", "")
+
+
 def test_simulate_same_plans_as_before_split(golden_module):
+    """Minimum driving times left out: they are given whole laps & their driver change since
+    (test_race_driver_minimums)"""
     rng = random.Random(20261013)
     for _ in range(400):
         values = random_values(rng)
+        values["driver_min_minutes"] = ()
         laps, stints = rng.randint(0, 250), rng.choice([0, 0, 1, rng.randint(2, 6)])
         before = golden_module.simulate(golden_module.StrategyInput(**values), laps, stints)
         after = fuel_strategy.simulate(fuel_strategy.StrategyInput(**values), laps, stints)
-        assert repr(after) == repr(before), (values, laps, stints)
+        assert same_repr(after) == repr(before), (values, laps, stints)
         before = golden_module.plan(golden_module.StrategyInput(**values))
         after = fuel_strategy.plan(fuel_strategy.StrategyInput(**values))
-        assert repr(after) == repr(before), values
+        assert same_repr(after) == repr(before), values
 
 
 def test_simulate_steps_small():

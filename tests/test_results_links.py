@@ -12,6 +12,7 @@ from neopedal.process import player_profile as pp
 from neopedal.process import results_file as rf
 from neopedal.process import results_index as ri
 from neopedal.setting import cfg
+from neopedal.ui.quick import stats_common
 from neopedal.userfile import driver_history
 from neopedal.userfile.driver_history import SessionRecord, parse_record, record_line
 from tests.test_driver_stats_viewer import OREGA, SPA, STATS, backend, dialogs, settle, window  # noqa: F401
@@ -217,7 +218,7 @@ def test_player_profile(tmp_path, monkeypatch):
 
 # Driver stats page
 def results_data(*summaries, profile=None):
-    from neopedal.ui.quick.stats_backend import ResultsData
+    from neopedal.ui.quick.stats_io import ResultsData
 
     return ResultsData(list(summaries), profile)
 
@@ -230,7 +231,6 @@ def spa_race(**changes) -> ri.ResultSummary:
 
 
 def test_stats_sessions_from_results(backend):  # noqa: F811
-    from neopedal.ui.quick import stats_backend
 
     driver_history.save_history(cfg.path.config, [
         SessionRecord(1_700_100_000.0, SPA, OREGA, 2, 121.5, valid=4, game_version="1.41"),
@@ -247,8 +247,8 @@ def test_stats_sessions_from_results(backend):  # noqa: F811
     assert "Position P5 of 30" in race_row["tip"] and "+3.500" in race_row["tip"]
     assert qualifying_row["version"] == "1.41" and qualifying_row["results"] == ""  # no results file
     assert "set on" in backend.progression["info"] and "Version 1.41" in backend.progression["info"]
-    assert stats_backend.gap_text(spa_race(gap_laps=2)) == "+2 laps"
-    assert stats_backend.summary_rank(spa_race(class_position=0)) == ""
+    assert stats_common.gap_text(spa_race(gap_laps=2)) == "+2 laps"
+    assert stats_common.summary_rank(spa_race(class_position=0)) == ""
 
 
 def test_stats_driver_card_and_fixes(backend, monkeypatch):  # noqa: F811

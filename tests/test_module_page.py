@@ -48,6 +48,7 @@ class FakeControl:
         self.failing = set(failing)
         self.toggled: list[str] = []
         self.batch: list[str] = []
+        self.grouped: list[tuple[list[str], bool]] = []
         self.reloaded: list[str] = []
 
     @property
@@ -62,6 +63,14 @@ class FakeControl:
     def toggle(self, name):
         self.toggled.append(name)
         cfg.user.setting[name]["enable"] = not cfg.user.setting[name]["enable"]
+
+    def set_enabled(self, names, enable):
+        """Grouped switch: names changed (recorded as toggles too)"""
+        changed = [name for name in names if bool(cfg.user.setting[name]["enable"]) != enable]
+        self.grouped.append((changed, enable))
+        for name in changed:
+            self.toggle(name)
+        return changed
 
     def enable_all(self):
         self.batch.append("enable")
@@ -150,7 +159,7 @@ def reference_scan(name: str) -> tuple[set[str], set[str]]:
         consts: list = []
         for instruction in dis.get_instructions(current):
             if (instruction.opname == "LOAD_ATTR" and previous is not None and previous.argval == "minfo"
-                    and previous.opname in ("LOAD_GLOBAL", "LOAD_NAME")):
+                    and previous.opname in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_ATTR")):  # minfo, ctx.minfo
                 fields.add(instruction.argval)
             elif instruction.opname in ("LOAD_CONST", "LOAD_SMALL_INT"):
                 consts.append(instruction.argval)

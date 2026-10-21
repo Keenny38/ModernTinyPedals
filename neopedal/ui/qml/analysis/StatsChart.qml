@@ -18,6 +18,9 @@ Item {
     readonly property real plotWidth: Math.max(width - labelWidth - theme.em * 1.6, 1)
     readonly property real plotHeight: Math.max(height - plotY - dateHeight, 1)
     property int hovered: -1
+    property int linkedPoint: -1  // point of the session hovered in the sessions list (shown as hovered)
+    readonly property int shownPoint: hovered >= 0 ? hovered : linkedPoint
+    signal pointClicked(int session)  // session (row of sessions list) of the clicked point, -1 if not listed
     property real reveal: 1  // share of chart drawn (animated when data changes)
 
     function px(value) { return plotX + value * plotWidth }
@@ -57,7 +60,7 @@ Item {
     onWidthChanged: Qt.callLater(paintAll)
     onHeightChanged: Qt.callLater(paintAll)
     // Colors painted: canvas painted again when light / dark theme switches (theme copy has no changed signal)
-    readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border]
+    readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border, theme.gain]
     onPaintColorsChanged: paintAll()
 
     NumberAnimation {
@@ -105,6 +108,18 @@ Item {
                 ctx.stroke()
             }
             ctx.globalAlpha = 1
+            var goalY = chart.chartData.goalY !== undefined ? chart.chartData.goalY : -1
+            if (goalY >= 0) {  // lap time goal: long dashes in the gain color
+                var gy = Math.round(chart.py(goalY)) + 0.5
+                ctx.strokeStyle = theme.gain
+                ctx.lineWidth = 1.5
+                ctx.beginPath()
+                for (var gx = x0; gx < x0 + span; gx += dash * 4) {
+                    ctx.moveTo(gx, gy)
+                    ctx.lineTo(Math.min(gx + dash * 2.5, x0 + span), gy)
+                }
+                ctx.stroke()
+            }
         }
     }
 
@@ -165,8 +180,8 @@ Item {
         Item {
             id: hoverMark
             objectName: "statsHover"
-            readonly property var point: chart.points.length >= 2 && chart.hovered >= 0
-                                         && chart.hovered < chart.points.length ? chart.points[chart.hovered] : null
+            readonly property var point: chart.points.length >= 2 && chart.shownPoint >= 0
+                                         && chart.shownPoint < chart.points.length ? chart.points[chart.shownPoint] : null
             readonly property real stroke: hoverMark.point && hoverMark.point.clipped ? 1.2
                                            : hoverMark.point && hoverMark.point.newPb ? Math.max(1.5, theme.em * 0.1) : 0
             width: chart.width
@@ -198,6 +213,13 @@ Item {
     function paintDot(ctx, point, hovered, accent, muted) {
         var radius = theme.em * (hovered ? 0.42 : point.newPb ? 0.3 : 0.24)
         var cx = px(point.x), cy = py(point.y)
+        if (point.wet) {  // best lap on a damp or wet road: ring around the dot
+            ctx.beginPath()
+            ctx.arc(cx, cy, radius + Math.max(2, theme.em * 0.14), 0, Math.PI * 2)
+            ctx.lineWidth = 1.2
+            ctx.strokeStyle = theme.tint(accent, 0.8)
+            ctx.stroke()
+        }
         ctx.beginPath()
         ctx.arc(cx, cy, radius, 0, Math.PI * 2)
         if (point.clipped) {
@@ -241,6 +263,18 @@ Item {
         color: theme.accent
         horizontalAlignment: Text.AlignRight
         font.pointSize: theme.fontSmall
+        font.weight: Font.DemiBold
+        font.features: { "tnum": 1 }
+    }
+    Text {  // lap time goal, at the left of its line
+        visible: chart.points.length >= 2 && (chart.chartData.goalY !== undefined ? chart.chartData.goalY : -1) >= 0
+        x: 0
+        width: chart.labelWidth - theme.em * 0.5
+        y: chart.py(chart.chartData.goalY || 0) - height / 2
+        text: chart.chartData.goal || ""
+        color: theme.gain
+        horizontalAlignment: Text.AlignRight
+        font.pointSize: theme.fontCaption
         font.weight: Font.DemiBold
         font.features: { "tnum": 1 }
     }
@@ -290,6 +324,11 @@ Item {
         hoverEnabled: true
         onPositionChanged: function(mouse) { chart.hovered = chart.nearest(mouse.x + hoverArea.x) }
         onExited: chart.hovered = -1
+        cursorShape: chart.hovered >= 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onClicked: function(mouse) {
+            var index = chart.nearest(mouse.x + hoverArea.x)
+            if (index >= 0) chart.pointClicked(chart.points[index].session !== undefined ? chart.points[index].session : -1)
+        }
     }
     ToolTip {
         parent: chart

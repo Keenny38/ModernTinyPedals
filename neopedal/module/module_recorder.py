@@ -34,6 +34,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import time
 from array import array
@@ -84,8 +85,11 @@ CSV_HEADER = (
     *(f"tyre_load_{wheel}" for wheel in WHEELS),
     # Car velocity across & along car (m/s, body slip angle), driver settings, engine temperatures
     "vel_lat", "vel_long", "brake_bias", "tc_level", "abs_level", "engine_map", "water_temp", "oil_temp",
+    # Pedals the car gets after driving aids (TC cut, ABS, throttle blip), aero load (kN), wheel camber (degrees)
+    "throttle_car", "brake_car", "downforce_front", "downforce_rear", *(f"camber_{wheel}" for wheel in WHEELS),
 )
 GRAVITY = 9.80665
+RADIANS_TO_DEGREES = 180 / math.pi
 NO_WHEELS = (0.0, 0.0, 0.0, 0.0)
 SESSION_NAMES = ("Test day", "Practice", "Qualify", "Warmup", "Race")
 LAP_KIND = "lap"
@@ -102,6 +106,9 @@ class Realtime(DataModule):
 
     def __init__(self, config, module_name):
         super().__init__(config, module_name)
+        if self.mcfg["enable_100hz_lap_recording"]:  # sampled every 10 ms (minimum update interval kept)
+            self.active_interval = min(self.active_interval, max(
+                HIGH_RATE_INTERVAL, self.cfg.application["minimum_update_interval"] / 1000))
 
     def update_data(self):
         """Update module data"""
@@ -177,7 +184,8 @@ LAP_TEXT_CHUNK = 250  # CSV rows written at once (about 5 ms), GIL released in b
 # kept, then one sample kept every STOPPED_SAMPLE_INTERVAL seconds (game time) only
 STOPPED_SPEED = 0.5
 STOPPED_SAMPLE_INTERVAL = 1.0
-MAX_LAP_ROWS = 90_000  # samples of a lap (30 minutes at 50 per second): lap dropped beyond (memory)
+MAX_LAP_ROWS = 90_000  # samples of a lap (30 minutes at 50 per second, 15 at 100): lap dropped beyond (memory)
+HIGH_RATE_INTERVAL = 0.01  # seconds between samples with 100 Hz recording
 
 
 def wait_lap_saver(timeout: float | None = None) -> bool:
@@ -296,6 +304,11 @@ def read_sample(lap_start: float) -> tuple:
         read.switch.motor_map_level(),
         round(read.engine.water_temperature(), 1),
         round(read.engine.oil_temperature(), 1),
+        round(read.inputs.throttle(), 3),
+        round(read.inputs.brake(), 3),
+        round(read.vehicle.downforce_front() * 0.001, 3),
+        round(read.vehicle.downforce_rear() * 0.001, 3),
+        *four(read.wheel.camber(), 2, RADIANS_TO_DEGREES),
     )
 
 

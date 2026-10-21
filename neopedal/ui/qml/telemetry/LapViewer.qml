@@ -79,6 +79,12 @@ TpPage {
             enabled: chart.hasRange
             onTriggered: backend.exports.exportPassageCsv(chart.markerA, chart.markerB)
         }
+        Action { text: i18n.tr("CSV, Visible Part..."); onTriggered: backend.exports.exportPassageCsv(chart.viewStart, chart.viewEnd) }
+        Action {
+            text: i18n.tr("MoTeC, Reference Lap A ↔ B...")
+            enabled: chart.hasRange
+            onTriggered: backend.exports.exportPassageMotec(chart.markerA, chart.markerB)
+        }
         MenuSeparator {}
         Action { text: i18n.tr("Picture (PNG)..."); onTriggered: page.grabPicture(false) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: page.grabPicture(true) }
@@ -140,7 +146,7 @@ TpPage {
                         [i18n.tr("Track Map"), [
                             ["F", i18n.tr("Fit whole circuit")], ["R", i18n.tr("Turn map")], ["1-9", i18n.tr("Line coloring")],
                             ["+ / −", i18n.tr("Zoom")], ["← ↑ → ↓", i18n.tr("Move map")],
-                            ["B C S O", i18n.tr("Driving points")], ["L", i18n.tr("Lockups & wheelspin")],
+                            ["B C S O", i18n.tr("Driving points")], ["L", i18n.tr("Lockups, wheelspin & bottoming")],
                             ["G", i18n.tr("Off track")], ["X", i18n.tr("Track limits exceeded")],
                             ["Z", i18n.tr("Pedal zones")], ["T", i18n.tr("Cursor trail")], ["M", i18n.tr("Measure distance")],
                         ]],

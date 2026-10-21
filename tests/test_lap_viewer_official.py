@@ -228,7 +228,7 @@ def test_viewer_frames_passage_minisectors_session(viewer, laps):  # noqa: F811
     legend = backend.mapLegend
     assert sum(row["count"] for row in legend["mini"]) == legend["sectors"] == 10 and legend["ideal"]
     backend.setMapMode("laps")
-    assert all("slip" in point for point in backend.mapCursor(500.0))
+    assert all("slip" in point for point in backend.mapPointer.mapCursor(500.0))
     session = backend.session.values
     assert len(session["laps"]) == 4 and backend.session.sessions and session["best"] == pytest.approx(70.0)
     assert any(lap["shown"] for lap in session["laps"])
@@ -262,12 +262,12 @@ def test_map_zoom_steps_cached_and_prepared(viewer):  # noqa: F811
 
 
 def test_long_series_reduced_copy(viewer, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_panels
     from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     assert all(series["lods"] == [] for panel in backend.panels for series in panel["series"])  # short laps
-    monkeypatch.setattr(lap_backend, "LOD_LEVELS", (20, 50, 100000))
+    monkeypatch.setattr(lap_panels, "LOD_LEVELS", (20, 50, 100000))
     backend.rebuild_chart()
     reduced = [series for panel in backend.panels for series in panel["series"] if series["lods"]]
     assert reduced and all(len(series["lods"]) == 2 for series in reduced)  # level over sample count not made

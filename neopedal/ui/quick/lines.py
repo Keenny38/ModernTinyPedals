@@ -628,7 +628,8 @@ def circle(center_x: float, center_y: float, radius: float, segments_count: int 
             [center_y + math.sin(angle) * radius for angle in angles])
 
 
-MARKER_SHAPES = ("diamond", "dot", "triangle", "square", "ring", "hollow_triangle", "cross", "hollow_diamond")
+MARKER_SHAPES = ("diamond", "dot", "triangle", "square", "ring", "hollow_triangle", "cross", "hollow_diamond",
+                 "hollow_square")
 
 
 def _triangle_corners(x: float, y: float, angle: float, half: float) -> list[tuple[float, float]]:
@@ -676,6 +677,11 @@ def markers(points: Sequence[tuple[float, float, float]], shape: str, size: floa
         elif shape == "hollow_diamond":
             outer = [(x + half, y), (x, y + half), (x - half, y), (x, y - half)]
             inner = [(x + half * 0.5, y), (x, y + half * 0.5), (x - half * 0.5, y), (x, y - half * 0.5)]
+            _outline(outer, inner, data)
+        elif shape == "hollow_square":
+            side, inside = half * 0.8, half * 0.4
+            outer = [(x - side, y - side), (x + side, y - side), (x + side, y + side), (x - side, y + side)]
+            inner = [(x - inside, y - inside), (x + inside, y - inside), (x + inside, y + inside), (x - inside, y + inside)]
             _outline(outer, inner, data)
         elif shape == "hollow_triangle":
             _outline(_triangle_corners(x, y, angle, half), _triangle_corners(x, y, angle, half * 0.45), data)

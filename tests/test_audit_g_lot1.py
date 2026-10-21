@@ -94,30 +94,71 @@ def test_close_releases_page_once(ui_env):
     flush_deletes()
 
 
-def test_quick_pages_free_view_before_backend():
-    """Pages with a QML view free it in free_page (closeEvent & Esc), not only in closeEvent"""
-    import inspect
+class _Recorder:
+    """Fake backend: release & every other call recorded in a list shared with the fake view"""
 
+    def __init__(self, name: str, calls: list[str]):
+        self.name, self.calls = name, calls
+
+    def release(self):
+        self.calls.append(self.name)
+
+    def __getattr__(self, name):  # page_shown, page_hidden, tab... of the real page: no-op
+        return lambda *args, **kwargs: None
+
+
+def fake_page(page_type, calls: list[str]):
+    """Page of page_type built without its own __init__: fake QML view & backends recording into calls"""
+    from PySide6.QtQuickWidgets import QQuickWidget
+
+    from neopedal.ui._common import BaseDialog
+
+    class View(QQuickWidget):
+        def setSource(self, url):
+            calls.append("view" if url.isEmpty() else url.toString())
+
+    page = page_type.__new__(page_type)
+    BaseDialog.__init__(page, None)
+    page.view = View()  # no parent: kept until the end of the test
+    page.backend = _Recorder("backend", calls)
+    page.replays = _Recorder("replays", calls)
+    page._replays_active = False
+    return page
+
+
+def test_quick_pages_free_view_before_backend(ui_env):
+    """Pages with a QML view free it before its backends (bindings never read a released backend), once, on
+    close & Esc alike"""
     from neopedal.ui import broadcast_director, driver_stats_viewer, lap_viewer, race_results_viewer
     from neopedal.ui._common import BaseDialog
 
-    default = inspect.getsource(BaseDialog.free_page)  # QML view unloaded, then PageBackend.release
-    assert default.index("view.setSource(QUrl())") < default.index("release()")
-    for module in (race_results_viewer, driver_stats_viewer, broadcast_director, lap_viewer):
-        source = inspect.getsource(module)
-        if module is race_results_viewer:  # two backends: QML unloaded first
-            free_page = source[source.index("    def free_page(self):"):]
-            free_page = free_page[:free_page.index("\n\n")]
-            assert free_page.index("self.view.setSource(QUrl())") < free_page.index("self.replays.release()")
-            assert free_page.index("self.view.setSource(QUrl())") < free_page.index("self.backend.release()")
-        elif module is not lap_viewer:
-            assert "def free_page(" not in source, module  # BaseDialog.free_page
-        else:
-            free_page = source[source.index("    def free_page(self):"):]
-            free_page = free_page[:free_page.index("\n\n")]
-            assert "self.view.setSource(QUrl())" in free_page and "self.backend.release()" in free_page, module
-        assert "self.release_page()" in source[source.index("    def closeEvent(self, event):"):], module
-        assert "def reject(" not in source, module  # BaseDialog.reject releases the page
+    for entry in (race_results_viewer.RaceResultsViewer, driver_stats_viewer.DriverStatsViewer,
+                  broadcast_director.BroadcastDirector, lap_viewer.LapViewer):
+        page_type = entry if isinstance(entry, type) else next(  # singleton_dialog wrapper
+            cell.cell_contents for cell in entry.__closure__ if isinstance(cell.cell_contents, type))
+        name = page_type.__name__
+        assert "reject" not in vars(page_type), name  # BaseDialog.reject releases the page (Esc)
+        if name in ("DriverStatsViewer", "BroadcastDirector"):
+            assert "free_page" not in vars(page_type), name  # BaseDialog.free_page
+        for closing in ("close", "escape"):
+            calls: list[str] = []
+            page = fake_page(page_type, calls)
+            view = page.view
+            BaseDialog.show(page)
+            if closing == "close":
+                assert page.close()
+            else:
+                QApplication.sendEvent(
+                    page, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+            assert page.isHidden(), (name, closing)
+            flush_deletes()  # deleted page: nothing released again
+            if name == "RaceResultsViewer":  # two backends: QML unloaded first
+                assert calls[:1] == ["view"] and sorted(calls[1:]) == ["backend", "replays"], (closing, calls)
+            elif name == "LapViewer":
+                assert sorted(calls) == ["backend", "view"], (closing, calls)
+            else:  # BaseDialog.free_page: QML unloaded, then backend released
+                assert calls == ["view", "backend"], (name, closing, calls)
+            view.deleteLater()
 
 
 def test_uncaught_exceptions_logged(caplog):

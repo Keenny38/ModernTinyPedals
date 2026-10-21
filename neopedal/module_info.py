@@ -443,6 +443,13 @@ class LapSectors:
         if (self.current, self.last, self.sector, self.last_kind, self.out_lap, self.best_lap) != old:
             self.changed += 1
 
+    def best_now(self) -> tuple[float, float, float]:
+        """Personal best of each sector with sectors completed in lap being driven (best of class at once)"""
+        best1, best2, best3 = self.best
+        current1, current2 = self.current  # 0 unless completed in lap being driven
+        return (min(best1, current1) if best1 and current1 else best1 or current1,
+                min(best2, current2) if best2 and current2 else best2 or current2, best3)
+
     def recent(self) -> tuple[float, float, float]:
         """Most recent time of each sector: current lap for sectors completed in it, else last lap"""
         return (self.current[0] if self.sector >= 1 else self.last[0],
@@ -466,15 +473,34 @@ SECTOR_CLASS_BEST, SECTOR_PERSONAL_BEST, SECTOR_SLOWER = "best", "positive", "ca
 
 
 def sector_color(value: float, number: int, sectors: LapSectors, class_best: tuple) -> str | None:
-    """Theme color name of a sector time as game live timing: best of class in session (purple), personal best
-    of completed laps (green), slower (yellow); None if no time"""
+    """Theme color name of a sector time as game live timing: best of class in session (purple, one car only),
+    personal best improved or set (green, at once when sector of lap being driven beats it), slower (yellow); None
+    if no time"""
     if not 0 < value < MAX_SECONDS:
         return None
-    if class_best[number] and abs(value - class_best[number]) < SAME_TIME:
+    if class_best[number] and value < class_best[number] + SAME_TIME:
         return SECTOR_CLASS_BEST
-    if sectors.best[number] and abs(value - sectors.best[number]) < SAME_TIME:
+    best = sectors.best[number]  # completed laps (last lap shown: its sectors included)
+    if not best or value < best + SAME_TIME:
         return SECTOR_PERSONAL_BEST
     return SECTOR_SLOWER
+
+
+def set_class_bests(cars) -> None:
+    """Best S1, S2, S3 & best lap of each class in session told to every car of class (purple times as game live
+    timing): personal bests of its cars, sectors completed in laps being driven included (a sector beaten during the
+    lap is the only purple one at once)"""
+    best: dict[str, list[float]] = {}
+    for data in cars:
+        found = best.setdefault(data.vehicleClass, [0.0, 0.0, 0.0, 0.0])
+        lap = data.bestLapTime if 0 < data.bestLapTime < MAX_SECONDS else 0.0
+        for number, value in enumerate((*data.sectors.best_now(), lap)):
+            if 0 < value < MAX_SECONDS and (not found[number] or value < found[number]):
+                found[number] = value
+    for data in cars:
+        found = best[data.vehicleClass]
+        data.classBestSectors = (found[0], found[1], found[2])
+        data.classBestLap = found[3]
 
 
 def split_sectors(sector1: float, sector2: float, laptime: float) -> tuple[float, float, float]:
@@ -829,6 +855,7 @@ class FuelInfo:
         "neededRelative",
         "neededAbsolute",
         "lastLapConsumption",
+        "lastLapPartial",
         "estimatedConsumption",
         "estimatedValidConsumption",
         "estimatedLaps",
@@ -857,6 +884,7 @@ class FuelInfo:
         self.neededRelative: float = 0.0
         self.neededAbsolute: float = 0.0
         self.lastLapConsumption: float = 0.0
+        self.lastLapPartial: bool = False  # last lap counted from mid-lap (module started on track): no consumption
         self.estimatedConsumption: float = 0.0
         self.estimatedValidConsumption: float = 0.0
         self.estimatedLaps: float = 0.0
@@ -936,14 +964,32 @@ class HybridInfo:
         self.fuelEnergyBias: float = 0.0
 
 
+class TrackMap(NamedTuple):
+    """Track map shown by overlays: recorded map, else official circuit of game (see track_map_official)
+
+    Published as a whole (MappingInfo.trackMap replaced, never a field alone): a reader taking trackMap once gets
+    coordinates, distances & sectors of the same map, never parts of two maps (mapping module thread).
+    """
+
+    coordinates: tuple[tuple[float, float], ...] | None = None  # x, y of each node, from start line
+    elevations: tuple[tuple[float, float], ...] | None = None  # lap distance & elevation of each node (None: start
+    # line not known yet, official circuit shape only)
+    sectors: tuple[int, int] | None = None  # node index before each sector line (None: not known yet)
+    lastModified: float = 0.0  # changes with map: map file time, publish time of official circuit
+
+    def start_known(self) -> bool:
+        """Whether node 0 is at start line (lap distances known)"""
+        return bool(self.coordinates) and bool(self.elevations)
+
+
+NO_TRACK_MAP = TrackMap()
+
+
 class MappingInfo:
     """Mapping output data"""
 
     __slots__ = (
-        "coordinates",
-        "elevations",
-        "sectors",
-        "lastModified",
+        "trackMap",
         "speedTrapPosition",
         "pitEntryPosition",
         "pitExitPosition",
@@ -971,10 +1017,24 @@ class MappingInfo:
 
     def reset_map(self):
         """Reset track map only (track info fields owned by track info recording)"""
-        self.coordinates: tuple[tuple[float, float], ...] | None = None
-        self.elevations: tuple[tuple[float, float], ...] | None = None
-        self.sectors: tuple[int, int] | None = None
-        self.lastModified: float = 0.0
+        self.trackMap: TrackMap = NO_TRACK_MAP
+
+    # Fields of current map, each read on its own: take trackMap once to read several of the same map
+    @property
+    def coordinates(self) -> tuple[tuple[float, float], ...] | None:
+        return self.trackMap.coordinates
+
+    @property
+    def elevations(self) -> tuple[tuple[float, float], ...] | None:
+        return self.trackMap.elevations
+
+    @property
+    def sectors(self) -> tuple[int, int] | None:
+        return self.trackMap.sectors
+
+    @property
+    def lastModified(self) -> float:
+        return self.trackMap.lastModified
 
 
 class NotesData:

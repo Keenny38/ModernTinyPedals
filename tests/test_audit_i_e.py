@@ -64,7 +64,7 @@ def test_playback_full_state_every_third_step(opener, warnings, monkeypatch):  #
     x = chart.property("cursorX")
     wait(0.1)
     assert chart.property("cursorTitle") == page.cursorTitle(x)  # paused: values of last frame
-    assert js(view, chart, "cursorMapXY") == pytest.approx(flat_map(page.mapCursor(x)))
+    assert js(view, chart, "cursorMapXY") == pytest.approx(flat_map(page.mapPointer.mapCursor(x)))
 
 
 def test_playback_end_and_skip_give_full_state(opener, warnings, monkeypatch):  # noqa: F811
@@ -83,7 +83,7 @@ def test_playback_end_and_skip_give_full_state(opener, warnings, monkeypatch):  
     x = chart.property("cursorX")
     assert x == pytest.approx(page.xAtReferenceTime(chart.property("playTo")))
     assert chart.property("cursorTitle") == page.cursorTitle(x)  # last frame values exact
-    assert js(view, chart, "cursorMapXY") == pytest.approx(flat_map(page.mapCursor(x)))
+    assert js(view, chart, "cursorMapXY") == pytest.approx(flat_map(page.mapPointer.mapCursor(x)))
     calls = count_steps(page, monkeypatch)
     evaluate(view, chart, "togglePlay()")  # played again from start: first step full
     wait(0.05)

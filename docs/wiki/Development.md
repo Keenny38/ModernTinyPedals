@@ -54,7 +54,9 @@ pytest --cov=neopedal
 - Tests run headless in CI with `QT_QPA_PLATFORM=offscreen`, and a hung test fails after 300 seconds (`--timeout=300`).
 - `pytest -n auto` (pytest-xdist) spreads the tests over every CPU, about 3 times faster; CI does it on Linux. A test opening a server uses a port of its own per worker (`PYTEST_XDIST_WORKER`).
 - `pytest -m benchmark` runs the widget render benchmark (separate CI step); `pytest -m manual` runs tests that need a running game.
-- `python tools/check.py` runs every check of CI in one command: ruff, mypy for Windows **and** Linux, tests with coverage (`--quick`: without tests). It also warns when a changelog lacks the section of the next version, and lints changed workflows when `actionlint` / `zizmor` are installed. `python tools/check.py --install-hook` runs it before each push to `master` (a failed check refuses the push, pushes to other branches are not checked).
+- **Recorded game sessions** (`tests/test_recorded_sessions.py`): real Le Mans Ultimate recordings in `tests/fixtures/sessions` are played frame by frame through the reader of the app, every data module (in lock step: each module computes every frame once, in the same order every run) and every overlay in both designs. Module values are checked against the game values of the recording (fuel, lap times, field, pit stops, consumption history, driver stats distance), and the facts written in the `.json` next to each recording. To add one (rain, multiclass race, safety car...): record a session with `Tools` > `Advanced` > session recorder, then `python tools/make_replay_fixture.py SOURCE.tpreplay tests/fixtures/sessions/NAME.tpreplay --start S --end S` keeps that part at 2 frames per second without the telemetry of the other cars (a few MB for 4 minutes), replaces your driver name everywhere and removes chat messages; write `NAME.json` with what the session holds (see the existing one).
+- **Startup ratchet** (`tests/test_startup_imports.py`): imports of app start are measured with `python -X importtime` in a new interpreter. Tool pages, overlays, services, QML and charts must load when first used; the number of app modules imported at startup and their import time have a ceiling. Lower `MAX_APP_MODULES` when startup gets lighter.
+- `python tools/check.py` runs every check of CI in one command: ruff, mypy for Windows **and** Linux, tests with coverage spread over every CPU when `pytest-xdist` is installed (`--quick`: without tests). It also warns when a changelog lacks the section of the next version, and lints changed workflows when `actionlint` / `zizmor` are installed. `python tools/check.py --install-hook` runs it before each push to `master` (a failed check refuses the push, pushes to other branches are not checked).
 - CI installs `requirements-dev.txt` with `requirements-lock.txt` as constraints (`pip install -r requirements-dev.txt -c requirements-lock.txt`): runtime packages at the versions of release builds, the latest `ruff` and `mypy`. If a check fails in CI but passes locally, update them: `pip install -U ruff mypy`. `pyproject.toml` reads its dependencies from `requirements.txt`.
 - `pre-commit install` runs JSON / YAML checks, `ruff --fix` and `mypy` before each commit (not the tests).
 - The `visual-regression` job renders every overlay with the base commit and with your changes and compares them. An overlay change fails the check unless a before / after image is added in `docs/changes` (see [Visuals](#before--after-visuals)) or a commit message contains `[visual]`.
@@ -72,7 +74,7 @@ pytest --cov=neopedal
 | `neopedal/process/` | Game data processing; LMU REST data in `game_info.py` and `team_usage.py` |
 | `neopedal/widget/` | Overlays: classic layout `<name>.py`, modern design `_modern/<name>.py`, Dashboard HUD (`black_box`) `_black_box/`, base class `_base.py` |
 | `neopedal/template/` | Default settings; overlay defaults per category in `template/widget/<category>.py` |
-| `neopedal/ui/` | Qt Widgets pages and dialogs; QML pages in `ui/qml` (`components/` shared Tp* controls, one folder per zone: `config/`, `overlays/`, `director/`, `telemetry/`, `analysis/`), their Python backends in `ui/quick` |
+| `neopedal/ui/` | Qt Widgets pages and dialogs; QML pages in `ui/qml` (`components/` shared Tp* controls, one folder per zone: `home/`, `config/`, `overlays/`, `director/`, `telemetry/`, `analysis/`), their Python backends in `ui/quick` |
 | `neopedal/userfile/` | File formats and data: presets, laps, MoTeC, track corners and geometry, lap geometry jobs |
 | `neopedal/i18n/` | Translations (`fr.py`, `fr_messages.py`, `fr_overlay.py`) and option labels / help (`data/`) |
 | `neopedal/update.py`, `command_server.py`, `web_dashboard.py`, `vr_overlay.py`, `replay.py` | Updater, remote control, web dashboard, VR, telemetry replay |
@@ -98,7 +100,7 @@ A new tool page touches 2 files (5 before): its dialog module in `neopedal/ui/` 
 ### Qt Quick pages
 
 - The Lap Telemetry Viewer, Track Map Viewer, Driver Stats Viewer, Race Calculator and the Overlays page are QML pages in `neopedal/ui/qml`, with their state in `neopedal/ui/quick` (pure Python, testable without a display). New tool pages should preferably be Qt Quick, with logic in Python.
-- QML files: shared components in `ui/qml/components/`, pages and their panels in one folder per zone (`config`, `overlays`, `director`, `telemetry`, `analysis`). A zone file imports the folders it uses (`import "../components"`, `import "../director"`...). Python loads pages by file name (`create_quick_view(parent, "Overlays.qml")`, `quick.qml_path(name)` finds the subfolder); QML text written elsewhere (tests, tools) gets every folder with `quick.qml_folder_imports()`.
+- QML files: shared components in `ui/qml/components/`, pages and their panels in one folder per zone (`home`, `config`, `overlays`, `director`, `telemetry`, `analysis`). A zone file imports the folders it uses (`import "../components"`, `import "../director"`...). Python loads pages by file name (`create_quick_view(parent, "Overlays.qml")`, `quick.qml_path(name)` finds the subfolder); QML text written elsewhere (tests, tools) gets every folder with `quick.qml_folder_imports()`.
 - Race Calculator: `race_backend.py` (QObject: inputs, actions, one property per part of the results, emitted only when that part changes), `race_model.py` (saved inputs & their ranges, texts), `race_results.py` (results as plain values for QML), `race_tyres.py` (tyre plan model), `race_picture.py` (plan picture). The hosting page `ui/race_calculator.py` gives the dialogs, toasts and undo history, and builds the QML view when first shown.
 - Curves and maps are sent once to the graphics card (`GpuShape`); zooming only changes a matrix.
 - The executable bundles only the QML modules listed in `neopedal/ui/quick/qml_modules.py`. A QML module newly imported by a page must be added there (a test loads every page with only these modules).
@@ -235,7 +237,7 @@ Before publishing, run `git fetch --tags` (to start from the real last release) 
 
 `python tools/gen_release_notes.py --draft-changelog X.Y.Z` prints a draft of the section from the commits since the last release (titles under `New`, `Improvements` and `Fixes`, images added in `docs/changes`), to rewrite for users.
 
-Without both sections, `tools/release.py` and the workflow refuse to publish. The `##` to `####` headings inside a section become the cards of the app's What's New page.
+Without both sections, `tools/release.py` and the workflow refuse to publish. Inside a section, `###` headings are the groups of the app's What's New page (`New`, `Improvements`, `Fixes`...) and `####` headings its cards (bullets right under a `###` heading make a card without title); an indented `  - ` bullet is a sub-bullet. A `####` heading naming an overlay gets a `Try` button, and option keys written as code (`` `show_apex_speed` ``) become links to the option.
 
 ### Before / after visuals
 
@@ -245,11 +247,11 @@ When a commit changes how an overlay looks, add a before / after image in `docs/
 python tools/make_change_visual.py black_box --title "Dashboard HUD: engine map"
 ```
 
-`--set black_box.show_motor_map=true` shows an option that is off by default, `--slug` sets the file name, `--base` chooses the "before" revision. The release notes show added images in a **Visuals** section, unless the changelog section already embeds them (the app does not show images).
+`--set black_box.show_motor_map=true` shows an option that is off by default, `--slug` sets the file name, `--base` chooses the "before" revision. The release notes show added images in a **Visuals** section, unless the changelog section already embeds them (the app shows that section folded, `Before / After`).
 
 ### Changelog screenshots
 
-Screenshots of new app pages go in `docs/changelog` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/...` address, so they show on GitHub and in the release notes. The app's What's New page skips image lines.
+Screenshots of new app pages go in `docs/changes` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/...` address, so they show on GitHub, in the release notes and in the app's What's New page (shipped with the app for the newest version, else downloaded once; other image addresses are skipped).
 
 The README preview image is generated from the real overlays, on the simulated race of `neopedal/demo_data.py` (the one the app's overlay pictures show: widget modules read it only while a picture is drawn, see `demo_globals`; `demo_state` keeps simulated cars out of user presets):
 

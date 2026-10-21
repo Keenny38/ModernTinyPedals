@@ -299,6 +299,10 @@ def calc_consumption(
             last_elapsed_time = 0.0
             last_lap_stime = FLOAT_INF  # last lap start time
             laptime_last = 0.0  # last laptime from lap start times, matched by game laptime
+            # Consumption of lap in progress counted from its start (None until read): module started
+            # mid-lap (app started on track, preset reload) only counts the rest of that lap
+            from_lap_start: bool | None = None
+            last_lap_partial = False  # last lap counted from mid-lap: not its consumption
             laps_left = 0.0  # amount laps left at current lap distance
             end_timer_laps_left = 0.0  # amount laps left from start of current lap to end of race timer
             pos_recorded = 0.0  # last recorded vehicle position
@@ -316,6 +320,8 @@ def calc_consumption(
         laps_done = api.read.lap.completed_laps()
         lap_into = api.read.lap.progress()
         is_pit_lap |= api.read.vehicle.in_pits()
+        if from_lap_start is None:
+            from_lap_start = in_garage or laptime_curr < 1
         laptime_pace = minfo.delta.lapTimePace
         pos_synced = minfo.delta.lapDistance
 
@@ -357,7 +363,10 @@ def calc_consumption(
                 lap_state.pending = PendingLap(laptime_last, elapsed_time, (used_curr, tuple(delta_array_raw)))
             delta_array_raw[:] = DELTA_DEFAULT
             pos_last = pos_recorded = pos_curr
-            used_last_raw = used_curr
+            last_lap_partial = not from_lap_start
+            if from_lap_start:  # else partial lap: previous last lap consumption kept
+                used_last_raw = used_curr
+            from_lap_start = True
             used_curr = 0
             recording = laptime_curr < 1
             is_pit_lap = 0
@@ -472,6 +481,7 @@ def calc_consumption(
         output.neededRelative = amount_need_rel
         output.neededAbsolute = amount_need_abs
         output.lastLapConsumption = used_last_raw
+        output.lastLapPartial = last_lap_partial
         output.estimatedConsumption = used_ref + delta_fuel
         output.estimatedValidConsumption = used_est
         output.estimatedLaps = est_runlaps

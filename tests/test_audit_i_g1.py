@@ -416,7 +416,7 @@ def test_recent_network_paths_checked_in_background(page, host, tmp_path, monkey
 
 
 def test_recent_network_check_dropped_when_file_saved_meanwhile(page, host, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_files
 
     backend = page.backend
     shared = "//server/share/plan.race-plan"
@@ -427,13 +427,13 @@ def test_recent_network_check_dropped_when_file_saved_meanwhile(page, host, monk
         release.wait(5)
         return serial, set(paths)  # "missing" when the check started
 
-    monkeypatch.setattr(race_backend, "missing_files_of", slow_missing)
+    monkeypatch.setattr(race_files, "missing_files_of", slow_missing)
     backend.check_network_recent()
     backend.remember_recent("race_plan", "//server/share/other.race-plan")  # saved meanwhile
     release.set()
     wait_jobs(backend)
     assert shared in [item["path"] for item in backend.recentFiles["race_plan"]]  # stale check dropped
-    assert race_backend.network_path("\\\\server\\share\\a.race-plan") and not race_backend.network_path("C:/a")
+    assert race_files.network_path("\\\\server\\share\\a.race-plan") and not race_files.network_path("C:/a")
 
 
 def test_page_loads_without_errors_after_changes(page, host):  # noqa: F811

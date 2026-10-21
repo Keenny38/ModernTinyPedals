@@ -43,6 +43,17 @@ Item {
             root.chart.setView(range[0] - margin, range[1] + margin, true)
         }
     }
+    // Corner asked from elsewhere (Home page debrief): charts zoomed on it once this list shows
+    readonly property int focusRequest: backend.cornerTable.focusRequest
+    onFocusRequestChanged: takeFocus()
+    Component.onCompleted: takeFocus()
+    function takeFocus() {
+        if (root.focusRequest < 0 || !root.chart)
+            return
+        var index = backend.cornerTable.takeFocus()
+        if (index >= 0)
+            Qt.callLater(root.showCorner, index)  // charts of the laps just shown measured first
+    }
 
     ColumnLayout {
         anchors.fill: parent

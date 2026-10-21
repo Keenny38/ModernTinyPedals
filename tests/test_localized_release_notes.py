@@ -112,12 +112,12 @@ def test_update_check_fetches_notes_in_app_language(monkeypatch, language):
     async def latest(repo):
         return release_response()
 
-    def fetch(repo, tag, code):
+    def fetch(repo, tag, code, timeout=5):
         fetched.append((repo, tag, code))
-        return "### Overlays\n\n- **Graphique de delta** ajouté."
+        return "## 99.0.0 (2099-01-02)\n\n### Overlays\n\n- **Graphique de delta** ajouté."
 
     monkeypatch.setattr(update, "request_latest_release", latest)
-    monkeypatch.setattr(update, "fetch_localized_summary", fetch)
+    monkeypatch.setattr(update, "fetch_changelog", fetch)
     monkeypatch.setattr(update, "current_language", lambda: language)
     checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
     assert checker.is_updates() and "Delta graph" in checker.release_notes
@@ -125,8 +125,9 @@ def test_update_check_fetches_notes_in_app_language(monkeypatch, language):
     if language == "fr":
         assert fetched == [("Keenny38/ModernTinyPedals", "v99.0.0", "fr")]
         assert checker.notes("fr").startswith("### Overlays\n\n- **Graphique de delta** ajouté.\n\n## Commits")
-    else:
-        assert not fetched and checker.notes("fr") == checker.release_notes  # English for every language
+    else:  # English changelog read for skipped versions only, notes are the release notes
+        assert fetched == [("Keenny38/ModernTinyPedals", "v99.0.0", "en")]
+        assert checker.notes("fr") == checker.release_notes  # English for every language
 
 
 def test_update_check_state_kept_consistent_on_notes_error(monkeypatch):
@@ -155,7 +156,7 @@ def test_update_check_state_kept_consistent_on_notes_error(monkeypatch):
     def fetch(*args):
         raise RuntimeError("unexpected")
 
-    monkeypatch.setattr(update, "fetch_localized_summary", fetch)
+    monkeypatch.setattr(update, "fetch_changelog", fetch)
     checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
     assert not checker.is_updates() and checker.release_notes == "" and checker.installer is None
     assert checker.message() == "Unable To Find Updates"

@@ -318,6 +318,7 @@ WIDGET_FUEL = {
         "pit_window_laps": 2,
         "warning_color_pit_window": "#FF6600",
         "enable_live_replan": True,
+        "enable_live_consumption": True,
         "show_next_stop": True,
         "prefix_next_stop": "PIT ",
         "font_color_next_stop": "#FFFFFF",

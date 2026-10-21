@@ -158,11 +158,11 @@ def test_backend_map_corners_gcircle(backend):
 
     track_map = backend.trackMap
     assert VertexStore.get(track_map["road"]).vertex_count > 10 and len(track_map["lines"]) == 2
-    points = backend.mapCursor(750.0)  # quarter lap: top of circle
+    points = backend.mapPointer.mapCursor(750.0)  # quarter lap: top of circle
     assert len(points) == 2 and points[0]["y"] > track_map["maxY"] * 0.9
     # Click near reference line point: its axis position
-    assert backend.mapPick(points[0]["x"], points[0]["y"], 20.0) == pytest.approx(750.0, abs=10)
-    assert backend.mapPick(1e6, 1e6, 20.0) == -1.0
+    assert backend.mapPointer.mapPick(points[0]["x"], points[0]["y"], 20.0) == pytest.approx(750.0, abs=10)
+    assert backend.mapPointer.mapPick(1e6, 1e6, 20.0) == -1.0
     backend.setMapView(1000.0, 2000.0, 2.0)
     assert VertexStore.get(track_map["lines"][0]["highlight"]).vertex_count > 0
     backend.setMapMode("gain")

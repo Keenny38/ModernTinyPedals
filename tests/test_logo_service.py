@@ -221,57 +221,6 @@ def test_page_logos_kept_when_pictures_arrive(game, monkeypatch):
     assert len(asked) == count + 1  # game lists: brand names may change
 
 
-# --- Home cards
-def test_home_last_session_logos_in_background(ui_env, monkeypatch):
-    from neopedal.ui import home_view
-    from neopedal.ui.home_view import HomeCard
-    from neopedal.userfile.driver_history import SessionRecord
-
-    record = SessionRecord(time=1759660000, track="Spa", vehicle="Hyper - Ferrari", session=2, best=123.456)
-    calls = []
-    monkeypatch.setattr(home_view, "game_logos",
-                        lambda *args, **kwargs: calls.append((threading.get_ident(), kwargs.get("light"))) or ())
-    card = HomeCard(None, "Last Session", ("", "H"), "")
-    try:
-        card.show_logos(("last", 1), lambda: home_view.record_logos(record, True))
-        assert card.label_logos.isHidden() and card.logos == ()
-        assert LOGO_LOADER.wait()
-        QTest.qWait(300)
-        assert card.logos == ("last", 1)  # waited result taken by check timer
-        assert calls == [(calls[0][0], True)] and calls[0][0] != threading.get_ident()
-    finally:
-        card.deleteLater()
-
-
-def test_home_card_logos_read_in_background_same_pixels(ui_env, tmp_path):
-    from PySide6.QtGui import QPixmap
-
-    from neopedal.ui._common import UIScaler
-    from neopedal.ui.home_view import HomeCard
-
-    paths = (logo_file(str(tmp_path / "a.png"), "#e02020"), logo_file(str(tmp_path / "b.png"), "#2020e0", 0))
-    card = HomeCard(None, "Last Session", ("", "H"), "")
-    try:
-        card.set_logos(paths)
-        assert card.logos == ()  # read meanwhile
-        assert LOGO_LOADER.wait()
-        QTest.qWait(300)
-        assert card.logos == paths and not card.label_logos.isHidden()
-        shown = card.label_logos.pixmap().toImage()
-        height = UIScaler.pixel(22)
-        ratio = card.devicePixelRatioF()
-        expected = HomeCard(None, "Last Session", ("", "H"), "")
-        expected.draw_logos(tuple(custom_image.load_picture(path, height * 3, height, ratio) for path in paths))
-        assert shown == expected.label_logos.pixmap().toImage()
-        expected.deleteLater()
-        card.set_logos(())
-        assert LOGO_LOADER.wait()
-        QTest.qWait(300)
-        assert card.label_logos.isHidden() and isinstance(card.label_logos.pixmap(), QPixmap)
-    finally:
-        card.deleteLater()
-
-
 # --- Classic overlays
 @pytest.mark.parametrize("fmt", [QImage.Format.Format_ARGB32, QImage.Format.Format_RGB32, QImage.Format.Format_Indexed8])
 def test_classic_logo_read_in_background_same_pixels(ui_env, tmp_path, fmt):

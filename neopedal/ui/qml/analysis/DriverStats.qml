@@ -21,6 +21,9 @@ TpPage {
     readonly property var tiles: backend.tiles
     readonly property var driver: backend.driver  // driver card (All Tracks)
     readonly property var sessions: backend.sessions  // sessions of selected vehicle
+    readonly property var goal: backend.goal  // lap time goal of selected vehicle
+    // Selected vehicle has a personal best: shared as picture or code
+    readonly property bool canShare: !allTracks && goal.visible === true && (goal.best || "-") !== "-"
     readonly property bool allTracks: backend.allTracks
     readonly property bool compact: width < theme.bpWide  // menu buttons as icons, 3 key figures a row
     readonly property bool narrow: width < theme.bpNarrow  // side cards below the table
@@ -87,6 +90,56 @@ TpPage {
         }
     }
     // Small section title inside a card
+    // Rank over time (ranks seen): line of rank values, Bronze 1 at the bottom, in the rank color
+    component RankLine: Item {
+        id: rankLine
+        property var points: []
+        property color tint: theme.accent
+        property string label: ""
+        implicitHeight: Math.round(theme.em * 2)
+        Accessible.role: Accessible.Graphic
+        Accessible.name: label
+        onPointsChanged: lineCanvas.requestPaint()
+        onWidthChanged: lineCanvas.requestPaint()
+        onTintChanged: lineCanvas.requestPaint()
+        Text {
+            id: lineLabel
+            text: rankLine.label
+            color: theme.dimText
+            font.pointSize: theme.fontCaption
+            width: theme.em * 6.5
+            elide: Text.ElideRight
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Canvas {
+            id: lineCanvas
+            x: lineLabel.width + theme.em * 0.5
+            width: parent.width - x
+            height: parent.height
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                var points = rankLine.points || []
+                if (points.length < 2) return
+                var pad = 3, w = width - pad * 2, h = height - pad * 2
+                ctx.strokeStyle = rankLine.tint
+                ctx.lineWidth = 2
+                ctx.lineJoin = "round"
+                ctx.beginPath()
+                for (var i = 0; i < points.length; i++) {
+                    var x = pad + points[i].x * w, y = pad + (1 - points[i].y) * h
+                    if (i === 0) ctx.moveTo(x, y)
+                    else ctx.lineTo(x, y)
+                }
+                ctx.stroke()
+                var last = points[points.length - 1]
+                ctx.fillStyle = rankLine.tint
+                ctx.beginPath()
+                ctx.arc(pad + last.x * w, pad + (1 - last.y) * h, 3, 0, Math.PI * 2)
+                ctx.fill()
+            }
+        }
+    }
     component SectionLabel: TpSectionLabel {
         Layout.topMargin: theme.space2
         Layout.fillWidth: true
@@ -195,6 +248,15 @@ TpPage {
                     onTriggered: function(source) { page.popupBelow(exportMenu, source) }
                 }
                 TpAction {
+                    name: "shareButton"
+                    text: i18n.tr("Share")
+                    glyph: ""  // share
+                    tip: i18n.tr("Personal best of selected vehicle as a picture or a code, codes of other drivers compared")
+                    priority: 4
+                    checked: shareMenu.visible
+                    onTriggered: function(source) { page.popupBelow(shareMenu, source) }
+                }
+                TpAction {
                     name: "viewButton"
                     text: i18n.tr("View")
                     glyph: ""  // view
@@ -274,6 +336,32 @@ TpPage {
                     title: backend.tableTitle
                     glyph: page.allTracks ? "" : ""  // map pin, car
                     count: backend.hasRows ? String(table.count) : ""
+                    // Search by name, rows of one class (shown when the table has several classes)
+                    actions: [
+                        TpCombo {
+                            id: classCombo
+                            objectName: "statsClassFilter"
+                            readonly property var classes: backend.tableClasses
+                            readonly property var choices: [i18n.tr("All Classes")].concat(classes)  // made when classes change
+                            visible: classes.length > 1 || backend.classFilter !== ""
+                            tip: i18n.tr("Rows of one class only")
+                            implicitWidth: theme.em * 12
+                            model: choices
+                            currentIndex: Math.max(0, classes.indexOf(backend.classFilter) + 1)
+                            onActivated: function(index) {
+                                backend.setClassFilter(index > 0 ? classes[index - 1] : "")
+                                page.refocusTable()
+                            }
+                        },
+                        TpSearchField {
+                            id: tableSearch
+                            objectName: "statsSearch"
+                            implicitWidth: theme.em * 11.5
+                            placeholderText: page.allTracks ? i18n.tr("Find track") : i18n.tr("Find vehicle")
+                            onSearchChanged: function(text) { backend.setSearch(text) }
+                            onExitField: table.forceActiveFocus()
+                        }
+                    ]
                     Layout.fillHeight: page.allTracks || !backend.hasRows
                     // Every row when it fits in about half of the room under key figures (page height: no layout loop)
                     Layout.preferredHeight: page.allTracks || !backend.hasRows ? -1
@@ -328,7 +416,8 @@ TpPage {
             Flickable {
                 id: side
                 // Side column at the right; narrow page: below the table, full width, a third of the height
-                Layout.preferredWidth: page.narrow ? -1 : page.compact ? theme.em * 23 : theme.em * 27
+                Layout.preferredWidth: page.narrow ? -1 : page.compact ? theme.em * 23
+                                       : Math.max(theme.em * 27, Math.min(theme.em * 34, page.width * 0.2))
                 Layout.fillWidth: page.narrow
                 Layout.fillHeight: !page.narrow
                 Layout.preferredHeight: page.narrow ? Math.min(sideColumn.implicitHeight, page.height * 0.35) : -1
@@ -436,6 +525,8 @@ TpPage {
             id: progressionBox
             readonly property bool split: width > theme.em * 54  // content-tuned: chart (25 em) & sessions list (29 em)
             property bool showSessions: false
+            property int hoveredPoint: -1  // chart point of the session hovered in the list
+            property int pickedSession: -1  // session of the chart point clicked (shown in the list)
             title: i18n.tr("Progression")
             glyph: ""  // area chart
             tip: i18n.tr("Best lap of each session & personal best so far, level limits of community lap times")
@@ -445,6 +536,17 @@ TpPage {
                     options: backend.sessionFilters
                     currentIndex: backend.sessionFilter
                     onActivated: function(index) { backend.setSessionFilter(index) }
+                },
+                TpButton {
+                    id: filtersButton
+                    objectName: "statsFiltersButton"
+                    flat: !backend.filtered
+                    checked: filtersMenu.visible || backend.filtered
+                    glyph: ""  // filter
+                    size: "sm"
+                    fallback: i18n.tr("Filters")
+                    tip: i18n.tr("Sessions of a road condition, online or offline, since a game version")
+                    onClicked: page.popupBelow(filtersMenu, filtersButton)
                 },
                 TpButton {
                     visible: !progressionBox.split
@@ -472,6 +574,13 @@ TpPage {
                         Layout.fillHeight: true
                         Layout.minimumHeight: theme.em * 8
                         chartData: page.progression
+                        linkedPoint: progressionBox.hoveredPoint
+                        onPointClicked: function(session) {
+                            progressionBox.pickedSession = session
+                            if (session < 0) return
+                            if (!progressionBox.split) progressionBox.showSessions = true
+                            sessionList.positionViewAtIndex(session, ListView.Contain)
+                        }
                     }
                     StatsEmpty {
                         visible: page.progression.visible !== true
@@ -498,7 +607,9 @@ TpPage {
                 ColumnLayout {  // sessions of selected vehicle, newest first
                     visible: progressionBox.split || progressionBox.showSessions
                     Layout.fillWidth: !progressionBox.split
-                    Layout.preferredWidth: progressionBox.split ? Math.min(theme.em * 29, progressionBox.width * 0.5) : -1
+                    // content-tuned: 34 em when the chart keeps 56 em or more
+                    Layout.preferredWidth: progressionBox.split
+                        ? Math.min(progressionBox.width > theme.em * 90 ? theme.em * 34 : theme.em * 29, progressionBox.width * 0.5) : -1  // content-tuned
                     Layout.fillHeight: true
                     spacing: theme.em * 0.2
                     RowLayout {
@@ -553,6 +664,7 @@ TpPage {
                                 anchors.margins: 1
                                 radius: theme.radiusSm
                                 hovered: sessionArea.containsMouse && sessionItem.linked
+                                selected: sessionItem.index === progressionBox.pickedSession
                             }
                             FocusRing {
                                 target: sessionSurface
@@ -561,6 +673,7 @@ TpPage {
                             }
                             MouseArea {  // session of a results file: shown in race results page
                                 id: sessionArea
+                                onContainsMouseChanged: progressionBox.hoveredPoint = containsMouse ? sessionItem.modelData.point : -1
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 acceptedButtons: sessionItem.linked ? Qt.LeftButton : Qt.NoButton
@@ -591,6 +704,20 @@ TpPage {
                                     font.pointSize: theme.fontCaption
                                     font.features: { "tnum": 1 }
                                 }
+                                Icon {  // best lap on a damp or wet road
+                                    visible: sessionItem.modelData.wet === true
+                                    glyph: ""  // water drop
+                                    fallback: "~"
+                                    size: theme.em * 0.7
+                                    color: theme.accent
+                                }
+                                Icon {  // driven on an online server
+                                    visible: sessionItem.modelData.online === 1
+                                    glyph: ""  // globe
+                                    fallback: "@"
+                                    size: theme.em * 0.7
+                                    color: theme.dimText
+                                }
                                 Item { Layout.fillWidth: true }
                                 Icon {  // contacts & penalties of session (results file)
                                     visible: sessionItem.modelData.incidents > 0
@@ -609,6 +736,14 @@ TpPage {
                                     text: sessionItem.modelData.best
                                     color: sessionItem.modelData.pb ? theme.accent : sessionItem.modelData.best === "-" ? theme.dimText : theme.text
                                     font.weight: sessionItem.modelData.pb ? Font.DemiBold : Font.Normal
+                                    font.features: { "tnum": 1 }
+                                }
+                                Text {  // places gained in a race (start to finish)
+                                    visible: text !== ""
+                                    text: sessionItem.modelData.gained || ""
+                                    color: page.tone(sessionItem.modelData.gainedColor, theme.dimText)
+                                    font.pointSize: theme.fontLabel
+                                    font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                 }
                                 Text {
@@ -653,9 +788,93 @@ TpPage {
             title: i18n.tr("Activity")
             glyph: ""  // calendar
             tip: i18n.tr("Driving time of each day, all tracks")
+            actions: [
+                TpSegmented {
+                    objectName: "activityView"
+                    name: i18n.tr("Activity")
+                    options: [i18n.tr("Days"), i18n.tr("Breakdown")]
+                    currentIndex: backend.activityView
+                    onActivated: function(index) { backend.setActivityView(index) }
+                },
+                TpCombo {
+                    objectName: "activityYear"
+                    readonly property var years: (backend.activity.years || []).map(function(entry) { return entry.text })
+                    implicitWidth: theme.em * 11
+                    tip: i18n.tr("Period shown")
+                    model: years
+                    currentIndex: backend.activity.yearIndex || 0
+                    onActivated: function(index) { backend.setActivityYear(index) }
+                }
+            ]
             StatsActivity {
+                visible: backend.activityView === 0
                 Layout.fillWidth: true
                 activityData: backend.activity
+            }
+            GridLayout {  // driving time of the period by track & by class
+                visible: backend.activityView === 1 && (backend.activity.tracks || []).length > 0
+                Layout.minimumHeight: theme.em * 9  // as tall as the calendar of days: no jump when switching
+                Layout.fillWidth: true
+                Layout.topMargin: theme.space2
+                columns: width > theme.em * 40 ? 2 : 1  // content-tuned: two lists of names, bars & times
+                columnSpacing: theme.space5
+                rowSpacing: theme.space3
+                // made again only when the activity changes
+                readonly property var lists: [{ "title": i18n.tr("Driving time by track"), "rows": backend.activity.tracks || [] },
+                                              { "title": i18n.tr("Driving time by class"), "rows": backend.activity.classes || [] }]
+                Repeater {
+                    model: parent.lists
+                    ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignTop
+                        spacing: theme.space1
+                        SectionLabel { text: modelData.title; Layout.topMargin: 0 }
+                        Repeater {
+                            model: modelData.rows
+                            RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: theme.space3
+                                Text {
+                                    text: modelData.name
+                                    color: theme.text
+                                    elide: Text.ElideRight
+                                    Layout.preferredWidth: theme.em * 11
+                                }
+                                TpMeter {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                    value: Math.max(modelData.ratio, 0.03)
+                                    tint: theme.accent
+                                    name: modelData.name
+                                }
+                                Text {
+                                    text: modelData.time
+                                    color: theme.text
+                                    font.features: { "tnum": 1 }
+                                    Layout.preferredWidth: theme.em * 5.4
+                                    horizontalAlignment: Text.AlignRight
+                                }
+                                Text {
+                                    text: modelData.share
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontSmall
+                                    font.features: { "tnum": 1 }
+                                    Layout.preferredWidth: theme.em * 3
+                                    horizontalAlignment: Text.AlignRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Text {  // breakdown of a period without driving
+                visible: backend.activityView === 1 && (backend.activity.tracks || []).length === 0
+                text: backend.activity.summary || ""
+                color: theme.dimText
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
         }
     }
@@ -665,6 +884,62 @@ TpPage {
         id: vehicleSide
         ColumnLayout {
             spacing: theme.space5
+            TpSectionCard {  // lap time goal of selected vehicle: progress since first lap time, told once beaten
+                objectName: "goalCard"
+                visible: page.goal.visible === true
+                title: i18n.tr("Lap Time Goal")
+                glyph: ""  // target
+                tip: i18n.tr("Lap time to beat with this vehicle, saved: a message tells you once it is beaten")
+                actions: [
+                    TpButton {
+                        visible: page.goal.set === true
+                        flat: true
+                        size: "sm"
+                        text: i18n.tr("Remove")
+                        onClicked: backend.clearGoal()
+                    },
+                    TpButton {
+                        size: "sm"
+                        text: page.goal.set === true ? i18n.tr("Change...") : i18n.tr("Set...")
+                        onClicked: backend.editGoal()
+                    }
+                ]
+                RowLayout {
+                    visible: page.goal.set === true
+                    Layout.fillWidth: true
+                    spacing: theme.space4
+                    Text {
+                        text: page.goal.time || ""
+                        color: page.goal.reached ? theme.gain : theme.accent
+                        font.pointSize: theme.fontLarge
+                        font.weight: Font.DemiBold
+                        font.features: { "tnum": 1 }
+                    }
+                    Text {
+                        text: page.goal.gap || ""
+                        color: page.tone(page.goal.gapColor, theme.dimText)
+                        font.weight: Font.DemiBold
+                        font.features: { "tnum": 1 }
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+                TpMeter {  // progress from the first lap time of the history to the goal
+                    visible: page.goal.set === true && (page.goal.ratio || -1) >= 0
+                    Layout.fillWidth: true
+                    value: Math.max(page.goal.ratio || 0, 0)
+                    tint: page.goal.reached ? theme.gain : theme.accent
+                    name: i18n.tr("Lap Time Goal")
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: page.goal.set === true ? i18n.tr("Personal best") + " " + (page.goal.best || "-")
+                                                 : (page.goal.suggestion || i18n.tr("No goal yet: set a lap time to beat."))
+                    color: theme.dimText
+                    font.pointSize: theme.fontLabel
+                    wrapMode: Text.WordWrap
+                }
+            }
             TpSectionCard {  // other vehicle: values change in place (no fade: keyboard browsing never flickers)
                 id: referenceCard
                 title: i18n.tr("Lap Time Reference")
@@ -760,9 +1035,23 @@ TpPage {
                     wrapMode: Text.WordWrap
                 }
                 // Lap time limit of each level, marks of personal, qualifying & race bests
-                SectionLabel { visible: page.reference.visible === true; text: i18n.tr("Levels") }
+                RowLayout {  // level limits: folded by default (the scale above shows the levels), saved
+                    visible: page.reference.visible === true
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.space2
+                    SectionLabel { text: i18n.tr("Levels"); Layout.topMargin: 0 }
+                    TpButton {
+                        objectName: "levelsFold"
+                        flat: true
+                        size: "xs"
+                        glyph: backend.levelsOpen ? "\uE70E" : "\uE70D"  // chevron up, down
+                        fallback: backend.levelsOpen ? "▴" : "▾"
+                        tip: backend.levelsOpen ? i18n.tr("Hide lap time limits of levels") : i18n.tr("Show lap time limits of levels")
+                        onClicked: backend.setLevelsOpen(!backend.levelsOpen)
+                    }
+                }
                 Repeater {
-                    model: page.reference.visible ? page.reference.ladder : []
+                    model: page.reference.visible && backend.levelsOpen ? page.reference.ladder : []
                     TpListRow {  // level of the personal best: emphasized row, name in bold
                         required property var modelData
                         Layout.fillWidth: true
@@ -1048,6 +1337,17 @@ TpPage {
                             }
                         }
                     }
+                    Repeater {  // rank over time, one line per rank seen at least twice (empty chart: no line)
+                        model: page.driver.ranks || []
+                        RankLine {
+                            required property var modelData
+                            visible: (modelData.chart || []).length > 1
+                            Layout.fillWidth: true
+                            points: modelData.chart
+                            tint: (theme.dark ? modelData.color : modelData.lightColor) || theme.accent
+                            label: modelData.label
+                        }
+                    }
                     RowLayout {  // badge of game menu: game icon, name in its color, description
                         readonly property var badge: page.driver.badge || {}
                         readonly property color badgeColor: (theme.dark ? badge.color : badge.lightColor) || theme.text
@@ -1174,6 +1474,7 @@ TpPage {
                             layout: "stack"
                             large: true
                             label: modelData.label
+                            tip: modelData.tip || ""
                             value: modelData.value
                             Layout.preferredWidth: 1  // equal columns
                         }
@@ -1257,6 +1558,147 @@ TpPage {
                     color: theme.dimText
                     font.pointSize: theme.fontLabel
                     wrapMode: Text.WordWrap
+                }
+            }
+            TpSectionCard {  // official races to come (option): your best lap of each class on their track
+                objectName: "upcomingCard"
+                visible: backend.upcomingEnabled
+                title: i18n.tr("Official Races to Come")
+                glyph: ""  // calendar
+                tip: i18n.tr("Next daily races of RaceControl with your best laps on their track (View menu to hide)")
+                actions: TpButton {
+                    flat: true
+                    size: "sm"
+                    glyph: ""  // refresh
+                    fallback: i18n.tr("Read Again")
+                    tip: i18n.tr("Read Again")
+                    onClicked: backend.refreshUpcoming()
+                }
+                Text {
+                    visible: text !== ""
+                    text: backend.upcoming.note || ""
+                    color: theme.dimText
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    model: backend.upcoming.races || []
+                    ColumnLayout {
+                        id: raceItem
+                        required property var modelData
+                        readonly property real indent: theme.em * 2.6 + theme.space3  // under the circuit logo
+                        Layout.fillWidth: true
+                        spacing: theme.space1
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.space3
+                            GameLogo {
+                                source: raceItem.modelData.logo || ""
+                                boxWidth: theme.em * 2.6
+                                boxHeight: theme.em * 1.6
+                            }
+                            ColumnLayout {
+                                spacing: 0
+                                Layout.fillWidth: true
+                                Text {
+                                    text: raceItem.modelData.track
+                                    color: theme.text
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: [raceItem.modelData.start, raceItem.modelData.tier, raceItem.modelData.title]
+                                          .filter(function(part) { return part }).join(" · ")
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontSmall
+                                    font.features: { "tnum": 1 }
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                        Repeater {
+                            model: raceItem.modelData.bests
+                            RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.leftMargin: raceItem.indent
+                                spacing: theme.space3
+                                Text {
+                                    text: modelData.vehicleClass
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontSmall
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text { text: modelData.best; color: theme.text; font.features: { "tnum": 1 } }
+                                Chip {
+                                    text: modelData.level === "-" ? "" : modelData.level
+                                    tint: modelData.color || theme.dimText
+                                }
+                            }
+                        }
+                        Text {
+                            text: raceItem.modelData.note
+                            color: theme.dimText
+                            font.pointSize: theme.fontSmall
+                            Layout.leftMargin: raceItem.indent
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+            }
+            TpSectionCard {  // people of your class met in several online races (results files)
+                objectName: "rivalsCard"
+                visible: backend.rivals.length > 0
+                title: i18n.tr("Rivals")
+                glyph: ""  // people
+                tip: i18n.tr("People of your class met in several online races: times finished ahead & behind, best lap gap")
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.space3
+                    TpHeaderCell { text: i18n.tr("Driver"); Layout.fillWidth: true }
+                    TpHeaderCell { text: i18n.tr("Races"); align: Qt.AlignRight; Layout.preferredWidth: theme.em * 4.8 }
+                    TpHeaderCell { text: i18n.tr("Ahead-Behind"); align: Qt.AlignRight; Layout.preferredWidth: theme.em * 7 }
+                    TpHeaderCell { text: i18n.tr("Gap"); align: Qt.AlignRight; Layout.preferredWidth: theme.em * 4.4 }
+                }
+                Repeater {
+                    model: backend.rivals
+                    RowLayout {
+                        id: rivalRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: theme.space3
+                        HoverHandler { id: rivalHover }
+                        ToolTip.visible: rivalHover.hovered
+                        ToolTip.text: modelData.tip
+                        ToolTip.delay: theme.tipDelay
+                        Text { text: rivalRow.modelData.name; color: theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Text {
+                            text: rivalRow.modelData.races
+                            color: theme.dimText
+                            font.features: { "tnum": 1 }
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: theme.em * 4.8
+                        }
+                        Text {
+                            text: rivalRow.modelData.record
+                            color: page.tone(rivalRow.modelData.tone, theme.text)
+                            font.weight: Font.DemiBold
+                            font.features: { "tnum": 1 }
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: theme.em * 7
+                        }
+                        Text {
+                            text: rivalRow.modelData.gap
+                            color: page.tone(rivalRow.modelData.gapTone, theme.dimText)
+                            font.features: { "tnum": 1 }
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: theme.em * 4.4
+                        }
+                    }
                 }
             }
             TpSectionCard {  // latest sessions: click to show track & vehicle
@@ -1361,6 +1803,72 @@ TpPage {
 
     // Menus of the toolbar actions (opened next to their button, or next to "⋯" when the action is in it)
     TpMenu {
+        id: shareMenu
+        onClosed: page.refocusTable()
+        Action { text: i18n.tr("Copy Personal Best Card"); enabled: page.canShare; onTriggered: backend.copyPbCard() }
+        Action { text: i18n.tr("Save Personal Best Card..."); enabled: page.canShare; onTriggered: backend.exportPbCard() }
+        Action { text: i18n.tr("Copy Personal Best Code"); enabled: page.canShare; onTriggered: backend.copyPbCode() }
+        MenuSeparator {}
+        Action { text: i18n.tr("Compare a Personal Best Code..."); onTriggered: backend.pastePbCode() }
+    }
+    TpMenu {
+        id: filtersMenu
+        onClosed: page.refocusTable()
+        TpMenu {
+            id: conditionMenu
+            title: i18n.tr("Road")
+            Instantiator {
+                model: backend.conditionFilters
+                delegate: Action {
+                    required property var modelData
+                    required property int index
+                    text: modelData
+                    checkable: true
+                    checked: backend.conditionFilter === index
+                    onTriggered: backend.setConditionFilter(index)
+                }
+                onObjectAdded: function(index, object) { conditionMenu.insertAction(index, object) }
+                onObjectRemoved: function(index, object) { conditionMenu.removeAction(object) }
+            }
+        }
+        TpMenu {
+            id: onlineMenu
+            title: i18n.tr("Server")
+            Instantiator {
+                model: backend.onlineFilters
+                delegate: Action {
+                    required property var modelData
+                    required property int index
+                    text: modelData
+                    checkable: true
+                    checked: backend.onlineFilter === index
+                    onTriggered: backend.setOnlineFilter(index)
+                }
+                onObjectAdded: function(index, object) { onlineMenu.insertAction(index, object) }
+                onObjectRemoved: function(index, object) { onlineMenu.removeAction(object) }
+            }
+        }
+        TpMenu {
+            id: versionMenu
+            title: i18n.tr("Game Version")
+            Instantiator {
+                model: backend.versionChoices
+                delegate: Action {
+                    required property var modelData
+                    required property int index
+                    text: modelData.text
+                    checkable: true
+                    checked: backend.versionIndex === index
+                    onTriggered: backend.setVersionFilter(index)
+                }
+                onObjectAdded: function(index, object) { versionMenu.insertAction(index, object) }
+                onObjectRemoved: function(index, object) { versionMenu.removeAction(object) }
+            }
+        }
+        MenuSeparator {}
+        Action { text: i18n.tr("Clear Filters"); enabled: backend.filtered; onTriggered: backend.clearFilters() }
+    }
+    TpMenu {
         id: exportMenu
         onClosed: page.refocusTable()
         Action { text: i18n.tr("Export CSV..."); onTriggered: backend.exportCsv(false) }
@@ -1401,6 +1909,19 @@ TpPage {
             checkable: true
             checked: backend.colorblind
             onTriggered: backend.setColorblind(checked)
+        }
+        Action {
+            text: i18n.tr("Group Vehicles by Class")
+            checkable: true
+            checked: backend.groupByClass
+            onTriggered: backend.setGroupByClass(checked)
+        }
+        MenuSeparator {}
+        Action {
+            text: i18n.tr("Official Races to Come (RaceControl)")
+            checkable: true
+            checked: backend.upcomingEnabled
+            onTriggered: backend.setUpcomingEnabled(checked)
         }
     }
     TpMenu {

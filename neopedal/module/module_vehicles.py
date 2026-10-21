@@ -39,6 +39,7 @@ from ..module_info import (
     VehicleDataSet,
     VehiclesInfo,
     minfo,
+    set_class_bests,
 )
 from ..userfile.brands import select_brand_name
 from ._base import WAIT_STATE_CHANGE, DataModule, data_stamp
@@ -403,7 +404,11 @@ def update_vehicle_data(
                 data.gapBehindLeader = calc_gap_behind_leader(index)
 
             lap_start_time = api.read.timing.start(index)
-            data.lapStartTime = lap_start_time
+            # Running lap time: scoring start (every car, even without telemetry or with telemetry frozen while
+            # player is out of car), telemetry start if newer (line crossed, scoring not updated yet)
+            scoring_start = api.read.timing.scoring_start(index)
+            data.lapStartTime = (lap_start_time if scoring_start < lap_start_time <= elapsed_time + 1.0
+                                 else scoring_start)
             last_laptime = api.read.timing.last_laptime(index)
             data.sectors.update(
                 laps_completed, api.read.lap.sector_index(index),
@@ -732,23 +737,9 @@ def reset_session_timing(output: VehiclesInfo) -> None:
 
 
 def update_class_best_sectors(output: VehiclesInfo) -> None:
-    """Best S1, S2, S3 (personal bests of its cars) & best lap of each class in session, told to every car of class
-    (purple times, as game live timing)"""
-    total = min(output.totalVehicles, len(output.dataSet))
-    cars = output.dataSet
-    best: dict[str, list[float]] = {}
-    for index in range(total):
-        data = cars[index]
-        found = best.setdefault(data.vehicleClass, [0.0, 0.0, 0.0, 0.0])
-        lap = data.bestLapTime if 0 < data.bestLapTime < MAX_SECONDS else 0.0
-        for number, value in enumerate((*data.sectors.best, lap)):
-            if value and (not found[number] or value < found[number]):
-                found[number] = value
-    for index in range(total):
-        data = cars[index]
-        found = best[data.vehicleClass]
-        data.classBestSectors = (found[0], found[1], found[2])
-        data.classBestLap = found[3]
+    """Best S1, S2, S3 & best lap of each class in session, told to every car of class (purple times, as game live
+    timing)"""
+    set_class_bests(output.dataSet[:min(output.totalVehicles, len(output.dataSet))])
 
 
 def update_best_lap_gaps(output: VehiclesInfo) -> None:

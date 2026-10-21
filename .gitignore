@@ -13,6 +13,7 @@ __pycache__/
 /carsetups/
 /telemetry/
 /gameimage/
+/changelogimage/
 
 # pipenv stuff
 Pipfile
@@ -27,6 +28,7 @@ pylintrc
 !/neopedal/i18n/data/*.json
 !/tools/readme_preview_track.json
 !/native/openxr_layer/NeoPedalXrLayer.json
+!/tests/fixtures/sessions/*.json
 *.csv
 *.fuel
 

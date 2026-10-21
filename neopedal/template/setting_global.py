@@ -43,6 +43,7 @@ FUEL_CALCULATOR_INPUTS = {
     "input_tread_start": 100.0,
     "input_wear_per_lap": 0.0,
     "input_minimum_tread": 0.0,
+    "input_tyre_deg": 0.0,
     "input_refuel_rate": 0.0,
     "input_energy_rate": 0.0,
     "enable_tyres_during_refuel": False,
@@ -53,11 +54,14 @@ FUEL_CALCULATOR_INPUTS = {
     "input_drivers": 1,
     "input_fuel_effect": 0.0,
     "input_track_evolution": 0.0,
+    "input_temp_effect": 0.0,
+    "input_temp_slope": 0.0,
     "input_target_stint_laps": 0,
     "input_safety_margin_kind": 0,  # see fuel_strategy.MARGIN_UNITS
     "enable_balanced_stints": False,
     "input_stints_per_driver": 1,
     "input_driver_table": "",  # pace:min:max of each driver, see fuel_strategy.parse_driver_table
+    "input_driver_names": "",  # name of each driver, one per line (LMU team order), see fuel_strategy.driver_numbers
     "input_saving_cost": 0.0,
     "input_race_start_minutes": -1,
     "enable_safety_car": False,
@@ -67,6 +71,8 @@ FUEL_CALCULATOR_INPUTS = {
     "input_sc_laptime": 150.0,
     "enable_sc_pit": False,
     "input_sc_pit_saving": 50.0,
+    "enable_sc_risk": False,
+    "input_sc_risk": 0.3,
     "input_sc_wear": 50.0,
     "enable_rain": False,
     "input_rain_lap": 1,
@@ -99,9 +105,16 @@ GLOBAL_DEFAULT = {
         "show_option_group_title": True,
         "show_confirmation_for_batch_toggle": True,
         "show_overlay_previews": True,  # Overlays page: cards with preview, compact list if off
+        "show_overlay_screen_view": False,  # Overlays page: running overlays on a map of the screens instead
+        "overlays_sort_order": 0,  # Overlays page sort: 0 name, 1 enabled first, 2 category
+        "favorite_overlays": "",  # Overlays page: favorite overlay names, comma separated (every preset)
+        "recent_overlays": "",  # Overlays page: overlays last edited in Overlay Options, newest first
         "check_for_updates_on_startup": True,
         "number_of_hours_between_update_checks": 12,  # checked again while app runs, 0 = startup only
         "update_repository": "Keenny38/ModernTinyPedals",
+        # What's New of the versions since the newest one run (last_run_version), once at first start of a newer one
+        "show_release_notes_after_update": True,
+        "last_run_version": "",
         # Driver & Safety Rank read online from RaceControl (sign in with a game ticket), see process/raceos.py
         "enable_online_driver_ranks": True,
         'snap_distance': 10,

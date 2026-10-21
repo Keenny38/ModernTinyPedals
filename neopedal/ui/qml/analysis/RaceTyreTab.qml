@@ -129,6 +129,10 @@ Item {
                         store: tab.store; key: "input_minimum_tread"; label: i18n.tr("Minimum Tread")
                         tip: i18n.tr("Tyres changed at the stop before tread would go below")
                     }
+                    RaceNumber {
+                        store: tab.store; key: "input_tyre_deg"; label: i18n.tr("Used Tyre Pace Loss")
+                        tip: i18n.tr("Lap time lost per 10% of tread used before the stint (tyres kept for one more stint, used tyres). Tyres proposed for a change when it costs less than the time lost, 0 = none")
+                    }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: theme.em * 0.5
@@ -609,6 +613,32 @@ Item {
                             }
                         }
                     }
+                }
+            }
+
+            // Race on each compound (scenarios, worker thread)
+            TpSectionCard {
+                id: compoundCard
+                readonly property var compare: (backend.scenarios || ({})).compounds || ({})
+                visible: compare.visible === true
+                Layout.columnSpan: grid.columns
+                Layout.fillWidth: true
+                title: i18n.tr("Compound Comparison")
+                glyph: "\uE8AB"  // switch
+                tip: i18n.tr("Whole race on each compound: tyres changed when worn or when used tyres lose more than a change costs, best one in bold")
+                RaceTable {
+                    Layout.fillWidth: true
+                    columns: compoundCard.compare.columns || []
+                    rows: compoundCard.compare.rows || []
+                    boldRow: compoundCard.compare.best !== undefined ? compoundCard.compare.best : -1
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: compoundCard.compare.note || ""
+                    color: theme.dimText
+                    font.pointSize: theme.fontLabel
+                    wrapMode: Text.Wrap
                 }
             }
         }

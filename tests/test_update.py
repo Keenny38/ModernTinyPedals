@@ -172,7 +172,7 @@ def test_parse_release_notes():
     assert update.parse_release_notes(body) == "### Added\n\n- Add replay"
     assert update.parse_release_notes(b"") == ""
     with_visuals = release_body([])[:-1] + b', "body": "### Added\\n\\n- Add MAP\\n\\n### Visuals\\n\\n![MAP](https://x/y.png)"}'
-    assert update.parse_release_notes(with_visuals) == "### Added\n\n- Add MAP"
+    assert update.parse_release_notes(with_visuals).endswith("### Visuals\n\n![MAP](https://x/y.png)")  # shown folded
 
 
 def test_release_notes_visuals(tmp_path):

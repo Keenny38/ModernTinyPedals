@@ -57,7 +57,7 @@ def test_playback_step_light_and_full(opener, warnings):  # noqa: F811
     x = backend.xAtReferenceTime(seconds)
     step = backend.playbackStep(seconds, False)
     assert set(step) == {"x", "mapXY", "gXY"} and step["x"] == pytest.approx(x)
-    assert backend._map_shown and step["mapXY"] == pytest.approx(flat_map(backend.mapCursor(x)))
+    assert backend._map_shown and step["mapXY"] == pytest.approx(flat_map(backend.mapPointer.mapCursor(x)))
     assert step["gXY"] == []  # G circle hidden: not worked out
     full = backend.playbackStep(seconds, True)
     assert set(full) == {"x", "state"} and full["state"] is backend.cursorState(x)  # same state (cached)
@@ -77,7 +77,7 @@ def test_playback_frames_move_cars_values_at_30hz(opener, warnings, monkeypatch)
     wait(0.3)
     chart = chart_of(view)
     calls = {"full": 0, "light": 0}
-    cursor_state, map_positions = backend.cursorState, backend.map_positions
+    cursor_state, map_positions = backend.cursorState, backend.mapPointer.map_positions
 
     def counted_state(x):
         calls["full"] += 1
@@ -89,7 +89,7 @@ def test_playback_frames_move_cars_values_at_30hz(opener, warnings, monkeypatch)
         return map_positions(x, texts)
 
     monkeypatch.setattr(backend, "cursorState", counted_state)  # playbackStep calls it through instance
-    monkeypatch.setattr(backend, "map_positions", counted_positions)
+    monkeypatch.setattr(backend.mapPointer, "map_positions", counted_positions)
     evaluate(view, chart, "togglePlay()")
     assert chart.property("playing")
     wait(1.0)
@@ -102,7 +102,7 @@ def test_playback_frames_move_cars_values_at_30hz(opener, warnings, monkeypatch)
     wait(0.1)
     x = chart.property("cursorX")
     assert chart.property("cursorTitle") == backend.cursorTitle(x)
-    expected = flat_map(backend.mapCursor(x))
+    expected = flat_map(backend.mapPointer.mapCursor(x))
     assert js(view, chart, "cursorMapXY") == pytest.approx(expected)
     # Cars placed from flat positions
     side_map = track_maps(view, False)[0]

@@ -132,8 +132,8 @@ def _instructions(code: CodeType):
 
 
 def scan_code(code: CodeType, module_name: str, is_package: bool) -> tuple[frozenset[str], frozenset[str]]:
-    """module_info fields read (minfo.<field>, nested functions & classes included) & modules imported
-    at module level by code"""
+    """module_info fields read (minfo.<field> or <context>.minfo.<field>, nested functions & classes included) &
+    modules imported at module level by code"""
     fields: set[str] = set()
     imports: set[str] = set()
     stack = [(code, True)]
@@ -150,9 +150,15 @@ def scan_code(code: CodeType, module_name: str, is_package: bool) -> tuple[froze
                 if opcode in _LOAD_NAME:
                     after_minfo = names[argument] == "minfo"
                     continue
-                if opcode == _LOAD_ATTR and after_minfo:
-                    fields.add(names[argument >> _ATTR_SHIFT])
-                elif top:
+                if opcode == _LOAD_ATTR:
+                    name = names[argument >> _ATTR_SHIFT]
+                    if after_minfo:
+                        fields.add(name)
+                        after_minfo = False
+                    else:
+                        after_minfo = name == "minfo"  # self.ctx.minfo (context of widget, module, page)
+                    continue
+                if top:
                     if opcode == _LOAD_CONST:
                         consts.append(current.co_consts[argument])
                     elif opcode == _LOAD_SMALL_INT:
@@ -458,6 +464,34 @@ class ModuleControl:
             self.__start_selected(name, wait)
         cfg.save()
         self.update_demand()  # module needing (or no longer needing) on demand modules
+
+    def set_enabled(self, names: Iterable[str], enable: bool) -> list[str]:
+        """Enable or disable several modules at once (shown rows of a page): started or closed as toggle does,
+        listeners called, setting saved & on demand modules updated once
+
+        Returns:
+            Names changed (unknown names and modules already in that state skipped).
+        """
+        wait = not event_loop_running()
+        changed = []
+        self._batch += 1
+        try:
+            for name in names:
+                if name not in self._module_pack or bool(cfg.user.setting[name]["enable"]) == enable:
+                    continue
+                cfg.user.setting[name]["enable"] = enable
+                changed.append(name)
+                if enable:
+                    self.__start_selected(name, wait)
+                else:
+                    self.__close_selected(name, wait=wait)
+        finally:
+            self._batch -= 1
+        if changed:
+            self.__changed()
+            cfg.save()
+            self.update_demand()
+        return changed
 
     def should_run(self, name: str) -> bool:
         """Whether module runs: enabled, and needed if on demand"""

@@ -174,13 +174,13 @@ def test_lap_with_nan_positions_shown(track, tmp_path):
 
 
 def test_comparison_failure_keeps_lap(track, tmp_path, monkeypatch, caplog):
-    import neopedal.ui.quick.lap_backend as lap_backend
+    import neopedal.ui.quick.lap_loading as lap_loading
     import neopedal.userfile.lap_offset as lap_offset
 
     def broken(*args, **kwargs):
         raise ValueError("cannot convert float NaN to integer")
 
-    monkeypatch.setattr(lap_backend, "same_imported_circuit", broken)
+    monkeypatch.setattr(lap_loading, "same_imported_circuit", broken)
     monkeypatch.setattr(lap_offset, "aligned_lap", broken)
     backend, _ = track
     imported = write_lap(str(tmp_path / "logs"), make_lap(7, shift=50.0))
@@ -229,7 +229,7 @@ def test_shape_checks_keep_no_lap_data(track, tmp_path):
 
 # F) Slow comparisons of imported laps in background
 def test_imported_laps_compared_in_background(track, tmp_path, monkeypatch):
-    import neopedal.ui.quick.lap_backend as lap_backend
+    import neopedal.ui.quick.lap_loading as lap_loading
     import neopedal.ui.quick.trace_data as trace_data
     from neopedal.ui import lap_viewer
 
@@ -241,7 +241,7 @@ def test_imported_laps_compared_in_background(track, tmp_path, monkeypatch):
     assert len(backend.data.laps) == 4
     monkeypatch.setattr(lap_viewer, "BACKGROUND_PREPARE_SAMPLES", 1, raising=False)  # any imported lap
     threads = []
-    original_check, original_align = lap_backend.same_imported_circuit, trace_data.aligned_on
+    original_check, original_align = lap_loading.same_imported_circuit, trace_data.aligned_on
 
     def check(*args):
         threads.append(threading.current_thread())
@@ -251,7 +251,7 @@ def test_imported_laps_compared_in_background(track, tmp_path, monkeypatch):
         threads.append(threading.current_thread())
         return original_align(*args)
 
-    monkeypatch.setattr(lap_backend, "same_imported_circuit", check)
+    monkeypatch.setattr(lap_loading, "same_imported_circuit", check)
     monkeypatch.setattr(trace_data, "aligned_on", align)
     backend.setReference(imported[0])  # laps cached: only alignments measured again
     wait_loaded(backend)

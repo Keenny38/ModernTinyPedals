@@ -107,18 +107,18 @@ def test_live_rows_kept_race_card_only(race_24h):
 
 
 def test_dry_plan_made_once(race_24h, monkeypatch):
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_live_tab
 
     backend, clock = race_24h
     plans = []
-    original = race_backend.plan
+    original = race_live_tab.plan
 
     def plan_spy(setup):
         if sys._getframe(1).f_code.co_name == "dry_plan_laps":  # calculation of results left out
             plans.append(setup)
         return original(setup)
 
-    monkeypatch.setattr(race_backend, "plan", plan_spy)
+    monkeypatch.setattr(race_live_tab, "plan", plan_spy)
     for _ in range(3):  # live refreshes, inputs unchanged
         clock["elapsed"] += 2.0
         backend.publish_live_data()
@@ -131,7 +131,7 @@ def test_dry_plan_made_once(race_24h, monkeypatch):
         collected.append(1)
         return []
 
-    monkeypatch.setattr(race_backend, "collect_live", collect_spy)
+    monkeypatch.setattr(race_live_tab, "collect_live", collect_spy)
     backend.applyAllLive()
     assert len(collected) == 1  # filled in & shown from one reading of the game
 
@@ -149,9 +149,9 @@ def test_team_usage_parsed_off_ui_thread(page, monkeypatch):  # noqa: F811
         threads.append(threading.current_thread())
         return parse(data)
 
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_history
 
-    monkeypatch.setattr(race_backend, "parse_usage", parse_spy)
+    monkeypatch.setattr(race_history, "parse_usage", parse_spy)
     backend = page.backend
     received = backend.received_team
     handed = []

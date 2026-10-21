@@ -130,6 +130,11 @@ SOURCES = (
     Source("brake_bias", ("Brake Bias Rear",), complement=True),  # recorder: front percent
     Source("water_temp", ("Eng Water Temp", "Water Temp")),
     Source("oil_temp", ("Eng Oil Temp", "Oil Temp")),
+    Source("throttle_car", ("Throttle Pos Filtered",), _fraction),
+    Source("brake_car", ("Brake Pos Filtered",), _fraction),
+    Source("downforce_front", ("Front Downforce",), _kilonewton),
+    Source("downforce_rear", ("Rear Downforce",), _kilonewton),
+    *(Source(f"camber_{wheel.lower()}", (f"Camber {wheel}",)) for wheel in WHEELS),
 )
 # Tyre surface temperature: one channel (exported by this app), or average of inner, centre & outer
 TYRE_TEMP_NAMES = tuple(

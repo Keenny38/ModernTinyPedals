@@ -38,7 +38,7 @@ from itertools import pairwise
 from typing import NamedTuple
 
 from . import replace_retry
-from .telemetry_lap import LapData, interpolate, lap_time_of, lap_timestamp_of
+from .telemetry_lap import LapData, interpolate, lap_part, lap_time_of, lap_timestamp_of
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,11 @@ CHANNEL_MAP = (
     ExportChannel("brake_bias", "Brake Bias Rear", "BBRear", "%", -1.0, 100.0),  # recorder: front percent
     ExportChannel("water_temp", "Eng Water Temp", "WatT", "C"),
     ExportChannel("oil_temp", "Eng Oil Temp", "OilT", "C"),
+    ExportChannel("throttle_car", "Throttle Pos Filtered", "ThrF", "%", 100.0),
+    ExportChannel("brake_car", "Brake Pos Filtered", "BrkF", "%", 100.0),
+    ExportChannel("downforce_front", "Front Downforce", "DFF", "N", 1000.0),  # kN to N
+    ExportChannel("downforce_rear", "Rear Downforce", "DFR", "N", 1000.0),
+    *wheel_exports("camber_{wheel}", "Camber {wheel}", "Cam{wheel}", "deg"),
 )
 HEADER_DATE_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%y %H:%M:%S")
 
@@ -315,7 +320,7 @@ def lap_channels(lap: LapData) -> list[Channel]:
     return channels
 
 
-def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 0.0) -> None:
+def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 0.0, comment: str = "") -> None:
     """Export recorded lap to MoTeC .ld file, vehicle, session & driver from lap info if recorded
 
     Lap name (date, lap number & time) kept as comment: imported back with the same name. Log date is lap start,
@@ -329,15 +334,18 @@ def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 
         vehicle=str(meta.get("vehicle", "")),
         venue=str(meta.get("track") or venue),
         session=str(meta.get("session", "")),
-        comment=lap.name,
+        comment=comment or lap.name,
         timestamp=finished - lap_time if finished > 0 else timestamp,
     )
     write_ld(filename, lap_channels(lap), info)
 
 
-def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
+def export_lap_job(folder: str, path: str, target: str, venue: str = "",
+                   passage: tuple[float, float] | None = None) -> str:
     """Export recorded lap file to MoTeC .ld file (worker process job: lap read from binary cache of folder),
     returns error text ("" if exported)
+
+    Passage: lap distances exported (low, high), whole lap if None.
 
     Written to a temporary file renamed once complete: job stopped at app exit leaves no partial .ld file.
     """
@@ -348,7 +356,12 @@ def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
 
     temporary = f"{target}.tmp"
     try:
-        export_lap(load_cached_lap(folder, path), temporary, venue=venue, timestamp=os.path.getmtime(path))
+        lap = load_cached_lap(folder, path)
+        comment = ""
+        if passage is not None:
+            lap = lap_part(lap, *passage)
+            comment = f"{lap.name} {passage[0]:.0f}-{passage[1]:.0f} m"
+        export_lap(lap, temporary, venue=venue, timestamp=os.path.getmtime(path), comment=comment)
         replace_retry(temporary, target)
     except (OSError, ValueError) as error:
         logger.error("MOTEC: unable to export %s: %s", path, error)

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QMessageBox, QPushButton
 
 from neopedal.setting import cfg
 from neopedal.ui._common import BaseEditor
+from neopedal.ui.quick import stats_common, stats_overview
 from tests.test_race_calculator import host, page  # noqa: F401 (fixtures)
 
 STAMP = time.mktime((2025, 10, 9, 18, 5, 7, 0, 0, -1))  # local time
@@ -49,10 +50,10 @@ def test_language_date_formats_kept(monkeypatch):
 
 def test_pages_use_shared_date_helpers():
     """Former module functions still reachable where tests & pages import them"""
-    from neopedal.ui.quick import formatting, replays_backend, results_backend, stats_backend
+    from neopedal.ui.quick import formatting, replays_backend, results_backend
 
-    assert stats_backend.format_date is formatting.format_date
-    assert stats_backend.date_locale is formatting.date_locale
+    assert stats_common.format_date is formatting.format_date
+    assert stats_overview.date_locale is formatting.date_locale
     assert replays_backend.day_text is formatting.day_text
     assert replays_backend.date_text is formatting.date_text
     assert results_backend.clock_minutes is formatting.clock_minutes

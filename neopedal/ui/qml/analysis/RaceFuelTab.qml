@@ -315,6 +315,14 @@ Item {
                             tip: i18n.tr("Lap time change per hour of race, negative when the track gets faster")
                         }
                         RaceNumber {
+                            store: tab.store; key: "input_temp_effect"; label: i18n.tr("Lap Time per °C")
+                            tip: i18n.tr("Lap time change per °C of air temperature (slower when hotter: positive), 0 = none: with the temperature trend, added to track evolution")
+                        }
+                        RaceNumber {
+                            store: tab.store; key: "input_temp_slope"; label: i18n.tr("Temperature Trend")
+                            tip: i18n.tr("Air temperature change per hour of race (weather forecast of the Live tab)")
+                        }
+                        RaceNumber {
                             store: tab.store; key: "input_saving_cost"; label: i18n.tr("Saving Cost")
                             tip: i18n.tr("Lap time lost per 10% less consumption (lift & coast): saving target & strategy comparison count it")
                         }
@@ -362,6 +370,28 @@ Item {
                             tip: i18n.tr("Part of pit lane time not lost under safety car")
                         }
                         Note { text: tab.scenarios.safetyCar || "" }
+                    }
+
+                    RaceSection {
+                        id: riskSection
+                        readonly property var risk: tab.scenarios.risk || ({})
+                        store: tab.store
+                        name: "safety_car_risk"
+                        switchKey: "enable_sc_risk"
+                        title: i18n.tr("Safety Car Risk")
+                        glyph: ""  // warning
+                        tip: i18n.tr("Safety cars coming at random: chance of one, stops saved, and for each stint whether to stop under it (laps, consumption & pit time of the Safety Car section)")
+                        RaceNumber {
+                            store: tab.store; key: "input_sc_risk"; label: i18n.tr("Safety Cars per Hour")
+                            tip: i18n.tr("Safety cars (or full course yellows) per hour of race on average")
+                        }
+                        Note { text: riskSection.risk.text || "" }
+                        RaceTable {
+                            Layout.fillWidth: true
+                            visible: riskSection.risk.visible === true
+                            columns: riskSection.risk.columns || []
+                            rows: riskSection.risk.rows || []
+                        }
                     }
 
                     RaceSection {
@@ -414,6 +444,14 @@ Item {
                                 tint: theme.accent
                                 tip: i18n.tr("Fuel unit of the plan (Units setting)")
                             },
+                            TpButton {  // LMU: refill of next stop written to the game pit menu
+                                size: "sm"
+                                enabled: planCard.plan.ready === true
+                                glyph: ""  // game
+                                text: i18n.tr("Pit Menu")
+                                tip: i18n.tr("Set the refill of the next stop in the game pit menu (LMU, in a session): fuel, or virtual energy of a car using it, as in the tank after the stop")
+                                onClicked: backend.setGamePitMenu()
+                            },
                             TpButton {
                                 id: exportButton
                                 size: "sm"
@@ -459,6 +497,10 @@ Item {
                         title: i18n.tr("Driving Time")
                         glyph: ""  // people
                         warning: times.warning === true
+                        TpNotice {
+                            visible: text !== ""
+                            text: timesCard.times.note || ""
+                        }
                         RaceTable {
                             Layout.fillWidth: true
                             columns: timesCard.times.columns || []
@@ -569,6 +611,7 @@ Item {
                             rows: rivalsCard.rivals.rows || []
                             boldRow: rivalsCard.rivals.player !== undefined ? rivalsCard.rivals.player : -1
                         }
+                        Note { text: rivalsCard.rivals.exit || "" }  // rejoin if stopping at end of this lap
                     }
                 }
             }

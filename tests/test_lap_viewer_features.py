@@ -186,13 +186,13 @@ def test_map_click_and_cursor(viewer):
     backend = viewer.backend
     line = backend._map_lines[0][0]
     index = len(line.distances) // 3
-    position = backend.mapPick(line.xs[index], line.ys[index], 5.0)
+    position = backend.mapPointer.mapPick(line.xs[index], line.ys[index], 5.0)
     assert backend.distanceAt(position) == pytest.approx(line.distances[index], abs=1)
-    points = backend.mapCursor(position)
+    points = backend.mapPointer.mapCursor(position)
     assert len(points) == 2 and points[0]["x"] == pytest.approx(line.xs[index], abs=1)
     braking = [point for point in backend.trackMap["points"] if point["kind"] == "brake"]  # 2 corners, 2 laps
     assert len(braking) == 4 and {point["color"] for point in braking} == {lap.color.name() for lap in backend.data.laps}
-    bounds = backend.mapBounds(0.0, 500.0)  # first quarter: right & top of oval
+    bounds = backend.mapPointer.mapBounds(0.0, 500.0)  # first quarter: right & top of oval
     assert bounds[0] > 0 and bounds[3] > 150
 
 

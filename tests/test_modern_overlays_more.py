@@ -24,7 +24,7 @@ FIELD_ATTRIBUTES = {
         "nearestYellowAhead", "nearestYellowBehind", "nearestBlueClass",
     ),
     minfo.relative: ("standings", "drawOrder"),
-    minfo.mapping: ("elevations", "sectors", "lastModified"),
+    minfo.mapping: ("trackMap",),
     minfo.fuel: ("amountCurrent", "estimatedLaps", "estimatedValidConsumption"),
     minfo.energy: ("available", "amountCurrent", "estimatedLaps"),
 }
@@ -437,9 +437,8 @@ def test_chat_own_messages_and_notices(widgets, monkeypatch):
 # --- Elevation
 def test_elevation_profile_and_position(widgets, monkeypatch):
     points = [(distance, 10.0 + 5.0 * math.sin(distance / 300.0)) for distance in range(0, 4000, 20)]
-    minfo.mapping.elevations = tuple(points)
-    minfo.mapping.sectors = (60, 130)
-    minfo.mapping.lastModified = 123.0
+    minfo.mapping.trackMap = minfo.mapping.trackMap._replace(elevations=tuple(points), sectors=(60, 130),
+                                                             lastModified=123.0)
     reader(monkeypatch, "lap", "progress", 0.5)
     reader(monkeypatch, "vehicle", "position_vertical", 12.34)
     widget = widgets("elevation")
@@ -455,8 +454,7 @@ def test_elevation_profile_and_position(widgets, monkeypatch):
 
 
 def test_elevation_without_map(widgets, monkeypatch):
-    minfo.mapping.elevations = None
-    minfo.mapping.lastModified = -5.0
+    minfo.mapping.trackMap = minfo.mapping.trackMap._replace(elevations=None, lastModified=-5.0)
     widget = widgets("elevation", show_elevation_reading=False, show_elevation_scale=False)
     update(widget)
     assert widget.line.isEmpty() and widget.profile_y(10.0) is None

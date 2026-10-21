@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication, QObject
 
+from neopedal.ui.quick import stats_core, stats_io
 from tests.test_audit_c_update import messages, updates  # noqa: F401
 from tests.test_driver_stats_e2 import OREGA, SPA, stats_page, wait_stints  # noqa: F401
 from tests.test_setup_wizard import renders  # noqa: F401
@@ -257,12 +258,11 @@ def test_reference_download_is_a_page_job(stats_page, monkeypatch):  # noqa: F81
 
 
 def test_reference_download_failure_never_left_downloading(stats_page, monkeypatch, caplog):  # noqa: F811
-    from neopedal.ui.quick import stats_backend
 
     def broken(url):
         raise SystemExit  # not an Exception: job failed callback
 
-    monkeypatch.setattr(stats_backend, "download_reference_sheet", broken)
+    monkeypatch.setattr(stats_core, "download_reference_sheet", broken)
     with caplog.at_level(logging.ERROR):
         stats_page.download_reference(force=True)
         assert wait_for(lambda: not stats_page._downloading)
@@ -270,26 +270,24 @@ def test_reference_download_failure_never_left_downloading(stats_page, monkeypat
 
 
 def test_download_reference_sheet_errors(monkeypatch):
-    from neopedal.ui.quick import stats_backend
     from neopedal.userfile import lap_reference
 
     monkeypatch.setattr(lap_reference, "fetch_sheet", lambda url: "a,b")
-    assert stats_backend.download_reference_sheet("x") == ("a,b", "")
+    assert stats_io.download_reference_sheet("x") == ("a,b", "")
     monkeypatch.setattr(lap_reference, "fetch_sheet", lambda url: (_ for _ in ()).throw(ValueError("bad")))
-    assert stats_backend.download_reference_sheet("x") == ("", "bad")
+    assert stats_io.download_reference_sheet("x") == ("", "bad")
 
 
 def test_stints_read_is_a_page_job(stats_page, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import stats_backend
 
     threads = []
-    real = stats_backend.read_laps
+    real = stats_io.read_laps
 
     def read(path, *args, **kwargs):
         threads.append(threading.current_thread())
         return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(stats_backend, "read_laps", read)
+    monkeypatch.setattr(stats_io, "read_laps", read)
     stats_page.selectTrack(SPA)
     stats_page.selectRow(OREGA)
     stats_page.laps_timer.stop()

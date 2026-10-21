@@ -273,8 +273,9 @@ def test_home_driver_card_history_from_memory(home, monkeypatch):  # noqa: F811
     monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
         "Keenny Hess", "1", "", "", dr.Rank("Silver", 2, 40), None, ""))
     monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
-    home.refresh_driver()
-    assert "+50%" in home.card_driver.label_value.text()  # 90% S1 -> 40% S2
+    home.backend._driver_key = None
+    home.backend.refresh_driver()
+    assert home.backend.driver["ranks"][0]["change"] == "+50%"  # 90% S1 -> 40% S2
 
 
 # --- Architecture 6: storage file not read again while online ranks used

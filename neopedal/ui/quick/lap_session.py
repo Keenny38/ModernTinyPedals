@@ -33,10 +33,11 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtQml import QJSValue
 
+from ...i18n import tr
 from ...userfile.lap_geometry import session_values
 from ...userfile.telemetry_lap import lap_number_of
 from .. import lap_viewer
-from ..lap_viewer import LapEntry, format_laptime
+from ..lap_viewer import LapEntry, corner_label, distance_unit, format_laptime, number_text
 from .lap_base import PagePart, weak_host
 from .lines import TRIANGLES, VertexStore, Vertices
 
@@ -49,6 +50,8 @@ from .stint_analysis import info_pair, trend_positions
 SESSION_SHAPES = ("segments", "points", "bars")  # session chart vertex buffers
 POINT_STEPS = 20  # lap point circle segments
 STRIP_COLUMNS = ("fuel", "wear")  # bar strips under lap times, top to bottom
+LAP_TIME = "time"  # session chart value: lap time, else sector time ("s1"...) or corner value ("min:3"...)
+CORNER_VALUES = ("min", "brake", "corner")  # minimum speed, braking point, corner time: index in session_values
 
 
 def premultiplied(color: QColor, opacity: float = 1.0) -> int:
@@ -95,7 +98,7 @@ def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
         segments.extend((*corners[0], *corners[1], *corners[2], *corners[1], *corners[3], *corners[2]))
 
     # Lap points: border ring & fill disc (fill none for invalid laps), in lap order (later laps on top)
-    em, best = view["em"], view["best"]
+    em, best, higher = view["em"], view["best"], bool(view.get("higherBetter"))
     window, text, gold = QColor(view["window"]), QColor(view["text"]), QColor(view["gold"])
     angles = [step / POINT_STEPS * math.tau for step in range(POINT_STEPS + 1)]
     cosines, sines = [math.cos(angle) for angle in angles], [math.sin(angle) for angle in angles]
@@ -121,7 +124,7 @@ def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
         if not lap["time"] > 0:
             continue
         shown, valid = bool(lap["shown"]), bool(lap["valid"])
-        tone = QColor(lap["color"]) if shown else gold if valid and lap["time"] <= best + 1e-6 else text
+        tone = QColor(lap["color"]) if shown else gold if valid and is_best(lap["time"], best, higher) else text
         opacity = 0.4 if lap.get("outlier") else 1.0
         radius = em * (0.85 if shown else 0.6) / 2
         border = 1.5 if valid else 2.0
@@ -155,6 +158,21 @@ def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
             bar_words.extend((valid_word if lap["valid"] else invalid_word,) * 6)
     return {"segments": Vertices(segments, len(segments) // 2, TRIANGLES),
             "points": colored_triangles(xs, ys, words), "bars": colored_triangles(bar_xs, bar_ys, bar_words)}
+
+
+def is_best(value: float, best: float, higher_better: bool = False) -> bool:
+    """Whether value is the best one of session chart (lowest time, highest speed)"""
+    return value >= best - 1e-6 if higher_better else value <= best + 1e-6
+
+
+def value_range(values: Sequence[float], low_span: float) -> list[float]:
+    """Scale of session chart for values other than times [low, high]: all values, low_span at least, 8% margin"""
+    if not values:
+        return [0.0, 1.0]
+    low, high = min(values), max(values)
+    if high - low < low_span:
+        low, high = (low + high - low_span) / 2, (low + high + low_span) / 2
+    return [low - (high - low) * 0.08, high + (high - low) * 0.08]
 
 
 def session_stats(rows: Sequence[dict]) -> dict:
@@ -206,10 +224,15 @@ class SessionHost(Protocol):
 
     @property
     def chartChanged(self) -> SignalInstance: ...
+    @property
+    def cornersChanged(self) -> SignalInstance: ...
     def track_sessions(self) -> list: ...
     def session_row(self, group: list[LapEntry], is_added: bool) -> dict: ...
     def session_shown(self) -> bool: ...
     def run_process_job(self, name: str, done: Callable[[Any], None], function: Callable, *args): ...
+    def session_corners(self) -> list[tuple[int, float, float, float]]: ...
+    @staticmethod
+    def entry_sectors(entry: LapEntry) -> list[float]: ...
 
 
 class SessionTab(PagePart):
@@ -222,10 +245,14 @@ class SessionTab(PagePart):
         self._page = weak_host(page)
         self._key = ""  # session shown in session tab
         self._extra: dict[str, tuple[float, dict]] = {}  # lap path: file time, values read from lap
+        self._extra_corners: tuple = ()  # corners of reference lap values of _extra were read for
+        self._metric = LAP_TIME  # value of session chart
         self._busy = False  # values of session laps being read
         self._state: dict | None = None  # session tab state, built once until changed (see session_state)
+        self._corner_numbers: tuple = ()  # corners of reference lap (session chart values to choose)
         self.changed.connect(self.drop_state)  # connected first: dropped before QML reads
         page.chartChanged.connect(self.drop_state)  # laps shown (colors) read again on next read
+        page.cornersChanged.connect(self.corners_changed)
 
     @Property(dict, notify=changed)
     def state(self) -> dict:
@@ -244,6 +271,76 @@ class SessionTab(PagePart):
     def values(self) -> dict:
         """Laps of shown session: number, time, valid, fuel & tyre wear used, off tracks, track limits, shown"""
         return self.session_state()["data"]
+
+    def corners_changed(self):
+        """Corners of reference lap found again: values to choose & corner values of session laps"""
+        corners = tuple(self._page.session_corners())
+        if corners == self._corner_numbers:
+            return
+        self._corner_numbers = corners
+        self.changed.emit()
+        if ":" in self._metric and self._page.session_shown():
+            self.start_job()
+
+    @Property(list, notify=changed)
+    def metrics(self) -> list[dict]:
+        return self.metric_list()
+
+    def metric_list(self) -> list[dict]:
+        """Values the session chart can show: key, title"""
+        items = [{"key": LAP_TIME, "title": tr("Lap Time")}]
+        items += [{"key": f"s{index}", "title": f"{tr('Sector Time')} S{index}"} for index in (1, 2, 3)]
+        titles = (tr("Minimum Speed"), tr("Braking Point"), tr("Corner Time"))
+        for number, *_ in self._page.session_corners():
+            items += [{"key": f"{kind}:{number}", "title": f"{corner_label(number)} · {title}"}
+                      for kind, title in zip(CORNER_VALUES, titles)]
+        return items
+
+    @Property(str, notify=changed)
+    def metric(self) -> str:
+        return self.current_metric()
+
+    def current_metric(self) -> str:
+        """Value shown on session chart, lap time if chosen one is gone (corners of another reference lap)"""
+        return self._metric if any(item["key"] == self._metric for item in self.metric_list()) else LAP_TIME
+
+    @Slot(str)
+    def setMetric(self, key: str):
+        """Value shown on session chart (lap time, sector time, corner value)"""
+        self._metric = key
+        self.changed.emit()
+        self.start_job()
+
+    @staticmethod
+    def metric_info(key: str) -> dict:
+        """How values of session chart read: time (lap time text), unit, decimals, higher value better"""
+        if key == LAP_TIME or key[:1] == "s" or key.startswith("corner:"):
+            return {"key": key, "time": True, "unit": "s", "decimals": 3, "higherBetter": False}
+        if key.startswith("min:"):
+            return {"key": key, "time": False, "unit": lap_viewer.display_units()["speed"][1], "decimals": 1,
+                    "higherBetter": True}
+        return {"key": key, "time": False, "unit": distance_unit()[1], "decimals": 0, "higherBetter": True}
+
+    def metric_value(self, key: str, entry: LapEntry, extra: dict) -> float:
+        """Value of lap shown on session chart, 0 if unknown"""
+        if key == LAP_TIME:
+            return entry.file.lap_time
+        if key[:1] == "s":
+            sectors = self._page.entry_sectors(entry)
+            return sectors[int(key[1]) - 1] if len(sectors) == 3 else 0.0
+        kind, _, number = key.partition(":")
+        values = (extra.get("corners") or {}).get(number)
+        if not isinstance(values, list) or len(values) != len(CORNER_VALUES) or kind not in CORNER_VALUES:
+            return 0.0
+        value = float(values[CORNER_VALUES.index(kind)])
+        if value <= 0:
+            return 0.0
+        if kind == "min":
+            convert = lap_viewer.display_units()["speed"][0]
+            return convert(value) if convert is not None else value
+        if kind == "brake":
+            return value * distance_unit()[0]
+        return value
 
     def reset(self):
         """Circuit changed: session of reference lap shown"""
@@ -348,14 +445,30 @@ class SessionTab(PagePart):
                 "shown": entry.file.path in colors, "color": colors.get(entry.file.path, ""),
                 "reference": entry.file.path == reference_key,
             })
+        metric = self.current_metric()
+        info = self.metric_info(metric)
+        if metric != LAP_TIME:  # lap value shown instead of lap time (lap time kept for lap details)
+            for row, entry in zip(rows, group):
+                value = self.metric_value(metric, entry, self._extra.get(entry.file.path, (0.0, {}))[1])
+                row["lapText"] = row["text"]
+                row["time"] = value
+                if value <= 0:
+                    row["text"] = "\u2014"
+                elif info["time"]:
+                    row["text"] = format_laptime(value)
+                else:
+                    row["text"] = f"{number_text(value, info['decimals'])} {info['unit']}"
         valid = [row["time"] for row in rows if row["valid"] and row["time"] > 0]
+        higher = info["higherBetter"]
         fuel_unit = units["fuel"]
         return {
-            "laps": rows, "best": min(valid, default=0.0), "worst": max(valid, default=0.0),
+            "laps": rows, "best": (max if higher else min)(valid, default=0.0),
+            "worst": (min if higher else max)(valid, default=0.0), "metric": info,
             "busy": self._busy, "fuelUnit": fuel_unit[1], "temperatureUnit": units["temperature"][1],
             "fuelScale": fuel_unit[0](1.0) if fuel_unit[0] else 1.0,
-            "trend": self.session_trend(rows, group),
-            "stats": session_stats(rows), "range": session_time_range(rows),
+            "trend": self.session_trend(rows, group) if metric == LAP_TIME else self.value_trend(rows),
+            "stats": session_stats(rows),
+            "range": session_time_range(rows) if info["time"] else value_range(valid, 2.0 if higher else 0.1),
             "stripMax": {name: max([0.0, *(row[name] or 0.0 for row in rows)]) for name in STRIP_COLUMNS},
         }
 
@@ -394,6 +507,19 @@ class SessionTab(PagePart):
                 result["wearSlope"] = least_squares(worn)[0]
         return result
 
+    @staticmethod
+    def value_trend(rows: list[dict]) -> dict:
+        """Change per lap of session chart value other than lap time (every valid lap, no outlier left out)"""
+        for row in rows:
+            row["outlier"] = False
+        kept = [index for index, row in enumerate(rows) if row["valid"] and row["time"] > 0]
+        if len(kept) < 4:
+            return {}
+        positions = trend_positions([row.get("number", 0) for row in rows], kept)
+        slope, intercept = least_squares([(position, rows[index]["time"]) for position, index in zip(positions, kept)])
+        return {"slope": slope, "x0": kept[0], "y0": intercept + slope * positions[0],
+                "x1": kept[-1], "y1": intercept + slope * positions[-1]}
+
     def start_job(self):
         """Tyre wear, off tracks & track limits of session laps read from lap files in background (cached)
 
@@ -404,6 +530,10 @@ class SessionTab(PagePart):
         groups = self.session_groups()
         key = self.session_key(groups)
         group = next((laps for name, _, laps in groups if name == key), [])
+        corners = tuple(self._page.session_corners()) if ":" in self.current_metric() else ()
+        if corners and corners != self._extra_corners:  # corner values asked for other corners: read again
+            self._extra = {}
+            self._extra_corners = corners
         todo = []
         for entry in group:
             try:
@@ -411,7 +541,7 @@ class SessionTab(PagePart):
             except OSError:
                 continue
             cached = self._extra.get(entry.file.path)
-            if cached is None or cached[0] != mtime:
+            if cached is None or cached[0] != mtime or (corners and "corners" not in cached[1]):
                 todo.append((entry.file.path, mtime))
         if not todo:
             return
@@ -428,4 +558,4 @@ class SessionTab(PagePart):
             if page.session_shown():  # session or track changed meanwhile
                 self.start_job()
 
-        page.run_process_job("session", done, session_values, page.folder, todo)
+        page.run_process_job("session", done, session_values, page.folder, todo, corners)

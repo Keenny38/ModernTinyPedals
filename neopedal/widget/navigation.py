@@ -27,7 +27,7 @@ from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap, QRadial
 
 from .. import calculation as calc
 from ..api_control import api
-from ..module_info import minfo
+from ..module_info import NO_TRACK_MAP, TrackMap, minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
 
@@ -56,7 +56,8 @@ class NavigationMixin:
         self.map_path: QPainterPath | None = None
         self.sfinish_path: QPainterPath | None = None
         self.sector_path: QPainterPath | None = None
-        self.map_scaled: Any = None  # scaled coordinates of recorded map
+        self.track_map: TrackMap = NO_TRACK_MAP  # map drawn (coordinates & sectors of one map)
+        self.map_scaled: Any = None  # scaled coordinates of track map
         self.map_size = 1,1
         self.map_offset = 0,0
 
@@ -64,7 +65,8 @@ class NavigationMixin:
         """Map update, whether map changed"""
         if self.last_modified != data:
             self.last_modified = data
-            self.create_map_path(minfo.mapping.coordinates)
+            self.track_map = minfo.mapping.trackMap  # taken once: coordinates & sectors of the same map
+            self.create_map_path(self.track_map.coordinates)
             return True
         return False
 
@@ -102,12 +104,15 @@ class NavigationMixin:
             # Close map loop if start & end distance less than 500 meters
             if dist < 500:
                 map_path.closeSubpath()
-            # Create start/finish path
-            sfinish_path = QPainterPath()
-            self.create_sector_path(
-                sfinish_path, self.map_scaled, 0, self.start_line_length)
+            # Create start/finish path, once start line known (official circuit shape: not yet)
+            if self.track_map.start_known():
+                sfinish_path = QPainterPath()
+                self.create_sector_path(
+                    sfinish_path, self.map_scaled, 0, self.start_line_length)
+            else:
+                sfinish_path = None
             # Create sectors paths
-            sectors_index = minfo.mapping.sectors
+            sectors_index = self.track_map.sectors
             if isinstance(sectors_index, tuple):
                 sector_path = QPainterPath()
                 for index in sectors_index:

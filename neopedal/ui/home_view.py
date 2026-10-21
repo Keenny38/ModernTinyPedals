@@ -17,67 +17,34 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Home page: state at a glance (game & session, overlay, preset, version, last session, driver) & shortcuts
+Home page: state at a glance (game & session, checks, overlay, preset, last session & its debrief, driver)
+& quick access
 
-Header with version, what's new of running version (local changelog, works offline) and update
-state. Cards are clickable (open their page), laid out in 1 to 3 columns following page width.
+Qt Quick page (qml/home/Home.qml), state & actions in quick/home_backend.py. The QML page is created when first
+shown, game & files are read only while it is shown. Quick access entries & release notes helpers are here (rail
+& settings use them without the page).
 """
 
 from __future__ import annotations
 
-import html
-import os
-from collections.abc import Callable
-from time import monotonic
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from PySide6.QtCore import QDateTime, QLocale, QPointF, Qt, QTimer, Slot
-from PySide6.QtGui import QFont, QImage, QPainter, QPalette, QPixmap
-from PySide6.QtWidgets import (
-    QApplication,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QMenu,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import QUrl, Slot
+from PySide6.QtQuickWidgets import QQuickWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from .. import app_signal
 from ..api_control import api
-from ..calculation import sec2laptime_full
-from ..const_app import APP_NAME, VERSION
-from ..i18n import current_language, tr, trm
-from ..lazy_service import update_checker
-from ..module_control import mctrl, wctrl
-from ..overlay_control import octrl
+from ..const_app import VERSION
+from ..i18n import tr
 from ..setting import cfg
-from ..userfile.custom_image import LOGO_LOADER, brand_logo_file, logo_for_background, read_picture
 from ..userfile.driver_history import SessionRecord, last_record
-from ..userfile.game_images import images
-from . import app_icon_file, status_color
-from ._common import UIScaler
 from .nav_rail import RailEditor
 from .ordered_picker import PickerEntry
-from .quick.background import BackgroundJobs
-from .quick.game_pictures import notifier
+
+if TYPE_CHECKING:
+    from ..update import ChangelogEntry
 
 CHANGELOG_FILE = "CHANGELOG.md"  # next to app (release build) or project root (source)
-SESSION_NAMES = ("Test day", "Practice", "Qualify", "Warmup", "Race")  # game session type index
-FINISH_STATES = ("", "Finished", "DNF", "DQ")  # driver history finish state
-# Card icons: Segoe Fluent Icons / MDL2 Assets glyph, letter if no icon font
-GLYPH_GAME = ("", "G")  # game controller
-GLYPH_LOCKED = ("", "L")  # lock
-GLYPH_UNLOCKED = ("", "U")  # unlock
-GLYPH_PRESET = ("", "P")  # library
-GLYPH_OVERLAYS = ("", "O")  # view all
-GLYPH_MODULES = ("", "M")  # processing
-GLYPH_HISTORY = ("", "H")  # history
-GLYPH_START = ("", "S")  # play
-GLYPH_DRIVER = ("\ue77b", "D")  # contact
 # Quick access actions (besides tools & pages): key: (label, glyph, letter)
 QUICK_ACTIONS = {
     "command_palette": ("Command Palette", "\ue721", "C"),  # search
@@ -85,10 +52,6 @@ QUICK_ACTIONS = {
     "check_updates": ("Check for Updates", "\ue895", "U"),  # sync
 }
 QUICK_SHORTCUTS = {"command_palette": "Ctrl+K"}  # shown after label
-DRIVER_DATA_SECONDS = 600.0  # driver card: results files & profile read again this often while Home shows
-COLUMN_WIDTH = 30  # UIScaler size of one card column, page gets 2 or 3 columns from this width
-QUICK_COLUMNS = {1: 1, 2: 3, 3: 5}  # quick access buttons per row for card columns
-LOGO_CHECK_MS = 100  # logos read on logo loader thread checked for at this interval
 
 
 class QuickEntry(NamedTuple):
@@ -180,6 +143,30 @@ def base_version(version: str = VERSION) -> str:
     return version.split("+")[0].split("-")[0]
 
 
+def read_changelog_entries(filename: str) -> list[ChangelogEntry]:
+    """Changelog sections with release dates, empty if no changelog"""
+    from ..update import changelog_entries
+
+    try:
+        with open(filename, encoding="utf-8") as file:
+            return changelog_entries(file.read())
+    except (OSError, UnicodeDecodeError):
+        return []
+
+
+def local_changelog(language: str = "en", filename: str = CHANGELOG_FILE) -> list[ChangelogEntry]:
+    """Changelog next to app, newest version first: section in language (CHANGELOG.<code>.md) when written,
+    else English (works offline, every version: release notes history)"""
+    from ..update import localized_changelog_name
+    from ..version_check import parse_version_string
+
+    sections = {entry.version: entry for entry in read_changelog_entries(filename)}
+    if language != "en":
+        sections.update((entry.version, entry) for entry in
+                        read_changelog_entries(localized_changelog_name(language, filename)))
+    return sorted(sections.values(), key=lambda entry: parse_version_string(entry.version), reverse=True)
+
+
 def read_changelog(filename: str) -> list[tuple[str, str]]:
     """Changelog sections (version, body), empty if no changelog"""
     from ..update import changelog_sections
@@ -218,24 +205,6 @@ def api_state_text() -> tuple[str, bool]:
     return state, bool(state) and state not in ("not running", "0.0")
 
 
-def session_text() -> str:
-    """Current session (track, session, position, lap), empty if not on track"""
-    read = api.read
-    try:
-        if not read.state.active():
-            return ""
-        session = read.session.session_type()
-        parts = [
-            read.session.track_name(),
-            tr(SESSION_NAMES[session]) if 0 <= session < len(SESSION_NAMES) else "",
-            f"P{read.vehicle.place()}/{read.vehicle.total_vehicles()}" if read.vehicle.total_vehicles() > 1 else "",
-            f"{tr('Lap')} {read.lap.number()}",
-        ]
-    except (AttributeError, TypeError, ValueError, IndexError):
-        return ""
-    return " · ".join(html.escape(part) for part in parts if part)
-
-
 def last_session() -> SessionRecord | None:
     """Last driven session (driver stats history, end of file read), None if none"""
     try:
@@ -244,653 +213,59 @@ def last_session() -> SessionRecord | None:
         return None
 
 
-def light_page() -> bool:
-    """Whether app pages are light (dark logos needed)"""
-    return QApplication.palette().color(QPalette.ColorRole.Window).lightness() > 128
-
-
-def game_logos(track: str, vehicle_name: str = "", brand: str = "", light: bool | None = None) -> tuple[str, ...]:
-    """Circuit & car brand logo files of game (own brand logo first), those cached only (any thread if light
-    background is given)"""
-    if light is None:
-        light = light_page()
-    track_logo = logo_for_background(images.track_logo(track), light) if track else ""
-    brand_logo = brand_logo_file(cfg.path.brand_logo, images.brand(vehicle_name, brand), light, vehicle_name)         if vehicle_name or brand else ""
-    return tuple(path for path in (track_logo, brand_logo) if path)
-
-
-_live_logos: dict[tuple[str, str, bool], tuple[int, tuple[str, ...]]] = {}  # track, car, light: version, logos
-
-
-def live_logos() -> tuple[str, ...]:
-    """Logos of current track & player car, none if not on track
-
-    Asked every second: files looked for on logo loader thread, again only once game pictures change (logos
-    found earlier for same track & car shown meanwhile).
-    """
-    read = api.read
-    try:
-        if not read.state.active():
-            return ()
-        track, vehicle = read.session.track_name(), read.vehicle.vehicle_name()
-    except (AttributeError, TypeError, ValueError, IndexError):
-        return ()
-    key = (track, vehicle, light_page())
-    version = images.version
-    known = _live_logos.get(key)
-    if known is not None and known[0] == version:
-        return known[1]
-    done, logos = LOGO_LOADER.result(("home", *key, version), lambda: game_logos(track, vehicle, light=key[2]))
-    if not done:
-        return known[1] if known is not None else ()
-    if len(_live_logos) > 64:
-        _live_logos.clear()
-    _live_logos[key] = (version, logos or ())
-    return logos or ()
-
-
-def record_logos(record: SessionRecord, light: bool | None = None) -> tuple[str, ...]:
-    """Logos of track & car brand of a session record (vehicle key "Class - Brand", or vehicle name), any
-    thread if light background is given"""
-    if " - " in record.vehicle:
-        return game_logos(record.track, brand=record.vehicle.split(" - ", 1)[1].strip(), light=light)
-    if record.vehicle and record.vehicle != record.vehicle_class:
-        return game_logos(record.track, record.vehicle, light=light)
-    return game_logos(record.track, light=light)
-
-
-def logo_pictures(paths: tuple[str, ...], height: int, ratio: float) -> tuple[QImage, ...]:
-    """Logo pictures fitted in card title height, unreadable ones left out (any thread)"""
-    pictures = (read_picture(path, height * 3, height, ratio) for path in paths)
-    return tuple(picture for picture in pictures if not picture.isNull())
-
-
-def session_record_text(record: SessionRecord) -> tuple[str, str]:
-    """Value & detail of a session record: track, then vehicle, session, best lap, result, date"""
-    when = QDateTime.fromSecsSinceEpoch(int(record.time))
-    session = tr(SESSION_NAMES[record.session]) if 0 <= record.session < len(SESSION_NAMES) else ""
-    result = ""
-    if record.session == 4 and record.finish == 1 and record.position > 0:
-        result = f"P{record.position}"
-    elif 0 < record.finish < len(FINISH_STATES):
-        result = tr(FINISH_STATES[record.finish])
-    parts = (
-        record.vehicle,
-        session,
-        f"{tr('Best')} {sec2laptime_full(record.best)}" if record.best > 0 else "",
-        result,
-        QLocale(current_language()).toString(when, QLocale.FormatType.ShortFormat),
-    )
-    return f"<b>{html.escape(record.track)}</b>", " · ".join(html.escape(part) for part in parts if part)
-
-
-class HomeCard(QFrame):
-    """Card: icon & title, value, detail, optional buttons; whole card opens on_click (mouse, Enter, Space)"""
-
-    def __init__(self, parent, title: str, glyph: tuple[str, str], icon_family: str,
-                 on_click: Callable[[], object] | None = None, tooltip: str = ""):
-        super().__init__(parent)
-        self.setObjectName("homeCard")
-        self.on_click = on_click
-        self.icon_family = icon_family
-        if on_click is not None:
-            self.setProperty("clickable", True)
-            self.setAttribute(Qt.WidgetAttribute.WA_Hover)
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-            self.setToolTip(tooltip)
-        self.label_glyph = QLabel(self)
-        self.label_glyph.setObjectName("homeGlyph")
-        if icon_family:
-            font = QFont(icon_family)
-            font.setPixelSize(UIScaler.pixel(16))
-            self.label_glyph.setFont(font)
-        self.set_glyph(glyph)
-        self.label_title = QLabel(tr(title), self)
-        self.label_title.setObjectName("homeCardTitle")
-        self.label_logos = QLabel(self)  # circuit & car brand logos of game
-        self.label_logos.hide()
-        self.logos: tuple = ()  # key of logos shown (files, or what they were looked for from)
-        self._logos_waited: tuple[tuple, Callable[[], tuple[str, ...]]] | None = None
-        self._logo_timer: QTimer | None = None
-        layout_title = QHBoxLayout()
-        layout_title.setSpacing(UIScaler.pixel(6))
-        layout_title.addWidget(self.label_glyph)
-        layout_title.addWidget(self.label_title, stretch=1)
-        layout_title.addWidget(self.label_logos)
-
-        self.label_value = QLabel("", self)
-        self.label_value.setObjectName("homeValue")
-        self.label_value.setTextFormat(Qt.TextFormat.RichText)
-        self.label_detail = QLabel("", self)
-        self.label_detail.setObjectName("homeDetail")
-        self.label_detail.setTextFormat(Qt.TextFormat.RichText)
-        self.label_detail.setWordWrap(True)
-        self.layout_actions = QHBoxLayout()
-        self.layout_actions.setSpacing(UIScaler.pixel(6))
-
-        layout = QVBoxLayout(self)
-        margin = UIScaler.pixel(12)
-        layout.setContentsMargins(margin, UIScaler.pixel(10), margin, margin)
-        layout.setSpacing(UIScaler.pixel(3))
-        layout.addLayout(layout_title)
-        layout.addWidget(self.label_value)
-        layout.addWidget(self.label_detail)
-        layout.addStretch(1)
-        layout.addLayout(self.layout_actions)
-
-    def set_glyph(self, glyph: tuple[str, str]):
-        text = glyph[0] if self.icon_family else glyph[1]
-        if self.label_glyph.text() != text:
-            self.label_glyph.setText(text)
-
-    def set_logos(self, paths: tuple[str, ...]):
-        """Logos side by side next to title (hidden if none), see show_logos"""
-        self.show_logos(paths, lambda: paths)
-
-    def show_logos(self, key: tuple, files: Callable[[], tuple[str, ...]]):
-        """Logos of files() shown once looked for & read on logo loader thread (earlier logos kept meanwhile),
-        once per key"""
-        if key == self.logos:
-            self._logos_waited = None
-            return
-        height = UIScaler.pixel(22)
-        ratio = self.devicePixelRatioF()
-        done, pictures = LOGO_LOADER.result(("home card", key, height, ratio),
-                                            lambda: logo_pictures(files(), height, ratio))
-        if not done:
-            self._logos_waited = (key, files)
-            if self._logo_timer is None:
-                self._logo_timer = QTimer(self)
-                self._logo_timer.setSingleShot(True)
-                self._logo_timer.setInterval(LOGO_CHECK_MS)
-                self._logo_timer.timeout.connect(self.check_logos)
-            if not self._logo_timer.isActive():
-                self._logo_timer.start()
-            return
-        self._logos_waited = None
-        self.logos = key
-        self.draw_logos(tuple(QPixmap.fromImage(picture) for picture in pictures or ()))
-
-    def check_logos(self):
-        """Logos waited for shown once ready"""
-        if self._logos_waited is not None:
-            self.show_logos(*self._logos_waited)
-
-    def draw_logos(self, pictures: tuple[QPixmap, ...]):
-        """Logos side by side next to title (hidden if none)"""
-        height = UIScaler.pixel(22)
-        ratio = self.devicePixelRatioF()
-        if not pictures:
-            self.label_logos.hide()
-            return
-        gap = UIScaler.pixel(8)
-        width = sum(picture.width() / ratio for picture in pictures) + gap * (len(pictures) - 1)
-        row = QPixmap(max(round(width * ratio), 1), round(height * ratio))
-        row.setDevicePixelRatio(ratio)
-        row.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(row)
-        left = 0.0
-        for picture in pictures:
-            top = (height - picture.height() / ratio) / 2
-            painter.drawPixmap(QPointF(left, top), picture)
-            left += picture.width() / ratio + gap
-        painter.end()
-        self.label_logos.setPixmap(row)
-        self.label_logos.show()
-
-    def add_action(self, text: str, action: Callable[[], object], primary: bool = False) -> QPushButton:
-        """Button at bottom of card"""
-        button = QPushButton(tr(text), self)
-        if primary:
-            button.setObjectName("homePrimary")
-        button.clicked.connect(action)
-        if self.layout_actions.count() == 0:
-            self.layout_actions.addStretch(1)  # buttons kept right, stretch moved first
-        self.layout_actions.insertWidget(self.layout_actions.count() - 1, button)
-        return button
-
-    def set_text(self, value: str, detail: str = ""):
-        if self.label_value.text() != value:
-            self.label_value.setText(value)
-        if self.label_detail.text() != detail:
-            self.label_detail.setText(detail)
-        self.label_detail.setHidden(not detail)
-
-    def mouseReleaseEvent(self, event):
-        if (self.on_click is not None and event.button() == Qt.MouseButton.LeftButton
-                and self.rect().contains(event.position().toPoint())):
-            self.on_click()
-            return
-        super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event):
-        if self.on_click is not None and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            self.on_click()
-            return
-        super().keyPressEvent(event)
-
-
 class HomeView(QWidget):
-    """Home page"""
+    """Home page
 
-    def __init__(self, parent, window, select_page: Callable[[str], object], icon_family: str = ""):
+    Args:
+        parent: page area.
+        window: main window (tools, dialogs & command palette opened from it).
+        select_page: shows a main window page by navigation key.
+    """
+
+    def __init__(self, parent, window, select_page):
         super().__init__(parent)
-        self._window = window
-        self._columns = 0
-        content = QWidget(self)
-        content.setObjectName("pageStack")
-        layout_content = QVBoxLayout(content)
-        margin = UIScaler.pixel(12)
-        layout_content.setContentsMargins(margin, margin, margin, margin)
-        layout_content.setSpacing(UIScaler.pixel(10))
+        from .quick.home_backend import HomeBackend
 
-        # Header: app, version, what's new & update
-        hero = QFrame(content)
-        hero.setObjectName("homeHero")
-        self.label_icon = QLabel(hero)
-        self.label_title = QLabel(f"<b>{APP_NAME}</b>", hero)
-        self.label_title.setObjectName("homeHeader")
-        self.label_version = QLabel("", hero)
-        self.label_version.setObjectName("homeSubtitle")
-        self.chip_update = QLabel("", hero)
-        self.chip_update.setObjectName("homeChip")
-        self.chip_update.setHidden(True)
-        layout_version = QHBoxLayout()
-        layout_version.setSpacing(UIScaler.pixel(8))
-        layout_version.addWidget(self.label_version)
-        layout_version.addWidget(self.chip_update)
-        layout_version.addStretch(1)
-        layout_text = QVBoxLayout()
-        layout_text.setSpacing(UIScaler.pixel(2))
-        layout_text.addWidget(self.label_title)
-        layout_text.addLayout(layout_version)
-        self.button_notes = QPushButton(tr("Release Notes"), hero)
-        self.button_notes.setToolTip(tr("What's new in this version"))
-        self.button_notes.clicked.connect(self.show_release_notes)
-        self.button_update = QPushButton("", hero)
-        self.button_update.clicked.connect(self.update_action)
-        layout_hero = QHBoxLayout(hero)
-        hero_margin = UIScaler.pixel(14)
-        layout_hero.setContentsMargins(hero_margin, hero_margin, hero_margin, hero_margin)
-        layout_hero.setSpacing(UIScaler.pixel(12))
-        layout_hero.addWidget(self.label_icon)
-        layout_hero.addLayout(layout_text, stretch=1)
-        layout_hero.addWidget(self.button_notes)
-        layout_hero.addWidget(self.button_update)
-        layout_content.addWidget(hero)
+        self.backend = HomeBackend(self, window, select_page)
+        self.view: QQuickWidget | None = None  # see ensure_view
+        self._creating = False
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
 
-        # State cards
-        self.card_game = HomeCard(content, "Game", GLYPH_GAME, icon_family)
-        self.card_overlay = HomeCard(content, "Overlay", GLYPH_LOCKED, icon_family)
-        self.button_lock = self.card_overlay.add_action("Lock Overlay", self.toggle_lock, primary=True)
-        self.card_preset = HomeCard(content, "Preset", GLYPH_PRESET, icon_family,
-                                    lambda: select_page("preset"), tr("Open presets"))
-        self.card_widget = HomeCard(content, "Overlays", GLYPH_OVERLAYS, icon_family,
-                                    lambda: select_page("widget"), tr("Open overlays"))
-        self.card_module = HomeCard(content, "Module", GLYPH_MODULES, icon_family,
-                                    lambda: select_page("module"), tr("Open modules"))
-        self.card_last = HomeCard(content, "Last Session", GLYPH_HISTORY, icon_family,
-                                  lambda: self.open_tool("driver_stats_viewer.DriverStatsViewer"),
-                                  tr("Open driver stats"))
-        self.card_driver = HomeCard(content, "Driver", GLYPH_DRIVER, icon_family,
-                                    lambda: self.open_tool("driver_stats_viewer.DriverStatsViewer"),
-                                    tr("Open driver stats"))
-        self.card_driver.hide()  # shown once anything is known (ranks, profile, races)
-        self.card_start = HomeCard(content, "Before Driving", GLYPH_START, icon_family)
-        self.card_start.set_text(
-            f"<b>{html.escape(tr('Game Setup'))}</b>",
-            html.escape(tr("Set the game display mode to Borderless or Windowed (exclusive fullscreen hides "
-                           "the overlay). Le Mans Ultimate: enable Settings > Gameplay > Enable plugins. "
-                           "rFactor 2: install the shared memory plugin.")))
-        self.cards = (
-            self.card_game, self.card_overlay, self.card_preset,
-            self.card_widget, self.card_module, self.card_last, self.card_driver,
-        )
-        self.grid = QGridLayout()
-        self.grid.setSpacing(UIScaler.pixel(10))
-        layout_content.addLayout(self.grid)
+    def ensure_view(self) -> QQuickWidget | None:
+        """QML page, created on first use"""
+        if self.view is None and not self._creating:
+            from .quick import create_quick_view
 
-        # Quick access: tools, pages & actions chosen by user (Customize, or right-click)
-        self._select_page = select_page
-        self._icon_family = icon_family
-        label_quick = QLabel(tr("Quick Access"), content)
-        label_quick.setObjectName("homeSectionTitle")
-        self.button_customize = QPushButton(tr("Customize..."), content)
-        self.button_customize.setObjectName("homeLink")
-        self.button_customize.setToolTip(tr("Add, remove or reorder quick access buttons"))
-        self.button_customize.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.button_customize.clicked.connect(self.customize_quick_access)
-        layout_quick_title = QHBoxLayout()
-        layout_quick_title.addWidget(label_quick)
-        layout_quick_title.addWidget(self.button_customize)
-        layout_quick_title.addStretch(1)
-        layout_content.addLayout(layout_quick_title)
-        self.quick_box = QWidget(content)
-        self.quick_box.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.quick_box.customContextMenuRequested.connect(self.show_quick_menu)
-        self.quick_grid = QGridLayout(self.quick_box)
-        self.quick_grid.setContentsMargins(0, 0, 0, 0)
-        self.quick_grid.setSpacing(UIScaler.pixel(8))
-        self.label_quick_empty = QLabel(
-            tr("No quick access button: use Customize... to add tools, pages or actions."), self.quick_box)
-        self.label_quick_empty.setEnabled(False)
-        self.quick_buttons: list[QWidget] = []
-        self.build_quick_buttons()
-        layout_content.addWidget(self.quick_box)
-
-        tip = QLabel(tr("Tip: press Ctrl+K to find any widget, option, tool or preset. "
-                        "Drop a preset or plugin file on this window to import it."), content)
-        tip.setWordWrap(True)
-        tip.setEnabled(False)
-        layout_content.addWidget(tip)
-        layout_content.addStretch(1)
-
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
-        layout_main = QVBoxLayout(self)
-        layout_main.setContentsMargins(0, 0, 0, 0)
-        layout_main.addWidget(scroll)
-
-        self.arrange(self.column_count(self.width()))
-        app_signal.updates.connect(self.refresh_version)
-        # Game state changes without refresh signal
-        self._stale = False  # refresh skipped while window minimized: done once shown again
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.refresh_live)
-        self._timer.start(1000)
-        notifier().changed.connect(self.refresh_last_session)  # logos fetched from game meanwhile
-        # Driver card: ranks of game menu file (polled in background), profile & races read in background
-        self._jobs = BackgroundJobs(self, "Home")
-        self._driver_data = None  # DriverData once read
-        self._driver_read_time = -DRIVER_DATA_SECONDS
-        self._driver_key: tuple | None = None  # what driver card shows (made again only when changed)
-        self.refresh()
-
-    # Quick access
-    def build_quick_buttons(self):
-        """Quick access buttons from setting, in order (rebuilt after customizing)"""
-        from .tools_view import ToolCard
-
-        for button in self.quick_buttons:
-            self.quick_grid.removeWidget(button)
-            button.deleteLater()
-        entries = quick_access_entries()
-        self.quick_buttons = []
-        for key in current_quick_items():
-            entry = entries[key]
-            label = tr(entry.label)
-            if key in QUICK_SHORTCUTS:
-                label = f"{label} ({QUICK_SHORTCUTS[key]})"
-            glyph = entry.glyph if self._icon_family else entry.letter
-            card = ToolCard(label, glyph, self._icon_family, self.quick_box)
-            card.setObjectName(f"quick_{key}")
-            card.clicked.connect(lambda _=False, entry=entry: self.run_quick_entry(entry))
-            self.quick_buttons.append(card)
-        self.label_quick_empty.setHidden(bool(self.quick_buttons))
-        self.rearrange()
-
-    def run_quick_entry(self, entry: QuickEntry):
-        """Open tool or page, or run action"""
-        if entry.kind == "tool":
-            self.open_tool(entry.target)
-        elif entry.kind == "page":
-            self._select_page(entry.target)
-        elif entry.key == "command_palette":
-            self._window.open_command_palette()
-        elif entry.key == "bug_report":
-            from .bug_report_view import BugReport
-
-            BugReport(self._window).show()
-        elif entry.key == "check_updates":
-            update_checker.check(True)
-            self.refresh_version()
-
-    def customize_quick_access(self):
-        """Choose & order quick access entries (page inside app)"""
-        QuickAccessEditor(self._window, self.build_quick_buttons).open()
-
-    def show_quick_menu(self, position):
-        menu = QMenu(self)
-        menu.addAction(tr("Customize Quick Access...")).triggered.connect(self.customize_quick_access)
-        menu.exec(self.quick_box.mapToGlobal(position))
-        menu.deleteLater()
-
-    # Layout
-    def column_count(self, width: int) -> int:
-        """Card columns for page width: 1 narrow, 2, 3 wide"""
-        column = UIScaler.size(COLUMN_WIDTH)
-        return max(1, min(3, width // column)) if column > 0 else 2
-
-    def arrange(self, columns: int):
-        """Place cards & quick access in columns"""
-        if columns == self._columns:
-            return
-        self._columns = columns
-        cards = [card for card in self.cards if not card.isHidden()]
-        for card in (*self.cards, self.card_start):
-            self.grid.removeWidget(card)
-        for index, card in enumerate(cards):
-            self.grid.addWidget(card, index // columns, index % columns)
-        if not self.card_start.isHidden():  # game setup reminder: full width row below cards
-            self.grid.addWidget(self.card_start, (len(cards) + columns - 1) // columns, 0, 1, columns)
-        for column in range(3):
-            self.grid.setColumnStretch(column, 1 if column < columns else 0)
-        for button in (*self.quick_buttons, self.label_quick_empty):
-            self.quick_grid.removeWidget(button)
-        quick_columns = max(1, min(len(self.quick_buttons), QUICK_COLUMNS[columns]))
-        for index, button in enumerate(self.quick_buttons):
-            self.quick_grid.addWidget(button, index // quick_columns, index % quick_columns)
-        if not self.quick_buttons:
-            self.quick_grid.addWidget(self.label_quick_empty, 0, 0)
-        for column in range(6):
-            self.quick_grid.setColumnStretch(column, 1 if column < quick_columns else 0)
-
-    def rearrange(self):
-        """Cards shown or hidden: placed again"""
-        columns, self._columns = self._columns, 0
-        self.arrange(columns or self.column_count(self.width()))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.arrange(self.column_count(event.size().width()))
+            self._creating = True  # page shown again while QML loads: one page only
+            try:
+                view = create_quick_view(self, "Home.qml", {"backend": self.backend}, samples=0)
+            finally:
+                self._creating = False
+            view.setAcceptDrops(False)  # preset & plugin files dropped go to main window
+            self._layout.addWidget(view)
+            view.show()  # child added to a shown page is not shown by itself
+            self.setFocusProxy(view)
+            self.view = view
+        return self.view
 
     def showEvent(self, event):
+        self.ensure_view()
+        self.backend.page_shown()
         super().showEvent(event)
-        self.refresh_last_session()  # session saved while page was hidden
-        self.refresh_live()
-        self.read_driver_data()
 
-    # Actions
-    def open_tool(self, path: str):
-        from .tools_view import open_tool
+    def hideEvent(self, event):
+        self.backend.page_hidden()  # nothing read while another page (or the race) is shown
+        super().hideEvent(event)
 
-        open_tool(path, self._window)
-
-    def toggle_lock(self):
-        octrl.toggle.lock()
-        self.refresh_live()
-
-    def show_release_notes(self):
-        """What's new in running version (local changelog in app language, works offline)"""
-        from ..version_check import parse_version_string
-        from .release_notes import ReleaseNotesDialog
-
-        dialog = ReleaseNotesDialog(self._window, current_release_notes(language=current_language()),
-                                    parse_version_string(base_version()), (0, 0, 0))
-        dialog.button_install.hide()  # running version: nothing to install
-        dialog.open()
-
-    def update_action(self):
-        """Update available: its notes & install, else check now"""
-        if update_checker.is_updates():
-            from .notification import UpdatesNotifyButton
-
-            button = self._window.findChild(UpdatesNotifyButton)
-            if button is not None:
-                button.show_release_notes()
-                return
-        update_checker.check(True)
-        self.refresh_version()
-
-    # Refresh
-    @Slot(bool)  # type: ignore[operator]
-    def refresh(self):
-        """Refresh all cards"""
-        preset = html.escape(cfg.filename.setting[:-5])
-        locked = f" <span style='font-weight:normal'>({tr('locked')})</span>" if (
-            cfg.filename.setting in cfg.user.filelock) else ""
-        autoload = tr("Auto Load Primary Preset") + ": " + (
-            tr("On") if cfg.application["enable_auto_load_preset"] else tr("Off"))
-        self.card_preset.set_text(f"<b>{preset}</b>{locked}", autoload)
-        self.card_widget.set_text(
-            f"<b>{wctrl.number_active}</b> / {wctrl.number_total}", tr("Enabled"))
-        self.card_module.set_text(
-            f"<b>{mctrl.number_active}</b> / {mctrl.number_total}", tr("Enabled"))
-        self.refresh_header()
-        self.refresh_version()
-        self.refresh_last_session()
-        self.refresh_live()
-
-    def refresh_header(self):
-        """App icon matching app theme (light / dark)"""
-        dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
-        size = UIScaler.pixel(48)
-        pixmap = QPixmap(app_icon_file(dark))
-        if not pixmap.isNull():
-            ratio = self.devicePixelRatioF()
-            pixmap = pixmap.scaled(round(size * ratio), round(size * ratio), Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
-            pixmap.setDevicePixelRatio(ratio)
-        self.label_icon.setPixmap(pixmap)
-        self.label_icon.setHidden(pixmap.isNull())
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if self.view is not None:  # QML gone before the backend it binds to
+            view, self.view = self.view, None
+            view.setSource(QUrl())
+            view.deleteLater()
 
     @Slot(bool)  # type: ignore[operator]
-    def refresh_version(self, _checking: bool = False):
-        """Version, update chip & button"""
-        game = api.name if cfg.user.setting else ""
-        self.label_version.setText(" · ".join(text for text in (f"{tr('Version')} {VERSION}", game) if text))
-        checked = update_checker.imported  # update module imported by first check, not at start for this
-        if checked and update_checker.is_checking():
-            self.chip_update.setHidden(True)
-            self.button_update.setText(tr("Checking..."))
-            self.button_update.setEnabled(False)
-            self.button_update.setObjectName("")
-        elif checked and update_checker.is_updates():
-            version = ".".join(str(part) for part in update_checker.latest_version())
-            self.chip_update.setText(f"{tr('Update Available')} · v{version}")
-            self.chip_update.setHidden(False)
-            self.button_update.setText(tr("See Update"))
-            self.button_update.setEnabled(True)
-            self.button_update.setObjectName("homePrimary")
-        else:
-            self.chip_update.setHidden(True)
-            self.button_update.setText(tr("Check for Updates"))
-            self.button_update.setEnabled(True)
-            self.button_update.setObjectName("")
-            self.button_update.setToolTip(trm(update_checker.message()) if checked else "")
-        self.button_update.style().unpolish(self.button_update)  # object name changes style
-        self.button_update.style().polish(self.button_update)
-
-    def refresh_last_session(self):
-        """Last driven session from driver stats, card hidden if none (refreshed when page shown)"""
-        if not self.isVisible():  # hidden page or window: refreshed by showEvent
-            return
-        if self.window().isMinimized():  # refreshed once restored (refresh_live)
-            self._stale = True
-            return
-        record = last_session()
-        hidden = record is None
-        if record is not None:
-            self.card_last.set_text(*session_record_text(record))
-            light = light_page()
-            try:
-                own_stamp = os.path.getmtime(cfg.path.brand_logo)
-            except OSError:
-                own_stamp = 0.0
-            key = ("last", record.track, record.vehicle, record.vehicle_class, light, images.logos_version, own_stamp)
-            self.card_last.show_logos(key, lambda: record_logos(record, light))
-        if self.card_last.isHidden() != hidden:
-            self.card_last.setHidden(hidden)
-            self.rearrange()
-
-    def refresh_live(self):
-        """Refresh game, session & overlay state"""
-        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
-            return
-        if self.window().isMinimized():  # still "visible" while minimized: refreshed once restored
-            self._stale = True
-            return
-        if self._stale:  # restored: changes made meanwhile shown
-            self._stale = False
-            self.refresh_last_session()
-        self.refresh_driver()
-        state, running = api_state_text()
-        dot = status_color("success" if running else "inactive")
-        session = session_text() if running else ""
-        if session:
-            detail = session
-        elif running:
-            detail = tr("Running")
-        else:
-            detail = tr("Not running") if state == "not running" else tr(state)
-        self.card_game.set_text(f"<span style='color:{dot}'>●</span> <b>{html.escape(api.name)}</b>", detail)
-        self.card_game.set_logos(live_logos() if session else ())
-        if self.card_start.isHidden() != running:  # game setup reminder while game not running
-            self.card_start.setHidden(running)
-            self.rearrange()
-
-        locked = cfg.overlay["fixed_position"]
-        self.card_overlay.set_glyph(GLYPH_LOCKED if locked else GLYPH_UNLOCKED)
-        flags = (
-            tr("Auto Hide") if cfg.overlay["auto_hide"] else "",
-            tr("VR Compatibility") if cfg.overlay["vr_compatibility"] else "",
-        )
-        detail = " · ".join(flag for flag in flags if flag)
-        if not locked:
-            detail = " · ".join(text for text in (tr("Drag overlays to move them"), detail) if text)
-        self.card_overlay.set_text(f"<b>{tr('Locked') if locked else tr('Unlocked')}</b>", detail)
-        text = tr("Unlock Overlay") if locked else tr("Lock Overlay")
-        if self.button_lock.text() != text:
-            self.button_lock.setText(text)
-
-    def read_driver_data(self, force: bool = False):
-        """Profile & race record read in background, again once DRIVER_DATA_SECONDS passed (page shown)"""
-        if not force and monotonic() - self._driver_read_time < DRIVER_DATA_SECONDS:
-            return
-        from .home_driver import read_driver_data
-
-        self._driver_read_time = monotonic()
-        self._jobs.run("driver card", read_driver_data, self.driver_data_read, key="driver")
-
-    def driver_data_read(self, data):
-        self._driver_data = data
-        self.refresh_driver()
-
-    def refresh_driver(self):
-        """Driver card: ranks checked in background (game menu file changed), made again only when changed"""
-        from ..rank_info import ranks
-
-        ranks.poll()
-        if monotonic() - self._driver_read_time >= DRIVER_DATA_SECONDS:
-            self.read_driver_data()
-        light = light_page()
-        key = (ranks.serial, id(self._driver_data), light, current_language())
-        if key == self._driver_key:
-            return
-        self._driver_key = key
-        from .home_driver import driver_card_text
-
-        player = ranks.player
-        history = ranks.history_of(player.steam_id) if player is not None else ()  # in memory: no file read here
-        text = driver_card_text(player, ranks.remembered, ranks.updated, history, self._driver_data, light,
-                                ranks.others)
-        hidden = text is None
-        if text is not None:
-            self.card_driver.set_text(*text)
-        if self.card_driver.isHidden() != hidden:
-            self.card_driver.setHidden(hidden)
-            self.rearrange()
+    def refresh(self, *_):
+        """Setting, preset or language changed: cards made again (once shown if hidden)"""
+        self.backend.refresh()

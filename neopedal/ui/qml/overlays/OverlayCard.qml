@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "../components"
 
-// Overlay card of Overlays page (grid): preview on a dark stage (overlays are drawn over the game),
-// name & category, settings button & on/off switch. Click opens settings, right-click the menu.
+// Overlay card of Overlays page (grid): preview on a dark stage (overlays are drawn over the game), played on a
+// moving simulated race while hovered, favorite star, when the overlay shows (if not always), name & category,
+// settings button & on/off switch. Click opens settings, right-click the menu, hovering tells what it shows.
 Item {
     id: card
     required property int index
@@ -18,9 +19,14 @@ Item {
     required property int previewState  // 0 loading, 1 ready, 2 not available
     required property int previewWidth
     required property int previewHeight
+    required property string description
+    required property bool favorite
+    required property var badges  // [{kind, text, tip}]: shown only in some situations
     readonly property bool current: GridView.isCurrentItem && GridView.view.activeFocus
     readonly property real pad: Math.round(theme.em * 0.45)
-    readonly property bool hovered: area.containsMouse
+    // Pointer anywhere over the card, its buttons, name & switch included (a passive handler: never taken by them)
+    readonly property bool hovered: cardHover.hovered
+    readonly property bool playing: backend.liveName === name && backend.liveUrl !== ""
     property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
 
@@ -28,15 +34,26 @@ Item {
         recycling = true
         opacity = 1  // add transition cut short by pooling: not reused faded or shrunk
         scale = 1
+        backend.stopLive(name)
     }
     GridView.onReused: recycling = false
+    onHoveredChanged: if (!hovered) backend.stopLive(name)
+    HoverHandler { id: cardHover }
 
     width: GridView.view.cellWidth
     height: GridView.view.cellHeight
 
     Accessible.role: Accessible.ListItem
     Accessible.name: label + ", " + categoryLabel + ", " + (active ? i18n.tr("Enabled") : i18n.tr("Disabled"))
-                     + (failed ? ", " + i18n.tr("Error") : "")
+                     + (favorite ? ", " + i18n.tr("Favorite") : "") + (failed ? ", " + i18n.tr("Error") : "")
+    Accessible.description: description
+
+    // Hovered a moment: overlay played on a moving simulated race (one card at a time)
+    Timer {
+        interval: 450
+        running: card.hovered && card.previewState === 1 && theme.animate && pageState.active && !card.recycling
+        onTriggered: backend.startLive(card.name)
+    }
 
     Rectangle {
         id: surface
@@ -69,6 +86,13 @@ Item {
                     backend.openConfig(card.name)
             }
         }
+        // What the overlay shows, below the card
+        ToolTip {
+            visible: area.containsMouse && card.description !== ""
+            delay: theme.tipDelay * 2
+            text: card.description
+            y: surface.height + theme.space2
+        }
 
         // Preview stage
         Rectangle {
@@ -92,7 +116,7 @@ Item {
                 width: Math.round(card.previewWidth * fit)
                 height: Math.round(card.previewHeight * fit)
                 source: card.preview
-                visible: card.previewState === 1
+                visible: card.previewState === 1 && !live.shown
                 // image://overlaypreview URL changes only with the picture: cached, decoded off the UI thread,
                 // old picture kept until the new one is ready, scaled once by the provider (32 px steps on resize)
                 asynchronous: true
@@ -104,6 +128,23 @@ Item {
                 scale: card.hovered ? 1.03 : 1
                 Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionBase } }
                 Behavior on scale { enabled: !card.recycling; NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
+            }
+            // Played overlay: pictures straight from the store (never cached: each one shown once)
+            Image {
+                id: live
+                readonly property bool shown: status === Image.Ready && source !== ""
+                anchors.centerIn: parent
+                width: shot.width
+                height: shot.height
+                scale: shot.scale
+                source: card.playing ? backend.liveUrl : ""
+                visible: shown
+                asynchronous: false
+                retainWhileLoading: true
+                cache: false
+                fillMode: Image.PreserveAspectFit
+                sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+                smooth: true
             }
 
             // Loading: soft pulse where the picture comes
@@ -134,11 +175,30 @@ Item {
                 font.pointSize: theme.fontSmall
             }
 
+            // Favorite: star shown while hovering, kept shown once marked
+            StageButton {
+                id: starButton
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.margins: theme.space3
+                opacity: card.favorite || card.hovered || card.current ? 1 : 0
+                visible: opacity > 0
+                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionFast } }
+                glyph: card.favorite ? "" : ""  // star filled : outline
+                fallback: card.favorite ? "★" : "☆"
+                glyphColor: card.favorite ? theme.gold : "white"
+                tip: card.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")
+                onClicked: {
+                    card.GridView.view.currentIndex = card.index
+                    backend.toggleFavorite(card.name)
+                }
+            }
+
             // Enabled but not running: start error (see log)
             Rectangle {
                 visible: card.failed
                 anchors.top: parent.top
-                anchors.left: parent.left
+                anchors.left: starButton.visible ? starButton.right : parent.left
                 anchors.margins: theme.space3
                 height: Math.round(theme.em * 1.5)
                 width: failedRow.implicitWidth + theme.space5
@@ -163,35 +223,59 @@ Item {
                 ToolTip.delay: theme.tipDelay
             }
 
+            // Shown only in some situations: session or pit state, stream only, screen only
+            Row {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: theme.space3
+                spacing: theme.space2
+                Repeater {
+                    model: card.badges
+                    Rectangle {
+                        required property var modelData
+                        height: Math.round(theme.em * 1.45)
+                        width: badgeRow.implicitWidth + theme.space4
+                        radius: height / 2
+                        color: Qt.darker(theme.stageBottom, 1.5)  // on the dark stage, over the picture
+                        border.width: 1
+                        border.color: Qt.lighter(theme.stageTop, 1.8)
+                        Row {
+                            id: badgeRow
+                            anchors.centerIn: parent
+                            spacing: theme.space1
+                            Icon {
+                                glyph: modelData.kind === "stream" ? "" : modelData.kind === "screen" ? "" : ""
+                                size: theme.em * 0.75
+                                color: "white"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: modelData.text
+                                color: "white"
+                                font.pointSize: theme.fontCaption
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                        MouseArea { id: badgeArea; anchors.fill: parent; hoverEnabled: true }
+                        ToolTip.visible: badgeArea.containsMouse
+                        ToolTip.text: modelData.tip
+                        ToolTip.delay: theme.tipDelay
+                    }
+                }
+            }
+
             // Settings, shown while hovering the card (card click and Enter open settings too: no Tab stop)
-            AbstractButton {
+            StageButton {
                 id: settingsButton
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.margins: theme.space3
-                width: Math.round(theme.em * 2)
-                height: width
-                hoverEnabled: true
-                focusPolicy: Qt.NoFocus
                 opacity: card.hovered || hovered || card.current ? 1 : 0
                 visible: opacity > 0
                 Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionFast } }
-                ToolTip.visible: hovered
-                ToolTip.text: i18n.tr("Config")
-                ToolTip.delay: theme.tipDelay
-                Accessible.name: i18n.tr("Config")
-                background: Rectangle {  // on the dark stage: white tints
-                    radius: width / 2
-                    color: settingsButton.down ? Qt.rgba(1, 1, 1, 0.3) : settingsButton.hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(0, 0, 0, 0.45)
-                    border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, 0.18)
-                }
-                contentItem: Icon {
-                    glyph: ""  // settings
-                    fallback: "⚙"
-                    size: theme.em * 0.95
-                    color: "white"
-                }
+                glyph: ""  // settings
+                fallback: "⚙"
+                tip: i18n.tr("Config")
                 onClicked: backend.openConfig(card.name)
             }
         }

@@ -213,13 +213,11 @@ def test_reference_loader_keeps_trace_when_check_cancelled(tmp_path):
 # Official corners of recorded track map
 def demo_mapping():
     from neopedal.demo_data import TRACK_POINTS, TRACK_SECTORS
-    from neopedal.module_info import MappingInfo
+    from neopedal.module_info import MappingInfo, TrackMap
 
     mapping = MappingInfo()
-    mapping.coordinates = tuple((point[1], point[2]) for point in TRACK_POINTS)
-    mapping.elevations = tuple((point[0], point[3]) for point in TRACK_POINTS)
-    mapping.sectors = TRACK_SECTORS
-    mapping.lastModified = 5.0
+    mapping.trackMap = TrackMap(tuple((point[1], point[2]) for point in TRACK_POINTS),
+                                tuple((point[0], point[3]) for point in TRACK_POINTS), TRACK_SECTORS, 5.0)
     return mapping
 
 
@@ -243,9 +241,9 @@ def test_map_corners_shared_and_placed_in_background():
     found = map_corners(TRACK_NAME, mapping)
     assert found is not None and found.corners
     assert map_corners(TRACK_NAME, mapping) is found  # once per map
-    mapping.lastModified = 6.0
+    mapping.trackMap = mapping.trackMap._replace(lastModified=6.0)
     assert map_corners(TRACK_NAME, mapping, wait=True) is not found  # new map, placed now (overlay picture)
-    mapping.coordinates = None
+    mapping.trackMap = mapping.trackMap._replace(coordinates=None)
     assert map_corners(TRACK_NAME, mapping).corners == ()
 
 
@@ -385,7 +383,7 @@ def test_corner_numbers_follow_new_map(ui_env, bundled_fonts, monkeypatch):
     assert widget.map_corners is not None and widget.map_corners.corners
     labels = widget.corner_labels(lambda text: (20.0, 10.0), 4.0)
     assert labels and all(not a.intersects(b) for index, (_, a) in enumerate(labels) for _, b in labels[index + 1:])
-    mapping.lastModified = 7.0
+    mapping.trackMap = mapping.trackMap._replace(lastModified=7.0)
     widget.timerEvent(None)
     assert widget.map_corners is None  # new map: placed again
     widget.deleteLater()

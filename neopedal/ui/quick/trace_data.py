@@ -63,6 +63,7 @@ from .math_channels import YAW_RATE, MathError, derivative, evaluate, input_name
 ENVELOPE_POINTS = 1500  # grid points of min / max band over displayed laps
 SLIP_MIN_SPEED = 30.0  # km/h, wheel slip not computed slower (division by small speed)
 SLIP_ANGLE_MIN_SPEED = 5.0  # m/s, body slip angle not computed slower
+AERO_BALANCE_MIN_LOAD = 0.5  # kN, aero balance left out under this total downforce (slow: share meaningless)
 PLACEMENT_COLUMNS = ("path_lateral", "track_position")  # measured on map when circuit & edges known
 AUTOSCALE_MARGIN = 0.05  # share of visible value range added above & below (autoscaled panel)
 # Caches a snapshot gets its own copy of (filled by a background thread, see TraceData.snapshot)
@@ -814,6 +815,25 @@ class TraceData:
             distances = monotonic_distance(lap.data, "tyre_temp_fl")[0]
             temps = [monotonic_distance(lap.data, f"tyre_temp_{wheel}")[1] for wheel in WHEELS]
             return distances, [max(values) - min(values) for values in zip(*temps)]
+        if column in ("throttle_cut", "brake_cut"):  # driver pedal minus pedal after aids: TC / ABS cut, blip below 0
+            pedal = column[:-4]
+            distances, driver = monotonic_distance(lap.data, pedal)
+            car = monotonic_distance(lap.data, f"{pedal}_car")[1]
+            return distances, [first - last for first, last in zip(driver, car)]
+        if column == "aero_balance":  # front share of downforce, low speed left out (no load: any share)
+            distances, fronts = monotonic_distance(lap.data, "downforce_front")
+            rears = monotonic_distance(lap.data, "downforce_rear")[1]
+            shares = [(distance, front / (front + rear) * 100) for distance, front, rear in zip(distances, fronts, rears)
+                      if front + rear >= AERO_BALANCE_MIN_LOAD]
+            return [distance for distance, _ in shares], [share for _, share in shares]
+        if column == "rake":  # rear minus front ride height
+            distances = monotonic_distance(lap.data, "ride_height_fl")[0]
+            heights = [monotonic_distance(lap.data, f"ride_height_{wheel}")[1] for wheel in WHEELS]
+            return distances, [(rear_left + rear_right - front_left - front_right) / 2
+                               for front_left, front_right, rear_left, rear_right in zip(*heights)]
+        if column.startswith("damper_vel_"):  # suspension deflection change per second
+            distances, deflections = monotonic_distance(lap.data, f"susp_defl_{column[-2:]}")
+            return distances, derivative(deflections, monotonic_distance(lap.data, "lap_time")[1])
         if column.startswith("slip_"):
             distances, wheel_speeds = monotonic_distance(lap.data, f"wheel_speed_{column[5:]}")
             speeds = monotonic_distance(lap.data, "speed_kph")[1]

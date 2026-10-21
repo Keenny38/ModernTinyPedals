@@ -33,11 +33,13 @@ A typed value is applied when you press `Enter` or leave the field (not at every
 - **Start**: starting fuel and energy (`0` = full tank), start time of day (pit stops then shown at their time of day).
 - **Pit stop**: refuel and energy rates (a splash costs less time than a full tank), driver change time, `Tyres Changed While Refuelling`, `Driver Change While Refuelling` (the longest of service and driver change counts, as in LMU), in and out lap consumption.
 - **Race rules**: mandatory stops, maximum stint time, `Balanced Stints` (no short splash stint at the end), `Leader Finishes First (+1 Lap)` for time races.
-- **Pace**: fuel effect on lap time, track evolution, saving cost. `Estimate from History` fills them from your consumption history.
+- **Pace**: fuel effect on lap time, track evolution, saving cost. `Estimate from History` fills them from your consumption history. `Lap Time per °C` (seconds per °C of air temperature, 0 = none) with the `Temperature Trend` (°C per hour, filled from the weather forecast of the `Live` tab) adds to the track evolution.
 
 ## Drivers
 
 With 2 drivers or more, set the stints per driver and, for each driver, the lap time difference and the minimum and maximum total driving time. The `Driving Time` card shows stints and time of each driver, with limits not met in red.
+
+A driver short of its minimum drives whole laps up to it before handing over (no stint just short of it, then one more stint), and the time other drivers still need, with their driver change, is kept for them. When the minimums add up to more than the race leaves to drive (pit stops take race time too), the plan is made without them and the `Driving Time` card says by how many minutes they are over.
 
 ## Scenarios
 
@@ -46,6 +48,10 @@ With 2 drivers or more, set the stints per driver and, for each driver, the lap 
 
 Both are compared with the plan without the scenario, and shown on the strategy timeline.
 
+- `Safety Car Risk` (switch in the title): safety cars coming at random, `Safety Cars per Hour` on average, with the laps, consumption, lap time and pit time saved of the `Safety Car` section. It shows the chance of one safety car at least over the race, the part of the race where a safety car saves one stop, and for each stint whether to stop under a safety car coming mid-stint or stay out, with the time it wins. Calculated in the background (a few tens of milliseconds for a 24 h race).
+
+The saving target, strategy comparison, compound comparison and safety car risk are calculated on a worker thread, so typing in a long race stays smooth: only the results of the last change are shown.
+
 ## Strategy and pit stop plan
 
 - **Strategy**: a timeline with one block per stint (one color per driver), pit laps above (orange when tyres are changed), safety car and rain laps behind, and the **fuel in the tank** over the race below. Hover a stint or stop for details.
@@ -53,13 +59,17 @@ Both are compared with the plan without the scenario, and shown on the strategy 
 - **Details**: totals, laps a full tank lasts, what is left at stint end, consumption needed to save one stop.
 - **Saving target**: laps per stint and consumption per lap needed for one stop less, with the time lost to saving and whether it is worth it.
 - **Strategy Comparison**: the current plan against plans with up to 2 stops less (fuel saving) and one stop more: consumption, lap time lost, time in the pits, race time and gap. The best one is in bold.
+- `Pit Menu` (LMU, in a session): sets the refill of the next stop in the game pit menu, as the amount in the tank after the stop: virtual energy for a car using it (the fuel ratio is left as it is), fuel otherwise. The first setting of the menu reaching the plan amount is chosen; a notice tells what was set.
 
 ## Live race
 
 During a race, turn on `Live Race`: the plan for the rest of the race is recalculated at each lap and each stop from the car (laps and time done, fuel, energy, tyres, stops done). The timeline and pit stop plan start at the current lap. The `Live Race` status also shows a safety car or full course yellow read from the game.
 
+- **Drivers**: the driver in the car and the driving time of each stint come from the race (race clock from pit exit to the next pit entry of each stop seen), not from the plan made before the race. Driver names are matched to the calculator drivers in the LMU team order (kept from the garage screens when the team has as many drivers), else by the plan.
+- **Penalties & repair**: a drive-through or stop & go to serve costs a pass in the pit lane (time race: fewer laps), a pending repair lengthens the next stop. Both are named on the strategy line.
+
 - `Plan against Race` compares stints driven with the plan (laps, lap time, consumption, tyre wear), with the driver of each stint.
-- `Class Rivals` lists the cars of your class: laps, stops, laps since their last stop and their next expected stop.
+- `Class Rivals` lists the cars of your class: laps, stops, laps since their last stop and their next expected stop. Below it, where you rejoin if you stop at the end of this lap: class place, gap to the cars just ahead and behind, and how many pass you, from the race distance of each car and the time of the next stop of the plan (other cars not stopping meanwhile).
 
 ## Live tab
 
@@ -69,7 +79,7 @@ Every value of the calculator the game gives, next to the value of the calculato
 - **Pace & consumption**: lap time, fuel, energy and tyre wear per lap (average of the valid laps at race pace, else the game estimate), tank capacity, compound on the car.
 - **Race start**: fuel, energy and tread of the car on the grid (race session, before the start).
 - **Pit stop**: pit lane time (stops of the session), refuel and energy rates, driver change time, tyre change time (1-2 / 3-4 tyres), what is done while refuelling: the pit stop times of the series in LMU.
-- **Tyres**: tyre allocation of the race (LMU, while driving). **Weather**: rain from the forecast as a rain scenario (laps of the race in the wet).
+- **Tyres**: tyre allocation of the race (LMU, while driving). **Weather**: rain from the forecast as a rain scenario (laps of the race in the wet), air temperature trend of the forecast (°C per hour, for `Lap Time per °C`).
 
 The arrow of a row fills that value in, `Fill In All` every value followed (the switch of each row: values left out are kept as you set them). Followed values are also filled in by `Load Live` and `Follow Live`. Rough estimates (pit lane time from the pit lane length and speed limit, wear of the lap in progress) are never followed: fill them in by hand.
 
@@ -79,7 +89,9 @@ The LMU garage screens are asked every 10 seconds while the tab is shown or `Fol
 
 ## Tyres tab
 
-- **Tyre wear**: starting tread, wear per lap, measured compound, minimum tread. `Laps per Tyre Set` and `Stints Cut by Tyre Life` limit stints to what the tyres last.
+- **Tyre wear**: starting tread, wear per lap, measured compound, minimum tread. `Laps per Tyre Set` and `Stints Cut by Tyre Life` limit stints to what the tyres last. `Used Tyre Pace Loss`: lap time lost per 10 % of tread already used when a stint starts (tyres kept for another stint, used tyres of the stock); without a tyre plan, tyres are proposed for a change when the time they would lose over the next stint is more than the time a change adds to the stop (nothing when changed while refuelling).
+- **Compound pace**: the `Lap Time Delta` of each compound (gear button of the tyre stock, seconds, only the difference between compounds counts) slows or speeds up the stints of the tyre plan on that compound.
+- **Compound Comparison**: the whole race (or the rest of it) on Soft, Medium, Hard and the other dry compounds of the stock, with its wear and lap time difference: stops, tyre changes, time in the pits, laps, race time and gap, best in bold.
 - **Tyre rules**: maximum tyres for the race (`From Game` reads the LMU allocation of the session), tyre change time by number of tyres, restricted allocation (LMU rule).
 - **Tyre plan**: one row per stint, the tyre on each wheel with its tread at the start and end of the stint (bar and text in the tread color, tyres used before shown dimmed when `Highlight New Tyre` is on). Drag a tyre from the stock onto a wheel, or click a wheel to pick a tyre of the stock or take it off (`Delete` on a selected wheel too). The `...` button of a row clears it, and without a strategy duplicates, inserts or deletes rows. `Propose Changes` fills the plan wheel by wheel at the stint where tread would go below the minimum, within the tyres allowed.
 - **Tyre stock**: pick a compound (colored dot), add tyres (`+`), set compound options (gear button), sort by compound or by stints, remove unused tyres or all tyres. Each tyre shows the stints it runs.
@@ -107,6 +119,6 @@ Turn on the **Race Plan** overlay (`Overlays` page) to see the next stop of your
 - distance to the pit entry and the target consumption per lap to reach the next stop (LMU);
 - a check of the game pit menu against the plan: for example `80>60L` in red when the refuel set in the game differs from the plan.
 
-The overlay uses the last inputs of the calculator, even when the calculator page is closed, and is replanned at each lap during a race.
+The overlay uses the last inputs of the calculator, even when the calculator page is closed, and is replanned at each lap during a race (option `enable_live_replan`), with the driver in the car, penalties and pending repair. With `enable_live_consumption` (on by default), the rest of the race is planned with the lap time and consumption of the latest 5 valid laps at race pace (3 at least), as `Load Live`, even with the page closed.
 
 All options: [Race calculator](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#race-calculator) and [Race plan](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#race-plan).

@@ -706,7 +706,7 @@ Click on the notification message will bring up a menu, where user can click `Vi
 
 Note, notification message will only be displayed if new updates is available. If main window is hidden in tray at startup, a tray message is shown instead of opening the window over the game. While the app runs, updates are checked again every `number_of_hours_between_update_checks` hours.
 
-With the Windows installer version, notification menu also offers `Download And Install`, which downloads the setup ZIP of the new version, checks its SHA256 hash (detects a corrupt download; the hash comes from the same release page, so it does not prove who published the file), extracts the installer, checks its digital signature when the installer is signed (an invalid signature is refused), then installs it. A portable copy (ZIP published until version 0.19) opens the release page instead, as the installer would install a separate copy without your presets and data: install the setup into the folder of the portable copy to keep them, later updates then install from the app. What's new notes are shown in the app language when translated (French), in English otherwise.
+With the Windows installer version, notification menu also offers `Download And Install`, which downloads the setup ZIP of the new version, checks its SHA256 hash (detects a corrupt download; the hash comes from the same release page, so it does not prove who published the file), extracts the installer, checks its digital signature when the installer is signed (an invalid signature is refused), then installs it. A portable copy (ZIP published until version 0.19) opens the release page instead, as the installer would install a separate copy without your presets and data: install the setup into the folder of the portable copy to keep them, later updates then install from the app. What's new notes are shown in the app language when translated (French), in English otherwise. When versions were skipped since the installed one, their notes follow (versions menu shows any older version too); option names in the notes open their option, and overlays named by a theme can be turned on (`Try`) from there.
 
 While downloading, notification message and what's new page show progress (percent and size), and `Cancel Download` (notification menu, or what's new page) stops it, partial download removed.
 
@@ -716,6 +716,9 @@ User can also manually check for updates any time by accessing `Check for Update
 
     number_of_hours_between_update_checks
 Check for updates again while the app runs, every this many hours since last check (at startup, by hand or automatic), for an app left open for days. Not checked while driving (checked once stopped). A new version found this way opens what's new only if the main window is the active window, otherwise the notification message waits in the main window (tray message if hidden in tray); a dismissed message is not shown again for the same version. Requires `check_for_updates_on_startup` enabled. Set `0` to check only at startup. Default is `12` hours, maximum `168` (one week).
+
+    show_release_notes_after_update
+Show what's new once at the first start of a new version: notes of every version since the last one run, from the changelog shipped with the app (works offline). Not shown at the very first start (setup wizard), nor when an older copy is started. Also switched from the `Show after each update` switch of the what's new page. This option is enabled by default.
 
     minimize_to_tray
 Minimize to tray when user clicks `X` close button.
@@ -753,6 +756,18 @@ Show confirmation dialog for enabling or disabling all widgets or modules. This 
 
     show_overlay_previews
 Show overlays on `Overlays` page as cards with a preview of each overlay, or as a compact list with the preview in a tooltip if disabled. Also switched by the view buttons at top right of `Overlays` page. Previews are drawn only while the page is shown. This option is enabled by default.
+
+    show_overlay_screen_view
+Show running overlays on `Overlays` page at their place on your screens (screen view, third view button at top right of the page) instead of cards or list. Drag an overlay there to move it (undo in the message shown after), click it to open its settings; overlays covering part of another one are outlined. Set by the view buttons, not shown in `Config`. Default is disabled.
+
+    overlays_sort_order
+Sort of `Overlays` page, set by its sort button: `0` = by name, `1` = enabled overlays first, `2` = by category. Rows are placed again when the sort is chosen (a switched overlay stays where it is until then). Not shown in `Config`. Default is `0`.
+
+    favorite_overlays
+Favorite overlays of `Overlays` page (star of a card or row, `Ctrl+F` on the focused one, `Favorites` chip), widget names separated by comma. Kept for every preset. Not shown in `Config`. Default is empty.
+
+    recent_overlays
+Overlays whose options were saved last in `Overlay Options` (`Recently Edited` chip of `Overlays` page, last edited first, 8 kept), widget names separated by comma. Not shown in `Config`. Default is empty.
 
     enable_edit_mode_on_unlock
 Start the edit mode when overlays are unlocked: toolbar (snapping, grid, guides, undo, `Done` locks overlays again), every overlay outlined, auto hidden overlays shown. Disabled: unlocking only makes overlays movable, the outline and resize handle of an overlay show when the mouse is over it; drag it to move it, arrow keys and `Ctrl+Z` still work, and the edit mode can still be started from the right-click menu of an overlay (`Edit Mode`). Default is disabled.
@@ -1760,7 +1775,9 @@ Charts show values along lap distance, time delta of each lap against reference 
 
 `Track Map` tab shows driving line of each lap and car position of each lap at cursor, over the circuit (from track map file of [Mapping module](#mapping-module) when recorded, else from reference lap line, start line checkered, sector limits marked). Line colors (saved): `Laps` (color of each lap, zoomed part highlighted), `Gain / Loss` (first compared lap against reference lap: red where it loses time, green where it gains, grey where even, rate of time difference over 40 meters, full color at 0.2 s per 100 m), `Speed` (reference lap, slowest blue to fastest red, scale below map) or `Pedals` (reference lap: throttle green, brake red, both amber, coasting grey). `Follow zoom` (saved) zooms map on the part of lap zoomed in charts. `Braking points` (saved) marks where each lap starts braking. Corner labels show time lost or gained by first compared lap in each corner, click one to zoom charts on it. Mouse wheel zooms track map around mouse (`+`, `-` and whole map buttons too, scale bar at bottom right), drag moves zoomed view, double-click resets. Click the driving line to show that point in charts (cursor moved there, view moved if it was outside). `G Circle` tab shows lateral vs longitudinal acceleration of each lap (zoomed part only when zoomed). `Corners` tab compares first compared lap with reference lap, corner by corner: corners are found on reference lap speed (speed minimum between two speed peaks, at least 10 km/h apart), each row shows time lost (red) or gained (green) from braking to top speed with a bar, minimum speed of both laps, and below: braking point (positive = brakes later) full throttle point (negative = full throttle earlier), and driving: seconds of trail braking (braking while turning), coasting (no pedal) and throttle & brake overlap of both laps (red when compared lap coasts or overlaps more). Click a corner to zoom charts on it. Two last rows show time lost on straights (between corners) and total lap difference, corners and straights add up to it. `Corner detection` sets the speed drop & rise counted as a corner (default 10 km/h, lower finds more corners), saved for next time. With reference lap only, the rows show its own corner times, minimum speeds and points.
 
-`Export` > `MoTeC i2 (.ld)` saves reference lap, displayed laps, or every lap of track as MoTeC i2 log files (`.ld`), resampled at recording rate, with every recorded channel (pedals in percent), and vehicle, track & session from lap info. `Export` > `CSV, Displayed Laps...` saves displayed charts of displayed laps every meter in a CSV file for Excel (decimal comma and semicolon separator when system uses decimal comma).
+`Export` > `MoTeC i2 (.ld)` saves reference lap, displayed laps, or every lap of track as MoTeC i2 log files (`.ld`), resampled at recording rate, with every recorded channel (pedals in percent), and vehicle, track & session from lap info. Right-click a lap > `Share Lap...` saves it as one compressed lap file (`.csv.gz`, named with track, vehicle, driver name & lap time; lap info tells who shared it) to send to another driver, who adds it with `Add File...`. Charts & map show the track notes of the track (track notes file of the Track Notes overlay, pit lane notes left out): right-click charts > `Add Track Note Here`, `Edit Track Note`, `Remove Track Note`, double-click a note to edit it. Session tab value menu: lap time, sector time, or minimum speed, braking point & corner time of a corner of reference lap for every lap of the session, with its trend. Laps read from their binary copy load the channels shown only (others when first used).
+
+`Export` > `CSV, Displayed Laps...` saves displayed charts of displayed laps every meter in a CSV file for Excel (decimal comma and semicolon separator when system uses decimal comma). `CSV, Visible Part...` saves the zoomed part only, `MoTeC, Reference Lap A ↔ B...` the reference lap between markers A & B.
 
 Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hides invalid, out & in laps (unless checked). Click a lap to show it, flag button or double-click to set it as reference. Right click a lap: `Set as Reference`, `Export MoTeC...`, and for recorded laps `Keep Lap` (a kept lap is never removed by the recorder when laps over `number_of_saved_laps_per_track` are deleted), `Note...` (free text shown in lap list), `Delete Lap` (asks first). Laps added from another folder or imported are grouped by folder. Checked laps and reference lap of each track are remembered. When 3 laps or more must be read, they load in background (window stays responsive), and `Refresh` only reads laps whose file changed.
 
@@ -2006,7 +2023,7 @@ Enable notes module.
 
 Files are saved in `telemetry_path` folder, one sub folder per track & class: `<date time> lap<number> <lap time>.csv`. Laps are verified with game lap time 1 to 10 seconds after crossing start line; laps that are not confirmed (track limits, invalid lap) are marked `invalid` in file name. Recorded laps can be compared in [Lap telemetry viewer](#lap-telemetry-viewer).
 
-First line of each file is lap info (`# ` followed by JSON): track, vehicle, class, session, track length, track & air temperature, wetness, fuel at start & end, official sector times, lap kind (`lap`, `out` or `in`) and app version. Then comes the CSV header and one row per sample: time, lap time, distance, speed, pedals, steering, gear, RPM, fuel, tyre temperatures & pressures, position (X, Y, Z), lateral & longitudinal acceleration (G), sector, TC & ABS activity, battery charge, and per wheel brake temperature, tyre wear (remaining percentage, 100 = new tyre), wheel speed (requires Wheels module, which learns wheel radius), ride height & suspension deflection (millimeters). Throttle & brake are unfiltered pedal positions (driver input, without throttle blip or cut from car electronics on gear shifts). Samples are only added when game data has changed. A lap is dropped if game time goes backward (replay looping or rewound).
+First line of each file is lap info (`# ` followed by JSON): track, vehicle, class, session, track length, track & air temperature, wetness, fuel at start & end, official sector times, lap kind (`lap`, `out` or `in`) and app version. Then comes the CSV header and one row per sample: time, lap time, distance, speed, pedals, steering, gear, RPM, fuel, tyre temperatures & pressures, position (X, Y, Z), lateral & longitudinal acceleration (G), sector, TC & ABS activity, battery charge, and per wheel brake temperature, tyre wear (remaining percentage, 100 = new tyre), wheel speed (requires Wheels module, which learns wheel radius), ride height & suspension deflection (millimeters). Throttle & brake are unfiltered pedal positions (driver input, without throttle blip or cut from car electronics on gear shifts); newer laps also keep the pedal positions the car gets after driving aids (traction control cut, ABS, throttle blip), front & rear downforce (kN) and wheel camber (degrees). Samples are only added when game data has changed. A lap is dropped if game time goes backward (replay looping or rewound).
 
 The module can also record [Session recorder](#session-recorder) replays automatically while driving.
 
@@ -2033,6 +2050,9 @@ Also save out laps (started in pit lane) and in laps (ended in pit lane), marked
 
     enable_compressed_lap_files
 Save laps as compressed CSV files (`.csv.gz`, about 5 times smaller). Lap telemetry viewer reads both. Default is disabled.
+
+    enable_100hz_lap_recording
+Record lap samples every 10 milliseconds (up to 100 samples per second, as fast as game data updates) instead of `update_interval`. Shows finer details in Lap telemetry viewer (suspension, wheel lockups, kerbs), lap files are about twice larger. Default is disabled.
 
     enable_auto_replay_recording
 Start recording a telemetry replay when driving starts, and stop it 10 seconds after leaving driving (requires `Le Mans Ultimate` or `rFactor 2` API). Automatic recordings are named `replay-auto-<date time>.tpreplay`. A recording stopped from Session recorder window is not restarted until next driving. Default is disabled.
@@ -4044,7 +4064,10 @@ Show message when game invalidates current lap.
 **This widget displays the next pit stop of the [Race Calculator](#race-calculator) plan: lap, fuel & energy to add, tyres to change and stops left.** The race calculator keeps the input of its plan (tyre plan & compounds included) whenever it changes, so the widget shows the same plan with race calculator closed. Laps count from race start, formation laps of race calculator left out. The stop of the lap just completed stays shown while the car is in the pits (finish line before the pit box; after it, the stop is still ahead).
 
     enable_live_replan
-Plan the rest of the race again at each lap & stop during a race, from the car: laps & time done, fuel, energy & tyres of now, stops done. Disabled: plan made before the race is followed.
+Plan the rest of the race again at each lap & stop during a race, from the car: laps & time done, fuel, energy & tyres of now, stops done, driver in the car & driving time of each driver, penalties to serve (time race: fewer laps) and pending repair (next stop longer). Disabled: plan made before the race is followed.
+
+    enable_live_consumption
+With `enable_live_replan`: rest of the race planned with the lap time, fuel & energy per lap of the latest 5 valid laps at race pace (at least 3), as `Load Live` of the race calculator, even with the race calculator closed. Disabled: values of the race calculator.
 
     pit_window_laps
 Set number of laps before next stop from which next stop is highlighted with `warning_color_pit_window`.

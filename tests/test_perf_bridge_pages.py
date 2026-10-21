@@ -186,18 +186,45 @@ def test_replay_clock_timers_read_cached_values():
 
 def test_updated_time_message_translated_from_cache(ui_env):
     """Message with the time of day: fixed part translated (cached), time added after"""
-    from neopedal import i18n
-    from neopedal.ui.quick import race_backend, replays_backend
+    import time
+    import types
 
-    for module in (race_backend, replays_backend):
-        with open(module.__file__, encoding="utf-8") as file:
-            assert 'trm(f"Updated from game at' not in file.read(), module.__name__
+    from PySide6.QtWidgets import QWidget
+
+    from neopedal import i18n
+    from neopedal.ui.quick import formatting
+    from neopedal.ui.quick.race_backend import RaceBackend
+    from neopedal.ui.quick.replays_backend import GameReplaysBackend
+
+    parent = QWidget()
+    replays = GameReplaysBackend(parent)  # type: ignore[arg-type]
+    team = types.SimpleNamespace(  # race calculator team tab: only what received_team uses
+        team_request=types.SimpleNamespace(busy=True), team_status="", unit_fuel=lambda value: value,
+        show_team_stints=lambda stints, capacity: None, team_status_changed=lambda: None)
+
+    def team_status() -> str:
+        RaceBackend.received_team(team, ([], 0.0))  # type: ignore[arg-type]
+        return team.team_status
+
+    def replays_status() -> str:
+        replays.mark_updated()
+        return replays.updated
+
     i18n.set_language("Français")
     try:
-        before = i18n._translate_message.cache_info()
-        texts = {i18n.trm("Updated from game at {}").replace("{}", stamp, 1) for stamp in ("12:00:01", "12:00:02")}
-        after = i18n._translate_message.cache_info()
-        assert texts == {"Mis à jour depuis le jeu à 12:00:01", "Mis à jour depuis le jeu à 12:00:02"}
-        assert after.currsize - before.currsize <= 1  # one entry for every time of day
+        for status in (team_status, replays_status):
+            texts = []
+            before = i18n._translate_message.cache_info()
+            for stamp in (43201.0, 43202.0):  # two times of day, same message
+                clock = types.SimpleNamespace(strftime=time.strftime, localtime=lambda _=None, at=stamp: time.gmtime(at))
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(formatting, "time", clock)
+                    texts.append(status())
+            after = i18n._translate_message.cache_info()
+            assert texts == ["Mis à jour depuis le jeu à 12:00:01", "Mis à jour depuis le jeu à 12:00:02"], status
+            assert after.currsize - before.currsize <= 1, status  # one entry for every time of day
+            assert after.hits > before.hits, status  # second time of day: template read from cache
     finally:
         i18n.set_language("English")
+        parent.deleteLater()
+        flush()

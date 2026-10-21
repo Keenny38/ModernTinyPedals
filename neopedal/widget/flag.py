@@ -75,10 +75,12 @@ def pending_penalty() -> str:
 
 
 def on_last_lap(in_race: bool) -> bool:
-    """Race lap of player ending with the flag (white flag): same finish lap as Laps and position & Session"""
+    """Race lap of player ending with the flag (white flag): same finish lap as Laps and position & Session,
+    plus the extra lap of a timed race when the leader crosses the line after the player (shown as +1 there)"""
     if not in_race or api.read.session.pre_race() or api.read.vehicle.finish_state():
         return False
     laps_done, finish_lap = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
+    finish_lap += round(minfo.vehicles.finishLapOffsetLeader)  # 0 unless timed race
     return 0 < finish_lap - laps_done <= 1  # laps done: completed laps + lap progress
 
 

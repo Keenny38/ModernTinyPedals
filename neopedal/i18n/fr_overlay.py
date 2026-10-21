@@ -277,4 +277,6 @@ OVERLAY_LABELS = MappingProxyType({
     "On point": "Pile",
     "early": "tôt",
     "late": "tard",
+    # Track map
+    "Track map after one lap": "Carte après un tour",
 })

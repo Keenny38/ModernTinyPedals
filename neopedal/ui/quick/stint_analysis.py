@@ -340,6 +340,10 @@ def write_history_csv(filename: str, records: Iterable[SessionRecord], header: S
                 session_names[record.session] if 0 <= record.session < len(session_names) else str(record.session),
                 number(record.best, 3) if record.best > 0 else "", record.valid, record.invalid,
                 number(record.meters, 0), number(record.seconds, 0), record.position or "", record.finish,
+                record.start_position or "",
+                number(record.wetness * 100, 0) if record.conditions_known else "",
+                number(record.track_temp, 1) if record.conditions_known else "",
+                record.compound, record.online if record.online >= 0 else "", record.game_version,
             ])
 
 

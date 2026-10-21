@@ -161,6 +161,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             minfo.delta.lapTimeCurrent > 10
             or minfo.delta.lapTimeCurrent < 2
             or minfo.delta.lapTimeLast <= 0
+            or minfo.fuel.lastLapPartial  # consumption of lap counted from mid-lap only, not in history
         ):
             continue
 

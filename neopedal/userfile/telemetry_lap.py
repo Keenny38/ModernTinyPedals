@@ -34,6 +34,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import threading
 import time
 import zlib
@@ -166,7 +167,7 @@ class LapData(NamedTuple):
     """Lap telemetry columns (packed arrays once loaded from file, lists when built in code)"""
 
     name: str
-    columns: dict[str, Column]
+    columns: Mapping[str, Column]  # dict, or CachedColumns read from cache file when used
     info: dict | None = None  # lap info from file first line
 
     @property
@@ -837,3 +838,40 @@ def write_lap_csv(filename: str, header: list[str], grid: list[float], columns: 
             os.remove(temporary)
         return error.strerror or str(error)
     return ""
+
+
+def share_lap_job(path: str, target: str, shared_by: str = "") -> str:
+    """Write lap file as one compressed lap file to send to another driver (added to their lap viewer with Add File),
+    lap info tells who shared it (worker process job), returns error text ("" if written)
+
+    Written to a temporary file renamed once complete: job stopped at app exit leaves no partial file.
+    """
+    temporary = f"{target}.tmp"
+    try:
+        with open_lap_file(path) as source:
+            first = source.readline(MAX_INFO_LENGTH)
+            info = parse_info(first)
+            if shared_by:
+                info["shared_by"] = shared_by
+            with gzip.open(temporary, "wt", encoding="utf-8", newline="") as shared:
+                shared.write(INFO_PREFIX + json.dumps(info) + "\n")
+                if not first.startswith(INFO_PREFIX):  # lap file without info line: its header line
+                    shared.write(first)
+                shutil.copyfileobj(source, shared)
+        replace_retry(temporary, target)
+    except (OSError, EOFError, zlib.error, UnicodeDecodeError) as error:  # corrupt .gz source: zlib.error, EOFError
+        logger.error("LAP SHARE: unable to share %s: %s", path, error)
+        with suppress(OSError):
+            os.remove(temporary)
+        return getattr(error, "strerror", None) or str(error)
+    return ""
+
+
+def lap_part(lap: LapData, low: float, high: float) -> LapData:
+    """Samples of lap from distance low to high (passage of a lap exported alone), lap kept if none in range"""
+    distances = lap.distance
+    first = next((index for index, distance in enumerate(distances) if distance >= low), len(distances))
+    last = next((index for index in range(len(distances) - 1, -1, -1) if distances[index] <= high), -1)
+    if last - first < 1:
+        return lap
+    return LapData(lap.name, {name: values[first:last + 1] for name, values in lap.columns.items()}, lap.info)

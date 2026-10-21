@@ -106,12 +106,16 @@ CFG_STRING = (
     "^column_widths$|"
     "^hidden_columns$|"
     "^input_driver_table$|"
+    "^input_driver_names$|"
     "^live_unfollowed$|"
     "^preset$|"
     "^process_id$|"
     "^open_pages$|"
     "^rail_items$|"
     "^home_quick_access$|"
+    "^last_run_version$|"
+    "^favorite_overlays$|"
+    "^recent_overlays$|"
     "^version$|"
     "^user_profile_[0-9]$|"  # black box user display profiles (see black_box_ui.USER_PROFILES)
     # Partial match
@@ -157,6 +161,7 @@ CFG_INTEGER = (
     "^window_width$|"
     "^window_height$|"
     "^last_page_index$|"
+    "^overlays_sort_order$|"
     # Partial match
     "area_margin|"
     "area_size|"

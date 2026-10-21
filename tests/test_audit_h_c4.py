@@ -23,14 +23,19 @@ def part_classes() -> dict:
     """Part property of page: class of part"""
     from neopedal.ui.quick.lap_charts import ChartTools, MathChannels
     from neopedal.ui.quick.lap_conditions import LapConditions
+    from neopedal.ui.quick.lap_consistency import MapConsistency
     from neopedal.ui.quick.lap_corners import CornerTable
     from neopedal.ui.quick.lap_dashboard import DashboardTab
     from neopedal.ui.quick.lap_export import LapExports
+    from neopedal.ui.quick.lap_map_marks import MapMarks
+    from neopedal.ui.quick.lap_map_pointer import MapPointer
     from neopedal.ui.quick.lap_session import SessionTab
+    from neopedal.ui.quick.lap_track_notes import TrackNotes
 
     return {"conditions": LapConditions, "dashboard": DashboardTab, "session": SessionTab,
             "math": MathChannels, "charts": ChartTools, "exports": LapExports,
-            "cornerTable": CornerTable}
+            "cornerTable": CornerTable, "trackNotes": TrackNotes, "mapConsistency": MapConsistency,
+            "mapMarks": MapMarks, "mapPointer": MapPointer}
 
 
 def meta_names(cls) -> set[str]:

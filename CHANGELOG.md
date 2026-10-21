@@ -3,6 +3,108 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.27.0 (2026-10-21)
+
+A new Home page with a debrief of your last session, a richer What's New page, a livelier Overlays page, the official circuit of Le Mans Ultimate on the track map from the first meters, a race calculator that follows the real race (drivers, penalties, pit menu), new telemetry channels, goals and road conditions in Driver Stats, and smoother animations on fast screens.
+
+### New
+
+#### Track map from the first meters (Le Mans Ultimate)
+
+- **Track Map** and **Navigation** show the official circuit of the game as soon as it answers, without driving a lap first (`enable_restapi_access`, on by default):
+  - the shape at once, with the cars on it;
+  - the start line (and the **Elevation** profile, Corner Coach) once a car drives on track;
+  - the sector lines once you cross them, then it is saved as the track map.
+- A short freeze of the app or the game while recording a lap no longer loses it: the lap is shown with its gap and the next lap without a gap is saved. A real jump (back to the garage, part of the lap skipped) is still not kept.
+- Without any map yet, Track Map shows `Track map after one lap` instead of a made-up circle.
+- rFactor 2, or Rest API off: one complete lap is still needed.
+
+![Official circuit before the first lap](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-official-track-map.png)
+
+#### Home page
+
+- **Checks**: what keeps overlays from showing right, most important first, each with a button to fix it: `Game running without data` (Le Mans Ultimate open with plugins off), `Game not running`, `Active State Override is on`, `No overlay enabled`, `Spectate Mode Enabled`, `Lap recording is off`, `Update Available`. While you drive with nothing wrong: `Ready`.
+- **Session Debrief** of your last session: best lap against your personal best, pace and consistency, theoretical best, fuel per lap, and `Work on`: the three corners where you lose most time, with the likely cause (`Brakes 6 m earlier`, `Minimum speed 4 km/h lower`...). **Click a corner** to open the telemetry on it, charts zoomed; `Open Telemetry` opens both laps. Your lap time goal (Driver Stats) with a progress bar.
+- `Switch Preset` from the preset card, the last session opens its track and car in Driver Stats, the game card opens the API options.
+- **Driver card**: change since your previous Driver & Safety Rank and a line of each rank over time.
+- The page is now drawn in Qt Quick (1 to 3 columns) and reads the game and files only while it is shown.
+
+![Home page with the session debrief](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-home-page.png)
+
+#### What's New page
+
+- Release notes as they are written: groups (`New`, `Improvements`, `Fixes`), one card per topic, sub-bullets, and the **screenshots** of the changelog in their card (click one to enlarge, arrows browse the others).
+- **Skipped versions**: the notes of every version since the installed one (up to 12), with chips to jump to a version.
+- `Search the notes` (`Ctrl+F`), and the version menu shows any older version, offline.
+- **Option names are links**: a click opens that option. A topic naming an overlay offers `Try <overlay>` (turns it on), then its options.
+- **After an update**, the page opens once at the first start of the new version (`show_release_notes_after_update`, or the `Show after each update` switch of the page).
+
+![What's New page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-whats-new-page.png)
+
+#### Overlays page
+
+- **Previews play while hovered**: the overlay runs on a simulated race driving a corner in a loop.
+- **Screen view**: running overlays at their place on your screens, overlaps outlined; drag one to move it (`Undo`), click it for its options.
+- **Favorites** (star of a card, `Ctrl+F`) and **Recently Edited** chips, a **sort** button (name, enabled first, category); a switched overlay stays where it is.
+- What each overlay shows, in its tooltip and in the compact list; badges for overlays shown only in some sessions (`Race`, `In Pits`...) or only on stream or screen.
+- The loaded **preset** at the top: click it to load another one.
+- Enabling or disabling many overlays at once is a single step (one save, one restart of the modules).
+- **Overlay Options**: the preview plays the overlay on the simulated race (inputs, speed, gear, G force, brakes heating up, loads), with a play / pause button under it; overlays showing a fixed sample stay still.
+
+![Overlays page with favorites, badges and the preset](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-page.png)
+
+![Screen view of the Overlays page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-screen-view.png)
+
+#### Race Calculator
+
+- **Live race with the real drivers**: the driver in the car and the driving time of each stint come from the race (LMU team order), with **penalties** to serve and a pending **repair** in the replan.
+- **Where you rejoin** (under `Class Rivals`): class place and gaps if you stop at the end of this lap.
+- **`Pit Menu`** (LMU, in a session): sets the refill of the next stop in the game pit menu (virtual energy for a car using it, else fuel).
+- **`Safety Car Risk`**: chance of a safety car over the race, the part of the race where it saves a stop, and for each stint whether to stop under it (`Safety Cars per Hour`).
+- **Tyre pace**: `Used Tyre Pace Loss` (tyres changed when it pays), lap time difference of each compound (gear button of the tyre stock), and **`Compound Comparison`** of the whole race on Soft, Medium, Hard.
+- **Temperature**: `Lap Time per °C` with the `Temperature Trend` of the weather forecast (`Live` tab).
+- **Driver minimums** that cannot fit in the race are shown on the `Driving Time` card instead of being planned in one-lap stints; a driver short of its minimum drives whole laps up to it.
+- **Race plan** overlay: `enable_live_consumption` (on by default) plans the rest of the race with the lap time and consumption of your latest race laps, even with the page closed.
+- Saving target, strategy and compound comparisons and safety car risk are calculated on a worker thread: typing stays smooth on a long race.
+
+#### Telemetry viewer
+
+- **New channels**: throttle and brake cut by the driving aids, aero balance, rake, damper velocity (presets `Driving Aids` and `Aero`), and **bottoming** marks on the map.
+- **`enable_100hz_lap_recording`** (off by default): a sample every 10 ms instead of 20 ms; newer laps also keep the pedals after driving aids, front and rear downforce and camber.
+- **Track notes**: `Add Track Note Here` on the charts; notes are those of the Track Notes overlay (a note added here shows in game).
+- **`Share Lap...`**: one `.csv.gz` file for another driver, who adds it with `Add File...` (shown "shared by" you).
+- **Session** tab: sector times, or for one corner the minimum speed, braking point or corner time of every lap.
+- Exports `CSV, Visible Part...`, `CSV, Passage A ↔ B...` and MoTeC between the markers.
+- A lap read from its binary copy loads only the channels shown: about half the memory per lap.
+
+#### Driver Stats
+
+- **Road conditions** of each session (dry or wet road, track temperature, tyre compound), start position and online or offline: filter by **road**, **server** or **since a game version**, with a **wet PB** and a **PB of the latest game version**.
+- **`Lap Time Goal`** per car (suggested from the next community level): progress bar, goal line on the progression chart, a message once beaten.
+- **Places gained**, **clean race** rate and streak, **`Rivals`** met in several online races, rank history.
+- Table **search**, **class filter**, `Group Vehicles by Class`; combos not driven for 30 days marked; activity of any year with driving time **by track and class** (`Breakdown`).
+- `Official Races to Come (RaceControl)` (off by default) with your best laps on their track.
+- **Share** your personal best as a picture card or a code to paste in a chat (`Copy Personal Best Card`, `Copy Personal Best Code`, `Compare a Personal Best Code...`).
+
+![Driver Stats: goal, filters and wet PB](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-goal-filters.png)
+
+![Driver Stats: driving time by track and class](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-all-tracks.png)
+
+### Improvements
+
+- **Smoother animations**: pages animate and scroll at the refresh rate of the screen (up to 125 images per second on a 240 Hz screen, 143 on 144 Hz) instead of 62 (Windows).
+- **Lap and sector time colors** (modern Standings, Relative, Rivals and Track Map sectors): purple for the best of the class, now including sectors of the lap being driven, so a sector beaten mid-lap is at once the only purple one; green for a personal best as soon as it is set; a slower valid last lap is yellow.
+- **Running lap time** for every car, also those without telemetry, and while your own telemetry is frozen (garage, monitor, spectating).
+- **Real game sessions replayed** in the automated tests through every data module and overlay, checked against the game values.
+
+### Fixes
+
+- **Fuel**: the lap you joined mid-lap (app started or preset loaded on track) was counted as a full lap, with a partial consumption in the history and the race calculator.
+- **Flag**: in a timed race, the last lap alert also comes on the extra lap when the leader crosses the line after you.
+- **Track Map, Navigation, Elevation, Corner Coach**: the map is read as one piece, never half of an old map and half of the new one while it is replaced.
+- **Startup**: the window no longer shows a first frame in the Windows default colors (gray with the accent color) before the app theme.
+- Button labels and short column headers (`PB`) no longer cut by a fraction of a pixel.
+
 ## 0.26.0 (2026-10-19)
 
 A corner coach, the Driver Rank and Safety Rank of every driver online, new flag alerts, darker panels, two overlays from TinyPedal 2.51, and three audits of bugs, performance and interface.

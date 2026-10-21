@@ -130,14 +130,17 @@ def test_brands_validator_drops_invalid_entries(folder):
     assert loaded == {"Car A": "Brand A"}
 
 
-def test_setting_loads_brands_with_validator():
-    import inspect
+def test_setting_loads_brands_with_validator(folder):
+    """Setting loads user brands.json validated: invalid entries dropped, valid ones kept"""
+    from neopedal.setting import Setting
 
-    from neopedal import setting
-
-    source = inspect.getsource(setting.Setting)
-    start = source.index("self.user.brands = load_style_json_file(")
-    assert "validator=StyleValidator.brands" in source[start:source.index(")", start)]
+    config = Setting()
+    config.default.set_default()
+    config.path.settings = folder
+    with open(f"{folder}{config.filename.brands}", "w", encoding="utf-8") as file:
+        json.dump({"Car A": "Brand A", "Car B": ["x"], "Car C": None, "Car D": "Brand D"}, file)
+    config.load_styles()
+    assert config.user.brands == {"Car A": "Brand A", "Car D": "Brand D"}
 
 
 # --- 11. OpenXR layer disabled by user stays disabled after unregister & register (reload, restart)

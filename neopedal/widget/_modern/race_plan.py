@@ -60,7 +60,8 @@ class Realtime(StatsMixin, ModernOverlay):
     wcfg: RacePlanConfig
 
     options = (
-        "font_size", "layout", "pit_window_laps", "enable_live_replan", "show_next_stop", "show_refuel",
+        "font_size", "layout", "pit_window_laps", "enable_live_replan", "enable_live_consumption", "show_next_stop",
+        "show_refuel",
         "show_energy", "show_tyres", "show_stops_left", "show_pit_menu", "show_target", "show_pit_entry",
         "show_stint_limit", "show_consumption_estimate",
         "display_order_next_stop", "display_order_refuel", "display_order_energy", "display_order_tyres",

@@ -32,6 +32,7 @@ def host(monkeypatch):
     monkeypatch.setattr(race_calculator.RaceCalculator, "save_file", lambda self, *args: found.save_path)
 
     monkeypatch.setattr(race_backend, "SCENARIO_DELAY_MS", 0)  # scenarios at once, not after a pause
+    monkeypatch.setattr(race_backend, "SCENARIO_JOBS", False)  # on the UI thread: read at once
     return found
 
 
@@ -418,7 +419,7 @@ def test_game_data_switched_off_and_on(page, host, monkeypatch):
 
     from neopedal.hotkey import command
     from neopedal.ui import command_palette
-    from neopedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_backend, race_files
 
     backend = page.backend
     set_race(backend, laps=40)
@@ -434,7 +435,7 @@ def test_game_data_switched_off_and_on(page, host, monkeypatch):
     assert backend.strategy.first_lap == 0 and backend.liveStatus == ""  # whole race planned
     assert not backend._live_timer.isActive() and not backend._garage_timer.isActive()
     reads = []
-    monkeypatch.setattr(race_backend, "read_live", lambda *args: reads.append(1))
+    monkeypatch.setattr(race_files, "read_live", lambda *args: reads.append(1))
     backend.refresh_live()
     backend.refresh_race_state()
     backend.setTab(2)

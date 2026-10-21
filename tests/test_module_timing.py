@@ -412,7 +412,7 @@ def test_module_save_on_stop_unless_discarded():
 def test_consumption_history_replaced_not_changed_in_place(tele, monkeypatch, tmp_path):
     """GUI iterates history while module adds laps: never changed in place (copy on write)"""
     monkeypatch.setattr(minfo, "delta", SimpleNamespace(lapTimeCurrent=5.0, lapTimeLast=90.0, isValidLap=True))
-    monkeypatch.setattr(minfo, "fuel", SimpleNamespace(lastLapConsumption=3.0, capacity=100.0))
+    monkeypatch.setattr(minfo, "fuel", SimpleNamespace(lastLapConsumption=3.0, capacity=100.0, lastLapPartial=False))
     monkeypatch.setattr(minfo, "energy", SimpleNamespace(lastLapConsumption=0.0))
     monkeypatch.setattr(minfo, "hybrid", SimpleNamespace(batteryDrainLast=0.0, batteryRegenLast=0.0))
     monkeypatch.setattr(minfo, "wheels", SimpleNamespace(lastLapTreadWear=(1.0, 1.0, 1.0, 1.0)))

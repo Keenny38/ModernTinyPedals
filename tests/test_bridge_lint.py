@@ -35,12 +35,17 @@ ALLOWED_COMPUTING: dict[str, int] = {
     "stream_backend.py": 3,
     "track_map_backend.py": 5,
 }
+# Parts (mixins) of a backend: counted with it (a signal of StatsCore notifies properties of every part)
+BACKEND_PARTS = {f"stats_{part}.py": "stats_backend.py"
+                 for part in ("core", "table", "overview", "selection", "edits", "sharing")}
+BACKEND_PARTS.update({f"replays_{part}.py": "replays_backend.py"
+                      for part in ("list", "folder", "playback", "incidents", "standings", "map")})
 # Notify signals covering more than MAX_SHARED_NOTIFY properties: values changed together (theme, options of a page)
 ALLOWED_SHARED: dict[tuple[str, str], int] = {
     ("__init__.py", "changed"): 30,  # theme & translator copies: changed only by a theme or language switch
     ("director_backend.py", "settingsChanged"): 8,
     ("lap_backend.py", "chartChanged"): 11,
-    ("lap_backend.py", "mapChanged"): 10,
+    ("lap_backend.py", "mapChanged"): 9,
     ("lap_backend.py", "optionsChanged"): 13,
     ("lap_corners.py", "changed"): 10,
     ("overlay_options_backend.py", "filterChanged"): 9,
@@ -61,7 +66,8 @@ def properties(tree: ast.AST):
         for decorator in node.decorator_list:
             if isinstance(decorator, ast.Call) and getattr(decorator.func, "id", "") == "Property":
                 notify = next((keyword.value for keyword in decorator.keywords if keyword.arg == "notify"), None)
-                yield node, ast.unparse(notify) if notify is not None else ""
+                # notify=StatsCore.tracksChanged (signal of another part of the backend): its name
+                yield node, ast.unparse(notify).rpartition(".")[2] if notify is not None else ""
 
 
 def computing(getter: ast.FunctionDef) -> bool:
@@ -83,19 +89,26 @@ def scan(source: str) -> tuple[int, dict[str, int]]:
 
 def test_backend_properties():
     unexpected, stale = [], []
+    backends: dict[str, tuple[int, dict[str, int]]] = {}
     for path in sorted(BACKEND_FOLDER.glob("*.py")):
         count, shared = scan(path.read_text(encoding="utf-8"))
-        allowed = ALLOWED_COMPUTING.get(path.name, 0)
-        if count > allowed:
-            unexpected.append(f"{path.name}: {count} computing getters (allowed {allowed}): store the value instead")
-        elif count < allowed:
-            stale.append(f"ALLOWED_COMPUTING {path.name}: {count}")
+        name = BACKEND_PARTS.get(path.name, path.name)
+        total_count, total_shared = backends.get(name, (0, {}))
         for notify, total in shared.items():
-            allowed = ALLOWED_SHARED.get((path.name, notify), MAX_SHARED_NOTIFY)
+            total_shared[notify] = total_shared.get(notify, 0) + total
+        backends[name] = (total_count + count, total_shared)
+    for name, (count, shared) in sorted(backends.items()):
+        allowed = ALLOWED_COMPUTING.get(name, 0)
+        if count > allowed:
+            unexpected.append(f"{name}: {count} computing getters (allowed {allowed}): store the value instead")
+        elif count < allowed:
+            stale.append(f"ALLOWED_COMPUTING {name}: {count}")
+        for notify, total in shared.items():
+            allowed = ALLOWED_SHARED.get((name, notify), MAX_SHARED_NOTIFY)
             if total > allowed:
-                unexpected.append(f"{path.name}: {notify} notifies {total} properties (allowed {allowed}): split it")
-            elif total < allowed and (path.name, notify) in ALLOWED_SHARED:
-                stale.append(f"ALLOWED_SHARED {path.name} {notify}: {total}")
+                unexpected.append(f"{name}: {notify} notifies {total} properties (allowed {allowed}): split it")
+            elif total < allowed and (name, notify) in ALLOWED_SHARED:
+                stale.append(f"ALLOWED_SHARED {name} {notify}: {total}")
     assert not unexpected, "\n".join(unexpected)
     assert not stale, "fixed: lower or remove " + ", ".join(stale)
 

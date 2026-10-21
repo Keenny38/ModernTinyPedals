@@ -31,7 +31,7 @@ real stop (not the one planned). Session change: see validator.is_same_session.
 
 Driver of each stint: driver name of the player car in scoring (the driver in the car, it changes
 on a driver swap), read at pit entry (driver of the stint ended) and pit exit (driver of the next
-stint) of each stop seen. Game strategy data (team usage) is only asked while the race calculator
+stint) of each stop seen; driving time of a stint: race clock from pit exit to next pit entry. Game strategy data (team usage) is only asked while the race calculator
 team tab is shown, so scoring is the source followed all race long.
 """
 
@@ -58,6 +58,7 @@ class StopRecord(NamedTuple):
     clock: float  # race clock leaving the pits
     driver_in: str  # driver of the stint ended by the stop (in the car at pit entry), "" unknown
     driver_out: str  # driver of the next stint (in the car leaving the pits), "" unknown
+    entry_clock: float = -1.0  # race clock at pit entry, -1 = unknown
 
 
 class StopCounter:
@@ -84,6 +85,7 @@ class StopCounter:
         self.stops: list[StopRecord] = []  # stops seen in this session
         self.driver = ""  # driver in the car (last update)
         self.entry_driver = ""  # driver in the car at pit entry
+        self.entry_clock = -1.0  # race clock at pit entry
 
     def update(self, session: tuple, in_pits: bool, speed: float, fuel: float, energy: float,
                tread: float, game_stops: int, now: float | None = None, laps: float = 0.0,
@@ -119,6 +121,7 @@ class StopCounter:
             self.still_since = 0.0
             self.amounts = (fuel, energy, tread)
             self.entry_driver = driver
+            self.entry_clock = max(clock, 0.0)
         if game_stops > self.last_game:
             if not self.visit_seen:
                 self.counted += game_stops - self.last_game
@@ -145,7 +148,7 @@ class StopCounter:
                 self.last_stop_clock = max(clock, 0.0)
                 self.stops.append(StopRecord(
                     self.baseline + self.counted, self.last_stop_lap, self.last_stop_clock,
-                    self.entry_driver, driver))
+                    self.entry_driver, driver, self.entry_clock))
             self.counting = False
         return self.baseline + self.counted
 
@@ -164,6 +167,19 @@ class StopCounter:
                 names[stop.number] = names[stop.number] or stop.driver_out
         names[-1] = (self.entry_driver if self.counting else self.driver) or names[-1]
         return tuple(names)
+
+    def stint_seconds(self) -> tuple[float, ...]:
+        """Driving time of each stint ended (first stint first), -1 unknown: race clock from pit
+        exit of the stop before (race start for the first stint) to pit entry of the stop ending it,
+        both seen"""
+        count = self.baseline + self.counted
+        seconds = [-1.0] * count
+        exits = {stop.number: stop.clock for stop in self.stops}
+        for stop in self.stops:
+            start = 0.0 if stop.number == 1 else exits.get(stop.number - 1, -1.0)
+            if 0 < stop.number <= count and start >= 0 <= stop.entry_clock and stop.entry_clock >= start:
+                seconds[stop.number - 1] = stop.entry_clock - start
+        return tuple(seconds)
 
 
 class LiveRead(NamedTuple):
@@ -194,12 +210,17 @@ def read_race_state(unit_fuel: Callable[[float], float], counter: StopCounter,
     seconds_left = session.remaining()
     if seconds_left <= 0 < session.end():  # timer ended: time since (negative)
         seconds_left = min(session.end() - session.elapsed(), 0.0)
+    penalty = api.read.vehicle.penalty()
+    penalties = max(api.read.vehicle.number_penalties(), penalty.pending, 0)
+    stop_go = float(penalty.seconds) if penalties and "stop" in penalty.kind.casefold() else 0.0
+    repair = max(api.read.vehicle.repair_time(), 0.0)
     text =(f"{laps_done} (+{progress:.2f}) · {clock(elapsed)} / {clock(seconds_left)} · "
             f"{fuel:.1f} {symbol_fuel} · {energy:.0f} % · {tread:.0f} % · {stops} ({game_stops})")
     if laps_done <= 0:  # plan made before the start is the plan of the race
         return LiveRead(None, in_pits, text)
     state = RaceState(laps_done, progress, elapsed, seconds_left, fuel, energy, tread, stops,
-                      counter.last_stop_lap, counter.last_stop_clock, counter.stint_drivers())
+                      counter.last_stop_lap, counter.last_stop_clock, counter.stint_drivers(),
+                      counter.stint_seconds(), penalties, stop_go, repair)
     return LiveRead(state, in_pits, text)
 
 
@@ -219,6 +240,40 @@ class Rival(NamedTuple):
     last_stop_lap: int  # 0 = no stop seen
     in_pits: bool
     player: bool
+    progress: float = 0.0  # race distance: laps completed & fraction of lap in progress
+
+
+class PitExit(NamedTuple):
+    """Where the player car rejoins if it stops at the end of this lap: class place, cars just
+    ahead & behind (name, seconds), class cars passing during the stop"""
+
+    place: int
+    ahead: tuple[str, float] | None
+    behind: tuple[str, float] | None
+    passed: int
+    loss: float  # seconds lost by the stop (pit lane & service)
+
+
+def pit_exit(rivals: list[Rival], loss: float, laptime: float) -> PitExit | None:
+    """Rejoin of the player car after a stop losing `loss` seconds, from the race distance of the
+    cars of its class (gaps at the player's lap time, other cars not stopping meanwhile), None
+    without player car, lap time or other car"""
+    player = next((rival for rival in rivals if rival.player), None)
+    others = [rival for rival in rivals if not rival.player]
+    if player is None or not others or laptime <= 0 or loss <= 0:
+        return None
+    after = player.progress - loss / laptime  # race distance once back on track
+    ahead = [rival for rival in others if rival.progress > after]
+    behind = [rival for rival in others if rival.progress <= after]
+    passed = sum(1 for rival in ahead if rival.progress <= player.progress)
+    closest_ahead = min(ahead, key=lambda rival: rival.progress, default=None)
+    closest_behind = max(behind, key=lambda rival: rival.progress, default=None)
+    return PitExit(
+        len(ahead) + 1,
+        (closest_ahead.driver, (closest_ahead.progress - after) * laptime) if closest_ahead else None,
+        (closest_behind.driver, (after - closest_behind.progress) * laptime) if closest_behind else None,
+        passed, loss,
+    )
 
 
 class RivalTracker:
@@ -248,5 +303,6 @@ class RivalTracker:
                 last_lap = laps
             self.stops[slot] = (stops, last_lap)
             rivals.append(Rival(read.vehicle.place(index), read.vehicle.driver_name(index), laps, stops,
-                                last_lap, read.vehicle.in_pits(index), index == player))
+                                last_lap, read.vehicle.in_pits(index), index == player,
+                                laps + min(max(read.lap.progress(index), 0.0), 1.0)))
         return sorted(rivals, key=lambda rival: rival.place)

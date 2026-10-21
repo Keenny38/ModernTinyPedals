@@ -1,4 +1,4 @@
-"""Track map widget: recorded map with sectors, cars, safety car, pit out prediction, temporary circle map"""
+"""Track map widget: recorded map with sectors, cars, safety car, pit out prediction, official circuit shape, no map"""
 
 import math
 
@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QTimerEvent
 from PySide6.QtGui import QColor
 
-from neopedal.module_info import minfo
+from neopedal.module_info import TrackMap, minfo
 from neopedal.setting import cfg
 from tests.test_list_widgets import visible_pixels
 from tests.test_readers import lmu_api
@@ -23,13 +23,11 @@ def track(ui_env, bundled_fonts, monkeypatch):
 
     saved = (minfo.vehicles.dataSet, minfo.vehicles.totalVehicles, minfo.vehicles.playerIndex)
     mapping, delta = minfo.mapping, minfo.delta
-    saved_map = (mapping.coordinates, mapping.elevations, mapping.sectors, mapping.lastModified,
-                 mapping.pitEntryPosition, mapping.pitExitPosition, delta.deltaBestData, delta.lapTimePace)
+    saved_map = (mapping.trackMap, mapping.pitEntryPosition, mapping.pitExitPosition, delta.deltaBestData,
+                 delta.lapTimePace)
     coords = tuple((600 * math.cos(i / NODES * math.tau), 350 * math.sin(i / NODES * math.tau)) for i in range(NODES))
-    mapping.coordinates = coords
-    mapping.elevations = tuple((i / NODES * LENGTH, 5 * math.sin(i / 20)) for i in range(NODES))
-    mapping.sectors = (66, 133)
-    mapping.lastModified = 1.0
+    mapping.trackMap = TrackMap(coords, tuple((i / NODES * LENGTH, 5 * math.sin(i / 20)) for i in range(NODES)),
+                                (66, 133), 1.0)
     mapping.pitEntryPosition = LENGTH * 0.95
     mapping.pitExitPosition = LENGTH * 0.05
     delta.deltaBestData = tuple((i / 100 * LENGTH, i / 100 * 90.0) for i in range(101))
@@ -45,8 +43,8 @@ def track(ui_env, bundled_fonts, monkeypatch):
     monkeypatch.setattr(api, "read", sim.reader())
     yield shared
     minfo.vehicles.dataSet, minfo.vehicles.totalVehicles, minfo.vehicles.playerIndex = saved
-    (mapping.coordinates, mapping.elevations, mapping.sectors, mapping.lastModified,
-     mapping.pitEntryPosition, mapping.pitExitPosition, delta.deltaBestData, delta.lapTimePace) = saved_map
+    (mapping.trackMap, mapping.pitEntryPosition, mapping.pitExitPosition, delta.deltaBestData,
+     delta.lapTimePace) = saved_map
 
 
 def render(**options):
@@ -99,15 +97,71 @@ def test_safety_car_and_pitout_prediction(track):
         assert times and all(time > 12.0 for time, _ in times)
 
 
-def test_temporary_circle_map_without_recorded_map(track):
-    minfo.mapping.coordinates = None
-    widget, image = render(show_vehicle_class_standings=True)
-    assert widget.map_scaled is None
-    assert visible_pixels(image) > 50
+@pytest.mark.parametrize("name", ["track_map", "_modern.track_map"])
+def test_no_map_text_instead_of_circle(track, name):
+    """No track map yet: a line of text, no made-up circle with cars placed by lap progress"""
+    from importlib import import_module
+
+    minfo.mapping.trackMap = TrackMap(lastModified=2.0)
+    cfg.user.setting["track_map"].update(show_vehicle_class_standings=True, show_background=False)
+    widget = import_module(f"neopedal.widget.{name}").Realtime(cfg, "track_map")
+    try:
+        widget.timerEvent(QTimerEvent(0))
+        assert widget.map_scaled is None
+        assert widget.vehicle_positions() == ()  # no car drawn
+        assert widget.no_map_text() == "Track map after one lap"
+        image = widget.grab().toImage()
+        blank = image.pixel(0, 0)
+        drawn = sum(1 for y in range(0, image.height(), 2) for x in range(0, image.width(), 2)
+                    if image.pixel(x, y) != blank)
+        assert 0 < drawn < 1500  # text only (circle road & 20 cars: far more)
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("name", ["track_map", "_modern.track_map", "navigation", "_modern.navigation",
+                                  "elevation", "_modern.elevation"])
+def test_official_circuit_shape_without_start_and_sectors(track, name):
+    """Official circuit before start line & sector lines known (no distances, no sectors): map drawn, no line"""
+    from importlib import import_module
+
+    shape = minfo.mapping.trackMap.coordinates
+    minfo.mapping.trackMap = TrackMap(shape, None, None, 3.0)
+    widget_name = name.rsplit(".", 1)[-1]
+    cfg.user.setting[widget_name].update(show_start_line=True, show_sector_line=True)
+    widget = import_module(f"neopedal.widget.{name}").Realtime(cfg, widget_name)
+    try:
+        widget.timerEvent(QTimerEvent(0))
+        widget.grab()
+        assert widget.track_map.coordinates == shape
+        if widget_name == "track_map":
+            assert widget.map_scaled and widget.car_positions  # cars placed by world position
+            assert widget.update_safetycar() is None and not widget.update_predictions()  # need distances
+        if widget_name == "navigation":
+            assert widget.sfinish_path is None and widget.sector_path is None
+    finally:
+        widget.deleteLater()
+
+
+def test_map_drawn_is_one_snapshot(track):
+    """Map published while overlay draws: overlay keeps coordinates & sectors of the map it took"""
+    from neopedal.widget.track_map import Realtime
+
+    widget = Realtime(cfg, "track_map")
+    try:
+        widget.timerEvent(QTimerEvent(0))
+        drawn = widget.track_map
+        minfo.mapping.trackMap = TrackMap(drawn.coordinates[:50], drawn.elevations[:50], (10, 20), 9.0)
+        assert widget.track_map is drawn and widget.track_map.sectors == (66, 133)  # until next update
+        widget.timerEvent(QTimerEvent(0))
+        assert widget.track_map.sectors == (10, 20) and len(widget.map_scaled) == 50
+    finally:
+        widget.deleteLater()
 
 
 def test_open_map_not_closed(track):
-    minfo.mapping.coordinates = tuple((i * 10.0, 0.5 * i) for i in range(NODES))  # point to point stage
+    minfo.mapping.trackMap = minfo.mapping.trackMap._replace(  # point to point stage
+        coordinates=tuple((i * 10.0, 0.5 * i) for i in range(NODES)))
     widget, _ = render()
     assert not widget.circular_map
 
@@ -117,7 +171,7 @@ def test_sector_index_out_of_map_skipped(track, name):
     """Sector index past last node (edited map file, or file of another layout): map still drawn, line skipped"""
     from importlib import import_module
 
-    minfo.mapping.sectors = (66, NODES + 50)
+    minfo.mapping.trackMap = minfo.mapping.trackMap._replace(sectors=(66, NODES + 50))
     wcfg = cfg.user.setting[name]
     wcfg.update(show_sector_line=True, show_start_line=True)
     widget = import_module(f"neopedal.widget.{name}").Realtime(cfg, name)
@@ -142,7 +196,7 @@ def test_track_orientation_added_to_display_orientation(track, monkeypatch):
         minfo.mapping.orientation = 300.0  # edited in track info editor: map drawn again at once
         widget.timerEvent(QTimerEvent(0))
         assert widget.map_orient == pytest.approx(math.radians(330))
-        assert widget.map_changed(-1)  # temporary circle map ignores track orientation
+        assert widget.map_changed(-1)  # no map: track orientation ignored
         assert widget.last_orientation == 0.0
     finally:
         widget.deleteLater()

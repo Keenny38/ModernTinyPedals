@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 QML_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "qml")
 # QML files are in subfolders: components (shared Tp* controls, imported by pages with import "../components")
-# and one folder per zone (config, overlays, director, telemetry, analysis)
+# and one folder per zone (home, config, overlays, director, telemetry, analysis)
 QML_COMPONENTS = os.path.join(QML_FOLDER, "components")
 _QML_INDEX: dict[str, dict[str, str]] = {}
 QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "int": "int", "QString": "string"}  # Theme property types

@@ -34,7 +34,10 @@ from . import atomic_write, write_json
 logger = logging.getLogger(__name__)
 
 
-def set_default_tyre_setting(limited_stock: bool, starting_tread: float, wear_per_stint: float) -> dict:
+def set_default_tyre_setting(limited_stock: bool, starting_tread: float, wear_per_stint: float,
+                             lap_time_delta: float = 0.0) -> dict:
+    """Compound setting: lap_time_delta: lap time difference of the compound (seconds, only the
+    difference between compounds counts)"""
     return {
         "enable_limited_stock": limited_stock,
         "front_left_starting_tread":  starting_tread,
@@ -45,6 +48,7 @@ def set_default_tyre_setting(limited_stock: bool, starting_tread: float, wear_pe
         "rear_left_wear_per_stint":   wear_per_stint,
         "rear_right_starting_tread":  starting_tread,
         "rear_right_wear_per_stint":  wear_per_stint,
+        "lap_time_delta": lap_time_delta,
     }
 
 

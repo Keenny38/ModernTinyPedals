@@ -1,14 +1,18 @@
-"""Home page: release notes of running version, cards, layout, last session"""
+"""Home page: release notes of running version, cards (game, overlay, preset, counts, last session, driver),
+checks, quick access, links to pages (driver stats on a session, telemetry on a corner), Qt Quick page"""
 
+import time
 from contextlib import suppress
 
 import pytest
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QSystemTrayIcon
 
 from neopedal import app_signal, update
 from neopedal.setting import cfg
 from neopedal.ui import home_view
+from neopedal.ui.home_checks import CheckState, home_checks
+from neopedal.ui.quick import home_backend
 from neopedal.userfile.driver_history import SessionRecord
 
 CHANGELOG = """# Changelog
@@ -40,18 +44,60 @@ def test_current_release_notes(tmp_path):
     assert home_view.base_version("0.19.1+3.g8a0f9f3") == "0.19.1" and home_view.base_version("0.20.0-dev") == "0.20.0"
 
 
-def test_session_record_text():
-    race = SessionRecord(time=1759660000, track="Spa", vehicle="Oreca 07", session=4, best=123.456,
-                         position=3, finish=1)
-    value, detail = home_view.session_record_text(race)
-    assert value == "<b>Spa</b>"
-    assert "Oreca 07" in detail and "Race" in detail and "Best 2:03.456" in detail and "P3" in detail
-    _, detail = home_view.session_record_text(race._replace(finish=2, best=0.0))
-    assert "DNF" in detail and "Best" not in detail and "P3" not in detail
-    _, detail = home_view.session_record_text(SessionRecord(time=0, track="<b>", vehicle="A & B", session=1))
-    assert "A &amp; B" in detail and "Practice" in detail  # escaped rich text
+class FakeLogos:
+    def track(self, name, other=""):
+        return f"track:{name}"
+
+    def brand(self, vehicle, brand=""):
+        return f"brand:{brand or vehicle}"
 
 
+def test_last_session_card():
+    race = SessionRecord(time=1759660000, track="Spa", vehicle="Hyper - Ferrari", vehicle_class="Hyper", session=4,
+                         best=123.456, position=3, finish=1)
+    card = home_backend.last_session_card(race, FakeLogos())
+    assert card["track"] == "Spa" and card["session"] == "Race" and card["best"] == "2:03.456"
+    assert card["result"] == "P3" and card["date"] and card["trackLogo"] == "track:Spa"
+    assert card["brandLogo"] == "brand:Ferrari"  # brand of "Class - Brand"
+    card = home_backend.last_session_card(race._replace(finish=2, best=0.0, vehicle="Hyper"), FakeLogos())
+    assert card["result"] == "DNF" and card["best"] == "" and card["brandLogo"] == ""  # class: no brand logo
+    assert home_backend.last_session_card(race._replace(vehicle="Oreca 07"), FakeLogos())["brandLogo"] == "brand:Oreca 07"
+
+
+# --- Checks
+def state(**changes) -> CheckState:
+    values = {"game": "Le Mans Ultimate", "running": True, "game_window": False, "override": False,
+              "spectate": False, "overlays": 5, "recorder": True, "update": ""}
+    return CheckState(**{**values, **changes})
+
+
+def keys(rows: list[dict]) -> list[str]:
+    return [row["key"] for row in rows]
+
+
+def test_checks_ready_while_driving():
+    assert keys(home_checks(state())) == ["ready"]
+    assert home_checks(state())[0]["level"] == "success"
+    rows = home_checks(state(spectate=True, update="1.2.3"))
+    assert keys(rows) == ["ready", "spectate", "update"] and rows[2]["text"] == "v1.2.3"  # infos keep ready
+
+
+def test_checks_game_setup_of_selected_game():
+    rows = home_checks(state(running=False))
+    assert keys(rows) == ["game"] and "Enable plugins" in rows[0]["text"] and rows[0]["action"] == "api"
+    assert "shared memory plugin" in home_checks(state(running=False, game="rFactor 2"))[0]["text"]
+    rows = home_checks(state(running=False, game_window=True))  # game open, no data: plugins off
+    assert keys(rows) == ["plugin"] and rows[0]["level"] == "error"
+
+
+def test_checks_most_important_first():
+    rows = home_checks(state(override=True, overlays=0, recorder=False))
+    assert keys(rows) == ["override", "overlays", "recorder"]  # warnings, then infos; no "ready" with warnings
+    assert [row["action"] for row in rows] == ["api", "overlays", "modules"]
+    assert keys(home_checks(state(running=False, override=True))) == ["override"]  # forced on: no setup reminder
+
+
+# --- Page
 @pytest.fixture
 def home(ui_env, monkeypatch):
     from neopedal.ui import app as app_module
@@ -73,29 +119,75 @@ def home(ui_env, monkeypatch):
             signal.disconnect()
     window.deleteLater()
     QCoreApplication.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # gone before the next test (window focus)
 
 
-def test_release_notes_page_of_running_version(home, monkeypatch):
+def wait_until(condition, timeout: float = 10.0):
+    end = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < end, "not done in time"
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+
+
+def item_texts(view) -> set[str]:
+    """Texts of visible QML items of a page"""
+    texts, stack = set(), [view.rootObject()]
+    while stack:
+        item = stack.pop()
+        if not item.property("visible"):
+            continue
+        text = item.property("text")
+        if isinstance(text, str) and text:
+            texts.add(text)
+        stack.extend(item.childItems())
+    return texts
+
+
+def test_qml_page_shows_cards(home):
+    view = home.view
+    assert view is not None and view.rootObject() is not None and not view.errors()
+    texts = item_texts(view)
+    assert {"Game", "Overlay", "Preset", "Overlays", "Module", "Quick Access", "Checks"} <= texts
+    assert "Last Session" not in texts and "Session Debrief" not in texts  # nothing driven yet
+    assert home.backend.page_visible and home.backend._timer.isActive()
+
+
+def test_page_reads_nothing_while_hidden(home):
+    window = home.window()
+    window.centralWidget().set_current_index(1)  # another page
+    QCoreApplication.processEvents()
+    assert not home.backend.page_visible and not home.backend._timer.isActive()
+    window.centralWidget().set_current_index(0)
+    QCoreApplication.processEvents()
+    assert home.backend._timer.isActive()
+
+
+def test_release_notes_of_running_version(home, monkeypatch):
     from neopedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.update import ChangelogEntry
 
-    monkeypatch.setattr(home_view, "current_release_notes", lambda **kwargs: "### Overlays\n\n- **Delta graph** added.")
-    home.button_notes.click()
+    monkeypatch.setattr(home_view, "local_changelog", lambda language="en", filename="": [
+        ChangelogEntry(home_view.base_version(), (2026, 10, 19), "### Overlays\n\n- **Delta graph** added.")])
+    home.backend.showReleaseNotes()
     QCoreApplication.processEvents()
     dialog = home.window().findChild(ReleaseNotesDialog)
     assert dialog is not None and dialog.isVisible()
-    assert [section.title for section in dialog.themes] == ["Overlays"]
-    assert dialog.button_install.isHidden()  # running version: nothing to install
+    assert [row["title"] for row in dialog.backend.model.rows] == ["Overlays", ""]
+    assert not dialog.backend.installVisible  # running version: nothing to install
+    assert "19 October 2026" in dialog.backend.detail  # release date of the changelog section
     dialog.close()
 
 
-def test_game_card_session_and_setup_reminder(home, monkeypatch):
+def test_game_card_session_and_checks(home, monkeypatch):
     from neopedal.api_control import api
 
+    backend = home.backend
     read = api.read
     monkeypatch.setattr(read.state, "version", lambda: "not running")
-    home.refresh_live()
-    assert not home.card_start.isHidden()  # game setup reminder while game not running
-    assert home.card_game.label_detail.text() == "Not running"
+    backend.refresh_live()
+    assert backend.game["running"] is False and backend.game["status"] == "Not running"
+    assert "game" in keys(backend.checks)  # game setup reminder while game not running
     monkeypatch.setattr(read.state, "version", lambda: "1.4200")
     monkeypatch.setattr(read.state, "active", lambda: True)
     monkeypatch.setattr(read.session, "track_name", lambda: "Road Atlanta")
@@ -103,85 +195,154 @@ def test_game_card_session_and_setup_reminder(home, monkeypatch):
     monkeypatch.setattr(read.vehicle, "place", lambda index=None: 3)
     monkeypatch.setattr(read.vehicle, "total_vehicles", lambda: 24)
     monkeypatch.setattr(read.lap, "number", lambda index=None: 12)
-    home.refresh_live()
-    assert home.card_start.isHidden()
-    assert home.card_game.label_detail.text() == "Road Atlanta · Race · P3/24 · Lap 12"
+    backend.refresh_live()
+    game = backend.game
+    assert (game["track"], game["session"], game["place"], game["lap"]) == ("Road Atlanta", "Race", "P3/24", "Lap 12")
+    assert "game" not in keys(backend.checks)
+    QCoreApplication.processEvents()
+    assert "Road Atlanta · Race · P3/24 · Lap 12" in item_texts(home.view)
 
 
-def test_overlay_card_lock_button(home, monkeypatch):
-    from neopedal.ui import home_view as module
+def test_checks_card_actions(home, monkeypatch):
+    opened = []
+    monkeypatch.setattr(home.backend, "_select_page", opened.append)
+    monkeypatch.setattr(home.backend, "openGameSettings", lambda: opened.append("api"))
+    for action in ("overlays", "modules", "spectate", "api"):
+        home.backend.runCheck(action)
+    assert opened == ["widget", "module", "spectate", "api"]
 
+
+def test_game_window_found_without_data(home, monkeypatch):
+    """Le Mans Ultimate open while no data comes: plugins off (window looked for on a worker thread)"""
+    from neopedal.api_control import api
+
+    monkeypatch.setattr(type(api), "name", property(lambda self: "Le Mans Ultimate"))
+    monkeypatch.setattr(home_backend, "find_game_window", lambda: True)
+    monkeypatch.setattr(api.read.state, "version", lambda: "not running")
+    backend = home.backend
+    backend.refresh_live()
+    backend.check_game_window()
+    wait_until(lambda: "plugin" in keys(backend.checks))
+    assert keys(backend.checks)[0] == "plugin"
+    backend.game_window_found(False)
+    assert "plugin" not in keys(backend.checks)
+
+
+def test_overlay_card_lock(home, monkeypatch):
     calls = []
-    monkeypatch.setattr(type(module.octrl.toggle), "lock", lambda self: (
+    monkeypatch.setattr(type(home_backend.octrl.toggle), "lock", lambda self: (
         calls.append(1), cfg.overlay.__setitem__("fixed_position", not cfg.overlay["fixed_position"])))
     cfg.overlay["fixed_position"] = True
-    home.refresh_live()
-    assert home.card_overlay.label_value.text() == "<b>Locked</b>" and home.button_lock.text() == "Unlock Overlay"
-    home.button_lock.click()
-    assert calls and home.button_lock.text() == "Lock Overlay"
-    assert "Drag overlays to move them" in home.card_overlay.label_detail.text()
+    home.backend.refresh_live()
+    assert home.backend.overlay["locked"] is True
+    QCoreApplication.processEvents()
+    assert "Unlock Overlay" in item_texts(home.view)
+    home.backend.toggleLock()
+    QCoreApplication.processEvents()
+    assert calls and home.backend.overlay["locked"] is False
+    assert {"Lock Overlay", "Drag overlays to move them"} <= item_texts(home.view)
 
 
-def test_cards_open_pages_and_layout_columns(home, monkeypatch):
-    from PySide6.QtCore import QEvent, QPointF, Qt
-    from PySide6.QtGui import QKeyEvent, QMouseEvent
-
-    opened = []
-    home.card_preset.on_click = lambda: opened.append("preset")
-    point = QPointF(5, 5)
-    QCoreApplication.sendEvent(home.card_preset, QMouseEvent(
-        QEvent.Type.MouseButtonRelease, point, point, Qt.MouseButton.LeftButton,
-        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
-    QCoreApplication.sendEvent(home.card_preset, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return,
-                                                           Qt.KeyboardModifier.NoModifier))
-    assert opened == ["preset", "preset"]  # mouse & keyboard
-    assert home.card_preset.focusPolicy() == Qt.FocusPolicy.StrongFocus and home.card_game.on_click is None
-
-    column = home_view.UIScaler.size(home_view.COLUMN_WIDTH)
-    assert home.column_count(column - 1) == 1 and home.column_count(column * 2) == 2
-    assert home.column_count(column * 10) == 3
-    for columns in (1, 2, 3):
-        home.arrange(columns)
-        position = home.grid.getItemPosition(home.grid.indexOf(home.card_widget))
-        assert position[:2] == divmod(3, columns)  # 4th card
-        if not home.card_start.isHidden():  # reminder spans every column
-            assert home.grid.getItemPosition(home.grid.indexOf(home.card_start))[3] == columns
-        quick = home.quick_grid.getItemPosition(home.quick_grid.indexOf(home.quick_buttons[-1]))
-        assert quick[1] < home_view.QUICK_COLUMNS[columns]
+def test_counts_follow_overlays_turned_on(home, monkeypatch):
+    monkeypatch.setattr(type(home_backend.wctrl), "number_active", property(lambda self: 0))
+    home.backend.refresh_live()
+    assert home.backend.counts["overlays"] == 0 and "overlays" in keys(home.backend.checks)
 
 
-def test_last_session_card(home, monkeypatch):
-    monkeypatch.setattr(home_view, "last_session", lambda: None)
-    home.refresh_last_session()
-    assert home.card_last.isHidden()
-    monkeypatch.setattr(home_view, "last_session", lambda: SessionRecord(
-        time=1759660000, track="Spa", vehicle="Oreca 07", session=2, best=123.456))
-    home.refresh_last_session()
-    assert not home.card_last.isHidden() and home.card_last.label_value.text() == "<b>Spa</b>"
-    assert home.grid.indexOf(home.card_last) >= 0
-
-
-def test_update_button(home, monkeypatch):
-    checker = type(update.update_checker)  # home view: proxy, update module imported (checked)
+def test_update_header(home, monkeypatch):
+    checker = type(update.update_checker)  # home: proxy, update module imported (checked)
     checks = []
     monkeypatch.setattr(checker, "is_checking", lambda self: False)
     monkeypatch.setattr(checker, "is_updates", lambda self: False)
+    monkeypatch.setattr(checker, "message", lambda self: "Up to date")
     monkeypatch.setattr(checker, "check", lambda self, manual: checks.append(manual))
-    home.refresh_version()
-    assert home.chip_update.isHidden() and home.button_update.text() == "Check for Updates"
-    home.button_update.click()
+    backend = home.backend
+    backend.refresh_header()
+    assert backend.header["update"] == "" and backend.header["tip"] == "Up to date"
+    backend.updateAction()
     assert checks == [True]
     monkeypatch.setattr(checker, "is_updates", lambda self: True)
     monkeypatch.setattr(checker, "latest_version", lambda self: (0, 20, 0))
-    home.refresh_version()
-    assert not home.chip_update.isHidden() and "v0.20.0" in home.chip_update.text()
-    assert home.button_update.text() == "See Update" and home.button_update.objectName() == "homePrimary"
+    backend.updates_changed()
+    assert backend.header["update"] == "available" and backend.header["latest"] == "0.20.0"
+    assert backend.header["tip"] == ""  # no tooltip of an older check left on the button
+    assert "update" in keys(backend.checks)
+    QCoreApplication.processEvents()
+    assert {"See Update", "Update Available · v0.20.0"} <= item_texts(home.view)
     shown = []
     from neopedal.ui.notification import UpdatesNotifyButton
 
     monkeypatch.setattr(UpdatesNotifyButton, "show_release_notes", lambda self, *args, **kwargs: shown.append(1))
-    home.button_update.click()
+    backend.updateAction()
     assert shown == [1] and checks == [True]  # update notes shown, no new check
+
+
+def test_preset_card_switch(home, monkeypatch, tmp_path):
+    folder = cfg.path.settings
+    for name in ("alpha", "beta"):
+        with open(f"{folder}{name}.json", "w", encoding="utf-8") as file:
+            file.write("{}")
+    rows = home.backend.presetList()
+    names = {row["name"] for row in rows}
+    assert {"alpha", "beta", "default"} <= names
+    assert [row for row in rows if row["loaded"]] == [row for row in rows if row["file"] == cfg.filename.setting]
+    loads = []
+    monkeypatch.setattr(type(cfg), "set_next_to_load", lambda self, filename: loads.append(filename))
+    reloads = []
+    app_signal.reload.connect(reloads.append)
+    home.backend.loadPreset("alpha.json")
+    home.backend.loadPreset("missing.json")  # gone meanwhile: nothing
+    home.backend.loadPreset(cfg.filename.setting)  # loaded already: nothing
+    assert loads == ["alpha.json"] and reloads == [True]
+
+
+def test_last_session_and_debrief_hidden_without_history(home, monkeypatch):
+    monkeypatch.setattr(home_view, "last_session", lambda: None)
+    home.backend._record_read = False
+    home.backend.refresh_last_session()
+    assert home.backend.lastSession == {} and home.backend.debrief == {}
+    record = SessionRecord(time=1759660000, track="Spa", vehicle="Oreca 07", session=2, best=123.456)
+    monkeypatch.setattr(home_view, "last_session", lambda: record)
+    home.backend.refresh_last_session()
+    assert home.backend.lastSession["track"] == "Spa"
+    QCoreApplication.processEvents()
+    assert "Last Session" in item_texts(home.view)
+
+
+def test_last_session_opens_its_driver_stats(home, monkeypatch):
+    shown = []
+
+    class Viewer:
+        class backend:
+            @staticmethod
+            def show_combo(track, vehicle):
+                shown.append((track, vehicle))
+
+    opened = []
+    monkeypatch.setattr(home.backend, "open_tool", lambda path: opened.append(path) or Viewer())
+    home.backend._record = SessionRecord(time=1.0, track="Spa", vehicle="Hyper - Ferrari")
+    home.backend.openLastSession()
+    assert opened == ["driver_stats_viewer.DriverStatsViewer"] and shown == [("Spa", "Hyper - Ferrari")]
+
+
+def test_debrief_corner_opens_telemetry_on_it(home, monkeypatch):
+    from neopedal.ui import home_debrief
+    from neopedal.ui.quick import lap_focus
+
+    calls = []
+
+    class Viewer:
+        backend = object()
+
+    monkeypatch.setattr(home.backend, "open_tool", lambda path: Viewer())
+    monkeypatch.setattr(lap_focus, "show_laps", lambda backend, *args: calls.append(args) or True)
+    monkeypatch.setattr(home_debrief, "debrief_laps", lambda data: ("ref.lap", "cmp.lap"))
+    home.backend._debrief_data = object()
+    home.backend._values["debrief"] = {"tips": [{"index": 0, "apex": 812.5}]}
+    home.backend.openCorner(0)
+    home.backend.openCorner(3)  # gone meanwhile: nothing
+    home.backend.openDebrief()
+    assert calls == [("ref.lap", "cmp.lap", 812.5), ("ref.lap", "cmp.lap", -1.0)]
 
 
 # --- Quick access: chosen by user
@@ -208,38 +369,37 @@ def test_current_quick_items(ui_env):
     assert home_view.current_quick_items() == home_view.default_quick_items()
 
 
-def test_quick_access_editor_rebuilds_buttons(home):
-    assert [button.objectName() for button in home.quick_buttons] == [
-        f"quick_{key}" for key in home_view.default_quick_items()]
-    editor = home_view.QuickAccessEditor(None, home.build_quick_buttons)
+def test_quick_access_editor_updates_buttons(home):
+    backend = home.backend
+    assert [row["key"] for row in backend.quick] == home_view.default_quick_items()
+    assert backend.quick[0]["label"] and [row["shortcut"] for row in backend.quick if row["shortcut"]] == []
+    editor = home_view.QuickAccessEditor(None, backend.refresh_quick)
     assert editor.checked_items() == home_view.default_quick_items()
     assert editor.picker.entries["bug_report"].kind == "Actions" and editor.picker.badge_text(0) == "1"
-    editor.fill(["preset"])
-    editor.picker.add("bug_report")
-    editor.picker.add("bug_report")  # already shown: no duplicate
+    editor.fill(["preset", "command_palette"])
     editor.saving()
     QCoreApplication.processEvents()
-    assert cfg.application["home_quick_access"] == "preset,bug_report"
-    assert [button.objectName() for button in home.quick_buttons] == ["quick_preset", "quick_bug_report"]
-    assert home.label_quick_empty.isHidden()
+    assert cfg.application["home_quick_access"] == "preset,command_palette"
+    assert [row["key"] for row in backend.quick] == ["preset", "command_palette"]
+    assert backend.quick[1]["shortcut"] == "Ctrl+K"
     editor.picker.remove("preset")
-    editor.picker.remove("bug_report")
+    editor.picker.remove("command_palette")
     editor.saving()
     QCoreApplication.processEvents()
-    assert cfg.application["home_quick_access"] == "" and home.quick_buttons == []
-    assert not home.label_quick_empty.isHidden()  # hint to add buttons
+    assert cfg.application["home_quick_access"] == "" and backend.quick == []
+    assert "No quick access button: use Customize... to add tools, pages or actions." in item_texts(home.view)
     editor.close()
 
 
 def test_quick_entries_run(home, monkeypatch):
     calls = []
-    monkeypatch.setattr(home, "_select_page", lambda key: calls.append(("page", key)))
-    monkeypatch.setattr(home, "open_tool", lambda path: calls.append(("tool", path)))
-    monkeypatch.setattr(home._window, "open_command_palette", lambda: calls.append(("palette",)))
+    backend = home.backend
+    monkeypatch.setattr(backend, "_select_page", lambda key: calls.append(("page", key)))
+    monkeypatch.setattr(backend, "open_tool", lambda path: calls.append(("tool", path)))
+    monkeypatch.setattr(backend._window, "open_command_palette", lambda: calls.append(("palette",)))
     monkeypatch.setattr(type(update.update_checker), "check", lambda self, manual: calls.append(("check", manual)))
-    entries = home_view.quick_access_entries()
-    for key in ("preset", "race_calculator", "command_palette", "check_updates"):
-        home.run_quick_entry(entries[key])
+    for key in ("preset", "race_calculator", "command_palette", "check_updates", "bogus"):
+        backend.runQuick(key)
     assert calls == [("page", "preset"), ("tool", "race_calculator.RaceCalculator"), ("palette",), ("check", True)]
 
 
@@ -250,19 +410,26 @@ def test_driver_card(home, monkeypatch):
     from neopedal.process import results_index as ri
     from neopedal.ui.home_driver import DriverData
 
+    backend = home.backend
+    backend.jobs.cancel("driver")  # profile & results of the page start: never handed over after the test's
+    monkeypatch.setattr(backend, "read_driver_data", lambda: None)
     monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
     monkeypatch.setattr(rank_info.ranks, "player", None)
-    home.refresh_driver()
-    assert home.card_driver.isHidden()
+    monkeypatch.setattr(rank_info.ranks, "others", [])
+    backend._driver_key = None
+    backend.refresh_driver()
+    assert backend.driver == {}
     monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
         "Keenny Hess", "", "", "", dr.Rank("Gold", 1, 20), None, ""))
     monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
-    home.refresh_driver()
-    assert not home.card_driver.isHidden() and "DR Gold 1" in home.card_driver.label_value.text()
-    assert home.grid.indexOf(home.card_driver) >= 0
-    home.driver_data_read(DriverData(None, ri.RaceRecord(2, 1, 1, 1.5, 2, 0), "Keenny Hess"))
-    assert "2/2" in home.card_driver.label_detail.text()
+    backend.refresh_driver()
+    assert backend.driver["name"] == "Keenny Hess"
+    assert [(row["label"], row["value"]) for row in backend.driver["ranks"]] == [("Driver Rank", "Gold 1")]
+    backend.driver_data_read(DriverData(None, ri.RaceRecord(2, 1, 1, 1.5, 2, 0), "Keenny Hess"))
+    assert {"label": "Clean Races", "value": "2/2"} in backend.driver["figures"]
+    QCoreApplication.processEvents()
+    assert {"Driver", "Keenny Hess", "Gold 1", "2/2"} <= item_texts(home.view)
     opened = []
-    monkeypatch.setattr(home, "open_tool", opened.append)
-    home.card_driver.on_click()
+    monkeypatch.setattr(backend, "open_tool", opened.append)
+    backend.openDriverStats()
     assert opened == ["driver_stats_viewer.DriverStatsViewer"]

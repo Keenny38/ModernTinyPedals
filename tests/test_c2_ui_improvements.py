@@ -636,8 +636,9 @@ def test_release_notes_skip_button(updates):
     button = notification.UpdatesNotifyButton("")
     dialog = button.release_notes_dialog(prompt=True)
     try:
-        assert not dialog.button_skip.isHidden()
-        dialog.button_skip.click()
+        assert dialog.backend.skipVisible
+        dialog.backend.skip()
+        QCoreApplication.processEvents()  # queued: page closes once QML handled the click
         assert cfg.application["skipped_update_version"] == 99_001_002 and button.isHidden()
     finally:
         dialog.deleteLater()
@@ -735,21 +736,22 @@ def test_release_notes_page_shows_progress(updates, monkeypatch):
     closed = []
     dialog.finished.connect(lambda *_: closed.append(1))
     try:
-        assert dialog.download_box.isHidden()
-        dialog.button_install.click()
+        backend = dialog.backend
+        assert not backend.downloading
+        backend.install()
+        QCoreApplication.processEvents()  # queued: runs once QML handled the click
         assert downloads and downloads[-1] is True and not closed  # page kept open
         updates.busy = True
         updates.busy_changed.emit(True)
         updates.progress.emit(2_000_000, 4_000_000)
-        assert not dialog.download_box.isHidden() and not dialog.button_install.isEnabled()
-        assert dialog.progress_bar.value() == 500 and "50%" in dialog.label_progress.text()
+        assert backend.downloading and backend.progress == 0.5 and "50%" in backend.progressText
         cancels = []
         monkeypatch.setattr(updates, "cancel", lambda: cancels.append(1) or True)
-        dialog.button_cancel.click()
-        assert cancels == [1]
+        backend.cancelDownload()
+        assert cancels == [1] and backend.cancelling
         updates.busy = False
         updates.busy_changed.emit(False)
-        assert dialog.download_box.isHidden() and dialog.button_install.isEnabled()
+        assert not backend.downloading and not backend.cancelling
     finally:
         dialog.deleteLater()
         button.deleteLater()
@@ -764,8 +766,8 @@ def test_release_notes_opened_while_downloading(updates):
     button = notification.UpdatesNotifyButton("")
     dialog = button.release_notes_dialog()
     try:
-        assert not dialog.download_box.isHidden() and dialog.progress_bar.maximum() == 0  # size unknown
-        assert "1.0 MB" in dialog.label_progress.text()
+        assert dialog.backend.downloading and dialog.backend.progress == -1  # size unknown: busy bar
+        assert "1.0 MB" in dialog.backend.progressText
     finally:
         updates.busy = False
         dialog.deleteLater()
@@ -927,20 +929,15 @@ def test_focus_ring_on_new_buttons(ui_env, monkeypatch, theme):
 
 
 def test_new_controls_keyboard_reachable(ui_env, updates):
-    from neopedal.ui import notification
     from neopedal.ui.preset_management import PresetTrash
 
     dialog = PresetTrash(None)
-    button = notification.UpdatesNotifyButton("")
-    notes = button.release_notes_dialog(prompt=True)
     try:
-        for widget in (dialog.listbox_trash, dialog.button_restore, dialog.button_delete, dialog.button_empty,
-                       notes.button_skip, notes.button_cancel):
+        # What's new page: Qt Quick buttons (TpButton), reached with Tab (see test_qml_design_tokens)
+        for widget in (dialog.listbox_trash, dialog.button_restore, dialog.button_delete, dialog.button_empty):
             assert widget.focusPolicy() & Qt.FocusPolicy.TabFocus
     finally:
         dialog.close()
-        notes.deleteLater()
-        button.deleteLater()
         flush_deleted()
 
 

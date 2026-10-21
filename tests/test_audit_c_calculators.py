@@ -58,6 +58,7 @@ def make_page(ui_env, monkeypatch, warnings):
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(race_backend, "SCENARIO_DELAY_MS", 0)
+    monkeypatch.setattr(race_backend, "SCENARIO_JOBS", False)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
     pages = []
 

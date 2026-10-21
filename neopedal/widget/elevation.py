@@ -29,7 +29,7 @@ from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ..demo_state import drawing_demo
-from ..module_info import minfo
+from ..module_info import NO_TRACK_MAP, TrackMap, minfo
 from ..userfile.corner_coach import MapCorners, map_corners
 from ._base import Overlay
 from ._painter import fill_pixmap
@@ -103,6 +103,7 @@ class Realtime(Overlay):
 
         # Last data
         self.last_modified = 0
+        self.track_map: TrackMap = NO_TRACK_MAP  # map drawn (distances & sectors of one map)
         self.veh_pos = 0
         self.map_scaled = None
         self.map_range = (0,10,0,10)
@@ -118,7 +119,7 @@ class Realtime(Overlay):
         modified = minfo.mapping.lastModified
         self.update_elevation(modified)
         if self.show_corner_numbers and self.map_scaled:
-            corners = map_corners(api.read.session.track_name(), minfo.mapping, drawing_demo())
+            corners = map_corners(api.read.session.track_name(), self.track_map, drawing_demo())
             if corners is not None and corners is not self.map_corners:
                 self.map_corners = corners
                 self.draw_marks(self.map_path)
@@ -139,7 +140,8 @@ class Realtime(Overlay):
         """Elevation map update"""
         if self.last_modified != data:
             self.last_modified = data
-            raw_data = minfo.mapping.elevations if data != -1 else None
+            self.track_map = minfo.mapping.trackMap if data != -1 else NO_TRACK_MAP  # taken once
+            raw_data = self.track_map.elevations
             map_path = self.create_elevation_path(raw_data)
             self.map_path = map_path
             self.map_corners = None  # placed again on new map
@@ -333,7 +335,7 @@ class Realtime(Overlay):
             painter.drawLine(self.display_width, -999, self.display_width, 999)
 
         # Draw sector line
-        sectors_index = minfo.mapping.sectors
+        sectors_index = self.track_map.sectors
         if self.wcfg["show_sector_line"] and self.map_scaled and isinstance(sectors_index, tuple):
             pen.setWidthF(self.wcfg["sector_line_width"])
             pen.setColor(self.wcfg["sector_line_color"])

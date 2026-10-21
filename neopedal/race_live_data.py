@@ -70,6 +70,14 @@ COMPOUND_WORDS = {  # tyre set key (userfile.tyre_strategy.DEFAULT_TYRE_SET): wo
     "Wet": ("wet", "mouille", "pluie", "regen", "nass", "lluvia", "mojado", "bagnato", "pioggia", "chuva"),
 }
 FORMATION_LAPS = (("fast rolling", 0.5), ("rolling", 1.0), ("standing", 1.0))  # setting text: laps driven
+# Pit menu of the game (LMU), read & written as the game web UI does: entry "PMC Value" (pit menu category),
+# "currentSetting" (index of "settings"); refill set as the amount in tank after the stop
+PIT_MENU_READ = "/rest/garage/PitMenu/receivePitMenu"
+PIT_MENU_WRITE = "/rest/garage/PitMenu/loadPitMenu"  # POST [entry], entry as read with its currentSetting changed
+PMC_VIRTUAL_ENERGY = 6  # virtual energy % in tank after the stop (cars using it: fuel entry is the fuel ratio)
+PMC_FUEL = 7  # fuel in tank after the stop (cars without virtual energy)
+LITERS_PER_GALLON = 3.785411784
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 RAIN_CHANCE = 0.5  # forecast node with this rain chance or more: wet
 _PERCENT = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
 _WORD = re.compile(r"[a-z]+")
@@ -244,6 +252,77 @@ def parse_garage(refuel: Any, tyres: Any = None, session: Any = None) -> GarageD
         if 0 <= minutes < 24 * 60:
             values["start_minutes"] = round(minutes)
     return GarageData(**values)
+
+
+class PitMenuRefill(NamedTuple):
+    """Refill entry of the game pit menu set to a plan amount"""
+
+    entry: dict  # entry to send (currentSetting changed)
+    kind: str  # "energy" or "fuel"
+    value: float  # amount chosen (%, or liters)
+    text: str  # setting text chosen (game language & unit)
+
+
+def _entry_category(entry: dict) -> int:
+    value = entry.get("PMC Value")
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    name = str(entry.get("name", "")).upper()
+    return {"VIRTUAL ENERGY:": PMC_VIRTUAL_ENERGY, "FUEL:": PMC_FUEL}.get(name, -1)
+
+
+def setting_amount(text: str, liters: bool) -> float | None:
+    """Amount of a pit menu setting text ("65%", "45.0L", "11.9gal"), liters: gallons converted"""
+    matched = _NUMBER.search(text)
+    if matched is None:
+        return None
+    number = float(matched.group().replace(",", "."))
+    return number * LITERS_PER_GALLON if liters and "gal" in text.lower() else number
+
+
+def pit_menu_refill(menu: Any, fuel_after: float, energy_after: float) -> PitMenuRefill | None:
+    """Entry of the pit menu (receivePitMenu answer) set to the plan amount after the stop: virtual
+    energy (%) of a car using it, else fuel (liters); first setting reaching the amount, else the
+    largest; None if no refill entry or plan amount"""
+    if not isinstance(menu, list):
+        return None
+    entries = {_entry_category(entry): entry for entry in menu if isinstance(entry, dict)}
+    if PMC_VIRTUAL_ENERGY in entries:
+        entry, kind, target, liters = entries[PMC_VIRTUAL_ENERGY], "energy", energy_after, False
+    elif PMC_FUEL in entries:
+        entry, kind, target, liters = entries[PMC_FUEL], "fuel", fuel_after, True
+    else:
+        return None
+    if target <= 0:
+        return None
+    amounts: list[tuple[int, float]] = []
+    for index, text in enumerate(_settings(entry)):
+        amount = setting_amount(text, liters)
+        if amount is not None:
+            amounts.append((index, amount))
+    if not amounts:
+        return None
+    reaching = [(amount, index) for index, amount in amounts if amount >= target - 0.05]
+    amount, index = min(reaching) if reaching else max((amount, index) for index, amount in amounts)
+    return PitMenuRefill(dict(entry, currentSetting=index), kind, amount, _settings(entry)[index])
+
+
+def write_pit_menu(fuel_after: float, energy_after: float) -> tuple[str, PitMenuRefill | None]:
+    """Refill of the game pit menu set to the plan amounts after the stop (background job: game
+    asked, one entry sent as the game web UI does): ("set" | "refused" | "missing" | "offline", refill)"""
+    import json
+
+    from .game_rest import GameConnection
+
+    with GameConnection() as game:
+        menu = game.get(PIT_MENU_READ)
+        if not game.answered:
+            return "offline", None
+        refill = pit_menu_refill(menu, fuel_after, energy_after)
+        if refill is None:
+            return "missing", None
+        sent = game.send("POST", PIT_MENU_WRITE, json.dumps([refill.entry]))
+        return ("set" if sent else "refused"), refill
 
 
 def rain_period(chances: Sequence[float], race_laps: int) -> tuple[int, int] | None:
@@ -454,8 +533,33 @@ def collect(history: Sequence[ConsumptionDataSet], garage: GarageData, unit_fuel
     add("maximum_tyre", "tyres", "Maximum Tyres", allowed if allowed > 0 else None,
         (f"{allowed}" + (f" ({garage.new_tyres_left} new left)" if garage.new_tyres_left >= 0 else ""))
         if allowed > 0 else "", "Tyre allocation (LMU)" if allowed > 0 else "Tyre allocation (LMU, while driving)")
+    values.append(collect_temperature())
     values.append(collect_rain(garage, plan_laps))
     return values
+
+
+def temperature_trend(nodes: Sequence[Any], session_seconds: float) -> tuple[float, float, float] | None:
+    """(first, last temperature °C, change per hour) of forecast nodes (start: fraction of the session),
+    None without 2 valid nodes or session length"""
+    valid = [node for node in nodes if node.sky_type >= 0 and node.temperature > -100]
+    if len(valid) < 2 or session_seconds <= 0:
+        return None
+    first, last = valid[0], valid[-1]
+    span = (last.start - first.start) * session_seconds / 3600
+    if span <= 0:
+        return None
+    return first.temperature, last.temperature, (last.temperature - first.temperature) / span
+
+
+def collect_temperature() -> LiveValue:
+    """Air temperature trend of the forecast (°C per hour), for the lap time per °C of the plan"""
+    session = api.read.session
+    trend = temperature_trend(session.weather_forecast(), session.end() - max(session.start(), 0.0))
+    if trend is None:
+        return LiveValue("input_temp_slope", "weather", "Temperature Trend", None, "-", "No forecast", True, "")
+    first, last, slope = trend
+    return LiveValue("input_temp_slope", "weather", "Temperature Trend", round(slope, 2),
+                     f"{first:.0f} → {last:.0f} °C ({slope:+.2f} °C/h)", "Weather Forecast", True, "")
 
 
 def collect_rain(garage: GarageData, plan_laps: int) -> LiveValue:

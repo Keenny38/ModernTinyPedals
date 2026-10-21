@@ -230,30 +230,6 @@ def test_readable_copies_made_when_logo_arrives(ui_env, monkeypatch):
     assert custom_image.pregenerate_logos(None) == 0
 
 
-# --- Home page: logos of track & car looked for in background, once per game pictures version
-def test_home_live_logos_in_background(ui_env, monkeypatch):
-    from neopedal.api_control import api
-    from neopedal.ui import home_view
-    from neopedal.userfile.game_images import images
-
-    monkeypatch.setattr(api.read.state, "active", lambda: True)
-    monkeypatch.setattr(api.read.session, "track_name", lambda: "Le Mans")
-    monkeypatch.setattr(api.read.vehicle, "vehicle_name", lambda: "Car #1")
-    monkeypatch.setattr(home_view, "_live_logos", {})
-    calls = []
-    monkeypatch.setattr(home_view, "game_logos", lambda *args, **kwargs: (calls.append(threading.get_ident()),
-                                                                           ("track.svg",))[1])
-    assert home_view.live_logos() == ()  # looked for in background
-    assert LOGO_LOADER.wait()
-    assert home_view.live_logos() == ("track.svg",)
-    assert home_view.live_logos() == ("track.svg",)
-    assert len(calls) == 1 and calls[0] != threading.get_ident()
-    monkeypatch.setattr(images, "version", images.version + 1)
-    assert home_view.live_logos() == ("track.svg",)  # earlier logos shown while looked for again
-    assert LOGO_LOADER.wait()
-    assert home_view.live_logos() == ("track.svg",) and len(calls) == 2
-
-
 @pytest.fixture(autouse=True)
 def loader_idle():
     """Jobs of a test done before next test (paths of test folder)"""

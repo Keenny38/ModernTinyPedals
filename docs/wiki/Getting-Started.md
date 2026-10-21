@@ -23,7 +23,7 @@ The navigation bar on the left gives access to pages and tools:
 
 | Entry | What it does |
 |---|---|
-| `Home` | Game and session state, overlay lock, last session, quick access, release notes |
+| `Home` | Checks, game and session state, overlay lock, preset, last session & its debrief, driver card, quick access, release notes |
 | `Overlays` | Turn overlays on or off and configure them |
 | `Stats` | [Driver Stats](Driver-Stats.md) |
 | `Results` | Results of past sessions: classification, laps, sectors, incidents and penalties |
@@ -48,10 +48,13 @@ The app also has a **tray icon**. Click it to show the main window, right-click 
 
 The `Home` page shows at a glance:
 
-- the installed version, with a `Release Notes` button (what's new in this version, readable offline) and the available update, if any;
-- the game state with the current session (track, session, position, lap), and a reminder of the game setup while the game is not running;
-- a one-click `Lock Overlay` / `Unlock Overlay` button;
-- the preset, overlays and modules in use, and the last session you drove;
+- the installed version, with a `Release Notes` button (what's new in this version, readable offline, older versions from its version menu) and the available update, if any;
+- **Checks**: what keeps overlays from showing right, most important first, each with a button to fix it: `Game running without data` (Le Mans Ultimate is open but sends nothing: enable `Settings > Gameplay > Enable plugins` in the game, then restart it), `Game not running` (game setup reminder of the selected game: display mode, plugin), `Active State Override is on`, `No overlay enabled`, `Spectate Mode Enabled`, `Lap recording is off` (the session debrief and the telemetry need recorded laps), `Update Available`. While you drive with nothing wrong, it shows `Ready`;
+- the game state with the current session (track, session, position, lap) and the circuit & car logos; click the card for the API options of the game;
+- a one-click `Lock Overlay` / `Unlock Overlay` button (click the card for the Overlays page);
+- the preset in use (`Switch Preset` loads one of your latest presets), the overlays and modules enabled, and the last session you drove (click it to open the Driver Stats page on its track and car);
+- the **session debrief** of that session, made from the laps recorded while you drove: best lap against your personal best (or `New personal best`), number of laps, pace and consistency (average and spread of the valid laps within 103 % of your best), theoretical best (best game sectors), fuel per lap, and `Work on`: the three corners where your best lap loses most time against your older personal best lap, with the likely cause (`Brakes 6 m earlier`, `Minimum speed 4 km/h lower`...). When the session is your new personal best, a typical lap of the session is compared with its best lap instead. **Click a corner** (or `Tab` to it, then `Enter`) to open the telemetry with both laps, the `Corners` tab and the charts zoomed on that corner; `Open Telemetry` opens both laps. The lap time goal of the track and car (set on the Driver Stats page) is shown with what is left to find and a progress bar;
+- your **driver card**: Driver Rank & Safety Rank with their progress, change since the previous rank and a line of each rank over time, badge, team, race record of the results files;
 - **Quick Access** buttons (by default: Lap Telemetry Viewer, Race Calculator, Driver Stats Viewer, Layout Editor, Widget Performance, Results & Replays, the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Create Bug Report, Check for Updates). The Module, Hotkey and Tools pages, not in the navigation bar by default, are one click away there. Use `Customize...` next to `Quick Access`, or right-click the buttons, to choose tools, pages and actions.
 
 ## When overlays are shown
@@ -88,14 +91,18 @@ Positions are saved in the preset, and remembered per screen setup (screens plug
 
 ## Configure an overlay
 
-1. Open the `Overlays` page. Each overlay is a card with a preview drawn with your settings, its category and its switch. The buttons at top right switch to a compact list (preview in a tooltip); the choice is kept (`show_overlay_previews` in `Config` > `Application`).
-2. Turn an overlay on or off with its switch. Type part of a name in the search box (accents and case ignored, several words allowed), choose `All`, `Active` or `Inactive`, or click a category chip (the number of matching overlays is shown on each chip, click it again to show all).
-3. Click a card (or the gear button shown on its preview) to open its options in the **Overlay Options** page. Right-click a card for its menu: options, enable or disable, show only its category.
+1. Open the `Overlays` page. Each overlay is a card with a preview drawn with your settings, its category and its switch; hover a card a moment and its overlay plays on a moving simulated race (a corner driven in a loop), and its tooltip says what it shows. The buttons at top right switch to a compact list (category and what each overlay shows, preview in a tooltip) or to the screen view (see below); the choice is kept (`show_overlay_previews` in `Config` > `Application`).
+2. Turn an overlay on or off with its switch. Type part of a name in the search box (accents and case ignored, several words allowed), choose `All`, `Active` or `Inactive` (each with its number of overlays), or click a chip: a category, `Favorites` (overlays you marked with the star of their card, `Ctrl+F` on the selected one, kept for every preset) or `Recently Edited` (overlays whose options you saved last, last first). Click a chip again to show all. The sort button sorts by name, enabled overlays first or category; a switched overlay stays where it is until you choose a sort again.
+3. Click a card (or the gear button shown on its preview) to open its options in the **Overlay Options** page. Right-click a card for its menu: options, enable or disable, add to or remove from favorites, show only its category.
 4. Change options, then `Apply` (`Ctrl+S`): the preset is saved and the edited overlays restart. See [The Overlay Options page](#the-overlay-options-page).
+
+A card shows a small badge when its overlay is not always shown: the sessions or pit state of its `Visibility Context` option (`Race`, `In Pits`...), `Stream Only` or `Screen Only`. The loaded preset is named at top: click it to load another preset (most recent first) or open the `Presets` page.
+
+The screen view shows the running overlays at their place on your screens, with their picture. Overlays covering part of another one are outlined, with their number at top. Drag an overlay to move it (`Undo` in the message shown after, or `Ctrl+Z` on an unlocked overlay), click it to open its options; `Layout Editor` places overlays on a game screenshot with alignment guides.
 
 At the bottom, `Enable All` and `Disable All` switch every overlay at once (with a confirmation). While a search or filter is active they become `Enable Shown` and `Disable Shown` and only switch the overlays shown. An overlay that is on but could not start shows an `Error` badge, with a notice at top to open the log. Every option is described in its tooltip and in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
 
-Keyboard: type anywhere on the page to search, `/` jumps to the search box, arrows move between overlays, `Space` switches the selected overlay, `Enter` opens its options, `Esc` clears the search.
+Keyboard: type anywhere on the page to search, `/` jumps to the search box, arrows move between overlays, `Space` switches the selected overlay, `Enter` opens its options, `Ctrl+F` marks it as favorite, `Esc` clears the search.
 
 ### The Overlay Options page
 

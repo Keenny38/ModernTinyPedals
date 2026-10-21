@@ -16,6 +16,7 @@ from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, qInstal
 
 from neopedal.module import module_recorder
 from neopedal.setting import cfg
+from neopedal.ui.quick import stats_edits
 from neopedal.userfile.telemetry_lap import LapData
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, TRACK, lap_rows, laps, save, viewer  # noqa: F401
@@ -540,8 +541,8 @@ def test_stats_level_colors_follow_theme_and_backups_cached(ui_env, monkeypatch)
     from tests.test_lap_reference import SHEET
 
     calls = []
-    original = stats_backend.list_stats_backups
-    monkeypatch.setattr(stats_backend, "list_stats_backups", lambda path: (calls.append(path), original(path))[1])
+    original = stats_edits.list_stats_backups
+    monkeypatch.setattr(stats_edits, "list_stats_backups", lambda path: (calls.append(path), original(path))[1])
     write_stats(STATS)
     lap_reference.save_cache(cfg.path.config, SHEET)
     parent = QWidget()

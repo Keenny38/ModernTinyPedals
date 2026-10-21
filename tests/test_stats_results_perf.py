@@ -13,6 +13,7 @@ from PySide6.QtCore import QCoreApplication
 from neopedal.process import results_file as rf
 from neopedal.process import results_index as ri
 from neopedal.setting import cfg
+from neopedal.ui.quick import stats_core, stats_edits, stats_io, stats_sharing
 from neopedal.userfile import driver_history
 from neopedal.userfile.driver_history import SessionRecord, record_line
 from tests.test_driver_stats_viewer import OREGA, SPA, backend, dialogs, settle, window, write_stats  # noqa: F401
@@ -201,7 +202,7 @@ def big_page(window, monkeypatch):  # noqa: F811
     summaries = synthetic_summaries()
     reads = []
     monkeypatch.setattr(ri, "read_summaries", lambda folders: reads.append(threading.current_thread()) or summaries)
-    monkeypatch.setattr(stats_backend, "player_profile", lambda folders: None)
+    monkeypatch.setattr(stats_io, "player_profile", lambda folders: None)
     page = stats_backend.DriverStatsBackend(window)
     settle(page, timeout=60)
     page.reads = reads
@@ -251,13 +252,12 @@ def test_parts_told_only_when_changed(big_page):
 
 
 def test_per_lap_reload_of_big_stats_in_background(big_page, monkeypatch):
-    from neopedal.ui.quick import stats_backend
 
     page = big_page
-    monkeypatch.setattr(stats_backend, "SYNC_STATS_BYTES", 1)
+    monkeypatch.setattr(stats_core, "SYNC_STATS_BYTES", 1)
     threads = []
-    real = stats_backend.load_stats_json_file
-    monkeypatch.setattr(stats_backend, "load_stats_json_file",
+    real = stats_io.load_stats_json_file
+    monkeypatch.setattr(stats_io, "load_stats_json_file",
                         lambda **kwargs: threads.append(threading.current_thread()) or real(**kwargs))
     assert timed(page.reload_stats) < UI_BUDGET
     settle(page, timeout=60)
@@ -265,11 +265,11 @@ def test_per_lap_reload_of_big_stats_in_background(big_page, monkeypatch):
 
 
 def test_sort_by_last_driven_reads_nothing(big_page, monkeypatch):
-    from neopedal.ui.quick import stats_backend
 
     page = big_page
     reads = []
-    monkeypatch.setattr(stats_backend, "load_stats_json_file", lambda **kwargs: reads.append(1))
+    monkeypatch.setattr(stats_io, "load_stats_json_file", lambda **kwargs: reads.append(1))
+    monkeypatch.setattr(stats_edits, "load_stats_json_file", lambda **kwargs: reads.append(1))
     page.selectTrack("")
     page.setSortRecent(True)
     keys = [entry["key"] for entry in page.tracks[1:]]
@@ -292,14 +292,14 @@ def test_history_released_while_hidden(big_page):
 
 
 def test_friend_read_in_background(backend, tmp_path, monkeypatch):  # noqa: F811
-    from neopedal.ui.quick import stats_backend, stint_analysis
+    from neopedal.ui.quick import stint_analysis
 
     friend = tmp_path / "friend.json"
     stint_analysis.write_history_json(str(friend), stint_analysis.history_document(
         [SessionRecord(1_700_000_000.0, SPA, OREGA, 1, 120.0)], {SPA: {OREGA: {"pb": 120.0}}}, {}, "Max"))
     threads = []
-    real = stats_backend.load_friend
-    monkeypatch.setattr(stats_backend, "load_friend", lambda name: threads.append(threading.current_thread()) or
+    real = stats_sharing.load_friend
+    monkeypatch.setattr(stats_sharing, "load_friend", lambda name: threads.append(threading.current_thread()) or
                         real(name))
     backend.load_friend_file(str(friend), chosen=True)
     assert not backend.friend["visible"]
