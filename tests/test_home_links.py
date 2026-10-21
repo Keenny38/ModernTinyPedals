@@ -1,6 +1,7 @@
 """Home page links into other pages: telemetry viewer on the debrief laps & a corner, driver stats on the last
 session track & car"""
 
+import os
 import time
 from types import SimpleNamespace
 
@@ -60,8 +61,9 @@ def test_telemetry_opens_debrief_laps_on_a_corner(lap_page):
 
     reference, compared = lap_path(lap_page, 1), lap_path(lap_page, 3)
     lap_page.setSideTab(0)
-    # Debrief paths are made from the telemetry setting (other slashes): matched to the listed laps
-    assert show_laps(lap_page, reference.replace("\\", "/"), compared.replace("/", "\\"), 1560.0)
+    # Debrief paths are made from the telemetry setting (other slashes on Windows): matched to the listed laps
+    separator = "\\" if os.name == "nt" else "/"  # a backslash is a file name character elsewhere
+    assert show_laps(lap_page, reference.replace("\\", "/"), compared.replace("/", separator), 1560.0)
     wait_loaded(lap_page)
     wait_until(lambda: lap_page.cornerTable.focusRequest >= 0)
     assert lap_page.checked == {reference, compared} and lap_page.reference_key == reference

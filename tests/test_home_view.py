@@ -3,6 +3,7 @@ checks, quick access, links to pages (driver stats on a session, telemetry on a 
 
 import time
 from contextlib import suppress
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -289,7 +290,8 @@ def test_preset_card_switch(home, monkeypatch, tmp_path):
     loads = []
     monkeypatch.setattr(type(cfg), "set_next_to_load", lambda self, filename: loads.append(filename))
     reloads = []
-    app_signal.reload.connect(reloads.append)
+    # Signal stand-in: the real one reloads the test window's app (API, overlays & modules left running after)
+    monkeypatch.setattr(home_backend, "app_signal", SimpleNamespace(reload=SimpleNamespace(emit=reloads.append)))
     home.backend.loadPreset("alpha.json")
     home.backend.loadPreset("missing.json")  # gone meanwhile: nothing
     home.backend.loadPreset(cfg.filename.setting)  # loaded already: nothing

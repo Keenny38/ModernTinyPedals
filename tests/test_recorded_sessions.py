@@ -46,6 +46,10 @@ def session(ui_env, fresh_minfo, monkeypatch, request):
     """Recorded session read by app API (request.param: session name)"""
     for name in ("active", "paused", "resets", "shown", "session_type", "in_pits"):
         monkeypatch.setattr(realtime_state, name, getattr(realtime_state, name))
+    # As app start: inactive until first frame synced (state left active by an earlier test: modules started
+    # before frame 0 read player telemetry not synced yet, None)
+    realtime_state.active = realtime_state.paused = realtime_state.shown = realtime_state.in_pits = False
+    realtime_state.resets = 0
     monkeypatch.setattr(realtime_state, "singleton", True)  # single instance (as app): driver stats recorded
     recorded = RecordedSession(request.param, cfg.api)
     monkeypatch.setattr(api, "_api", recorded.connector)
