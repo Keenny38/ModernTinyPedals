@@ -852,7 +852,7 @@ def test_new_texts_translated(french):
     assert trm("Deleted presets are kept for 30 day(s), then removed.").startswith("Les presets supprimés")
     assert trm("race · deleted 05/10/2026 10:00 · 29 day(s) left") == (
         "race · supprimé le 05/10/2026 10:00 · 29 jour(s) restant(s)")
-    assert tr("Press a key or key combination").startswith("Appuyez")
+    assert tr("Press a key, key combination, mouse or controller button").startswith("Appuyez")
 
 
 # --- From package B2: safe mode keeps tool pages closed, plugin errors translated

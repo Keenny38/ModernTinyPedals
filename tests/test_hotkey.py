@@ -9,7 +9,7 @@ from neopedal.hotkey.common import (
     format_hotkey_name,
     load_hotkey,
     modifier_priority,
-    set_hotkey_win,
+    set_hotkey,
     sort_key_codes,
     validate_hotkey,
 )
@@ -57,8 +57,8 @@ def test_format_and_priority():
 
 def test_set_hotkey_from_key_state():
     pressed = {17, 18, 65}
-    assert set_hotkey_win(lambda code: -32768 if code in pressed else 0, GENERAL, MODIFIER) == ("ctrl", "", "alt", "a")
-    assert set_hotkey_win(lambda code: -32768 if code == 17 else 0, GENERAL, MODIFIER) == ()  # modifier only
+    assert set_hotkey(lambda code: -32768 if code in pressed else 0, GENERAL, MODIFIER) == ("ctrl", "", "alt", "a")
+    assert set_hotkey(lambda code: -32768 if code == 17 else 0, GENERAL, MODIFIER) == ()  # modifier only
 
 
 # --- Commands
@@ -292,6 +292,26 @@ def test_hotkey_with_modifiers_in_any_order(ui_env, monkeypatch):
     assert run_hotkeys(monkeypatch, states, {"overlay_lock": "shift+ctrl+f1"}) == ["overlay_lock"]
 
 
+def test_controller_button_hotkey(ui_env, monkeypatch):
+    """Wheel or button box button bound alone, on every platform"""
+    from neopedal.hotkey.joystick import joystick_code
+
+    button = joystick_code(1, 4)
+    states = [set(), {button}, {button}, set(), {button}]
+    assert run_hotkeys(monkeypatch, states, {"overlay_lock": "joy2_button_5"}) == ["overlay_lock"] * 2
+
+
+@WINDOWS_KEYS
+def test_controller_button_with_modifier_and_mouse_hotkey(ui_env, monkeypatch):
+    from neopedal.hotkey.joystick import joystick_code
+    from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+
+    ctrl, pov_up, mouse = KEYMAP_MODIFIER["ctrl"], joystick_code(0, 32), KEYMAP_GENERAL["mouse_back"]
+    states = [{pov_up}, set(), {ctrl, pov_up}, set(), {mouse}]
+    binds = {"overlay_lock": "ctrl+joy1_pov_up", "overlay_auto_hide": "mouse_back"}
+    assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]
+
+
 def test_hotkey_control_stops_without_commands(ui_env, monkeypatch):
     assert run_hotkeys(monkeypatch, [set(), set()], {}) == []
 
@@ -424,3 +444,12 @@ def test_force_foreground_no_op_off_windows():
     from neopedal.ui import app as app_module
 
     app_module.force_foreground(None)  # never reads window
+
+
+def test_held_controller_buttons():
+    from neopedal.hotkey.common import held_controller_buttons
+    from neopedal.hotkey.joystick import joystick_code
+
+    keymap = {"a": 65, "joy1_button_1": joystick_code(0, 0), "joy1_button_2": joystick_code(0, 1)}
+    pressed = {65, joystick_code(0, 1)}
+    assert held_controller_buttons(lambda code: code in pressed, keymap) == {joystick_code(0, 1)}  # keyboard aside

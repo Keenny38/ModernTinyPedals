@@ -1230,11 +1230,11 @@ Set interval (in milliseconds) of the car position check that plays the next pac
 ## Hotkey
 **Hotkey control panel can be accessed from `Hotkey` tab in main window.**
 
-Note, hotkey bindings are non-exclusive in NeoPedal, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. Currently global hotkey feature is not supported on Linux.
+Note, hotkey bindings are non-exclusive in NeoPedal, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. On Linux, only game controller buttons can be bound (keyboard not supported).
 
 Click `Enabled` or `Disabled` button to toggle global hotkey on and off. Note, global hotkey can also be enabled by setting `enable_global_hotkey` option to `true` in [Application](#application) dialog.
 
-To change key binding, click key button on right side of each hotkey option, then in `Key Binding` dialog, press a `key` or `key combination` to register new key binding.
+To change key binding, click key button on right side of each hotkey option, then in `Key Binding` dialog, press a `key` or `key combination`, a mouse button (middle, back, forward) or a game controller button (wheel, button box, joystick, gamepad, named `Joy1 Button 5`, `Joy1 Pov Up`...) to register new key binding. A controller button already held when the dialog opens (button box switch) is ignored until released.
 
 Note, assign same key for multiple options will cause those options to be toggled at the same time. However, each option's toggle state is still handled individually.
 

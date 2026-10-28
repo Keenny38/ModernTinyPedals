@@ -45,8 +45,9 @@ from ..const_file import ConfigType, FileExt
 from ..hotkey.common import (
     format_hotkey_name,
     get_key_state_function,
+    held_controller_buttons,
     refresh_keystate,
-    set_hotkey_win,
+    set_hotkey,
 )
 from ..hotkey_control import kctrl
 from ..i18n import tr, trm
@@ -300,24 +301,23 @@ class ConfigHotkey(BaseDialog):
         # Platform specific
         self.get_key_state = get_key_state_function()
         refresh_keystate(self.get_key_state)
+        # Controller buttons held at start (switch, rotary) never taken as pressed until released
+        self.held_buttons = held_controller_buttons(self.get_key_state)
 
         if PLATFORM.WINDOWS:
-            self.text_placeholder = tr("Press a key or key combination")
-            self.update_text(format_hotkey_name(hotkey_name, self.text_placeholder, delimiter=" + "))
-            self._update_timer.start(200, self)
-        else:
-            self.text_placeholder = tr("Hotkey not supported on Linux")
-            self.update_text(self.text_placeholder)
+            self.text_placeholder = tr("Press a key, key combination, mouse or controller button")
+        else:  # keyboard not read on Linux
+            self.text_placeholder = tr("Press a controller button (keyboard not supported on Linux)")
+        self.update_text(format_hotkey_name(hotkey_name, self.text_placeholder, delimiter=" + "))
+        self._update_timer.start(200, self)
 
     def timerEvent(self, event):
-        """Monitor key press"""
+        """Monitor key & button press"""
         if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
             return
-        if PLATFORM.WINDOWS:
-            key_combo = set_hotkey_win(self.get_key_state)
-        else:
-            key_combo = ()
-
+        get_key_state = self.get_key_state
+        held_buttons = self.held_buttons = {_code for _code in self.held_buttons if get_key_state(_code)}
+        key_combo = set_hotkey(lambda code: 0 if code in held_buttons else get_key_state(code))
         if key_combo:
             hotkey_name = "+".join(_key for _key in key_combo if _key)
             self.temp_hotkey = hotkey_name

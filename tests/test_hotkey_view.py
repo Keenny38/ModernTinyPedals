@@ -80,7 +80,7 @@ def binding(page, monkeypatch):
     from neopedal.ui import hotkey_view
 
     keys = []
-    monkeypatch.setattr(hotkey_view, "set_hotkey_win", lambda get_state: tuple(keys))
+    monkeypatch.setattr(hotkey_view, "set_hotkey", lambda get_state: tuple(keys))
     monkeypatch.setattr(hotkey_view.PLATFORM, "WINDOWS", True)
     name = next(iter(SHORTCUTS_PRESET))
     cfg.user.shortcuts[name]["bind"] = ""
@@ -130,6 +130,31 @@ def test_not_supported_text_on_linux(page, monkeypatch):
 
     monkeypatch.setattr(hotkey_view.PLATFORM, "WINDOWS", False)
     dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
-    assert "not supported" in dialog.hotkey_entry.text()
+    assert "controller button" in dialog.hotkey_entry.text() and "not supported" in dialog.hotkey_entry.text()
     dialog.close()
     assert PLATFORM is hotkey_view.PLATFORM
+
+
+def test_controller_button_held_at_start_ignored(page, monkeypatch):
+    """Button box switch held in a position never taken as the pressed button, until released & pressed"""
+    from neopedal.hotkey.joystick import joystick_code
+    from neopedal.ui import hotkey_view
+
+    switch, button = joystick_code(0, 0), joystick_code(0, 9)
+    pressed = {switch}
+    monkeypatch.setattr(hotkey_view, "get_key_state_function", lambda: lambda code: int(code in pressed))
+    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
+    dialog.show()
+    try:
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.temp_hotkey == ""
+        pressed.add(button)
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.temp_hotkey == "joy1_button_10" and "Joy1 Button 10" in dialog.hotkey_entry.text()
+        pressed.clear()
+        dialog.timerEvent(QTimerEvent(0))  # switch released
+        pressed.add(switch)
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.temp_hotkey == "joy1_button_1"
+    finally:
+        dialog.close()

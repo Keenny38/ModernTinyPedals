@@ -2491,8 +2491,10 @@ TRANSLATION = MappingProxyType({
     "overriding": "forcé",
     "unknown": "inconnu",
     "not running": "non lancé",
-    "Press a key or key combination": "Appuyez sur une touche ou une combinaison de touches",
-    "Hotkey not supported on Linux": "Raccourci non pris en charge sous Linux",
+    "Press a key, key combination, mouse or controller button": (
+        "Appuyez sur une touche, une combinaison de touches, un bouton de souris ou de contrôleur"),
+    "Press a controller button (keyboard not supported on Linux)": (
+        "Appuyez sur un bouton de contrôleur (clavier non pris en charge sous Linux)"),
     "update": "mise à jour",
     "paint": "dessin",
     "stall": "blocage",

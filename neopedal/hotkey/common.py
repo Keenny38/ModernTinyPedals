@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable, Mapping
 from itertools import chain
 
 from ..const_app import PLATFORM
+from .joystick import JOY_CODE_BASE, joystick_reader
 from .keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
 
@@ -62,12 +63,22 @@ def modifier_priority(key: str) -> int:
 
 
 def get_key_state_function() -> Callable[[int], int]:
-    """Platform specific 'get key state' function"""
+    """Platform specific 'get key state' function, keyboard & mouse keys, game controller buttons"""
+    get_keyboard_state: Callable[[int], int]
     if PLATFORM.WINDOWS and sys.platform == "win32":  # platform check also read by type checker
         from ctypes import windll
 
-        return windll.user32.GetAsyncKeyState
-    return _get_key_state_linux
+        get_keyboard_state = windll.user32.GetAsyncKeyState
+    else:
+        get_keyboard_state = _get_key_state_linux
+    get_joystick_state = joystick_reader().pressed  # devices released with function
+
+    def get_key_state(key_code: int) -> int:
+        if key_code >= JOY_CODE_BASE:
+            return get_joystick_state(key_code)
+        return get_keyboard_state(key_code)
+
+    return get_key_state
 
 
 def refresh_keystate(get_key_state: Callable[[int], int]) -> None:
@@ -121,12 +132,12 @@ def sort_modifiers(modifiers: Iterable[str], key_modifier: Mapping[str, int] = K
     return [_mod for _mod in key_modifier if _mod in names]
 
 
-def set_hotkey_win(
+def set_hotkey(
     get_key_state: Callable[[int], int],
     key_general: Mapping[str, int] = KEYMAP_GENERAL,
     key_modifier: Mapping[str, int] = KEYMAP_MODIFIER,
 ) -> tuple[str, ...]:
-    """Set hotkey string"""
+    """Set hotkey string from pressed keys (modifiers & one key, mouse or game controller button)"""
     key_combo = [""] * 4  # Ctrl, Alt, Shift, Key
     # Key state: 0=off, 1=pressed, <1=down
     # Assign mod key
@@ -142,6 +153,14 @@ def set_hotkey_win(
             key_combo[-1] = key
             return tuple(key_combo)
     return ()
+
+
+def held_controller_buttons(
+    get_key_state: Callable[[int], int],
+    key_general: Mapping[str, int] = KEYMAP_GENERAL,
+) -> set[int]:
+    """Key codes of game controller buttons held down (button box switch or rotary held in a position)"""
+    return {_code for _code in key_general.values() if _code >= JOY_CODE_BASE and get_key_state(_code)}
 
 
 # Private

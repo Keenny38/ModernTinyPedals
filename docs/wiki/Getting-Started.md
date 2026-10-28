@@ -146,12 +146,14 @@ A preset stores the layout and options of all overlays and modules. You can keep
 
 ## Hotkeys
 
-The `Hotkey` page binds keys to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Dashboard HUD incident, bring the main window in front of the game and focus it, even from the tray (`show_main_window`), drive the [Broadcast Director](Broadcast-Director.md#hotkeys) (`director_*` commands), turn any overlay or module on or off, load a given preset, restart or quit the app.
+The `Hotkey` page binds keys, mouse buttons and game controller buttons (wheel, button box, joystick, gamepad) to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Dashboard HUD incident, bring the main window in front of the game and focus it, even from the tray (`show_main_window`), drive the [Broadcast Director](Broadcast-Director.md#hotkeys) (`director_*` commands), turn any overlay or module on or off, load a given preset, restart or quit the app.
 
 1. Click the `Disabled` button to turn global hotkeys on (it then shows `Enabled`).
-2. Click the key button of a command and press a key or key combination (`Clear` removes it, `Clear All` removes every binding). Preset commands also ask which preset to load.
+2. Click the key button of a command and press a key or key combination, a mouse button (middle, back, forward) or a controller button (`Clear` removes it, `Clear All` removes every binding). Preset commands also ask which preset to load.
 
-Hotkeys do not block the key for other programs. Global hotkeys are not supported on Linux. The same commands can be run by other programs (Stream Deck, SimHub...): see [Connections](Connections.md#remote-control).
+Controller buttons are named after the device and the button (`Joy1 Button 5`, `Joy2 Pov Up` for the d-pad), and can be combined with `Ctrl`, `Shift` or `Alt`. Up to 16 devices with 32 buttons and a d-pad each are read. A button held when the key binding dialog opens (a switch or rotary of a button box) is ignored until released. The device number follows the order Windows gives to controllers: if you plug or unplug a device, check the bindings again.
+
+Hotkeys do not block the key or button for other programs (the game still sees it). On Linux, only controller buttons work (`/dev/input/js*`), keyboard hotkeys are not supported. The same commands can be run by other programs (Stream Deck, SimHub...): see [Connections](Connections.md#remote-control).
 
 ## Spectate
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from ..const_app import PLATFORM
+from .joystick import joystick_keymap
 
 # Windows virtual key code:
 # https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
@@ -42,11 +43,11 @@ _WIN_KEYMAP_MODIFIER = {
     # "right_win": 92,
 }
 _WIN_KEYMAP_GENERAL = {
-    # "left_button": 1,
+    # "left_button": 1,  # clicks Save of key binding dialog
     # "right_button": 2,
-    # "middle_button": 4,
-    # "x1_button": 5,
-    # "x2_button": 6,
+    "mouse_middle": 4,
+    "mouse_back": 5,  # x1 button
+    "mouse_forward": 6,  # x2 button
     "backspace": 8,
     "tab": 9,
     "num_delete": 12,
@@ -205,11 +206,14 @@ _WIN_KEYMAP_GENERAL = {
     # "gamepad_right_thumbstick_left": 218,
 }
 
+# Game controller buttons (wheel, button box, joystick, gamepad), after keyboard & mouse keys
+_JOYSTICK_KEYMAP = joystick_keymap()
+
 # Windows
 if PLATFORM.WINDOWS:
     KEYMAP_MODIFIER = MappingProxyType(_WIN_KEYMAP_MODIFIER)
-    KEYMAP_GENERAL = MappingProxyType(_WIN_KEYMAP_GENERAL)
-# Other platform (placeholder)
+    KEYMAP_GENERAL = MappingProxyType(_WIN_KEYMAP_GENERAL | _JOYSTICK_KEYMAP)
+# Other platform (keyboard placeholder, game controllers only)
 else:
     KEYMAP_MODIFIER = MappingProxyType({})
-    KEYMAP_GENERAL = MappingProxyType({})
+    KEYMAP_GENERAL = MappingProxyType(_JOYSTICK_KEYMAP)
