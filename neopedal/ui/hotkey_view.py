@@ -25,8 +25,9 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, cast
 
-from PySide6.QtCore import QBasicTimer, Qt, Slot
+from PySide6.QtCore import QBasicTimer, QEvent, Qt, Slot
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialogButtonBox,
     QHBoxLayout,
@@ -46,6 +47,7 @@ from ..hotkey.common import (
     format_hotkey_name,
     get_key_state_function,
     held_controller_buttons,
+    held_modifiers,
     refresh_keystate,
     set_hotkey,
 )
@@ -60,6 +62,9 @@ from ..template.setting_shortcuts import (
     SHORTCUTS_WIDGET,
 )
 from ._common import BaseDialog, UIScaler, confirm_action
+
+# Key events kept from app while capturing a key (shortcut override accepted: no app shortcut run)
+CAPTURED_KEY_EVENTS = frozenset((QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress, QEvent.Type.KeyRelease))
 
 
 class HotkeyList(QWidget):
@@ -319,9 +324,15 @@ class ConfigHotkey(BaseDialog):
         held_buttons = self.held_buttons = {_code for _code in self.held_buttons if get_key_state(_code)}
         key_combo = set_hotkey(lambda code: 0 if code in held_buttons else get_key_state(code))
         if key_combo:
-            hotkey_name = "+".join(_key for _key in key_combo if _key)
-            self.temp_hotkey = hotkey_name
-            self.update_text(format_hotkey_name(hotkey_name, delimiter=" + "))
+            self.temp_hotkey = "+".join(_key for _key in key_combo if _key)
+            self.update_text(format_hotkey_name(self.temp_hotkey, delimiter=" + "))
+            return
+        # Modifiers held alone shown while waiting for the key, ex. "Ctrl + Shift + ..."
+        modifiers = held_modifiers(get_key_state)
+        if modifiers:
+            self.update_text(f"{format_hotkey_name('+'.join(modifiers), delimiter=' + ')} + ...")
+        else:
+            self.update_text(format_hotkey_name(self.temp_hotkey, self.text_placeholder, delimiter=" + "))
 
     def reset(self):
         """Reset hotkey"""
@@ -377,18 +388,49 @@ class ConfigHotkey(BaseDialog):
         """Reject(ESC)"""
         self.close()
 
+    def capturing_keys(self) -> bool:
+        """Keys pressed in app go to key capture: shown in active window, no message box or popup over it"""
+        return (
+            self.isVisible()
+            and QApplication.activeModalWidget() is None
+            and QApplication.activePopupWidget() is None
+            and QApplication.activeWindow() is self.window()
+        )
+
+    def eventFilter(self, watched, event):
+        """App shortcuts & keys off while capturing (Ctrl+K, Ctrl+1, Ctrl+S, Alt menu, Enter, Space...),
+        so any key combination can be bound; Esc still closes"""
+        if (event.type() in CAPTURED_KEY_EVENTS and event.key() != Qt.Key.Key_Escape
+                and self.capturing_keys()):
+            event.accept()
+            return True
+        return False
+
+    def filter_app_keys(self, enabled: bool):
+        """Key events of whole app go through eventFilter (or no longer)"""
+        app = QApplication.instance()
+        if app is None:
+            return
+        if enabled:
+            app.installEventFilter(self)
+        else:
+            app.removeEventFilter(self)
+
     def showEvent(self, event):
         """Global hotkeys off while capturing a key (pressed keys would run their commands)"""
         super().showEvent(event)
         kctrl.disable()
+        self.filter_app_keys(True)
 
     def hideEvent(self, event):
         """Global hotkeys back on as soon as key capture stops showing (page left open behind)"""
         super().hideEvent(event)
+        self.filter_app_keys(False)
         kctrl.enable()  # only if enabled in setting
 
     def closeEvent(self, event):
         """Close dialog"""
+        self.filter_app_keys(False)
         self._update_timer.stop()
         with suppress(RuntimeError):  # hotkey page it came from replaced meanwhile (language change)
             self.reloading()

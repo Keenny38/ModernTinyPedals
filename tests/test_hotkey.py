@@ -49,6 +49,24 @@ def test_sort_key_codes_modifiers_first():
     assert set(codes[3:]) == {65, 32}
 
 
+def test_every_modifier_checked_for_exact_combo():
+    """Modifiers not used by any hotkey still read: 'c' not run with Ctrl+C held"""
+    assert sort_key_codes([(65,)], MODIFIER) == (17, 16, 18, 65)
+    assert sort_key_codes([], MODIFIER) == ()
+
+
+def test_modifier_released_before_key_not_in_combo(monkeypatch):
+    """Modifier read as held only (pressed-since-last-check bit ignored), other keys read both bits"""
+    from neopedal.hotkey import common
+
+    states = {17: 1, 16: -32768, 65: 1}  # ctrl tapped & released, shift held, a tapped
+    monkeypatch.setattr(common.PLATFORM, "WINDOWS", False)
+    monkeypatch.setattr(common, "KEYMAP_MODIFIER", MODIFIER)
+    monkeypatch.setattr(common, "_get_key_state_linux", lambda code: states.get(code, 0))
+    get_key_state = common.get_key_state_function()
+    assert not get_key_state(17) and get_key_state(16) and get_key_state(65)
+
+
 def test_format_and_priority():
     assert format_hotkey_name("ctrl+page_up", delimiter=" + ") == "Ctrl + Page Up"
     assert format_hotkey_name("", notset="Not set") == "Not set"
@@ -309,6 +327,18 @@ def test_controller_button_with_modifier_and_mouse_hotkey(ui_env, monkeypatch):
     ctrl, pov_up, mouse = KEYMAP_MODIFIER["ctrl"], joystick_code(0, 32), KEYMAP_GENERAL["mouse_back"]
     states = [{pov_up}, set(), {ctrl, pov_up}, set(), {mouse}]
     binds = {"overlay_lock": "ctrl+joy1_pov_up", "overlay_auto_hide": "mouse_back"}
+    assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]
+
+
+@WINDOWS_KEYS
+def test_hotkey_needs_exact_modifiers(ui_env, monkeypatch):
+    """Ctrl+C never runs the 'c' hotkey, Ctrl+Shift+A never runs 'ctrl+a'"""
+    from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+
+    ctrl, shift = KEYMAP_MODIFIER["ctrl"], KEYMAP_MODIFIER["shift"]
+    key_a, key_c = KEYMAP_GENERAL["a"], KEYMAP_GENERAL["c"]
+    states = [{ctrl, key_c}, set(), {ctrl, shift, key_a}, set(), {key_c}, set(), {ctrl, key_a}]
+    binds = {"overlay_lock": "c", "overlay_auto_hide": "ctrl+a"}
     assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]
 
 

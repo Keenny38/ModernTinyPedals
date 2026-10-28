@@ -151,6 +151,8 @@ The `Hotkey` page binds keys, mouse buttons and game controller buttons (wheel, 
 1. Click the `Disabled` button to turn global hotkeys on (it then shows `Enabled`).
 2. Click the key button of a command and press a key or key combination, a mouse button (middle, back, forward) or a controller button (`Clear` removes it, `Clear All` removes every binding). Preset commands also ask which preset to load.
 
+Combinations with `Ctrl`, `Shift` and `Alt` work with any key, also the ones the app itself uses (`Ctrl+K`, `Ctrl+1`, `Ctrl+S`, `Alt`, `Enter`, `Space`...): while the key binding dialog is shown, keys only go to it (`Esc` still closes it), and held modifiers are shown (`Ctrl + Shift + ...`) until you press the key. Modifiers must match exactly: a hotkey on `C` does not run with `Ctrl+C`, and `Ctrl+A` does not run with `Ctrl+Shift+A`.
+
 Controller buttons are named after the device and the button (`Joy1 Button 5`, `Joy2 Pov Up` for the d-pad), and can be combined with `Ctrl`, `Shift` or `Alt`. Up to 16 devices with 32 buttons and a d-pad each are read. A button held when the key binding dialog opens (a switch or rotary of a button box) is ignored until released. The device number follows the order Windows gives to controllers: if you plug or unplug a device, check the bindings again.
 
 Hotkeys do not block the key or button for other programs (the game still sees it). On Linux, only controller buttons work (`/dev/input/js*`), keyboard hotkeys are not supported. The same commands can be run by other programs (Stream Deck, SimHub...): see [Connections](Connections.md#remote-control).

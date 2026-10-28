@@ -158,3 +158,54 @@ def test_controller_button_held_at_start_ignored(page, monkeypatch):
         assert dialog.temp_hotkey == "joy1_button_1"
     finally:
         dialog.close()
+
+
+def test_app_shortcuts_kept_from_app_while_capturing(page, monkeypatch):
+    """Ctrl+K, Ctrl+1, Alt, Enter... go to key capture only (any combination bindable), Esc still closes"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from neopedal.ui import hotkey_view
+
+    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
+    capturing = [True]
+    monkeypatch.setattr(hotkey_view.ConfigHotkey, "capturing_keys", lambda self: capturing[0])
+
+    def filtered(event_type, key, modifiers=Qt.KeyboardModifier.NoModifier):
+        return dialog.eventFilter(None, QKeyEvent(event_type, key, modifiers))
+
+    try:
+        ctrl = Qt.KeyboardModifier.ControlModifier
+        assert filtered(QEvent.Type.ShortcutOverride, Qt.Key.Key_K, ctrl)
+        assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
+        assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_Return)
+        assert filtered(QEvent.Type.KeyRelease, Qt.Key.Key_Alt)
+        assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_Escape)
+        capturing[0] = False  # message box over it, or other window active
+        assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
+    finally:
+        dialog.close()
+
+
+def test_held_modifiers_shown_while_waiting_for_key(page, monkeypatch):
+    from neopedal.ui import hotkey_view
+
+    pressed = set()
+    monkeypatch.setattr(hotkey_view, "get_key_state_function", lambda: lambda code: int(code in pressed))
+    monkeypatch.setattr(hotkey_view, "held_modifiers",
+                        lambda get_state: [name for name, code in (("ctrl", 17), ("shift", 16)) if get_state(code)])
+    monkeypatch.setattr(hotkey_view, "set_hotkey", lambda get_state: ("ctrl", "", "", "f5") if get_state(116) else ())
+    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
+    dialog.show()
+    try:
+        pressed.update((17, 16))
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.hotkey_entry.text() == "Ctrl + Shift + ..." and dialog.temp_hotkey == ""
+        pressed.add(116)
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.temp_hotkey == "ctrl+f5"
+        pressed.clear()
+        dialog.timerEvent(QTimerEvent(0))
+        assert dialog.hotkey_entry.text() == "Ctrl + F5"  # captured combo kept once released
+    finally:
+        dialog.close()

@@ -30,20 +30,24 @@ from ..const_app import PLATFORM
 from .joystick import JOY_CODE_BASE, joystick_reader
 from .keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
+KEY_DOWN = 0x8000  # GetAsyncKeyState most significant bit: key held down
+
 
 def sort_key_codes(
     available_commands: Iterable[tuple[int, ...]],
     key_modifier: Mapping[str, int] = KEYMAP_MODIFIER,
 ) -> tuple[int, ...]:
-    """Sort available key codes in order - modifiers > keys"""
+    """Sort available key codes in order - modifiers > keys
+
+    Every modifier is checked (also if no hotkey uses it), so modifiers must match exactly:
+    'c' does not run with Ctrl+C, 'ctrl+a' does not run with Ctrl+Shift+A.
+    """
     all_keys = set(chain(*(_keys for _keys in available_commands)))
+    if not all_keys:
+        return ()
     all_modifiers = set(key_modifier.values())
     keys_only = tuple(all_keys - all_modifiers)
-    modifiers_only = tuple(
-        _mod for _mod in key_modifier.values()
-        if _mod in all_keys
-    )
-    return modifiers_only + keys_only
+    return tuple(key_modifier.values()) + keys_only
 
 
 def format_hotkey_name(name: str, notset: str = "", delimiter: str = "+") -> str:
@@ -72,11 +76,14 @@ def get_key_state_function() -> Callable[[int], int]:
     else:
         get_keyboard_state = _get_key_state_linux
     get_joystick_state = joystick_reader().pressed  # devices released with function
+    modifier_codes = frozenset(KEYMAP_MODIFIER.values())
 
     def get_key_state(key_code: int) -> int:
         if key_code >= JOY_CODE_BASE:
             return get_joystick_state(key_code)
-        return get_keyboard_state(key_code)
+        if key_code in modifier_codes:  # held only: a modifier released just before a key is not in combo
+            return get_keyboard_state(key_code) & KEY_DOWN
+        return get_keyboard_state(key_code)  # held or pressed since last check (short key tap)
 
     return get_key_state
 
@@ -153,6 +160,14 @@ def set_hotkey(
             key_combo[-1] = key
             return tuple(key_combo)
     return ()
+
+
+def held_modifiers(
+    get_key_state: Callable[[int], int],
+    key_modifier: Mapping[str, int] = KEYMAP_MODIFIER,
+) -> list[str]:
+    """Names of modifiers held down, in key_modifier order"""
+    return [_mod for _mod, _code in key_modifier.items() if get_key_state(_code)]
 
 
 def held_controller_buttons(
