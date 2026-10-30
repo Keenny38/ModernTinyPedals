@@ -31,12 +31,15 @@ from typing import Any
 from PySide6.QtCore import Slot
 
 from ...api_control import api
+from ...const_api import API_LMU_NAME
 from ...fuel_strategy import (
     history_laps,
     plan,
+    whole_laps,
 )
 from ...i18n import tr, trm
 from ...module_info import minfo
+from ...process.results_text import number_text, position_text
 from ...race_live import clock as race_clock
 from ...race_live_data import (
     LITERS_PER_GALLON,
@@ -70,7 +73,7 @@ LIVE_GROUPS = (  # live tab groups: key, title
     ("race", "Race"), ("pace", "Pace & Consumption"), ("start", "Race Start"), ("pit", "Pit Stop"),
     ("tyres", "Tyres"), ("weather", "Weather"),
 )
-FILLED_KEYS = frozenset((  # live values Load Live & Follow Live fill in from laps (fill_in_data)
+FILLED_KEYS = frozenset((  # live values the Game Session source & Follow Live fill in from laps (fill_in_data)
     "race_length", "input_lap_time", "input_fuel_per_lap", "input_energy_per_lap", "input_wear_per_lap",
     "input_tank_capacity",
 ))
@@ -84,15 +87,15 @@ class LiveTab(RaceBase):
     # Live game data (live tab): every input value the game gives, see race_live_data
     @staticmethod
     def unfollowed_live() -> set[str]:
-        """Live values the user turned off: left out of Load Live, Follow Live & Fill In All"""
+        """Live values the user turned off: left out of the Game Session source, Follow Live & Fill In All"""
         text = cfg.user.config["fuel_calculator"].get("live_unfollowed", "")
         return {key for key in text.split(",") if key} if isinstance(text, str) else set()
 
     def update_garage_timer(self):
-        """LMU garage screens asked at once, then every few seconds while the live tab is shown or
-        inputs follow live"""
+        """LMU garage screens asked at once, then every few seconds while the live or team tab is shown
+        (names of the team drivers) or inputs follow live"""
         follow = bool(cfg.user.config["fuel_calculator"].get("enable_follow_live"))
-        if self.active and self.game_data and (self.tab == TABS.index("live") or follow):
+        if self.active and self.game_data and (self.tab in (TABS.index("live"), TABS.index("team")) or follow):
             if not self._garage_timer.isActive():
                 self._garage_timer.start()
                 self.refresh_garage()
@@ -134,14 +137,25 @@ class LiveTab(RaceBase):
             values = self.live_values
         self.publish_live_data(values)
 
-    def keep_team_names(self):
-        """Driver names of the LMU team kept as names of the calculator drivers when the team has
-        as many drivers (driver of each stint of a race under way, see fuel_strategy.driver_numbers)"""
-        names = self.garage.drivers
-        if names and len(names) == self.values["input_drivers"]:
-            text = "\n".join(names)
-            if self.values["input_driver_names"] != text:
-                self.setInput("input_driver_names", text)
+    def update_pit_menu_available(self):
+        """Pit Menu button enabled in an LMU session only (the game pit menu exists there), told to QML"""
+        available = bool(self.game_data) and api.name == API_LMU_NAME and bool(api.read.state.active())
+        if available != self.pit_menu_available:
+            self.pit_menu_available = available
+            self.liveChanged.emit()
+
+    def next_plan_stop(self):
+        """Next stop of the plan shown: first stop of the rest of the race (live race state), else the first stop
+        of the whole race plan not done yet (live plan off while a race is under way: stops already made left
+        out), None if none left"""
+        strategy = self.strategy
+        if not strategy.ready or not strategy.stops:
+            return None
+        stops = strategy.stops
+        if self.race_state is None and self._race_running:  # plan of the whole race while the race is under way
+            done = whole_laps(self.race_setup.formation_laps) + max(api.read.lap.completed_laps(), 0)
+            stops = [stop for stop in stops if stop.lap > done]
+        return stops[0] if stops else None
 
     @Slot()
     def setGamePitMenu(self):
@@ -150,11 +164,13 @@ class LiveTab(RaceBase):
         if not self.game_data:
             self.host.toast(tr("Race Calculator is off"))
             return
-        strategy = self.strategy
-        if not strategy.ready or not strategy.stops:
+        if not self.strategy.ready or not self.strategy.stops:
             self.host.toast(tr("No pit stop in the plan"))
             return
-        stop = strategy.stops[0]
+        stop = self.next_plan_stop()
+        if stop is None:
+            self.host.toast(tr("Every stop of the plan is done: plan the race under way (Live Race) for the next one"))
+            return
         fuel = stop.fuel_after * LITERS_PER_GALLON if self.is_gallon else stop.fuel_after
         self.jobs.run("pit menu", partial(write_pit_menu, fuel, stop.energy_after), self.pit_menu_written,
                       key="pit menu")
@@ -193,7 +209,7 @@ class LiveTab(RaceBase):
                             self.symbol_fuel, self.dry_plan_laps(), tuple(DEFAULT_TYRE_SET))
 
     def apply_live(self, keys: set[str] | None = None, followed: bool = False, filled: bool = False) -> int:
-        """Live values filled in: those of keys, or every value followed (filled: values Load Live
+        """Live values filled in: those of keys, or every value followed (filled: values the Game Session source
         fills in from laps too), count filled in"""
         unfollowed = self.unfollowed_live()
 
@@ -309,7 +325,7 @@ class LiveTab(RaceBase):
         if key in ("input_fuel_start", "input_energy_start") and values[key] <= 0:
             return tr("Full Tank")
         if key == "tyre_change_times":
-            return f"{float(rule['tyre_change_time_2']):.1f} s / {float(rule['tyre_change_time_4']):.1f} s"
+            return f"{number_text(float(rule['tyre_change_time_2']), 1)} s / {number_text(float(rule['tyre_change_time_4']), 1)} s"
         if key == "maximum_tyre":
             return f"{int(rule['maximum_tyre'])}"
         if key == "rain":
@@ -326,7 +342,7 @@ class LiveTab(RaceBase):
         decimals = {"input_tank_capacity": 1, "input_fuel_start": 1, "input_energy_start": 1, "input_tread_start": 1,
                     "input_pit_seconds": 1, "input_driver_change_seconds": 1}.get(key, spec.decimals)
         unit = unit_text(spec.unit, symbol)
-        return f"{value:.{decimals}f} {unit}".strip()
+        return f"{number_text(value, decimals)} {unit}".strip()
 
     def live_race_items(self) -> list[dict]:
         """Race under way read from the game: lap, race time, amounts, stops, track state, penalties,
@@ -362,7 +378,7 @@ class LiveTab(RaceBase):
             {"title": tr("Race Time"), "value": race_clock(elapsed), "warning": False},
             {"title": tr("Time left"), "value": race_clock(max(left, 0.0)) if not lap_race else results.DASH,
              "warning": False},
-            {"title": tr("Fuel"), "value": f"{self.unit_fuel(read.engine.fuel()):.1f} {self.symbol_fuel}",
+            {"title": tr("Fuel"), "value": f"{number_text(self.unit_fuel(read.engine.fuel()), 1)} {self.symbol_fuel}",
              "warning": False},
             {"title": tr("Energy"), "value": f"{read.engine.virtual_energy() * 100:.0f} %", "warning": False},
             {"title": tr("Tread"), "value": f"{sum(read.tyre.wear()) * 25:.0f} %", "warning": False},
@@ -371,11 +387,11 @@ class LiveTab(RaceBase):
             {"title": tr("Penalties"), "value": f"{penalties}", "warning": penalties > 0},
         ]
         if cars:
-            items.append({"title": tr("Class Position"), "value": f"P{place + 1} / {cars}", "warning": False})
+            items.append({"title": tr("Class Position"), "value": position_text(place + 1, cars), "warning": False})
         if repair > 0:
             items.append({"title": tr("Pending Repair"), "value": f"{repair:.0f} s", "warning": True})
         if pit_time > 0:
-            items.append({"title": tr("Next Stop (Game)"), "value": f"{pit_time:.1f} s", "warning": False})
+            items.append({"title": tr("Next Stop (Game)"), "value": f"{number_text(pit_time, 1)} s", "warning": False})
         return items
 
     def garage_tyres(self) -> dict:
@@ -397,7 +413,7 @@ class LiveTab(RaceBase):
         if not api.read.state.active():
             return tr("Game not running or not in a session: values of the car & session needed")
         if self.garage_request.busy and not self.garage_time:
-            return tr("Asking game...")
+            return tr("Asking game…")
         if self.garage_time:
             return trm("LMU garage data at {}").replace("{}", self.garage_time, 1)
         return tr("No LMU garage data: pit stop times, tyres & team come from LMU in a session")
@@ -474,7 +490,7 @@ class LiveTab(RaceBase):
 
     @Slot(str, bool)
     def setLiveFollowed(self, key: str, followed: bool):
-        """Live value filled in by Load Live, Follow Live & Fill In All, or left out (kept for next time)"""
+        """Live value filled in by the Game Session source, Follow Live & Fill In All, or left out (kept for next time)"""
         names = self.unfollowed_live() - {key}
         if not followed:
             names.add(key)

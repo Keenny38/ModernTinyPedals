@@ -32,12 +32,13 @@ from time import monotonic
 from typing import Any, ClassVar
 
 from .. import app_signal, realtime_state
-from ..thread_guard import run_supervised
+from ..thread_guard import run_supervised, wait_all_stopped
 from .data_notify import notifier
 
 logger = logging.getLogger(__name__)
 INVALID_INDEX = -1  # same in LMU & rF2 shared memory libraries
 STOP_TIMEOUT = 3.0  # seconds to wait for update thread to stop
+RETRY_DELAYS = (1.0, 5.0, 30.0, 60.0)  # seconds before update loop restarts once its restart budget is spent
 
 
 def default_tele_indexes() -> dict[int, int]:
@@ -214,37 +215,72 @@ class SyncData:
         self.synced = False
 
     def stop(self) -> None:
-        """Join and stop updating thread, close mmap"""
+        """Join and stop updating thread, close mmap (request_stop then wait_stopped)"""
         if self._updating:
-            self._event.set()
-            self._updating = False
-            if self._update_thread is not None:
-                self._update_thread.join(STOP_TIMEOUT)
-                if self._update_thread.is_alive():  # exits on its own event, close only makes its reads fail
-                    logger.warning("sharedmemory: UPDATING: thread still stopping in background")
-            # Make final copy before close, otherwise mmap won't close if using direct access
-            if self.player_scor is not None:
-                self.player_scor = copy_struct(self.player_scor)
-            if self.player_tele is not None:
-                self.player_tele = copy_struct(self.player_tele)
-            self._release_rows()  # release wrappers of mmap data
-            self.tele_map = self.NO_TELE_MAP
-            self.dataset.close_mmap()
+            self.request_stop()
+            self.wait_stopped()
         else:
             logger.warning("sharedmemory: UPDATING: already stopped")
 
+    def request_stop(self) -> None:
+        """Signal updating thread to stop, returns at once: wait_stopped joins it & closes mmap
+
+        Split so every API thread is signalled before any is waited (threads stop in parallel).
+        """
+        if self._updating:
+            self._event.set()
+
+    def wait_stopped(self, timeout: float = STOP_TIMEOUT, deadline: float | None = None) -> bool:
+        """Wait (bounded) for signalled updating thread, then close mmap, returns True if thread stopped
+
+        Args:
+            timeout: maximum wait (seconds), see thread_guard.wait_all_stopped.
+            deadline: monotonic time to give up at instead (shared with other threads stopping).
+        """
+        if not self._updating:
+            return True
+        stopped = True
+        self._event.set()
+        self._updating = False
+        thread = self._update_thread
+        if thread is not None:
+            stopped = wait_all_stopped(
+                ((self.THREAD_NAME, lambda: not thread.is_alive(), thread.join),), timeout, deadline)
+            if not stopped:  # exits on its own event, close only makes its reads fail
+                logger.warning("sharedmemory: UPDATING: thread still stopping in background")
+        # Make final copy before close, otherwise mmap won't close if using direct access
+        if self.player_scor is not None:
+            self.player_scor = copy_struct(self.player_scor)
+        if self.player_tele is not None:
+            self.player_tele = copy_struct(self.player_tele)
+        self._release_rows()  # release wrappers of mmap data
+        self._last_data = None  # data structures of update loop (direct access: view of mmap)
+        self.tele_map = self.NO_TELE_MAP
+        self.dataset.close_mmap()
+        return stopped
+
+    def _hide_while_crashed(self) -> None:
+        """Crashed update loop: hide overlays instead of showing frozen values until restarted"""
+        self.paused = True
+        self.synced = False
+        realtime_state.notify_change()
+
     def __update(self, event: threading.Event) -> None:
-        """Run update loop, restart after unexpected error"""
+        """Run update loop, restart after unexpected error
+
+        Never gives up while not stopped (RETRY_DELAYS): a run of torn reads at session start must not leave
+        the connector dead until the user reloads.
+        """
         notifier.attach()  # data modules wait for notified new data while thread runs
         try:
             if (
-                not run_supervised(lambda: self.__update_loop(event), self.SUPERVISED_NAME, event)
+                not run_supervised(  # positional: tests replace it with lambda *args
+                    lambda: self.__update_loop(event), self.SUPERVISED_NAME, event, 3, 1.0,
+                    RETRY_DELAYS, self._hide_while_crashed)
                 and not event.is_set()
             ):
                 # Stopped after repeated errors: hide overlays instead of showing frozen values
-                self.paused = True
-                self.synced = False
-                realtime_state.notify_change()
+                self._hide_while_crashed()
         finally:
             notifier.detach()  # data modules woken, back to polling
 
@@ -272,6 +308,8 @@ class SyncData:
         last_sync_key: tuple = ()  # player index override setting of last player sync
         last_signature: tuple = ()  # data read by modules, notified on change
         last_index_key: tuple | None = None  # index key of last index maps update
+        last_session_key: tuple | None = None  # track, session type & start time of last tick with new data
+        session_changed = False  # new session: results of previous one not forgotten yet (results stream below)
 
         while not _event_wait(update_delay):
             copied = self.dataset.update_mmap()
@@ -281,9 +319,16 @@ class SyncData:
             new_data = copied is not False or replaced
             if new_data:
                 index_key = self._index_key()
-                if session_timestamp < last_session_timestamp:  # session changed: forget slot ids of previous session
-                    self._tele_indexes = default_tele_indexes()
+                # Session changed: elapsed time went back, or another track, session type or start time (a
+                # session joined with a larger elapsed time than the one left, multiplayer)
+                session_key = (scor_info.mTrackName, scor_info.mSession, scor_info.mStartET)
+                if session_timestamp < last_session_timestamp or (
+                    last_session_key is not None and last_session_key != session_key
+                ):
+                    session_changed = True
+                    self._tele_indexes = default_tele_indexes()  # forget slot ids of previous session
                     last_index_key = None
+                last_session_key = session_key
                 if replaced or last_index_key != index_key:
                     last_index_key = index_key
                     self._update_indexes()
@@ -308,15 +353,19 @@ class SyncData:
                         self.synced = False
                         logger.info("sharedmemory: UPDATING: player data paused")
                 # Result stream
-                if results is not None and results.timestamp != session_timestamp:
-                    if results.timestamp > session_timestamp:
+                if results is not None and (session_changed or results.timestamp != session_timestamp):
+                    if session_changed or results.timestamp > session_timestamp:
                         results.clear()
+                    session_changed = False
                     results.timestamp = session_timestamp
                     results.update(self._results_stream())
 
             if last_session_timestamp != session_timestamp:
-                in_garage = self.player_scor.mInGarageStall
-                slot_id = self.player_scor.mID
+                if self.synced:  # player data of a real slot (zeroed structure while not synced: no car)
+                    in_garage = self.player_scor.mInGarageStall
+                    slot_id = self.player_scor.mID
+                else:
+                    in_garage, slot_id = last_in_garage, last_slot_id
                 if (
                     last_session_timestamp > session_timestamp  # session changed
                     or last_in_garage < in_garage  # returned to garage

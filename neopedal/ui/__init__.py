@@ -20,9 +20,11 @@
 Application UI, style
 """
 
+import html
 import re
 import sys
 
+from PySide6 import QtGui
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -42,6 +44,25 @@ from ..const_app import PLATFORM
 from ..const_file import ImageFile
 
 WINDOWS_THEME_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+# Tags kept by safe_markup: text style & line breaks of messages, nothing that loads or opens anything
+_SAFE_TAGS = re.compile(r"&lt;(/?)(b|i|br|code)&gt;")
+
+
+def safe_markup(text: str) -> str:
+    """Rich text of a message (toast, confirmation, status line) keeping only <b>, <i>, <br> & <code>
+
+    Messages put file names, errors & names from the game or shared files in markup: an <img src="//host/a">
+    there would load a picture from the network (address leaked, Windows file share login sent), a <font>
+    or <a> would hide or fake lines. Values already escaped by the message (&lt;, &amp;) are shown the same.
+    """
+    return _SAFE_TAGS.sub(r"<\1\2>", html.escape(html.unescape(text), quote=False))
+
+
+def message_text(text: str) -> str:
+    """Text of a message box (Qt reads it as rich text when it starts like markup): kept to safe_markup when read
+    as rich text, plain text as is"""
+    return safe_markup(text) if QtGui.Qt.mightBeRichText(text) else text
 
 # Status colors (no QPalette role for them), per window color theme.
 # Text colors keep at least 4.5:1 contrast on window & base background of their theme,
@@ -271,9 +292,18 @@ def app_icon_file(dark: bool) -> str:
     return ImageFile.APP_ICON_DARK if dark else ImageFile.APP_ICON
 
 
+_LEGACY = [False]  # palette set by set_style_palette is a Legacy one
+
+
+def legacy_style() -> bool:
+    """Legacy (classic) theme in use: QML pages tell it by tokens (smaller corners, firmer strokes, plain headers)"""
+    return _LEGACY[0]
+
+
 def set_style_palette(color_theme: str):
     """Set style palette of window theme: modern, or legacy (classic colors), dark or light"""
     dark = resolve_color_theme(color_theme) == "Dark"
+    _LEGACY[0] = color_theme.startswith("Legacy")  # before the palette: pages read it on paletteChanged
     if color_theme.startswith("Legacy"):
         palette_theme = palette_legacy_dark() if dark else palette_legacy_light()
     else:
@@ -407,10 +437,11 @@ def set_style_window(base_font_pt: int) -> str:
     font_pt_text_browser = 0.9 * base_font_pt
     font_pt_app_name = 1.4 * base_font_pt
 
-    # Size
-    border_radius_button = 0.4  # em
-    border_radius_input = 4  # px
-    border_radius_card = 8  # px, list & search box
+    # Size (Legacy themes: corners half as round, as QML pages)
+    corner = 0.5 if legacy_style() else 1
+    border_radius_button = 0.4 * corner  # em
+    border_radius_input = 4 * corner  # px
+    border_radius_card = 8 * corner  # px, list & search box
 
     # Color
     palette = QApplication.palette()
@@ -431,12 +462,11 @@ def set_style_window(base_font_pt: int) -> str:
 
     palette.setCurrentColorGroup(QPalette.ColorGroup.Disabled)
     color_disabled_window_text = palette.windowText().color().name()
-    color_disabled_highlighted_text = palette.highlightedText().color().name()
     color_disabled_highlight = palette.highlight().color().name()
 
-    color_success = status_color("success", palette)
     color_success_border = status_color("success_border", palette)
     color_danger = status_color("danger", palette)
+    color_warning = status_color("warning", palette)
 
     # Strip off indentation & comment
     return re.sub(r"\s{4,}|\/\*.*\/", "", f"""
@@ -742,36 +772,23 @@ def set_style_window(base_font_pt: int) -> str:
             border: 1px solid {color_active_highlight};
             border-radius: {border_radius_card}px;
         }}
+        #toast[level="success"] {{
+            border-color: {color_success_border};
+        }}
+        #toast[level="warning"] {{
+            border-color: {color_warning};
+        }}
+        #toast[level="error"] {{
+            border-color: {color_danger};
+        }}
         #pageStack {{
             background: {color_active_window};
         }}
 
-        /* Main status bar: pills */
+        /* Main status bar: notify bar & saving state */
         AppWindow QStatusBar {{
             border-top: 1px solid {color_active_midlight};
             padding: 0.15em 0.3em;
-        }}
-        AppWindow QStatusBar > QPushButton {{
-            font-size: {font_pt_text_browser}pt;
-            color: {color_disabled_window_text};
-            border: 1px solid {color_active_mid};
-            background: transparent;
-            border-radius: 0.8em;
-            padding: 0.15em 0.7em;
-            margin: 0.15em 0.1em;
-        }}
-        AppWindow QStatusBar > QPushButton::hover {{
-            color: {color_active_window_text};
-            border-color: {color_active_highlight};
-            background: transparent;
-        }}
-        AppWindow QStatusBar > #pillApi[running="true"] {{
-            color: {color_success};
-            border-color: {color_success_border};
-        }}
-        AppWindow QStatusBar > QPushButton::menu-indicator {{
-            image: none;
-            width: 0;
         }}
         AppWindow QStatusBar #labelSaving {{
             font-size: {font_pt_text_browser}pt;
@@ -793,129 +810,6 @@ def set_style_window(base_font_pt: int) -> str:
         }}
         NotifyBar UpdatesNotifyButton {{
             background: {color_active_highlight};
-        }}
-
-        /* Preset backups & trash (dialogs) */
-        RestoreBackup > QListView,
-        PresetTrash > QListView {{
-            font-size: {font_pt_item_name}pt;
-            outline: none;
-            border: 1px solid {color_active_mid};
-            border-radius: {border_radius_card}px;
-            background: {color_active_base};
-            padding: 0.2em;
-        }}
-        RestoreBackup > QListView::item,
-        PresetTrash > QListView::item {{
-            border: none;
-            min-height: 1.25em;
-            padding: 0.25em 0.25em 0.25em 0;
-        }}
-        RestoreBackup > QListView::item:selected,
-        PresetTrash > QListView::item:selected {{
-            selection-color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-        }}
-        PresetTrash > QListView:focus {{
-            border: 2px solid {color_active_highlight};
-        }}
-
-        /* Preset transfer (dialog) */
-        PresetTransfer > QListView {{
-            outline: none;
-            background: {color_active_window};
-        }}
-        PresetTransfer > QListView::item {{
-            border: none;
-            min-height: 1.75em;
-        }}
-        PresetTransfer > QListView::item:selected {{
-            selection-color: {color_active_highlighted_text};
-            background: {color_disabled_highlight};
-        }}
-        PresetTransfer > QListView QCheckBox {{
-            font-size: {font_pt_item_name}pt;
-            margin: 0.25em;
-            border-radius: {border_radius_button}em;
-        }}
-        PresetTransfer ListHeader {{
-            background: {color_active_base};
-        }}
-        PresetTransfer ListHeader QLabel {{
-            font-size: {font_pt_item_name}pt;
-            color: {color_disabled_highlighted_text};
-            padding: 0 0.1em;
-        }}
-        PresetTransfer ListHeader CompactButton {{
-            border: none;
-            font-size: {font_pt_item_button}pt;
-            padding: 0.2em;
-        }}
-        PresetTransfer ListHeader CompactButton::checked {{
-            color: {color_inactive_highlighted_text};
-            background: {color_inactive_highlight};
-        }}
-        PresetTransfer ListHeader CompactButton::hover,
-        PresetTransfer ListHeader CompactButton::checked:hover {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-        }}
-
-        /* Hotkey list (tab) */
-        HotkeyList > QListView {{
-            border: 1px solid {color_active_mid};
-            border-radius: {border_radius_card}px;
-            background: {color_active_base};
-            font-size: {font_pt_item_name}pt;
-            outline: none;
-        }}
-        HotkeyList > QListView QLabel {{
-            font-size: {font_pt_item_name}pt;
-            font-weight: bold;
-            color: {color_inactive_highlighted_text};
-            background: {color_inactive_highlight};
-        }}
-        HotkeyList > QListView QLabel:disabled {{
-            color: {color_disabled_window_text};
-            background: {color_disabled_highlight};
-        }}
-        HotkeyList > QListView::item {{
-            border: none;
-            min-height: 1.75em;
-            color: {color_active_window_text};
-        }}
-        HotkeyList > QListView::item:selected {{
-            background: transparent;
-        }}
-        HotkeyList > QListView::item:hover {{
-            background: {color_disabled_highlight};
-        }}
-        HotkeyList > QListView::item:disabled {{
-            color: {color_disabled_window_text};
-        }}
-        HotkeyConfigItem QPushButton {{
-            font-size: {font_pt_item_toggle}pt;
-            font-weight: bold;
-            border: none;
-            border-radius: {border_radius_button}em;
-            height: none;
-            margin: 0.25em 0.25em 0.25em 0;
-            padding: 0 0.2em;
-            color: {color_disabled_highlighted_text};
-            background: {color_disabled_highlight};
-        }}
-        HotkeyConfigItem QPushButton::checked {{
-            color: {color_inactive_highlighted_text};
-            background: {color_inactive_highlight};
-        }}
-        HotkeyConfigItem QPushButton::hover,
-        HotkeyConfigItem QPushButton::checked:hover {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-        }}
-        HotkeyConfigItem QPushButton::disabled {{
-            color: {color_disabled_highlighted_text};
-            background: {color_disabled_highlight};
         }}
 
         /* Base dialog */
@@ -974,13 +868,6 @@ def set_style_window(base_font_pt: int) -> str:
         /* Config dialog */
         UserConfig #widgetPreview {{
             background: #39424E;
-        }}
-        UserConfig OptionSection {{
-            font-size: {font_pt_app_name}pt;
-            font-weight: bold;
-            color: {color_active_window_text};
-            border-bottom: 2px solid {color_active_highlight};
-            padding: 0.6em 0 0.2em 0;
         }}
         UserConfig OptionGroup {{
             font-size: {font_pt_item_name}pt;

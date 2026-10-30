@@ -22,6 +22,7 @@ The switch at the top of the list shows the **sessions** of the results files or
 - A replay whose session has a results file has a flag icon: pick it and its results are shown on the right. Right-click: `Show Results`.
 - A session with a replay has a camera icon: pick it and its replay is picked in the replays list too.
 - The game is asked only while the replays list or the `Replay` tab is shown.
+- The replays list always has the `Replay` tab (the replay open in the game, or the live session). When the replay picked was not opened from the page (another replay or the live session in the game, or a replay opened in the game itself), a notice above the player says so, with `Watch Replay` to open the one picked.
 
 ## Sessions
 
@@ -36,12 +37,16 @@ Newest first, grouped by day, with the session kind (`R`, `Q`, `P`, `W`), track,
 
 The header shows the track and layout, date, online server or single player, session length (minutes or laps), number of cars and track length, with the circuit logo and picture of Le Mans Ultimate (taken from the game once it ran with the app open, kept in the `gameimage` folder). Below it, your key figures:
 
-- **Position** (with your class position and the number of cars of your class), **Grid** with places gained or lost,
+- **Position** (with your class position and the number of cars of your class; gold on the podium), **Grid** with places gained or lost,
 - **Best lap** with its rank in your class (purple when fastest), **Laps** and pit stops,
 - **Contacts** with cars and walls, **Track limits** points and penalties,
 - **Fastest lap** of the session when it is not yours, or the **winner** when you were not in the session.
 
+With your car in the session, a line under the key figures comments it: **race pace** (median of your clean laps; best lap outside races) compared to the median of your class with your rank in it, **lap 1** places gained or lost from the grid (in your class with several classes), and the **lap time trend** of each stint (seconds per lap, stints of 5 clean laps or more).
+
 Class chips (multiclass sessions) show one class: positions and gaps become class positions and gaps.
+
+**Track Stats** (header): opens [Driver Stats](Driver-Stats.md) on the track of the session, your car of the session picked.
 
 **Watch Replay** (Le Mans Ultimate): when the game saved the replay of the session (`UserData/Replays/<track> R1 3.Vcr`, written a few minutes after the results file), a button in the header opens it in the game and shows the `Replay` tab, after confirmation (with a warning in a live session). Sessions with a replay have a camera icon in the list. The game must run to play it; if it is closed, the page tells you.
 
@@ -61,17 +66,21 @@ The place of every car at the end of each lap, starting from the grid. Your car 
 
 The laps of the car picked (your car first, any other car from the list): place, lap time (session best in purple, own best in green), gap to its own best, the three sectors (same colors), top speed in your speed unit, front tyre compound and laps through the pit lane. For your car, the virtual energy (or fuel) used on each lap and the tyre tread left. On top: best lap, average and consistency of clean laps (no pit lane, not the first lap), theoretical best from the best sectors, top speed.
 
+**Telemetry of this lap**: laps of your car recorded by the `Recorder` module (same session, same lap time) have a chart button (or `T` on the lap): it opens the [Telemetry Viewer](Telemetry-Viewer.md) on that lap.
+
 ### Replay (Le Mans Ultimate)
+
+Under a session, this tab is there only when the game saved the replay of that session, and it plays only that replay: when the game shows another replay or the live session, the tab offers `Watch Replay` instead. The replays list always has it.
 
 The replay open in the game, or the live session: game state, playback (play / pause with `Space`, speeds, previous / next lap of the car followed), camera and game HUD, then the incidents of the session on a timeline and in a list, the drivers and the track map. Same controls as described in [Game replays](Connections.md#game-replays-le-mans-ultimate).
 
 ### Events
 
-Contacts (a contact reported by both cars is shown once, with its impact strength), penalties (kind, time and reason), track limits (warnings, invalidated laps, points) and chat, with the session time. Filter by kind (with counts), or show only the events of the car picked. Your events are in bold. Game texts such as retirement reasons and penalties are shown in the app language.
+Contacts (a contact reported by both cars is shown once, with its impact strength), penalties (kind, time and reason), track limits (warnings, invalidated laps, points; in the warning color with a flag, purple stays for best times) and chat, with the session time. Filter by kind (with counts), or show only the events of the car picked. Your events are in bold. Game texts such as retirement reasons and penalties are shown in the app language.
 
 ## Used by other pages
 
-- [Driver Stats](Driver-Stats.md): your sessions are linked to their results file (class position, contacts, penalties, game version); click one to open it here. The `Driver` card counts your races from the results files, and `Complete...` adds lap times found in LMU results files that your stats miss.
+- [Driver Stats](Driver-Stats.md): your sessions are linked to their results file (class position, contacts, penalties, game version); click one to open it here. The `Driver` card counts your races from the results files, and `Complete…` adds lap times found in LMU results files that your stats miss.
 - [Broadcast Director](Broadcast-Director.md): the driver history of the car sheet (races, class wins, podiums, races with the cars ahead and behind) comes from the results files.
 
 ## Show the results on stream

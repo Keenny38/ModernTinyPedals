@@ -43,14 +43,20 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, NamedTuple
+from typing import IO, TYPE_CHECKING, Any, NamedTuple
 
 from .driver_ranks import DriverRanks, parse_rank
 
-RACEOS_URL = "https://raceos.gg"
+if TYPE_CHECKING:
+    import http.client
+    import urllib.request
+
+RACEOS_HOST = "raceos.gg"
+RACEOS_URL = f"https://{RACEOS_HOST}"
 AUTH_URL = f"{RACEOS_URL}/authenticate"
 TICKET_ROUTE = "/rest/profile/getAuthSessionTicket"
-TIMEOUT = 8.0
+TIMEOUT = 8.0  # seconds per connection step & read
+REQUEST_SECONDS = 20.0  # answer (status, headers, body) read in this time at most once request sent
 MAX_BODY = 4 * 1024 * 1024
 RETRY_SECONDS = 300.0  # first wait after a failed sign in, doubled each failure
 RETRY_MAX_SECONDS = 3600.0
@@ -65,32 +71,76 @@ logger = logging.getLogger(__name__)
 Http = Callable[[str, str, bytes | None, dict[str, str], float], tuple[int, bytes]]
 
 
+def is_raceos_url(url: str) -> bool:
+    """Address of RaceControl over HTTPS (redirect allowed to it only: requests carry the sign in token)"""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        return parts.scheme == "https" and parts.hostname == RACEOS_HOST and parts.port in (None, 443)
+    except ValueError:  # invalid port
+        return False
+
+
+def _opener(seconds: float) -> urllib.request.OpenerDirector:
+    """urllib opener: answers read within seconds of each connection, redirects followed only to https://raceos.gg
+    (urllib keeps the Game-Authorization header on a redirect to another host, and allows http)"""
+    import http.client
+    import urllib.request
+
+    from ..http_limits import deadline_response_class
+
+    class Redirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req: urllib.request.Request, fp: IO[bytes], code: int, msg: str,
+                             headers: http.client.HTTPMessage, newurl: str) -> urllib.request.Request | None:
+            if not is_raceos_url(newurl):
+                logger.info("RACEOS: redirect to another address refused")
+                return None  # redirect answer handed to caller (HTTPError), never followed
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    class Connection(http.client.HTTPSConnection):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.response_class = deadline_response_class(seconds)  # type: ignore[assignment]
+
+    class Handler(urllib.request.HTTPSHandler):
+        def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+            return self.do_open(Connection, req, context=self._context)  # type: ignore[attr-defined]
+
+    return urllib.request.build_opener(Redirect, Handler)
+
+
 def http_request(method: str, url: str, body: bytes | None, headers: dict[str, str],
                  timeout: float) -> tuple[int, bytes]:
-    """Status & body of request (error statuses too), (0, b"") if no answer"""
+    """Status & body of request (error statuses too), (0, b"") if no answer, or not read in REQUEST_SECONDS, or body
+    above MAX_BODY; https://raceos.gg only (redirects too)"""
     import http.client
     import urllib.error
     import urllib.request
 
+    from ..http_limits import read_body
+
+    if not is_raceos_url(url):
+        return 0, b""
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, response.read(MAX_BODY)
+        with _opener(max(REQUEST_SECONDS, timeout)).open(request, timeout=timeout) as response:
+            return response.status, read_body(response.read, MAX_BODY, response.length)
     except urllib.error.HTTPError as error:
         try:
-            return error.code, error.read(MAX_BODY)
-        except (OSError, http.client.HTTPException):
+            return error.code, read_body(error.read, MAX_BODY, getattr(error.fp, "length", None))
+        except (OSError, ValueError, http.client.HTTPException):
             return error.code, b""
         finally:
             error.close()
-    except (OSError, ValueError, http.client.HTTPException):  # offline, refused, cut off
+    except (OSError, ValueError, http.client.HTTPException):  # offline, refused, cut off, too large (ValueError)
         return 0, b""
 
 
 def _json(body: bytes) -> Any:
     try:
         return json.loads(body)
-    except ValueError:  # UnicodeDecodeError too
+    except (ValueError, RecursionError):  # UnicodeDecodeError too, RecursionError: nested too deeply
         return None
 
 

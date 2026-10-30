@@ -10,23 +10,25 @@ Rectangle {
     property string fallbackText: ""
     property string text: ""
     property color tint: theme.accent
-    property color glyphColor: strong ? "white" : tint
+    property color glyphColor: strong ? theme.accentInk : tint
     property bool strong: false
     property bool neutral: false  // no tint: inactive item (dim icon on a plain surface)
     property real size: Math.round(theme.em * 2.1)
 
     implicitWidth: size
     implicitHeight: size
-    radius: size > theme.em * 2.4 ? theme.radiusLg : theme.radiusMd
+    radius: size > theme.controlHeight ? theme.radiusLg : theme.radiusMd
+    // Translucent tints: same look on a card, a hovered card or a selected row
     color: strong ? (tint === theme.accent ? theme.accentFill : tint)
-         : neutral ? (theme.dark ? Qt.lighter(theme.base, 1.25) : Qt.darker(theme.base, 1.05))
-         : Qt.rgba(tint.r, tint.g, tint.b, theme.dark ? theme.tintSubtle * 1.5 : theme.tintSubtle)
+         : neutral ? theme.tint(theme.dimText, "subtle")
+         : theme.tint(tint, "selected")
     Behavior on color { ColorAnimation { duration: theme.motionBase } }
 
     Text {
         anchors.centerIn: parent
         visible: tile.text !== ""
         text: tile.text
+        textFormat: Text.PlainText
         color: tile.neutral ? theme.dimText : tile.glyphColor
         font.pointSize: theme.fontSmall
         font.weight: Font.Bold

@@ -63,7 +63,7 @@ FocusScope {
             radius: height / 2
             color: theme.tint(parent.tint, "selected")
             border.width: 1
-            border.color: theme.tint(parent.tint, 0.4)
+            border.color: theme.tint(parent.tint, "outline")
         }
     }
     Component {
@@ -115,6 +115,7 @@ FocusScope {
             Text {
                 anchors.centerIn: parent
                 text: parent.parent.letter
+                textFormat: Text.PlainText
                 color: theme.inkOn(parent.color)  // readable on level color
                 font.pointSize: theme.fontTiny
                 font.weight: Font.Bold
@@ -182,7 +183,7 @@ FocusScope {
             z: 3
             width: list.contentWidth
             height: table.rowHeight
-            color: theme.base
+            color: theme.surfaceCard
             Repeater {
                 model: table.columns
                 Item {
@@ -196,7 +197,7 @@ FocusScope {
                     TpHeaderCell {  // sort: click, or Tab then Enter / Space
                         anchors.fill: parent
                         anchors.leftMargin: theme.space3
-                        anchors.rightMargin: theme.em * 0.6  // room for the resize edge
+                        anchors.rightMargin: theme.space4  // room for the resize edge
                         text: headerCell.modelData.label
                         tip: headerCell.modelData.tip || ""
                         align: headerCell.alignedLeft ? Qt.AlignLeft : Qt.AlignRight
@@ -323,6 +324,7 @@ FocusScope {
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: alignedLeft ? Text.AlignLeft : Text.AlignRight
                     text: cell.text || ""
+                    textFormat: Text.PlainText
                     color: cell.color ? cell.color : cell.dim ? theme.dimText : theme.text
                     font.weight: cell.bold ? Font.DemiBold : Font.Normal
                     font.features: { "tnum": 1 }

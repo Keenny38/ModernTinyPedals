@@ -55,7 +55,7 @@ class Realtime(Overlay):
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.decimals_bias = max(self.wcfg["decimal_places_brake_bias"], 0)
         self.decimals_delta = max(self.wcfg["decimal_places_baseline_bias_delta"], 0)
-        self.decimals_migt = max(self.wcfg["decimal_places_brake_migration"], 1)
+        self.decimals_migt = max(self.wcfg["decimal_places_brake_migration"], 0)
         self.prefix_bias = self.wcfg["prefix_brake_bias"]
         self.prefix_delta = self.wcfg["prefix_baseline_bias_delta"]
         self.prefix_migt = self.wcfg["prefix_brake_migration"]
@@ -99,7 +99,7 @@ class Realtime(Overlay):
             text_bmigt = self.format_brake_migt(0)
             self.bar_bmigt = self.set_rawtext(
                 text=text_bmigt,
-                width=font_m.width * len(text_bmigt) + bar_padx,
+                width=font_m.width * len(self.format_brake_migt(10)) + bar_padx,  # 2 digits before decimals
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_brake_migration"],
@@ -115,6 +115,11 @@ class Realtime(Overlay):
         self.brake_bmigt = brake_migration(self.wcfg["electric_braking_allocation"])
 
     def post_update(self):
+        self.brake_bmigt.send(-1)
+
+    def vehicle_reset(self):
+        """Baseline bias & migration pressure scale of the previous car not kept (followed car changed)"""
+        self.baseline_bias = 0.0
         self.brake_bmigt.send(-1)
 
     def timerEvent(self, event):
@@ -174,7 +179,7 @@ class Realtime(Overlay):
 
     def format_bias_delta(self, value: float) -> str:
         """Format baseline bias delta"""
-        return f"{self.prefix_delta}{value * 100:+01.{self.decimals_delta}f}"
+        return f"{self.prefix_delta}{value * 100:+z01.{self.decimals_delta}f}"
 
     def format_brake_migt(self, value: float) -> str:
         """Format brake migration"""

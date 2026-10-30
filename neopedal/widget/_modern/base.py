@@ -35,15 +35,19 @@ from collections.abc import Iterable
 from functools import lru_cache
 from math import ceil, isfinite
 from time import gmtime, strftime
+from types import MappingProxyType
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QRegion, QStaticText
 
+from ... import calculation as calc
+from ...const_common import MAX_SECONDS
 from ...const_file import FontFile
+from ...module_info import SECTOR_SLOWER
 from .._base import Overlay
 from .._painter import DirtyRegion, layer_fits
-from .draw import drawable
+from .draw import drawable, readable_on, rounded
 from .theme import Theme, build_theme
 
 Align = Qt.AlignmentFlag
@@ -52,6 +56,9 @@ RIGHT = Align.AlignRight
 CENTER = Align.AlignHCenter
 
 DASH = chr(0x2013)  # en dash: missing value
+NO_LAPTIME = f"{DASH}:{DASH * 2}.{DASH * 3}"  # lap time placeholder, as wide as a lap time
+NO_CLOCK = f"{DASH}:{DASH * 2}:{DASH * 2}"  # clock & countdown placeholder
+PANEL_RADIUS = 0.5  # corner radius of overlay panels, in unit
 STEADY = "0.0"  # temperature difference text when steady (shown without arrow or sign)
 DEFAULT_CORNER_SCALE = 0.05  # global corner_radius_scale default, = radius unit 1
 # Unit = font_size option x this: design font is lighter & narrower than classic monospace
@@ -84,6 +91,46 @@ VALUE_TEXT = re.compile(
     r"(?:[A-Za-z]{1,4}(?:/[A-Za-z]{1,2})?)?"  # unit ("kW", "km/h", "PM")
     r"\s*[^\w\s]*"  # trailing symbols (arrows, dots)
 )
+
+
+# Reference laps of lap time & delta overlays (timing, deltabest extended, speed delta): theme token of each,
+# same meaning everywhere (purple: session best of every driver, as app pages; green: own best of all time)
+REFERENCE_ACCENTS = MappingProxyType({
+    "session_best": "best",  # session best of every driver (or of class)
+    "best": "positive",  # personal best, all time
+    "session_personal_best": "caution",  # personal best of session
+    "stint_best": "orange",
+    "last": "text_dim",
+})
+# Running lap time formatted uncached: new value every update, would evict lap times of tables from cache
+_running_laptime = calc.sec2laptime_full.__wrapped__
+
+
+def reference_accent(theme: Theme, kind: str) -> QColor:
+    """Accent color of a reference lap (REFERENCE_ACCENTS key)"""
+    return getattr(theme, REFERENCE_ACCENTS[kind])
+
+
+def signed(value: float, decimals: int = 0) -> str:
+    """Number with sign & decimals, never "-0" (value rounded to zero: "+0.0")"""
+    return f"{value:+z.{decimals}f}"
+
+
+def lap_delta_color(theme: Theme, delta: float) -> QColor:
+    """Color of a lap time against another lap: green faster, gold slower (as slower laps & sectors of lists,
+    red is for invalid laps), dim if same"""
+    if not delta:
+        return theme.text_dim
+    return theme.positive if delta < 0 else getattr(theme, SECTOR_SLOWER)
+
+
+def laptime_text(seconds: float, valid: bool = True, running: bool = False) -> str:
+    """Lap time of every overlay (minutes always shown, as app pages: 0:59.123), * prefix if invalid, NO_LAPTIME
+    if none; running: time of lap being driven (formatted uncached)"""
+    if 0 < seconds < MAX_SECONDS:
+        text = (_running_laptime if running else calc.sec2laptime_full)(seconds)
+        return text if valid else f"*{text}"
+    return NO_LAPTIME
 
 
 def design_font_family(style: dict) -> str:
@@ -188,6 +235,11 @@ class ModernOverlay(Overlay):
         self.state_key: Any = None  # what decides a repaint, see refresh_keyed
         self.dirty_region = DirtyRegion()  # parts to repaint, see TableMixin.refresh_rows
         self.paint_region: QRegion | None = None  # region painted now, None: whole widget
+        self.add_design_fonts()
+
+    def add_design_fonts(self):
+        """Fonts of design roles (value, strong, dim, small, label) at current unit (again after a widget
+        changes its unit)"""
         self.add_font("value", 1.0, "semibold")
         self.add_font("strong", 1.0, "bold")
         self.add_font("dim", 1.0, "medium")
@@ -195,6 +247,12 @@ class ModernOverlay(Overlay):
         self.add_font("label", 0.68, "bold", spacing=106, caps=True)
 
     # Options
+    def caption_shown(self) -> bool:
+        """Labels of design shown ("show_caption" option, shared by both designs): hidden once user turns the
+        option off; overlays whose classic caption is off by default keep design labels at default value"""
+        shown = self.wcfg.get("show_caption", True)
+        return bool(shown) or shown == self.cfg.default.setting.get(self.widget_name, {}).get("show_caption")
+
     def user_text(self, key: str, design_text: str) -> str:
         """Text option changed by user, else design text (translated label): classic text options
         default to short codes (P, G, LDR...) that design replaces by its own labels"""
@@ -236,6 +294,10 @@ class ModernOverlay(Overlay):
     def radius(self, scale: float = 0.4) -> float:
         """Corner radius relative to unit, follows global corner roundness"""
         return self.unit * scale * self.corner
+
+    def panel_radius(self) -> float:
+        """Corner radius of overlay panel (same on every overlay)"""
+        return self.radius(PANEL_RADIUS)
 
     def set_size(self, width: float, height: float):
         """Fixed widget size"""
@@ -399,6 +461,11 @@ class ModernOverlay(Overlay):
         painter.drawStaticText(QPointF(x, y), static)
 
     # Update & paint
+    def draw_badge(self, painter: QPainter, box: QRectF, text: str, fill: QColor, role: str = "small"):
+        """Class badge: alias on class color, as class column of driver lists"""
+        rounded(painter, box, self.radius(0.25), fill)
+        self.draw_text(painter, box, text, role, readable_on(fill), CENTER)
+
     def refresh(self, state: Any):
         """Repaint if state changed"""
         if state != self.state:

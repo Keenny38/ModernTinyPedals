@@ -20,30 +20,16 @@ TpPopup {
 
     contentItem: ColumnLayout {
         spacing: theme.space3
-        RowLayout {
-            Layout.fillWidth: true
-            Text {
-                Layout.fillWidth: true
-                text: i18n.tr("Recently Deleted Laps")
-                color: theme.text
-                font.weight: Font.DemiBold
-                font.pointSize: theme.fontHeading
-                elide: Text.ElideRight
-                Accessible.role: Accessible.Heading
-                Accessible.name: text
-            }
-            TpButton {
-                glyph: ""  // cancel
-                fallback: "✕"
-                flat: true
-                tip: i18n.tr("Close")
-                size: "sm"
-                onClicked: popup.close()
-            }
+        TpCardHeader {
+            level: "popup"
+            title: i18n.tr("Recently Deleted Laps")
+            closable: true
+            onClosed: popup.close()
         }
         Text {
             Layout.fillWidth: true
             text: i18n.tr("Deleted laps are kept %1 days, then removed for good.").arg(backend.trashDays)
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             wrapMode: Text.WordWrap
@@ -86,9 +72,10 @@ TpPopup {
                             spacing: 0
                             RowLayout {
                                 spacing: theme.space3
-                                Text { text: row.modelData.title; color: theme.text; font.weight: Font.DemiBold }
+                                Text { text: row.modelData.title; color: theme.text; font.weight: Font.DemiBold; textFormat: Text.PlainText }
                                 Text {
                                     text: row.modelData.time
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.features: { "tnum": 1 }
                                 }
@@ -96,6 +83,7 @@ TpPopup {
                             Text {
                                 Layout.fillWidth: true
                                 text: [row.modelData.track, row.modelData.recorded].filter(Boolean).join(" · ")
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontSmall
                                 elide: Text.ElideRight
@@ -103,12 +91,13 @@ TpPopup {
                         }
                         Text {
                             text: i18n.tr("Deleted %1").arg(row.modelData.deleted)
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
                         }
                         TpButton {
-                            glyph: ""  // undo
+                            glyph: theme.glyphs.restore
                             fallback: "↶"
                             text: i18n.tr("Restore")
                             flat: true
@@ -122,7 +111,7 @@ TpPopup {
                 anchors.centerIn: parent
                 loading: backend.trashLoading && list.count === 0
                 empty: !backend.trashLoading && list.count === 0
-                loadingText: i18n.tr("Reading deleted laps...")
+                loadingText: i18n.tr("Reading deleted laps…")
                 glyph: "\uE74D"  // delete
                 title: i18n.tr("No deleted lap")
             }

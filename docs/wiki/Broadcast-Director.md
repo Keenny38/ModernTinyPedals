@@ -18,7 +18,7 @@ The header shows the session state (`LIVE` or `REPLAY`) and the weather: full co
 
 The **switch** at the top left turns the director on or off (on by default, kept for next time). While the page is open, even hidden behind another page, the director asks the game about every second. Turned off, it asks the game nothing, cuts no camera, leaves an instant replay for the live session, turns `Automatic` back to `Assisted`, turns spectate mode off (overlays back on your car, whether the `Spectate` page or `Overlays follow the car on air` turned it on) and empties the broadcast graphics. Director hotkeys then act as with the page closed. Events, battles and notes of the session are kept; turn it back on with the switch, the `Turn On Broadcast Director` button, the `director_toggle` hotkey or the command palette (`Ctrl+K`, `Broadcast Director (On)`). Graphics and director settings can still be changed while off. Turned off and hidden behind another page for 10 minutes, the page is closed to free memory, like any page, and opens again from the navigation bar (turned on, it stays open to follow the session).
 
-While the page is open, its `Broadcast` entry of the navigation bar has a dot (green: on, grey: off) and the `Broadcast Director On` notice shows at the bottom of the main window while on (click it to show the page; `Config` > `Notification` to hide it). Hidden behind another page with nothing needing fresh answers (assisted or manual mode, no graphics source showing, overlays not following the car on air, events log off), the director asks the game every 5 seconds instead of every second, and every second again as soon as the page shows, a graphics source connects or automatic mode starts.
+While the page is open, its `Broadcast` entry of the navigation bar has a dot (green: on, grey: off) and the `Broadcast Director On` notice shows at the bottom of the main window while on (click it to show the page; `Settings` > `Notification` to hide it). Hidden behind another page with nothing needing fresh answers (assisted or manual mode, no graphics source showing, overlays not following the car on air, events log off), the director asks the game every 5 seconds instead of every second, and every second again as soon as the page shows, a graphics source connects or automatic mode starts.
 
 ## Director
 
@@ -28,9 +28,13 @@ Choose the mode at the top of the page:
 
 | Mode | What happens |
 |---|---|
-| `Manual` | You cut alone. |
-| `Assisted` | The stories are listed by interest in the director queue: click one, or `Take Best` (`Enter`). `1` to `6` take that suggestion. |
+| `Manual` | You cut alone: the stories are hidden, `Enter` and `1` to `6` cut to nothing (the `director_take_best` hotkey neither). |
+| `Assisted` | The stories are listed by interest in the director queue: click one, or `Take Best` (`Enter`). `1` to `6` take the story showing that number: a story keeps its number while it is listed, a new one takes the lowest free number. While the mouse is over the list (or the list has the focus) and one second after, the rows keep their place: new stories are added after them. |
 | `Automatic` | The director cuts by itself, with a camera suited to each story. |
+
+Press `?` (or the keyboard button at the top) for the **keys sheet**: the page keys (`←` `→` previous / next car, `Enter`, `1` to `6`, `Space` play / pause the replay, `F5` ask the game again, `Esc` closes the open popup, never the page) and the director hotkeys set on the `Hotkey` page with their keys. Buttons with a hotkey show it in their tooltip.
+
+When the game stops answering about the session for a moment (loading, network), the desk stays as it was, greyed under a `Game not responding for X s` banner, with its stories and the instant replay kept: the game is asked every second, and the page shows the menus only after three answers in a row without the session (or two answers two seconds apart).
 
 How the automatic director cuts:
 
@@ -48,7 +52,7 @@ How the automatic director cuts:
 - Intervals and battle gaps turn amber under 0.5 s and red under 0.3 s.
 - Sectors of each car are colored as on TV: purple for the best of the class, green for a personal best, yellow when slower.
 - Cars in the pit lane show their time there as it goes, and the time stopped in the pit box.
-- **Pit radar**: while the car on air is in the pit lane, the cars near it show with their distance, `Alongside` in red.
+- **Pit radar**: while the car on air is in the pit lane, the cars near it show with their distance, `Alongside` in red. It shares the status line of the on air card with the shortest shot bar and the operator hold countdown: the line keeps its height, so the cameras below never move.
 - **Tyres** of every car (front and rear), with the game on this computer.
 - **Sheet** of the selected car: intervals ahead and behind, laps, current stint, best and last lap, pit stops, contacts, penalties, tyres, energy used per lap over 3 and 5 laps and the laps left, and your **note** on the driver (kept between sessions).
 - **Driver history** in the sheet: races, class wins and podiums, best finish on this track, last races, and the races with the cars ahead and behind, from the game results files (see [Results & Replays](Race-Results.md)).
@@ -98,7 +102,7 @@ TV graphics made for the director, as one **browser source (1920 x 1080)** for O
 - **Starting grid**: pages of 8 cars with their qualifying lap and car picture.
 - **Event card**: track, conditions, forecast, session length.
 - **Classification**: captured when you click `Capture` (gap to the leader, laps, best lap, pit stops, retired cars), shown until captured again.
-- **Championship** standings imported from a CSV file (`Import...`): driver, points, and team, class and car number if you want, columns found by their title (comma, semicolon or tab separated). Several championships can be imported, shown for one class or `All Classes`, with medals for the first three.
+- **Championship** standings imported from a CSV file (`Import…`): driver, points, and team, class and car number if you want, columns found by their title (comma, semicolon or tab separated). Several championships can be imported, shown for one class or `All Classes`, with medals for the first three.
 - **Message** of race control or commentators as a lower third, and a **countdown** before the start.
 
 `Automatic` (each one on or off): starting grid during the formation lap, event card for 20 s when a session starts, classification at the chequered flag (kept up to date while cars finish). Your own choice always wins.
@@ -108,7 +112,7 @@ TV graphics made for the director, as one **browser source (1920 x 1080)** for O
 `Graphics` > `Style & Layout`:
 
 - Panel opacity, and temperatures in °C or °F (or the app setting).
-- **League**: accent color, event or league name, league logo (`Logo...`), and sponsors pictures shown in turn (a folder of PNG, JPG, WEBP or SVG pictures).
+- **League**: accent color, event or league name, league logo (`Logo…`), and sponsors pictures shown in turn (a folder of PNG, JPG, WEBP or SVG pictures).
 - **Layout presets**: `Default`, `Pre-race`, `Race` and `Post-race`, each with its own places. Switch the preset in use in one click or with the `director_next_layout` hotkey.
 - **Edit Layout** opens the graphics in your browser with sample data: drag a graphic to move it, mouse wheel to resize it, double click to put it back in its place, chips to show the graphics sharing a place. It snaps to the other graphics and to the middle with guides, arrows move by one pixel, `Ctrl+Z` undoes, position and size are shown. `Save`: every graphics source of this computer follows at once. `Reset Layout` (asked first) puts the graphics of the layout preset in use back, `Undo` until the layout changes again.
 - **Source with some graphics only**: a source address with `only=` followed by graphic names (for example `only=tower,map`) shows only these graphics, to split them over several OBS scenes or sources, each with its own layout preset. Names: `tower`, `card`, `battle`, `train`, `banners`, `pitradar`, `replay`, `clock`, `onboard`, `quali`, `map`, `grid`, `event`, `results`, `champ`, `message`, `countdown`, `logo`, `sponsors`.
@@ -133,4 +137,4 @@ These commands can be bound on the `Hotkey` page and run from the [remote contro
 
 - The page asks the game about once a second while it is open, also while you look at another page, so the director keeps working. It keeps one connection to the game open; an answer of the game costs about 3 ms of the interface (0.5 ms while the page is hidden).
 - Laps, fuel and stats are only recorded while you drive, not while you direct a race you spectate.
-- `Broadcast` took the place of `Spectate` in the default navigation bar. The `Spectate` page is still in the command palette and the Home page quick access; add it back to the navigation bar with `Customize Navigation Bar...` (right-click the bar).
+- `Broadcast` took the place of `Spectate` in the default navigation bar. The `Spectate` page is still in the command palette and the Home page quick access; add it back to the navigation bar with `Customize Navigation Bar…` (right-click the bar).

@@ -36,16 +36,16 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QPainter
 
 from ...api_control import api
-from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
+from ...const_common import MAX_SECONDS
 from ...demo_state import drawing_demo
 from ...formatter import format_points
 from ...i18n import tr_overlay as tr
-from ...module_info import minfo, sector_color
+from ...module_info import SECTOR_SLOWER, minfo, sector_color
 from ...template.setting_status_colors import SAME_TIME
 from ...template.widget.drivers_ui import DISPLAY_ORDER_NAMES
-from .base import ModernOverlay
-from .draw import panel
-from .rows import DASH, RowStyle, class_style, compound_cell, laptime_text, pit_cell
+from .base import NO_LAPTIME, ModernOverlay, laptime_text
+from .draw import panel, readable_on
+from .rows import DASH, RowStyle, class_style, compound_cell, pit_cell
 from .table import (
     BADGE,
     CENTER,
@@ -81,7 +81,7 @@ HEADER_LABELS = {
     "laptime": "Time", "best_laptime": "Best", "average_laptime": "Avg", "delta_laptime": "Delta",
     "energy_remaining": "Energy", "energy_per_lap": "E/Lap", "vehicle_integrity": "Health", "incidents": "Inc", "track_limits": "TL",
     "stint_laps": "Stint", "speed_trap": "Speed", "lift_and_coast_time": "L&C", "time_interval": "Int",
-    "time_gap": "Gap", "gap_trend": "Trend", "driver_ranks": "DR/SR",
+    "time_gap": "Gap", "gap_trend": "Trend", "driver_ranks": "DR/SR", "driver_badge": "Badge",
 }
 # Driver & Safety Rank of sample cars (overlay pictures & previews), by overall position
 SAMPLE_RANKS = (
@@ -90,6 +90,7 @@ SAMPLE_RANKS = (
     ("Bronze", 3, "Silver", 1, "sr-noob"), ("Gold", 1, "Gold", 3, "sr-saint"), ("Silver", 2, "Platinum", 2, ""),
 )
 TREND_STEADY = 0.05  # seconds per lap: gap change below this shown as steady
+RANK_LETTERS = "BSGP"  # first letter of Bronze, Silver, Gold, Platinum (Rank.short), rank cells sized on the widest
 # Gap change per lap of sample race rows (index -> seconds), overlay pictures
 SAMPLE_TRENDS = {2: 0.3, 7: -0.2, 8: -0.4, 10: -0.3, 3: -1.8, 11: 0.5}
 SAMPLE_LIMIT = 5.0  # track limits points per penalty of sample race
@@ -97,7 +98,7 @@ SAMPLE_LIMIT = 5.0  # track limits points per penalty of sample race
 # Options read by every driver list widget
 DRIVER_OPTIONS = (
     "font_size", "show_player_highlighted", "show_lap_difference",
-    "column_position", "column_class", "column_position_change", "show_position_change_in_class",
+    "column_position", "column_class", "show_class_name", "column_position_change", "show_position_change_in_class",
     "column_driver_name", "driver_name_shorten", "driver_name_uppercase", "driver_name_width",
     "column_vehicle_name", "show_vehicle_brand_as_name", "vehicle_name_width",
     "column_tyre_compound", "column_pit_status", "show_pit_request",  # pit status column shows pit stops too
@@ -144,6 +145,10 @@ class DriverTable(TableMixin, ModernOverlay):
     # Class shown by a header above each class group (widget sets): no class column, position in class
     class_headers = False
     class_column_hidden = False  # class column left out (class name in class headers)
+    class_sof = False  # strength of field of each class shown in its class header (Standings sets)
+    # Running lap time of other cars in tenths (else whole seconds: long lists repainted once a second, not
+    # 10 times); player's always in tenths
+    running_tenths = True
 
     def setup_table(self):
         """Columns from options"""
@@ -188,7 +193,8 @@ class DriverTable(TableMixin, ModernOverlay):
         theme = self.theme
         style = self.row_style
         if key == "position":
-            in_class = self.class_headers
+            # Class headers: position in class, unless the class column is kept (it shows the class position)
+            in_class = self.class_headers and self.class_column_hidden
             on_accent = style.on_accent
 
             def position(veh, ctx, player, alias, class_color, extra):
@@ -198,6 +204,11 @@ class DriverTable(TableMixin, ModernOverlay):
                 return Cell(BADGE, text, "strong", theme.text, theme.surface_raised)
             return position
         if key == "class":
+            if not wcfg.get("show_class_name", True):  # position in class on a square of class color
+
+                def class_position(veh, ctx, player, alias, class_color, extra):
+                    return Cell(BADGE, f"{veh.positionInClass}", "strong", readable_on(class_color), class_color)
+                return class_position
             shaded = wcfg.get("show_class_style_for_position_in_class", False)
             shade = self.class_shade
 
@@ -288,6 +299,8 @@ class DriverTable(TableMixin, ModernOverlay):
             return lambda veh, *_: lift_and_coast_cell(veh.licoTimer.elapsed, veh.licoTimer.idling)
         if key == "driver_ranks":
             return self.ranks_builder()
+        if key == "driver_badge":
+            return self.badge_builder()
         if key == "track_limits":
             track_limits_cell = self.track_limits_cell
             return lambda veh, ctx, *_: track_limits_cell(veh.trackLimitsPoints, ctx.in_race)
@@ -308,26 +321,14 @@ class DriverTable(TableMixin, ModernOverlay):
         """Driver & Safety Rank of driver (short, in rank color), dashes if unknown: player & team members, other
         drivers of an online race (RaceControl option)"""
         from ...process import driver_ranks as dr
-        from ...rank_info import driver_ranks
-        from ...userfile.badge_icons import badge_info, icons
 
         theme = self.theme
         colors = {name: QColor(color) for name, color in
                   (dr.RANK_COLORS_LIGHT if theme.light else dr.RANK_COLORS).items()}
         part_width = self.rank_width
-        show_badge = bool(self.wcfg.get("show_driver_badge", True))
         unknown = Cell(TEXT, DASH, "value", theme.text_faint)
         none_cell = Cell(PAIR, extra=(unknown, unknown, part_width))
-        if show_badge:
-            none_cell = Cell(PAIR, extra=(none_cell, EMPTY_CELL, part_width * 2 + self.unit * 0.3))
         cells: dict[tuple, Cell] = {}  # same cell objects for same ranks: rows compare fast
-
-        def badge_cell(badge: str) -> Cell:
-            """Game icon of badge (fetched once in background), dot of its color meanwhile"""
-            info = badge_info(badge) if badge else None
-            if info is None:
-                return EMPTY_CELL
-            return Cell(ICON, icons.file(badge), color=QColor(info.light_color if theme.light else info.color))
 
         def part(rank: dr.Rank | None) -> Cell:
             if rank is None:
@@ -335,32 +336,48 @@ class DriverTable(TableMixin, ModernOverlay):
             return Cell(TEXT, rank.short, "value", colors.get(rank.name.casefold(), theme.text))
 
         def ranks_cell(veh, ctx, player, alias, class_color, extra):
-            if drawing_demo():
-                sample = SAMPLE_RANKS[veh.positionOverall % len(SAMPLE_RANKS)]
-                found: Any = dr.DriverRanks("", "", "", "", dr.Rank(*sample[:2], 50), dr.Rank(*sample[2:4], 50),
-                                            sample[4])
-            else:
-                found = driver_ranks(veh.driverName)
+            found = known_ranks(veh)
             if found is None:
                 return none_cell
-            badge = found.badge if show_badge else ""
-            key = (found.driver, found.safety, badge, icons.version if badge else 0)  # icon saved: cell again
+            key = (found.driver, found.safety)
             cell = cells.get(key)
             if cell is None:
                 if len(cells) >= 256:
                     cells.clear()
-                cell = Cell(PAIR, extra=(part(found.driver), part(found.safety), part_width))
-                if show_badge:
-                    cell = Cell(PAIR, extra=(cell, badge_cell(badge), part_width * 2 + self.unit * 0.3))
-                cells[key] = cell
+                cell = cells[key] = Cell(PAIR, extra=(part(found.driver), part(found.safety), part_width))
             return cell
         return ranks_cell
 
+    def badge_builder(self) -> CellBuilder:
+        """Game badge of driver (icon fetched once in background, dot of its color meanwhile), empty if unknown:
+        same drivers as driver & safety rank column"""
+        from ...userfile.badge_icons import badge_info, icons
+
+        theme = self.theme
+        cells: dict[tuple, Cell] = {}  # same cell objects for same badges: rows compare fast
+
+        def badge_cell(veh, ctx, player, alias, class_color, extra):
+            found = known_ranks(veh)
+            badge = found.badge if found is not None else ""
+            info = badge_info(badge) if badge else None
+            if info is None:
+                return EMPTY_CELL
+            key = (badge, icons.version)  # icon saved: cell again
+            cell = cells.get(key)
+            if cell is None:
+                if len(cells) >= 256:
+                    cells.clear()
+                cell = cells[key] = Cell(ICON, icons.file(badge),
+                                         color=QColor(info.light_color if theme.light else info.color))
+            return cell
+        return badge_cell
+
     def poll_ranks(self, data_set) -> None:
-        """Ranks of drivers of session read in background when due (driver & safety rank column or strength of
-        field of classes shown)"""
+        """Ranks of drivers of session read in background when due (driver & safety rank or badge column, or
+        strength of field of classes shown)"""
         wcfg = self.wcfg
-        if (wcfg.get("column_driver_ranks", False) or wcfg.get("show_class_sof", False)) and not drawing_demo():
+        if (wcfg.get("column_driver_ranks", False) or wcfg.get("column_driver_badge", False)
+                or self.class_sof) and not drawing_demo():  # class_sof: strength of field really shown
             from ...rank_info import poll_field
 
             # Cars of session only: slots beyond keep drivers of a former (bigger) session
@@ -428,12 +445,18 @@ class DriverTable(TableMixin, ModernOverlay):
         good = rate < 0 if gap > 0 else rate > 0
         return Cell(TREND, extra=(round(rate, 1), good))
 
-    def position_trend(self, veh, index: int, ctx: Context) -> dict:
-        """Gap trend of car by race position (gap to car ahead of player, gap of car behind), row extras"""
+    def position_trend(self, veh, index: int, ctx: Context, ahead: bool | None = None) -> dict:
+        """Gap trend of car by race position (gap to car ahead of player, gap of car behind), row extras
+
+        Args:
+            ahead: car ahead of player (row known: Rivals), None: by race position.
+        """
         trend_of = self.trend_of
         if trend_of is None or ctx.player is None or veh.isPlayer:
             return {}
-        gap = 1.0 if veh.positionOverall < ctx.player.positionOverall else -1.0
+        if ahead is None:
+            ahead = veh.positionOverall < ctx.player.positionOverall
+        gap = 1.0 if ahead else -1.0
         return {"gap": gap, "trend": trend_of(gap, index)}
 
     def class_shade(self, color: QColor) -> QColor:
@@ -459,6 +482,8 @@ class DriverTable(TableMixin, ModernOverlay):
         if key == "position":
             return Column(key, self.digit_width("strong") * 2 + unit * 0.7)
         if key == "class":
+            if not self.wcfg.get("show_class_name", True):  # position in class only, as wide as position column
+                return Column(key, self.digit_width("strong") * 2 + unit * 0.7)
             return Column(key, self.row_style.class_width())
         if key == "position_change":
             return Column(key, change_width(unit, ROW_SCALE, self.digit_width("value")))
@@ -500,20 +525,20 @@ class DriverTable(TableMixin, ModernOverlay):
             return Column(key, self.text_width("dim", "888.8"), RIGHT)
         if key == "lift_and_coast_time":
             return Column(key, self.text_width("dim", "8.8s"), RIGHT)
-        if key == "driver_ranks":  # driver & safety rank: "S2 P3", then badge icon
-            self.rank_width = self.text_width("value", "P3")
-            width = self.rank_width * 2 + unit * 0.3
-            if self.wcfg.get("show_driver_badge", True):
-                width += unit * 0.3 + unit * ROW_SCALE * COMPOUND_SIZE
-            return Column(key, width, CENTER)
+        if key == "driver_ranks":  # driver & safety rank: "S2 P3", each part as wide as the widest rank letter
+            self.rank_width = max(self.text_width("value", f"{letter}3") for letter in RANK_LETTERS)
+            return Column(key, self.rank_width * 2 + unit * 0.3, CENTER)
+        if key == "driver_badge":  # game badge icon
+            return Column(key, unit * ROW_SCALE * COMPOUND_SIZE, CENTER)
         if key == "track_limits":
             return Column(key, self.text_width("dim", "88.88"), RIGHT)
         if key == "energy_per_lap":
             return Column(key, self.text_width("dim", "88.8%"), RIGHT)
         if key == "delta_laptime":
             return Column(key, (self.text_width("small", "8.8") + unit * 0.3) * self.delta_count, RIGHT)
-        if key == "gap_trend":
-            return Column(key, change_width(unit, ROW_SCALE, self.digit_width("value"), 2) + self.text_width("value", "."))
+        if key == "gap_trend":  # centered: apart from the right aligned gap before it
+            return Column(key, change_width(unit, ROW_SCALE, self.digit_width("value"), 2) + self.text_width("value", "."),
+                          CENTER)
         return self.extra_column(key)
 
     def extra_column(self, key: str) -> Column | None:
@@ -560,17 +585,29 @@ class DriverTable(TableMixin, ModernOverlay):
         as game live timing; time in pit lane while pitting"""
         theme = self.theme
         wcfg = self.wcfg
-        if (wcfg.get("show_pitstop_duration_while_requested_pitstop", True) and ctx.player_pit_request) or veh.pitTimer.pitting:
+        if (wcfg.get("show_pitstop_duration_while_requested_pitstop", True) and ctx.player_pit_request) or pit_time_shown(veh):
             return Cell(TEXT, pit_time_text(veh.inPit, veh.pitTimer.elapsed), "dim", theme.accent)
         running = self.running_time(veh, ctx)
         sectors = self.sector_parts(veh, ctx, running) if wcfg.get("show_lap_sectors", True) else ()
         if wcfg.get("show_running_lap_time", True) and 0 <= running < MAX_SECONDS and not veh.isFinished:
             if running >= RESULT_SECONDS:  # lap being driven
-                return Cell(LAPTIME, running_text(running), "dim", theme.text, extra=self.laptime_extra(sectors))
+                text = running_text(running, veh.isPlayer or self.running_tenths)
+                return Cell(LAPTIME, text, "dim", theme.text, extra=self.laptime_extra(sectors))
             show_delta = running >= LAP_SECONDS  # after the line: lap time, then delta
         else:  # lap time & delta in turn
             show_delta = ctx.now > 0 and int(ctx.now / LAP_SECONDS) % 2 == 1
         return self.lap_result_cell(veh, sectors, show_delta)
+
+    def best_lap_cell(self, veh, ctx: Context) -> Cell:
+        """Best lap (purple if fastest of class in session, show_highlighted_fastest_last_laptime), sector bars of
+        lap being driven: lap time column of lists ordered by best lap (standings & rivals outside races)"""
+        theme = self.theme
+        best = veh.bestLapTime
+        fastest = (self.wcfg.get("show_highlighted_fastest_last_laptime", True) and 0 < best < MAX_SECONDS
+                   and abs(best - (veh.classBestLap or veh.classBestLapTime)) < SAME_TIME)
+        sectors = self.sector_parts(veh, ctx) if self.wcfg.get("show_lap_sectors", True) else ()
+        return Cell(LAPTIME, laptime_text(best), "dim", theme.best if fastest else theme.text_dim,
+                    extra=self.laptime_extra(sectors))
 
     def laptime_extra(self, sectors: tuple, trend: int = 0) -> LapTimeExtra:
         return LapTimeExtra(sectors, trend, self.time_width, self.side_width, self.bars_width)
@@ -591,8 +628,8 @@ class DriverTable(TableMixin, ModernOverlay):
                 trend = lap_trend(veh.lapTimeHistory[3], veh.lapTimeHistory[4])
             if (show_delta and wcfg.get("show_lap_delta", True) and veh.isValidLap
                     and 0 < best < last - SAME_TIME and last < MAX_SECONDS):
-                return Cell(LAPTIME, delta_text(last - best), "dim", theme.warning,
-                            extra=self.laptime_extra(sectors, trend))
+                return Cell(LAPTIME, delta_text(last - best), "dim", getattr(theme, SECTOR_SLOWER),
+                            extra=self.laptime_extra(sectors, trend))  # slower than personal best
             text, role, color = laptime_text(last, veh.isValidLap), "dim", theme.text_dim
             if not veh.isValidLap and wcfg.get("show_invalid_lap_in_red", True):
                 text, color = laptime_text(last), theme.negative
@@ -602,14 +639,17 @@ class DriverTable(TableMixin, ModernOverlay):
                 elif not 0 < best < MAX_SECONDS or last < best + SAME_TIME:
                     color = theme.positive  # personal best
                 else:
-                    color = theme.caution  # personal best not improved
+                    color = getattr(theme, SECTOR_SLOWER)  # personal best not improved
         return Cell(LAPTIME, text, role, color, extra=self.laptime_extra(sectors, trend))
 
     @staticmethod
     def running_time(veh, ctx: Context) -> float:
-        """Time into lap being driven (seconds), -1 if unknown"""
-        if ctx.now > 0 and veh.lapStartTime > 0:
-            return ctx.now - veh.lapStartTime
+        """Time into lap being driven (seconds), -1 if unknown, in the garage, or beyond RUNNING_LIMIT laps of
+        the class best lap (car stopped on track or retired: its lap start is long gone)"""
+        if ctx.now > 0 and veh.lapStartTime > 0 and veh.inPit != 2:
+            running = ctx.now - veh.lapStartTime
+            if running < running_limit(veh):
+                return running
         return -1.0
 
     def sector_parts(self, veh, ctx: Context, running: float = -1.0) -> tuple:
@@ -645,7 +685,7 @@ class DriverTable(TableMixin, ModernOverlay):
         return self.refresh_rows(state)
 
     def paint_static(self, painter: QPainter):
-        panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         self.draw_header(painter)
 
     def paint(self, painter: QPainter):
@@ -653,10 +693,27 @@ class DriverTable(TableMixin, ModernOverlay):
 
 
 FILL_STEPS = 64  # drawn steps of sector bar being driven (see sector_fill)
+RUNNING_LIMIT = 3.0  # running lap time shown up to this many class best laps (see running_limit)
+RUNNING_LIMIT_SECONDS = 900.0  # without any lap time known yet
 RESULT_SECONDS = 8.0  # seconds after the line the completed lap is shown (lap time, then delta), then running time
 LAP_SECONDS = 4.0  # seconds lap time is shown before delta (in turn without running time)
 ARROW_GAP = 0.15  # space between time slot & trend arrow (font size units, see table.draw_laptime)
 STALE_SECONDS = 1.0  # player telemetry time this far from scoring time: frozen (scoring updates 5 times a second)
+
+
+def running_limit(veh) -> float:
+    """Longest running lap time shown: RUNNING_LIMIT laps of the class best lap (own best lap if none),
+    RUNNING_LIMIT_SECONDS without any"""
+    for best in (veh.classBestLap, veh.bestLapTime):
+        if 0 < best < MAX_SECONDS:
+            return best * RUNNING_LIMIT
+    return RUNNING_LIMIT_SECONDS
+
+
+def pit_time_shown(veh) -> bool:
+    """Time column shows the pit lane time: in pit lane or on the out lap of a pit visit; a car in the garage or
+    finished shows its last lap (pit time is 0 in the garage, and the last lap is what matters once finished)"""
+    return veh.pitTimer.pitting and veh.inPit != 2 and not veh.isFinished
 
 
 def session_now(telemetry: float, scoring: float) -> float:
@@ -667,8 +724,11 @@ def session_now(telemetry: float, scoring: float) -> float:
     return scoring
 
 
-def running_text(seconds: float) -> str:
-    """Running lap time, tenths: 1:23.4"""
+def running_text(seconds: float, tenths: bool = True) -> str:
+    """Running lap time, tenths: 1:23.4, else whole seconds elapsed: 1:23"""
+    if not tenths:
+        whole_minutes, whole_seconds = divmod(int(max(seconds, 0.0)), 60)
+        return f"{whole_minutes}:{whole_seconds:02d}"
     minutes, rest = divmod(round(max(seconds, 0.0), 1), 60)  # rounded first: 59.96 is 1:00.0, never 0:60.0
     return f"{int(minutes)}:{rest:04.1f}"
 
@@ -689,7 +749,7 @@ def pit_time_text(in_pit: int, pit_time: float) -> str:
     """Time spent in pit lane"""
     if 0 < pit_time < MAX_SECONDS:
         return f"{tr('PIT') if in_pit else tr('OUT')} {pit_time:.1f}"
-    return TEXT_NOLAPTIME
+    return NO_LAPTIME
 
 
 def live_trends() -> TrendOf:
@@ -706,6 +766,30 @@ def live_trends() -> TrendOf:
             return None
         return -delta.short * laptime  # gap shrinking (delta > 0) -> negative change
     return trend
+
+
+_rank_modules: tuple | None = None
+
+
+def rank_modules() -> tuple:
+    """(driver_ranks, rank_info) modules, imported when a rank column, badge or strength of field is first drawn,
+    not at widget import (rank_info loads the RaceControl client), then kept: called for every row & update"""
+    global _rank_modules
+    if _rank_modules is None:
+        from ... import rank_info
+        from ...process import driver_ranks
+
+        _rank_modules = (driver_ranks, rank_info)
+    return _rank_modules
+
+
+def known_ranks(veh) -> Any:
+    """Driver & safety ranks & badge of driver (sample ranks in overlay pictures & previews), None if unknown"""
+    dr, rank_info = rank_modules()
+    if drawing_demo():
+        sample = SAMPLE_RANKS[veh.positionOverall % len(SAMPLE_RANKS)]
+        return dr.DriverRanks("", "", "", "", dr.Rank(*sample[:2], 50), dr.Rank(*sample[2:4], 50), sample[4])
+    return rank_info.driver_ranks(veh.driverName)
 
 
 def demo_energy_per_lap(veh) -> float:

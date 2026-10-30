@@ -3,6 +3,87 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.28.0 (2026-10-30)
+
+Des raccourcis sur ton volant et ta button box, des mises à jour signées, une palette de commandes et un centre de notifications, des dialogues dans l'app, un onglet Équipe pour préparer une course d'endurance avec ses pilotes, un carré de catégorie et des valeurs à afficher une par une dans les overlays, et des centaines de corrections issues d'audits complets des overlays, des pages, des performances et de la sécurité.
+
+### Nouveautés
+
+#### Raccourcis sur les manettes et les boutons de souris
+
+- **N'importe quel bouton d'un volant, d'une button box, d'un joystick ou d'une manette**, seul ou avec `Ctrl` / `Maj` / `Alt` : jusqu'à 16 périphériques, 128 boutons et la croix directionnelle chacun (`Joy1 Button 5`, `Joy2 Pov Up`), manettes virtuelles comprises (SimHub Control Mapper, vJoy). Les boutons `milieu`, `précédent` et `suivant` de la souris aussi.
+- Un commutateur ou un rotacteur tenu à l'ouverture de la fenêtre d'attribution est ignoré jusqu'à ce qu'il soit relâché. Les boutons de manette marchent aussi sous Linux.
+
+#### Palette de commandes, notifications et raccourcis
+
+- **Palette de commandes** (`Ctrl+K`, ou le bouton de recherche de la barre de navigation) : résultats groupés par pages, outils, commandes des menus, paramètres, overlays, modules, presets et options, commandes récentes en premier. Commence par `>` pour les commandes seulement, `@` pour les options, `#` pour les presets.
+- **Centre de notifications** : une cloche dans la barre de navigation avec le nombre de messages non lus et leur historique (`Tout effacer`). Les problèmes en arrière-plan (un overlay planté, un fichier impossible à enregistrer) y arrivent avec `Voir le log` et `Créer un rapport de bug`. Quand la fenêtre est dans la zone de notification, Windows affiche la notification.
+- Fiche **`Raccourcis de l'application`** (`Ctrl+/` ou `F1`) avec une recherche. **Précédent / Suivant** comme dans un navigateur (`Alt+Gauche` / `Alt+Droite` ou les boutons de la souris). `Ctrl+F` cherche dans la page affichée, `Ctrl+Maj+F` trouve n'importe quelle option.
+- Chaque page a un en-tête avec son chemin (`Outils › Éditeur de freins`) ; la page `Outils` est redessinée avec une section `Pages`, et la barre a un bouton `Plus`.
+
+#### Calculateur de course : onglet Équipe
+
+- **`Composition`** : tape le nom de chaque pilote avant la course (`Ajouter un pilote`, `Retirer le pilote`) ; un pilote retiré emporte son rythme, ses temps de conduite et ses relais.
+- **`Plan des relais`** : le pilote de chaque relais, ou `Auto` pour laisser le plan choisir ; `Figer la rotation` et `Tout en auto` règlent tous les relais d'un coup (`input_stint_drivers`). Les noms s'affichent dans le plan, la frise, la carte `Temps de conduite` et les exports.
+- **Noms de Le Mans Ultimate** : les vrais noms de l'équipe dans le jeu remplacent ceux tapés ; un nom proche garde sa place (`Keenny` devient `Keenny Hess`) et ses relais prévus.
+- **`Préparer une course en 3 questions`** à la première utilisation : durée de la course, temps d'arrêt aux stands et source des données, puis tout le calculateur (`Passer`, `show_quick_setup`).
+
+#### Autres pages
+
+- **Presets** : `Comparaison de presets`, `Transfert de preset`, `Restaurer une sauvegarde` et `Presets supprimés récemment` (restaurer, `Vider la corbeille`) sont maintenant dans la page. `Principal pour la catégorie` demande : toutes les sessions, essais, qualifications ou course seulement.
+- **Visualiseur de télémétrie** : un bandeau de synthèse avec **`Analyser mon dernier tour`** et les virages où tu perds du temps (`Maj+[` / `Maj+]` pour les parcourir), et un menu `Comparer`. La bibliothèque `Tours importés`, l'éditeur de notes de piste et l'enregistreur de session sont redessinés.
+- **Résultats de course** : des commentaires de session sous les chiffres clés : ton rythme de course face à la médiane de la catégorie, places gagnées ou perdues au 1er tour, tendance des temps au tour de chaque relais.
+- **Statistiques pilote** en trois onglets (`Vue d'ensemble`, `Progression`, `Comparer`) avec des filtres en puces ; une carte `Cette semaine` sur l'accueil ; une étape streaming dans l'assistant de configuration.
+
+#### Overlays
+
+- **Carré de catégorie** (Relatif, Classement, Rivaux, design moderne) : avec `show_class_name` désactivé, la colonne de catégorie n'affiche que la position dans la catégorie sur un carré de la couleur de la catégorie, plus étroit.
+- **Colonne `Badge du pilote`** (`column_driver_badge`, désactivée par défaut) : le badge du jeu de chaque pilote dans sa propre colonne, affichable sans les rangs et déplaçable seule.
+- **Carburant et Énergie virtuelle : chaque valeur à part** (les deux designs) : `show_remaining`, `show_refueling` / `show_refilling`, `show_estimated_laps`, `show_estimated_minutes`, `show_estimated_consumption`, `show_saving_target`, `show_early_pitstop_count`, `show_delta_consumption`, `show_end_remaining`, `show_fuel_ratio`, `show_fuel_bias` remplacent les options qui affichaient les valeurs par paires (tes réglages sont convertis).
+- **Notes de pilotage** (design moderne) sur la carte de Notes de piste : la note en gras, les commentaires dessous.
+
+![Carré de catégorie : position dans la catégorie sur sa couleur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-class-square.png)
+
+![Carburant : minutes, arrêts anticipés et écart masqués un par un](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-fuel-values-on-their-own.png)
+
+![Notes de pilotage sur la carte de notes moderne](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-pace-notes-card.png)
+
+### Améliorations
+
+- **Dialogues dans la page** : confirmations, alertes et saisies de texte ou de nombre s'ouvrent dans la page au lieu de fenêtres Windows ; `Entrée` lance l'action, les actions qui effacent quelque chose sont en rouge avec le focus sur `Annuler`. `Annuler` au lieu d'une confirmation partout où un message le propose (page Overlays, Stream, Régie de course, pneus, Statistiques pilote, tours). Les sélecteurs de fichiers retiennent le dernier dossier.
+- **Paramètres** : filtre `Modifiées seulement`, recherche surlignée, une barre `Appliquer` et une alerte pour les changements non enregistrés. `Appliquer` ne recharge plus toute l'app : les paramètres d'application et de notification s'appliquent tout de suite, le style des overlays ne redémarre que les overlays, contrôle à distance, tableau de bord web, stream et VR ne redémarrent que leur serveur. Les interrupteurs des raccourcis globaux, du chargement auto des presets, des aperçus d'overlays, du contrôle à distance, du tableau de bord web, des overlays de stream et de la VR s'appliquent dès que tu les bascules. Unités, options de l'API et police globale sont passées dans les Paramètres.
+- **Éditeurs de tableaux** (freins, heatmaps, infos de piste, gommes, marques, catégories) : un seul tableau partagé : tri, filtre, saisie dans les cellules, unités de ton choix, aperçu des heatmaps en direct, `Ctrl+S` enregistre.
+- Page **Raccourcis** redessinée : recherche, `Attribués seulement`, `Tout effacer` avec annulation.
+- **Page Overlays** : la vue écran marche au clavier, respecte les verrous et le magnétisme, un écran à la fois ; menus `Profil`, `Thème` et `Filtres`. Activer beaucoup d'overlays d'un coup s'annule (`show_confirmation_for_batch_toggle` supprimée).
+- **Un seul style partout** : barre de titre aux couleurs du thème, ombres des cartes, titres de page plus petits, les mêmes listes, menus et interrupteurs sur chaque page, temps au tour dans un seul style, nombres, dates et unités selon ta langue, couleurs daltoniens identiques dans l'app, les overlays, les pages OBS et le tableau de bord web. Un seul nom par page (`Calculateur`, `Statistiques pilote`, `Nouveautés`) et « Voiture » au lieu de « Véhicule ».
+- **Overlays** : les valeurs pas encore connues affichent un tiret au lieu de `0.00` (batterie sans hybride, rapport poids/puissance avant calibrage, compteur, appui aérodynamique...), plus de `-0.00`. **Moteur** et **Température moteur** : l'alerte de surchauffe du jeu est une seule option pour les deux designs, `show_game_overheating_warning`. **Charge des pneus** : même échelle de jauge dans les deux designs. **LED lever et laisser rouler** (moderne) : LED doubles verticales côte à côte. Les designs modernes suivent `show_compound_color_by_type`, `suffix_brake_migration` et les légendes de Réglages embarqués.
+- **Aperçus plus proches des vraies valeurs** : températures des pneus (bord intérieur le plus chaud) et leur tendance, rapport d'appui, régularité des relais, signes du pincement et de l'angle de dérive, régénération.
+- **Moins de blocages de la fenêtre** : tout désactiver (overlays ou modules), supprimer ou restaurer beaucoup de tours, ouvrir de grandes pistes, recharger un preset dont un fichier est tenu par OneDrive ou un antivirus, arrêter l'enregistreur, redémarrer l'API ou un serveur, et enregistrer les données de delta, carburant, secteurs et relais se font en arrière-plan. Les overlays ne se redessinent que quand leur texte change, les tours de télémétrie se chargent avec beaucoup moins de mémoire.
+- **Classements** : un espace entre les places de tête et les places autour de toi quand des places entre les deux ne sont pas montrées (mode combiné, les deux designs) ; avec la colonne Catégorie gardée à côté des en-têtes de catégorie, le badge de position montre la place générale ; colonne `Tendance` centrée. Les options que Classements et Rivaux héritent de Relatif montrent maintenant leur aide dans la page Options des overlays et dans la recherche d'options (55 et 67 options) ; aide pour `time_interval_width` et `mixed_compound_symbol`.
+
+![LED lever et laisser rouler : LED doubles verticales côte à côte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-lift-coast-double-leds.png)
+
+### Corrections
+
+- **Raccourcis** : les touches de modification doivent correspondre exactement (`C` ne se lance plus avec `Ctrl+C`, ni `Ctrl+A` avec `Ctrl+Maj+A`) ; pendant l'attribution d'une touche, les raccourcis de l'app (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Entrée`, `Espace`) ne se lancent plus, donc toute combinaison peut être attribuée ; un appui bref sur un bouton du volant ou un cran de rotacteur n'est plus manqué.
+- **Moteur électrique** (Le Mans Ultimate) : la puissance était environ 6,7 fois trop haute ; elle vient maintenant du jeu, et la récupération affiche la puissance récupérée.
+- **Drapeau** : « stands fermés » sous full course yellow, écart et catégorie du drapeau bleu pris sur la même voiture, distance du drapeau jaune sans les voitures arrêtées dans la voie des stands, pas de puce de trafic au garage. **Aide voie des stands** : plus de fausse alerte de limiteur à la sortie des stands. **Spotter** et **Radar** ignorent les voitures dans la voie des stands ou au garage.
+- **Secteurs**, **Graphique de delta**, **Deltabest** : un temps de S3 donné en retard par le jeu s'affiche quand même, les tours sont suivis à travers le tour de sortie, `Dernier` n'est plus mesuré contre un tour de sortie. **Classement** : le meilleur tour de la catégorie est le tour le plus rapide de la catégorie ; les voitures ne sont plus affichées aux stands pendant le premier tour d'une session. **Chrono de relais** n'ajoute plus les pilotes suivis en spectateur.
+- **Mode spectateur et Régie de course** : les overlays repartent à zéro quand la voiture suivie change (gommes, usure par tour, répartition de freinage, compteur, cercle de friction, tendance d'écart) ; une voiture qui prend la place d'une autre n'hérite plus de ses tours et de ses arrêts.
+- **Carte de piste, Altitude, Navigation** : une carte d'une autre piste avec la même date de fichier se charge. **Session**, **Horloge de piste** : les durées de plus de 10 heures ne sont plus coupées. Corrections dans Dégâts, Usure des freins, Énergie virtuelle, Angle de braquage, Pédales, Black box, Chat, Météo, Prévisions météo et Coach de virages.
+- **Calculateur de course** : `Menu des stands` envoie le ravitaillement du **prochain** arrêt et est grisé hors d'une session Le Mans Ultimate ; un stop & go ou un passage au stand du garage ne compte plus comme un arrêt ; carburant, énergie et usure de départ ne sont pris que sur la grille ; suivre une autre voiture en spectateur ne mélange plus les arrêts ; plus d'arrêt fantôme en recalculant pendant le tour de sortie ; un pilote sous son minimum garde la voiture ; plus de relais d'un tour quand les temps de conduite maximum ne couvrent pas la course.
+- **Visualiseur de télémétrie** : les courbes de température et de pression se relisent depuis le cache, un tour masqué par un filtre s'affiche quand on le coche, `Partager le tour…` se termine même si l'app est fermée aussitôt, les exports MoTeC d'une partie de tour s'alignent sur les tours importés alignés, le curseur ne reste plus bloqué après un glisser relâché hors du graphique.
+- **Paramètres plus perdus en quittant** juste après une session (cartes de piste, position de la fenêtre) ; un enregistrement bloqué un instant par un antivirus est réessayé. Un fichier d'historique corrompu, un fichier MoTeC tronqué ou des nombres énormes dans un JSON ne cassent plus une page.
+- **Classements, Relatif, Rivaux** : les voitures arrivées ou au garage montrent leur dernier tour au lieu d'un temps de stand vide, et les écarts des voitures arrivées restent ceux de la ligne d'arrivée au lieu de retomber à `0.0` une fois les voitures au garage ; un rang pilote ou sécurité Bronze n'est plus coupé en `…` ; les tours de retard écrits `2L` dans la colonne écart, comme dans la colonne intervalle ; un tiret au lieu de `0.0` pour l'intervalle avec une voiture sans temps au tour ; RaceControl n'est plus interrogé pour les rangs quand la force du plateau n'est pas affichée ; le temps du tour en cours d'une voiture arrêtée en piste ne court plus pendant une heure ; disposition classique : plus de logo de marque dessiné dans l'espace entre les catégories.
+
+### Sécurité
+
+- **Mises à jour signées** : chaque version officielle est livrée avec un manifeste signé (`NeoPedal-<version>-manifest.json` et `.sig`) ; l'app n'installe une mise à jour officielle qu'avec une signature valide, sinon elle indique pourquoi elle la refuse. Un dépôt de mise à jour personnalisé exige un installateur signé Authenticode.
+- **Contrôle à distance** : les commandes qui agissent sur toute l'app (`quit_application`, `restart_application`, `restart_api`, choix de l'API ou du preset, toutes les commandes `preset_*`) exigent maintenant le jeton d'accès (`enable_access_token`, `access_token`) : active-le et mets le jeton dans tes actions Stream Deck, Companion ou SimHub.
+- **Tableau de bord web** : `access_code` d'au moins 8 caractères (un code plus court est remplacé), une connexion valable uniquement sur l'appareil qui l'a faite, les pages d'autres sites ne peuvent plus essayer de codes, les codes faux répétés sont bloqués.
+- **Fichiers partagés** : les noms des autres pilotes et les textes importés s'affichent en texte brut ; un preset importé garde tes propres chemins de fichiers et l'adresse de l'API du jeu ; `Importer des paramètres…` garde ton dépôt de mise à jour, ton accès réseau local, tes codes d'accès et tes plugins de confiance. Plugins : la confiance couvre tous les fichiers du dossier, le code natif est refusé.
+- Limites de taille et de durée sur chaque requête aux serveurs locaux, à l'API REST du jeu et à RaceControl.
+
 ## 0.27.0 (2026-10-21)
 
 Une nouvelle page d'accueil avec le débrief de ta dernière session, une page Nouveautés plus riche, une page Overlays plus vivante, le circuit officiel de Le Mans Ultimate sur la carte dès les premiers mètres, un calculateur de course qui suit la vraie course (pilotes, pénalités, menu des stands), de nouvelles courbes de télémétrie, des objectifs et les conditions de piste dans Statistiques pilote, et des animations plus fluides sur les écrans rapides.

@@ -27,20 +27,25 @@ Qt Quick pages left hidden a while, window shown or not, are released too (see I
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from collections.abc import Callable, Iterable
 
 import shiboken6
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Slot
-from PySide6.QtWidgets import QApplication, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, Qt, QTimer, QVariantAnimation, Slot
+from PySide6.QtGui import QColor, QPainter, QPalette
+from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from ..jobs import weak_callback
+
+logger = logging.getLogger(__name__)
 
 RELEASE_DELAY_MS = 60_000  # window hidden or minimized this long: pages released
 DESTROY_DELAY_MS = 1_000  # released pages deleted meanwhile, then hidden window's graphics freed
 IDLE_RELEASE_MS = 10 * 60_000  # page left hidden this long (window shown or not): its Qt Quick page released
 IDLE_CHECK_MS = 60_000  # hidden pages checked this often while any is hidden
+PAGE_FADE_MS = 120  # page change fade (motionFast token of QML pages), none when animations are off
 
 
 def request_idle_collect():
@@ -79,6 +84,9 @@ class LazyPage(QWidget):
         super().__init__(parent)
         self._factory = factory
         self._building = False
+        self._skeleton = False  # placeholder shown, page built by caller once painted (see show_skeleton)
+        self._failed = False  # factory raised: error shown, not tried again until retry_build (see ensure_page)
+        self._placeholder: QLabel | None = None
         self.page: QWidget | None = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -86,20 +94,63 @@ class LazyPage(QWidget):
     def ensure_page(self) -> QWidget | None:
         """Page, built if needed and refreshed once (as pages built at startup were)
 
-        Returns None while page is being built (page showing itself re-enters showEvent).
+        Returns None while page is being built (page showing itself re-enters showEvent), or when building it
+        failed: the error is logged once & shown in the placeholder, the factory is not called again at every
+        show (same exception, blank page) until retry_build.
         """
-        if self.page is None and not self._building:
+        if self.page is None and not self._building and not self._failed:
             self._building = True  # page creating its Qt Quick view when shown re-enters showEvent
+            self._skeleton = False
             try:
                 page = self._factory(self)
                 self.page = page
                 self._layout.addWidget(page)
                 page.show()  # child added to a shown page is not shown by itself
                 self.setFocusProxy(page)
+            except Exception:  # page module broken (plugin, update): the window keeps working
+                self._failed = True
+                logger.exception("GUI: unable to build page")
+                from ..i18n import tr
+
+                self.placeholder().setText(tr("Page failed to load, see log for details."))
+                self.placeholder().show()
+            else:
+                if self._placeholder is not None:
+                    self._placeholder.hide()
             finally:
                 self._building = False
-            self.refresh()
+            if self.page is not None:
+                self.refresh()
         return self.page
+
+    def build_failed(self) -> bool:
+        """Building the page raised (see ensure_page)"""
+        return self._failed
+
+    def retry_build(self) -> QWidget | None:
+        """Page built again after a failure (explicit: Retry, page module reloaded)"""
+        self._failed = False
+        return self.ensure_page()
+
+    def placeholder(self) -> QLabel:
+        """Placeholder label (loading or error text), made once"""
+        if self._placeholder is None:
+            self._placeholder = QLabel("", self)
+            self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._placeholder.setEnabled(False)  # dim text of window theme
+            self._layout.addWidget(self._placeholder)
+        return self._placeholder
+
+    def show_skeleton(self):
+        """Placeholder shown while the page is built (selected in a shown window): caller shows this page, paints
+        it (repaint) then builds it (ensure_page), so the click is answered at once instead of a frozen window"""
+        if self.page is not None or self._failed:  # failed: error text kept
+            return
+        from ..i18n import tr
+
+        self.placeholder().setText(tr("Loading page\u2026"))
+        self.placeholder().show()
+        self._skeleton = True
 
     def release(self) -> bool:
         """Delete built page (built again when shown or selected), True if released"""
@@ -110,12 +161,22 @@ class LazyPage(QWidget):
         self.setFocusProxy(None)  # type: ignore[arg-type]  # PySide6 stubs refuse None
         self._layout.removeWidget(page)
         page.hide()
+        # Page resources freed now (jobs, timers, deferred work of its backend), not left to the order in which
+        # Qt deletes children (a deleted child never gets closeEvent): release_page of the page, else its backend
+        release_page = getattr(page, "release_page", None)
+        if callable(release_page):
+            release_page()
+        else:
+            release = getattr(getattr(page, "backend", None), "release", None)
+            if callable(release):
+                release()
         release_quick_views(page)
         page.deleteLater()
         return True
 
     def showEvent(self, event):
-        self.ensure_page()
+        if not self._skeleton:  # skeleton: built by caller once painted
+            self.ensure_page()
         super().showEvent(event)
 
     @Slot(bool)  # type: ignore[operator]
@@ -293,3 +354,58 @@ class IdlePageRelease(QObject):
             request_idle_collect()
         if not self._hidden_since:
             self._timer.stop()
+
+
+def animations_enabled() -> bool:
+    """Windows animation effects on (theme.animate of QML pages), read once by the Qt Quick package"""
+    from .quick import system_animations
+
+    return system_animations()
+
+
+class PageFade(QWidget):
+    """Fade of a page change: window background over the new page, fading out (PAGE_FADE_MS)
+
+    Painted over the page stack, transparent for the mouse, only while the window is shown and animations are on
+    (Windows animation effects setting, as theme.animate). Nothing is grabbed: one rectangle painted a few times.
+    """
+
+    def __init__(self, stack: QStackedWidget):
+        super().__init__(stack)
+        self._stack = stack
+        self._enabled: bool | None = None  # animations setting, read once first needed
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.hide()
+        self._alpha = 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(PAGE_FADE_MS)
+        self._animation.setStartValue(1.0)
+        self._animation.setEndValue(0.0)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_alpha)
+        self._animation.finished.connect(self.hide)
+
+    def start(self, *_):
+        """Page changed: fade it in, if the window is shown"""
+        window = self._stack.window()
+        if not window.isVisible() or window.isMinimized() or not self._stack.isVisible():
+            return
+        if self._enabled is None:
+            self._enabled = animations_enabled()
+        if not self._enabled:
+            return
+        self.setGeometry(self._stack.rect())
+        self._animation.stop()
+        self._alpha = 1.0
+        self.show()
+        self.raise_()
+        self._animation.start()
+
+    def _set_alpha(self, value):
+        self._alpha = float(value)
+        self.update()
+
+    def paintEvent(self, event):
+        color = QColor(self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Window))
+        color.setAlphaF(max(0.0, min(1.0, self._alpha)))
+        QPainter(self).fillRect(self.rect(), color)

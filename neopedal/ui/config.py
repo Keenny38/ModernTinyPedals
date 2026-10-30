@@ -17,9 +17,11 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Config dialog: options of a module, preset settings (units, API) or a config section
+Config dialog: options of a section of a setting dictionary (tyre compound of the race calculator, config
+section of a viewer)
 
-Overlay options have their own page, see overlay_options.
+Overlay options have their own page (overlay_options), global options, settings of the loaded preset
+(units, API options, global font override, pace notes) and module options the Settings page (app_settings).
 """
 
 from __future__ import annotations
@@ -42,7 +44,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -52,7 +53,6 @@ from ..const_file import ConfigType
 from ..i18n import tr, trm
 from ..i18n.options import module_label, option_label, option_tooltip, search_text
 from ..setting import cfg
-from ..template.option_limits import clamp_to_limit
 from ._common import (
     QVAL_COLOR,
     QVAL_FLOAT,
@@ -82,7 +82,6 @@ from .option_limits import limit_error
 COLUMN_LABEL = 0  # grid layout column index
 COLUMN_OPTION = 1
 COLUMN_ERROR = 2  # short reason next to invalid value
-FONT_NO_CHANGE = "no change"  # font override choice keeping option as is
 # Choice lists shown as is (names, not words): others shown translated, English value saved
 UNTRANSLATED_CHOICES = (rxp.CFG_API_NAME, rxp.CFG_CHARACTER_ENCODING, rxp.CFG_LANGUAGE, rxp.CFG_FONT_WEIGHT)
 
@@ -93,6 +92,7 @@ HIDDEN_OPTIONS = {
         "position_x", "position_y", "window_width", "window_height", "window_maximized", "last_page_index",
         "rail_items", "open_pages", "skipped_update_version", "last_run_version", "home_quick_access",
         "show_overlay_screen_view", "overlays_sort_order", "favorite_overlays", "recent_overlays",
+        "command_palette_recent", "close_to_tray_notice_shown",
     ),
     "vr_overlay": ("mirror_position_x", "mirror_position_y"),
 }
@@ -182,172 +182,6 @@ class LiveSetting:
             return False
         self.preset_filename = cfg.filename.setting
         return True
-
-
-@singleton_dialog(ConfigType.CONFIG)
-class FontConfig(BaseDialog):
-    """Config global font setting"""
-
-    def __init__(self, parent, user_setting: dict, reload_func: Callable):
-        super().__init__(parent)
-        self.set_config_title(tr("Global Font Override"), cfg.filename.setting)
-
-        self.reloading = reload_func
-        self.live_setting = LiveSetting(user_setting)
-
-        # Create options ("no change" item keeps its English text as data, see selected_choice)
-        self.edit_fontname = DropDownListEdit(self)
-        self.edit_fontname.addItem(tr("no change"), FONT_NO_CHANGE)
-        self.edit_fontname.addItems(get_font_list())
-        self.edit_fontname.setFixedWidth(UIScaler.size(9))
-
-        self.edit_fontsize = QSpinBox(self)
-        self.edit_fontsize.setRange(-999, 999)
-        self.edit_fontsize.setFixedWidth(UIScaler.size(9))
-
-        self.edit_fontweight = DropDownListEdit(self)
-        self.edit_fontweight.addItem(tr("no change"), FONT_NO_CHANGE)
-        self.edit_fontweight.addItems(rxp.CHOICE_COMMON[rxp.CFG_FONT_WEIGHT])
-        self.edit_fontweight.setFixedWidth(UIScaler.size(9))
-
-        self.edit_autooffset = DropDownListEdit(self)
-        for choice in (FONT_NO_CHANGE, "enable", "disable"):
-            self.edit_autooffset.addItem(tr(choice), choice)
-        self.edit_autooffset.setFixedWidth(UIScaler.size(9))
-
-        self.edit_fontoffset = QSpinBox(self)
-        self.edit_fontoffset.setRange(-999, 999)
-        self.edit_fontoffset.setFixedWidth(UIScaler.size(9))
-
-        layout_option = QGridLayout()
-        layout_option.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout_option.addWidget(QLabel(tr("Font Name")), 0, 0)
-        layout_option.addWidget(self.edit_fontname, 0, 1)
-        layout_option.addWidget(QLabel(tr("Font Size Addend")), 1, 0)
-        layout_option.addWidget(self.edit_fontsize, 1, 1)
-        layout_option.addWidget(QLabel(tr("Font Weight")), 2, 0)
-        layout_option.addWidget(self.edit_fontweight, 2, 1)
-        layout_option.addWidget(QLabel(tr("Enable Auto Font Offset")), 3, 0)
-        layout_option.addWidget(self.edit_autooffset, 3, 1)
-        layout_option.addWidget(QLabel(tr("Font Offset Vertical Addend")), 4, 0)
-        layout_option.addWidget(self.edit_fontoffset, 4, 1)
-
-        # Button
-        button_apply = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply)
-        button_apply.clicked.connect(self.applying)
-
-        button_save = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        button_save.accepted.connect(self.saving)
-        button_save.rejected.connect(self.reject)
-
-        layout_button = QHBoxLayout()
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_apply)
-        layout_button.addWidget(button_save)
-
-        # Set layout
-        layout_main = QVBoxLayout()
-        layout_main.addLayout(layout_option)
-        layout_main.addLayout(layout_button)
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout_main)
-        self.applied_state = self.capture()  # choices last applied, see is_modified
-        # Unsaved changes marker follows choices
-        for combo in (self.edit_fontname, self.edit_fontweight, self.edit_autooffset):
-            combo.currentIndexChanged.connect(self.refresh_modified)
-        for spin in (self.edit_fontsize, self.edit_fontoffset):
-            spin.valueChanged.connect(self.refresh_modified)
-
-    @property
-    def user_setting(self) -> dict:
-        """Loaded preset setting (replaced when another preset loads)"""
-        return self.live_setting.get()
-
-    def save_action(self):
-        """Ctrl+S: Apply"""
-        return self.applying
-
-    @staticmethod
-    def selected_choice(editor: QComboBox) -> str:
-        """Selected choice, English value of translated items"""
-        data = editor.currentData()
-        return data if isinstance(data, str) else editor.currentText()
-
-    def capture(self) -> tuple:
-        """Current choices"""
-        return (
-            self.selected_choice(self.edit_fontname),
-            self.edit_fontsize.value(),
-            self.selected_choice(self.edit_fontweight),
-            self.selected_choice(self.edit_autooffset),
-            self.edit_fontoffset.value(),
-        )
-
-    def is_modified(self) -> bool:
-        """Whether choices were changed since opened or last applied"""
-        return self.capture() != self.applied_state
-
-    def is_preset_setting(self) -> bool:
-        """Edits options of loaded preset"""
-        return self.live_setting.is_preset
-
-    def applying(self) -> bool:
-        """Save & apply, False if cancelled"""
-        if not self.live_setting.confirm_preset(self):
-            return False
-        self.save_setting(self.user_setting)
-        return True
-
-    def saving(self):
-        """Save & close"""
-        if self.applying():
-            self.accept()  # close
-
-    def save_setting(self, dict_user: dict[str, dict]):
-        """Save setting"""
-        for setting in dict_user.values():
-            for key in setting:
-                # Font name
-                if re.search(rxp.CFG_FONT_NAME, key):
-                    font_name = self.selected_choice(self.edit_fontname)
-                    if font_name != FONT_NO_CHANGE:
-                        setting[key] = font_name
-                    continue
-                # Font weight
-                if re.search(rxp.CFG_FONT_WEIGHT, key):
-                    font_weight = self.selected_choice(self.edit_fontweight)
-                    if font_weight != FONT_NO_CHANGE:
-                        setting[key] = font_weight
-                    continue
-                # Font size addend
-                if re.search("font_size", key):
-                    font_size = self.edit_fontsize.value()
-                    if font_size != 0:
-                        # Option limit too (1-200): widgets are rebuilt from this setting, not validated again
-                        setting[key] = clamp_to_limit(key, max(setting[key] + font_size, 1))
-                    continue
-                # Auto font offset
-                if key == "enable_auto_font_offset":
-                    auto_offset = self.selected_choice(self.edit_autooffset)
-                    if auto_offset == "disable":
-                        setting[key] = False
-                    elif auto_offset == "enable":
-                        setting[key] = True
-                    continue
-                # Font offset vertical
-                if key == "font_offset_vertical":
-                    font_offset = self.edit_fontoffset.value()
-                    if font_offset != 0:
-                        setting[key] = clamp_to_limit(key, setting[key] + font_offset)
-                    continue
-        # Reset after applied
-        self.edit_fontsize.setValue(0)
-        self.edit_fontoffset.setValue(0)
-        self.applied_state = self.capture()
-        self.refresh_modified()
-        # Wait saving finish
-        cfg.save(0)
-        run_after_saving(self.reloading)
 
 
 class EditorHistory:
@@ -710,7 +544,7 @@ class UserConfig(BaseDialog):
             event.accept()
             return
         confirm = QMessageBox.question(
-            self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+            self, tr("Confirm"), tr("<b>Save changes before continuing?</b>"),
             buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel)
         if confirm == QMessageBox.StandardButton.Cancel or (

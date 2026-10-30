@@ -85,9 +85,14 @@ class DeltaTrace:
         self.previous_version += 1
 
     def update(self, lap: int, progress: float, delta: float) -> bool:
-        """Sample delta at lap progress (lap: completed laps), True if trace changed"""
-        if not (finite(progress) and finite(delta)):
+        """Sample delta at lap progress (lap: completed laps), True if trace changed
+
+        Delta nan (out lap, back to garage: no delta) leaves its slots empty, laps still followed.
+        """
+        if not finite(progress):
             return False
+        if not finite(delta):
+            delta = nan
         changed = False
         if lap != self.last_lap:
             if lap != self.last_lap + 1:  # new session, or lap counter went back
@@ -115,7 +120,7 @@ class DeltaTrace:
                 self.changed_from = 0
         elif 0 <= self.last_slot < slot <= self.last_slot + FILL_GAP:  # skipped slots: linear fill
             start = self.current[self.last_slot]
-            if finite(start):
+            if finite(start) and finite(delta):
                 steps = slot - self.last_slot
                 for index in range(1, steps):
                     self.current[self.last_slot + index] = start + (delta - start) * index / steps
@@ -288,7 +293,7 @@ class DeltaGraphMixin:
         """Delta reading"""
         if not finite(delta):
             return "-.--"
-        return f"{delta:+.{self.decimals}f}"
+        return f"{delta:+z.{self.decimals}f}"
 
 
 class Realtime(DeltaGraphMixin, ClassicCells, Overlay):
@@ -305,9 +310,13 @@ class Realtime(DeltaGraphMixin, ClassicCells, Overlay):
 
         # Config variable
         wcfg = self.wcfg
-        width = max(int(wcfg["display_width"]), 40)
-        height = max(int(wcfg["display_height"]), 20)
+        self.label = f"{tr('Delta')} {tr(wcfg['deltabest_source'])}"
         self.show_reading = bool(wcfg["show_delta_reading"])
+        width = max(int(wcfg["display_width"]), 40)
+        if self.show_reading:  # label & widest reading side by side (+99.99), never overlapping
+            decimals = min(max(int(wcfg["decimal_places"]), 0), 3)
+            width = max(width, round(self.text_cell_width(len(self.label) + 5 + decimals + bool(decimals))))
+        height = max(int(wcfg["display_height"]), 20)
         header = font_m.height if self.show_reading else 0
         self.rect_reading = QRectF(0, 0, width, header)
         self.setup_graph(QRectF(0, header, width, height))
@@ -323,7 +332,6 @@ class Realtime(DeltaGraphMixin, ClassicCells, Overlay):
         self.color_gain.setAlpha(255)
         self.color_loss = QColor(self.colors["fill_color_time_loss"])
         self.color_loss.setAlpha(255)
-        self.label = f"{tr('Delta')} {tr(wcfg['deltabest_source'])}"
 
         # Config canvas
         self.resize(width, header + height)

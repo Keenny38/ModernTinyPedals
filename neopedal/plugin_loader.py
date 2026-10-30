@@ -27,9 +27,12 @@ Plugin is registered as "plugin_<name>" widget. Plugins run as normal Python cod
 only install plugins from trusted source.
 
 Plugin code is only executed after user trusted it (Plugin Manager, or install from zip).
-Trust is bound to SHA-256 digest of all Python files in plugin folder, so any code change
-requires trusting again. Digests are stored in config folder, plugins shipped with NeoPedal
-are trusted by digest listed in BUNDLED_PLUGINS.
+Trust is bound to SHA-256 digest of every file in plugin folder (length prefixed path & content
+records), so any change requires trusting again. Digests are stored in config folder, plugins
+shipped with NeoPedal are trusted by digest listed in BUNDLED_PLUGINS. A plugin folder holding
+native code (.pyd, .dll, .so, .pth: loaded by Python before reviewed source) is never trusted.
+Digests saved until 0.27 covered Python files only: still accepted for a folder with only Python
+& data files, then saved again in the current format.
 
 Plugins written for versions until 0.23.0 import app modules by the legacy package name:
 LegacyPackageFinder maps it to this package (same module objects).
@@ -49,6 +52,7 @@ import json
 import logging
 import os
 import re
+import stat
 import sys
 import time
 from contextlib import suppress
@@ -58,7 +62,7 @@ from typing import TYPE_CHECKING, Any
 from . import safe_mode
 from .const_app import LEGACY_PACKAGE
 from .userfile import app_path, write_json
-from .validator import is_finite_number
+from .validator import is_finite_number, is_reserved_filename
 
 if TYPE_CHECKING:
     from .template.widget_config_types import PluginConfig
@@ -85,12 +89,14 @@ _valid_name = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 PLUGIN_ERRORS: dict[str, str] = {}  # widget name: last loading error
 ALLOWED_PACKAGE_FILES = (".py", ".json", ".png", ".svg", ".txt", ".md")
 BYTECODE_FILES = (".pyc", ".pyo")
-WINDOWS_DEVICE_NAMES = frozenset((
-    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
-    *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
-))
+NATIVE_FILES = (".pyd", ".dll", ".so", ".dylib", ".pth")  # native code & path hooks: never trusted
+TEXT_FILES = (".py", ".json", ".txt", ".md", ".svg")  # digest line ending neutral (git autocrlf)
+DIGEST_PREFIX = "v2:"  # trust file digest of current format, legacy digest (Python files only) has none
 TRUST_FILE = "plugin_trust.json"
 UNTRUSTED_ERROR = "Not trusted: review plugin code, then trust it in Plugin Manager"
+LINK_ERROR = "Plugin folder is a link (symbolic link or junction) to another folder: copy the plugin files instead"
+UNREADABLE_ERROR = "Unable to read plugin files"  # followed by the error (locked by an antivirus, permissions)
+NATIVE_ERROR = "Native code files (.pyd, .dll, .so, .pth) in plugin folder: remove them, plugin not loaded"
 SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart NeoPedal to load it"
 # Plugins shipped with NeoPedal: widget name: plugin digest (none since example speed plugin was removed)
 BUNDLED_PLUGINS: MappingProxyType[str, str] = MappingProxyType({})
@@ -125,7 +131,7 @@ def load_plugin_defaults(folder: str = "") -> dict[str, dict]:
                 setting = json.load(file)
             if not isinstance(setting, dict):
                 raise ValueError("setting.json must be a JSON object")
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RecursionError) as error:  # RecursionError: nested too deeply
             logger.error("PLUGIN: unable to load %s setting: %s", widget_name, error)
             continue
         defaults[widget_name] = {**PLUGIN_BASE_DEFAULT, **valid_plugin_setting(widget_name, setting)}
@@ -166,28 +172,59 @@ def plugin_path(widget_name: str, folder: str = "") -> str:
     return os.path.join(folder or PLUGIN_FOLDER, widget_name[len(PLUGIN_PREFIX):])
 
 
-def plugin_code_files(path: str) -> list[str]:
-    """Relative path of all Python files in plugin folder, sorted"""
-    code_files = []
+def plugin_files(path: str) -> list[str]:
+    """Relative path of every file in plugin folder, sorted (compiled Python cache left out: removed before
+    loading, never run)"""
+    found = []
     for root, dirs, files in os.walk(path):
         dirs[:] = sorted(name for name in dirs if name != "__pycache__")
         for name in sorted(files):
-            if name.endswith(".py"):
-                code_files.append(os.path.relpath(os.path.join(root, name), path).replace("\\", "/"))
-    return code_files
+            if not name.lower().endswith(BYTECODE_FILES):
+                found.append(os.path.relpath(os.path.join(root, name), path).replace("\\", "/"))
+    return found
+
+
+def plugin_code_files(path: str) -> list[str]:
+    """Relative path of all Python files in plugin folder, sorted"""
+    return [relative for relative in plugin_files(path) if relative.endswith(".py")]
+
+
+def native_files(relatives: list[str]) -> list[str]:
+    """Native code files (.pyd, .dll, .so, .pth) of plugin file list"""
+    return [relative for relative in relatives if relative.lower().endswith(NATIVE_FILES)]
+
+
+def plugin_contents(path: str) -> dict[str, bytes]:
+    """Content of every file in plugin folder (see plugin_files), relative path: content"""
+    contents = {}
+    for relative in plugin_files(path):
+        with open(os.path.join(path, relative), "rb") as file:
+            contents[relative] = file.read()
+    return contents
 
 
 def plugin_sources(path: str) -> dict[str, bytes]:
     """Content of all Python files in plugin folder, relative path: content"""
-    sources = {}
-    for relative in plugin_code_files(path):
-        with open(os.path.join(path, relative), "rb") as file:
-            sources[relative] = file.read()
-    return sources
+    return {relative: content for relative, content in plugin_contents(path).items() if relative.endswith(".py")}
+
+
+def contents_digest(contents: dict[str, bytes]) -> str:
+    """SHA-256 digest of plugin files: one record per file (sorted), path & content each prefixed by its
+    length (no two file sets give the same stream), text files line ending neutral"""
+    digest = hashlib.sha256(b"NeoPedal plugin digest 2\0")
+    for relative in sorted(contents):
+        content = contents[relative]
+        if relative.lower().endswith(TEXT_FILES):
+            content = content.replace(b"\r\n", b"\n")
+        name = relative.encode("utf-8")
+        digest.update(len(name).to_bytes(8, "little") + name + len(content).to_bytes(8, "little"))
+        digest.update(content)
+    return digest.hexdigest()
 
 
 def sources_digest(sources: dict[str, bytes]) -> str:
-    """SHA-256 digest of plugin Python files (relative path & content, line ending neutral)"""
+    """Legacy digest (until 0.27): SHA-256 of plugin Python files (relative path & content, line ending
+    neutral), unambiguous only if no content holds a null byte"""
     digest = hashlib.sha256()
     for relative, content in sources.items():
         digest.update(relative.encode("utf-8") + b"\0" + content.replace(b"\r\n", b"\n") + b"\0")
@@ -195,12 +232,59 @@ def sources_digest(sources: dict[str, bytes]) -> str:
 
 
 def plugin_digest(path: str) -> str:
-    """SHA-256 digest of all Python files in plugin folder (relative path & content, line ending neutral)"""
-    return sources_digest(plugin_sources(path))
+    """SHA-256 digest of every file in plugin folder (see contents_digest)"""
+    return contents_digest(plugin_contents(path))
+
+
+def trusted_state(widget_name: str, contents: dict[str, bytes]) -> str:
+    """Trust of plugin files: "trusted", "legacy" (trusted by digest of older format, to save again in current
+    format), "native" (native code files, never trusted) or "" (not trusted)
+
+    Legacy digest is accepted only if plugin folder has Python files (no null byte: unambiguous digest) &
+    data files a plugin package may hold, which that digest did not cover.
+    """
+    if native_files(list(contents)):
+        return "native"
+    digest = contents_digest(contents)
+    if digest == BUNDLED_PLUGINS.get(widget_name):
+        return "trusted"
+    stored = load_trusted().get(widget_name, "")
+    if stored == f"{DIGEST_PREFIX}{digest}":
+        return "trusted"
+    if stored and not stored.startswith(DIGEST_PREFIX) and all(
+        relative.lower().endswith(ALLOWED_PACKAGE_FILES) and (not relative.endswith(".py") or b"\0" not in content)
+        for relative, content in contents.items()
+    ):
+        sources = {relative: content for relative, content in contents.items() if relative.endswith(".py")}
+        if stored == sources_digest(sources):
+            return "legacy"
+    return ""
+
+
+def save_trusted_digest(widget_name: str, digest: str) -> None:
+    """Save plugin digest (see contents_digest) as trusted, raises OSError if unable to save"""
+    trusted = load_trusted()
+    trusted[widget_name] = f"{DIGEST_PREFIX}{digest}"
+    write_json(trust_filename(), trusted, indent=4, raise_error=True, sort_keys=True)
+
+
+def is_link_folder(path: str) -> bool:
+    """Folder that is a symbolic link or a Windows junction (reparse point) to another folder: files removed or
+    written in it would touch that other folder"""
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = os.lstat(path).st_file_attributes  # type: ignore[attr-defined]  # Windows only
+    except (OSError, AttributeError):
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 def remove_bytecode(path: str) -> None:
     """Remove compiled Python files (not covered by trusted digest) from plugin folder
+
+    Called for a trusted plugin only (see load_plugin_widget): never deletes files of a folder the user has not
+    approved.
 
     Raises:
         OSError: unable to remove a compiled file.
@@ -228,7 +312,7 @@ def load_trusted() -> dict[str, str]:
     try:
         with open(trust_filename(), encoding="utf-8") as file:
             data = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return {}
     if not isinstance(data, dict):
         return {}
@@ -236,13 +320,13 @@ def load_trusted() -> dict[str, str]:
 
 
 def is_trusted(widget_name: str, folder: str = "") -> bool:
-    """Check if plugin code matches trusted digest"""
-    return is_trusted_digest(widget_name, plugin_digest(plugin_path(widget_name, folder)))
+    """Check if plugin files match trusted digest (older format digest too, see trusted_state)"""
+    return trusted_state(widget_name, plugin_contents(plugin_path(widget_name, folder))) in ("trusted", "legacy")
 
 
 def is_trusted_digest(widget_name: str, digest: str) -> bool:
-    """Check if plugin code digest is trusted"""
-    return digest in (BUNDLED_PLUGINS.get(widget_name), load_trusted().get(widget_name))
+    """Check if plugin digest (see contents_digest) is trusted"""
+    return digest == BUNDLED_PLUGINS.get(widget_name) or load_trusted().get(widget_name) == f"{DIGEST_PREFIX}{digest}"
 
 
 def trust_plugin(widget_name: str, folder: str = "", expected_digest: str | None = None) -> str:
@@ -252,15 +336,17 @@ def trust_plugin(widget_name: str, folder: str = "", expected_digest: str | None
         expected_digest: digest shown to user for confirmation, refuse if code changed since.
 
     Raises:
-        ValueError: plugin code changed since expected digest was computed.
+        ValueError: plugin code changed since expected digest was computed, or native code files in plugin folder.
         OSError: unable to save trust file.
     """
-    digest = plugin_digest(plugin_path(widget_name, folder))
+    contents = plugin_contents(plugin_path(widget_name, folder))
+    native = native_files(list(contents))
+    if native:
+        raise ValueError(f"native code files not allowed in plugin folder: {', '.join(native[:5])}")
+    digest = contents_digest(contents)
     if expected_digest is not None and digest != expected_digest:
         raise ValueError("plugin code changed after confirmation, review it again")
-    trusted = load_trusted()
-    trusted[widget_name] = digest
-    write_json(trust_filename(), trusted, indent=4, raise_error=True, sort_keys=True)
+    save_trusted_digest(widget_name, digest)
     logger.info("PLUGIN: trusted %s (%s)", widget_name, digest[:12])
     return digest
 
@@ -311,23 +397,38 @@ def load_plugin_widget(package: str, widget_name: str, folder: str = "") -> Modu
         return placeholder
     plugin_folder = plugin_path(widget_name, folder)
     path = os.path.join(plugin_folder, "widget.py")
-    sources: dict[str, bytes] = {}
-    try:
-        remove_bytecode(plugin_folder)
-        sources = plugin_sources(plugin_folder)
-        trusted = is_trusted_digest(widget_name, sources_digest(sources))
-    except OSError as error:
-        trusted = False
-        logger.error("PLUGIN: unable to read %s code: %s", widget_name, error)
-    if not trusted:
-        logger.warning("PLUGIN: %s not trusted, code not loaded", widget_name)
-        PLUGIN_ERRORS[widget_name] = UNTRUSTED_ERROR
-        placeholder = error_placeholder(module_name, widget_name, UNTRUSTED_ERROR)
+    contents: dict[str, bytes] = {}
+    state = ""
+    error_text = UNTRUSTED_ERROR
+    if is_link_folder(plugin_folder):  # never run, never cleaned: it is another folder of the user
+        state, error_text = "link", LINK_ERROR
+    else:
+        try:
+            contents = plugin_contents(plugin_folder)
+            state = trusted_state(widget_name, contents)
+            if state in ("trusted", "legacy"):  # approved code only: compiled files of its folder removed
+                remove_bytecode(plugin_folder)
+        except OSError as error:
+            # Not an "untrusted" plugin: the user would review & trust it again for nothing
+            logger.error("PLUGIN: unable to read %s code: %s", widget_name, error)
+            state, error_text = "unreadable", f"{UNREADABLE_ERROR}: {error}"
+    if state == "legacy":  # trusted before digest covered every file: saved in current format
+        try:
+            save_trusted_digest(widget_name, contents_digest(contents))
+            logger.info("PLUGIN: %s trust digest updated", widget_name)
+        except OSError as error:  # still trusted this time, updated next time
+            logger.warning("PLUGIN: unable to update %s trust digest: %s", widget_name, error)
+    if state not in ("trusted", "legacy"):
+        if state == "native":
+            error_text = NATIVE_ERROR
+        logger.warning("PLUGIN: %s not loaded (%s)", widget_name, state or "not trusted")
+        PLUGIN_ERRORS[widget_name] = error_text
+        placeholder = error_placeholder(module_name, widget_name, error_text)
         sys.modules[module_name] = placeholder
         return placeholder
     write_bytecode = sys.dont_write_bytecode
     try:
-        source = sources.get("widget.py")
+        source = contents.get("widget.py")
         if source is None:
             raise ImportError(f"cannot load {path}")
         code = compile(source, path, "exec", dont_inherit=True)
@@ -414,6 +515,9 @@ def _install_plugin_package(zip_filename: str, folder: str) -> str:
         files = {info.filename.replace("\\", "/").split("/", 1)[-1]: info for info in members}
         if "widget.py" not in files or "setting.json" not in files:
             raise ValueError("widget.py or setting.json not found")
+        native = native_files(list(files))
+        if native:  # never skipped silently: plugin may need them, and was not reviewed as shipped
+            raise ValueError(f"native code files not allowed in plugin: {', '.join(native[:5])}")
         target = os.path.join(folder, name)
         if os.path.exists(target):
             raise ValueError(f"plugin {name} already exists")
@@ -476,6 +580,6 @@ def is_safe_package_path(parts: list[str]) -> bool:
             return False
         if os.path.isabs(part) or os.path.splitdrive(part)[0]:
             return False
-        if part.split(".", 1)[0].strip().upper() in WINDOWS_DEVICE_NAMES or part.endswith((" ", ".")):
+        if is_reserved_filename(part) or part.endswith((" ", ".")) or any(ord(char) < 32 for char in part):
             return False
     return True

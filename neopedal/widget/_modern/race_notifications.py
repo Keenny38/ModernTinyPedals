@@ -47,7 +47,8 @@ TIME_STEPS = 50  # time left bar steps (widget redrawn only on step change)
 # Message title -> icon
 ICONS = {
     "Position": "arrow", "Class position": "arrow", "Penalty": "penalty", "Fastest lap": "stopwatch",
-    "Blue flag": "flag", "Full course yellow": "flag", "Green flag": "flag", "Lap invalidated": "cross",
+    "Blue flag": "flag", "Full course yellow": "flag", "Red flag": "flag", "Green flag": "flag",
+    "Lap invalidated": "cross",
     PREVIEW_TITLE: "info",
 }
 
@@ -169,7 +170,7 @@ class Realtime(HiddenPreview, NotificationsMixin, ModernOverlay):
     def paint(self, painter: QPainter):
         theme = self.theme
         shown = self.slot_order(self.state or self.preview)
-        radius = self.radius(0.45)
+        radius = self.panel_radius()  # each card is a panel
         for index, (key, title, detail, kind, step, left) in enumerate(shown, self.first_slot(len(shown))):
             painter.setOpacity(step / FADE_STEPS)
             card = self.cards[index]

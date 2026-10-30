@@ -34,6 +34,7 @@ class BroadcastDirector(BaseDialog):
     """Broadcast director of the session or replay open in game (LMU)"""
 
     KEEP_WHEN_HIDDEN = True  # auto mode keeps choosing cameras while streaming, window hidden
+    ESC_CLOSES = False  # Esc never closes the page (a key slip mid-broadcast), see app_tab_view.DialogPage
 
     def __init__(self, parent):
         from .quick import create_quick_view

@@ -23,7 +23,7 @@ SetupStep {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1  // same width for every card
-                padding: theme.em * 0.6
+                padding: theme.space4
                 title: modelData.label
                 checked: backend.windowTheme === modelData.name
                 onClicked: backend.setWindowTheme(modelData.name)
@@ -111,7 +111,7 @@ SetupStep {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                padding: theme.em * 0.6
+                padding: theme.space4
                 title: modelData.label
                 checked: backend.overlayTheme === modelData.name
                 onClicked: backend.setOverlayTheme(modelData.name)
@@ -133,13 +133,13 @@ SetupStep {
         spacing: theme.em * 1.5
         // Follow the backend (checked never set by the click: the binding stays)
         TpSwitch {
-            text: i18n.tr("Colorblind safe colors")
+            text: i18n.tr("Colorblind Colors")
             checkable: false
             checked: backend.colorblind
             onClicked: backend.setColorblind(!backend.colorblind)
         }
         TpSwitch {
-            text: i18n.tr("Modern font (JetBrains Mono)")
+            text: i18n.tr("Modern font (%1)").replace("%1", backend.modernFontName)
             checkable: false
             checked: backend.modernFont
             onClicked: backend.setModernFont(!backend.modernFont)
@@ -156,7 +156,7 @@ SetupStep {
         readonly property real room: (width - theme.em * 2 - gap * (count - 1)) / count  // per overlay
         Layout.fillWidth: true
         implicitHeight: Math.round(theme.em * 10)
-        radius: theme.radiusXl
+        radius: theme.radiusLg
         clip: true
         gradient: Gradient {
             GradientStop { position: 0; color: theme.stageTop }
@@ -199,8 +199,8 @@ SetupStep {
                         SequentialAnimation on opacity {
                             running: sampleItem.previewState === 0 && pageState.active && theme.animate
                             loops: Animation.Infinite
-                            NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                            NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }
+                            NumberAnimation { to: 0.35; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
+                            NumberAnimation { to: 1; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
                         }
                     }
                 }

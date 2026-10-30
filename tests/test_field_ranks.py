@@ -241,16 +241,19 @@ def known_field(monkeypatch):
     return ranks
 
 
-@pytest.mark.parametrize("name", ["standings", "relative"])
-def test_driver_ranks_column(ui_env, bundled_fonts, known_field, name, monkeypatch, tmp_path):
+@pytest.mark.parametrize("name", ["standings", "relative"])  # player row shown
+def test_driver_ranks_and_badge_columns(ui_env, bundled_fonts, known_field, name, monkeypatch, tmp_path):
+    """Driver & safety ranks and game badge: two columns, each shown & moved on its own"""
     from neopedal.setting import cfg
     from neopedal.userfile.badge_icons import icons
     from neopedal.widget._modern.rows import DASH
-    from neopedal.widget._modern.table import ICON, PAIR, TEXT
+    from neopedal.widget._modern.table import EMPTY_CELL, ICON, PAIR, TEXT
     from tests.test_modern_table_rows import new_table, sample
     from tests.test_standings_gaps_columns import column_cells
 
-    cfg.user.setting[name]["column_driver_ranks"] = True
+    setting = cfg.user.setting[name]
+    setting["column_driver_ranks"] = True
+    setting["column_driver_badge"] = True
     widget = new_table(cfg, name)
     cars, context = sample(widget)
     player = cars.vehicles[cars.player_index].driverName  # shown by both widgets
@@ -260,12 +263,14 @@ def test_driver_ranks_column(ui_env, bundled_fonts, known_field, name, monkeypat
     monkeypatch.setattr(cfg.path, "game_image", str(tmp_path))
     widget.show_field(cars, context)
     cells = column_cells(widget, "driver_ranks")
-    assert all(cell.kind == PAIR and cell.extra[0].kind == PAIR for cell in cells)  # ranks, then badge
-    texts = {(cell.extra[0].extra[0].text, cell.extra[0].extra[1].text) for cell in cells}
+    assert all(cell.kind == PAIR and cell.extra[0].kind == TEXT for cell in cells)  # ranks only, no badge
+    texts = {(cell.extra[0].text, cell.extra[1].text) for cell in cells}
     assert ("G2", "P1") in texts and (DASH, DASH) in texts  # unknown drivers: dashes
-    gold = next(cell for cell in cells if cell.extra[0].extra[0].text == "G2")
-    assert gold.extra[0].extra[0].color.name().upper() == dr.RANK_COLORS["gold"].upper()
-    badge = gold.extra[1]
+    gold = next(cell for cell in cells if cell.extra[0].text == "G2")
+    assert gold.extra[0].color.name().upper() == dr.RANK_COLORS["gold"].upper()
+    badges = column_cells(widget, "driver_badge")
+    assert len(badges) == len(cells) and EMPTY_CELL in badges  # unknown drivers: no badge
+    badge = next(cell for cell in badges if cell != EMPTY_CELL)
     assert badge.kind == ICON and badge.text == "" and badge.color.name().upper() == "#1EFF6B"  # dot: no icon yet
     widget.grab()  # dot drawn
     icon = tmp_path / "badge" / "sr-saint.svg"
@@ -274,30 +279,32 @@ def test_driver_ranks_column(ui_env, bundled_fonts, known_field, name, monkeypat
                     'fill="#0f0"/></svg>', encoding="utf-8")
     monkeypatch.setattr(icons, "version", icons.version + 1)  # icon saved
     widget.show_field(cars, context)
-    gold = next(cell for cell in column_cells(widget, "driver_ranks") if cell.extra[0].extra[0].text == "G2")
-    assert gold.extra[1].text == str(icon)
+    badge = next(cell for cell in column_cells(widget, "driver_badge") if cell != EMPTY_CELL)
+    assert badge.text == str(icon)
     widget.grab()  # icon drawn
     widget.deleteLater()
-    cfg.user.setting[name]["show_driver_badge"] = False  # ranks only
-    plain = new_table(cfg, name)
-    plain.show_field(cars, context)
-    assert all(cell.extra[0].kind == TEXT for cell in column_cells(plain, "driver_ranks"))
-    plain.deleteLater()
-    cfg.user.setting[name]["show_driver_badge"] = True
-    cfg.user.setting[name]["column_driver_ranks"] = False
+    setting["column_driver_ranks"] = False  # badge alone: ranks still read
+    alone = new_table(cfg, name)
+    assert [column.key for column in alone.table.columns if column.key.startswith("driver_")][-1:] == ["driver_badge"]
+    assert "driver_ranks" not in {column.key for column in alone.table.columns}
+    alone.show_field(cars, context)
+    assert any(cell.kind == ICON for cell in column_cells(alone, "driver_badge"))
+    alone.deleteLater()
+    setting["column_driver_badge"] = False
 
 
 def test_session_field_level(ui_env, bundled_fonts, known_field, monkeypatch):
     from neopedal import rank_info
     from neopedal.module_info import minfo
     from neopedal.setting import cfg
+    from neopedal.widget._modern.base import DASH
     from neopedal.widget._modern.session import Realtime
     from tests.test_modern_table_rows import new_table
 
     cfg.user.setting["session"]["show_field_level"] = True
     widget = new_table(cfg, "session")
     assert isinstance(widget, Realtime) and "field_level" in widget.keys
-    assert widget.field_level_value().text == "- · -"
+    assert widget.field_level_value().text == f"{DASH} · {DASH}"  # placeholders
     names = [car.driverName for car in minfo.vehicles.dataSet[:2]]
     for name, rank in zip(names, ("Silver", "Gold")):
         known_field[fr.driver_key(name)] = dr.DriverRanks(name, "", "", "", dr.Rank(rank, 1, 0),
@@ -305,7 +312,7 @@ def test_session_field_level(ui_env, bundled_fonts, known_field, monkeypatch):
     if len(set(names)) == 2 and all(names):
         assert widget.field_level_value().text == "S2 · B2"
     monkeypatch.setattr(rank_info, "field_level", lambda names: fr.FieldLevel(None, dr.Rank("Gold", 1, 0), 3))
-    assert widget.field_level_value().text == "- · G1"
+    assert widget.field_level_value().text == f"{DASH} · G1"
     widget.deleteLater()
     cfg.user.setting["session"]["show_field_level"] = False
 

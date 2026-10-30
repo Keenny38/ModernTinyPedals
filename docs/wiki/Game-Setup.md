@@ -17,7 +17,7 @@ Set the game display mode to **Borderless** or **Windowed**. In exclusive fullsc
 
 The [setup wizard](Getting-Started.md#first-launch) asks for your game on first launch. To change it later, open the `API` menu of the main window and select `Le Mans Ultimate` or `rFactor 2`.
 
-- The status bar at the bottom of the main window shows the selected game and its connection state (click it to refresh). Game options are in `API` > `Options`.
+- The API button at the bottom of the navigation bar shows the selected game and its connection state (dot color, tooltip). Game options are in `API` > `Options`.
 - `API` > `Restart API` reconnects to the game.
 - `API` > `Remember API Selection from Preset` stores the game in each preset (on by default), so a preset made for rFactor 2 selects rFactor 2 when loaded.
 - `Le Mans Ultimate (legacy)` (LMU through the rFactor 2 plugin) is only listed after `API` > `Enable Legacy API Selection`. It is deprecated and not recommended.
@@ -57,7 +57,7 @@ If REST data does not show up, check `API` > `Options` (with `Le Mans Ultimate` 
 - `url_port` (default `6397`) must match the `WebUI port` value of the game file `UserData\player\Settings.JSON`. This value can change in some situations.
 - `enable_vehicle_info`, `enable_race_info`, `enable_garage_setup_info`, `enable_session_info` and `enable_weather_info` turn individual data groups on or off.
 
-The performance monitor (`Help` > `Widget Performance`, `Game data` section) shows the age of the shared memory data and the state of each REST data group. Details of each option: [Le Mans Ultimate API](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#le-mans-ultimate-api).
+The performance monitor (`Help` > `Overlay Performance`, `Game data` section) shows the age of the shared memory data and the state of each REST data group. Details of each option: [Le Mans Ultimate API](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#le-mans-ultimate-api).
 
 ## rFactor 2
 

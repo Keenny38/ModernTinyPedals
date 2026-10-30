@@ -30,8 +30,11 @@ only while the page is shown; the old picture stays shown until the new one is r
 picture: page not told). Pictures are shared by inputs with other pages (widget_preview).
 
 A hovered card plays its overlay on a moving simulated session (LiveRunner), one at a time. The
-screen view shows running overlays at their place on the screens (overlay_screen), movable there.
+screen view shows running overlays at their place on the screens (overlay_screen), movable there by mouse
+(snapped to other overlays & screens) or keyboard, saved & undoable like moves in game, never while overlays
+are locked; a screenshot of the game can be shown under them (in memory only).
 Favorites & recently edited overlays are kept in config.json (application section), not in presets.
+Enabling or disabling the shown overlays is done at once, with Undo in the page toast.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ import logging
 import weakref
 from collections import deque
 from collections.abc import Callable, Collection, Iterable, Mapping
+from functools import partial
 from time import perf_counter
 from typing import Any, NamedTuple
 
@@ -60,7 +64,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QGuiApplication, QImage
+from PySide6.QtGui import QGuiApplication, QImage, QImageReader
 
 from ... import app_signal
 from ...const_file import ConfigType, FileExt
@@ -73,7 +77,7 @@ from ...template.widget.registry import CATEGORY_COLORS as REGISTRY_COLORS
 from ...template.widget.registry import OTHER as CATEGORY_OTHER
 from ...template.widget.registry import category_of
 from ..module_view import sort_key
-from .overlay_screen import bounds_of, clamped_position, overlapping, rect_value
+from .overlay_screen import bounds_of, clamped_position, overlapping, rect_value, screen_for_image, snap_position
 from .page_backend import PageBackend
 from .preview_provider import STORE
 
@@ -88,6 +92,7 @@ PREVIEW_LOADING = 0
 PREVIEW_READY = 1
 PREVIEW_UNAVAILABLE = 2
 RENDER_BUDGET = 0.008  # seconds of previews rendered per event loop tick (at least one)
+UNDO_DEPTH = 30  # page changes undone one after another with Ctrl+Z (switches, batch switches, moves)
 _WIDGET_CATEGORY = category_of()  # category of built-in widgets
 
 # Widget categories: (name, widget names) in chips order, unknown widgets (plugins) are "Other",
@@ -127,6 +132,10 @@ PRESETS_SHOWN = 15  # presets in header menu (most recent first)
 LIVE_FRAME_MS = 66  # about 15 pictures per second
 LIVE_SLOW_SECONDS = 0.03  # picture drawn slower than this: fewer pictures per second (twice its time)
 SCREEN_POLL_MS = 1000  # screen view: overlays moved in game (dragged) followed
+# Screenshot under the screen view: kept at most this wide (the view shows a screen a few hundred pixels wide; a
+# 4K capture would hold 33 MB in the store), files decoded within this memory (see QImageReader.allocationLimit)
+BACKGROUND_MAX_WIDTH = 1920
+BACKGROUND_ALLOCATION_MB = 128
 
 
 def widget_category(name: str) -> str:
@@ -675,6 +684,42 @@ def screen_rects() -> list[tuple[str, QRect, bool]]:
     return [(screen.name(), screen.geometry(), screen is primary) for screen in QGuiApplication.screens()]
 
 
+def screen_scales() -> list[tuple[QRect, float]]:
+    """Screens of desktop: geometry & device pixel ratio (size of a screenshot taken on it)"""
+    return [(screen.geometry(), screen.devicePixelRatio()) for screen in QGuiApplication.screens()]
+
+
+def positions_locked() -> bool:
+    """Overlays locked (Lock Overlays): never moved, also not from the screen view (as in game)"""
+    return bool(cfg.overlay["fixed_position"])
+
+
+def shrink_background(image: QImage, max_width: int = BACKGROUND_MAX_WIDTH) -> QImage:
+    """Screenshot scaled down to max_width (same ratio) if wider, else as is (any thread)"""
+    if image.isNull() or image.width() <= max_width:
+        return image
+    scaled = image.scaledToWidth(max_width, Qt.TransformationMode.SmoothTransformation)
+    scaled.setDevicePixelRatio(1)
+    return scaled
+
+
+def read_background(filename: str, max_width: int = BACKGROUND_MAX_WIDTH) -> tuple[QSize, QImage]:
+    """Screenshot file decoded at most max_width wide (worker thread: a 4K PNG takes 100 ms or more), with its
+    pixel size on screen (tells the screen it was taken on); image null if unreadable or too big"""
+    reader = QImageReader(filename)
+    reader.setAllocationLimit(BACKGROUND_ALLOCATION_MB)
+    size = reader.size()  # from the file header, before decoding (invalid for formats without one)
+    if size.isValid() and size.width() > max_width:
+        # Decoded straight to the shown size when the format allows (JPEG), else scaled by the reader
+        reader.setScaledSize(QSize(max_width, max(1, round(size.height() * max_width / size.width()))))
+    image = reader.read()
+    if image.isNull():
+        return size, image
+    if not size.isValid():
+        size = image.size()
+    return size, shrink_background(image, max_width)
+
+
 class OverlayBackend(PageBackend):
     """Overlays page state & actions
 
@@ -687,17 +732,29 @@ class OverlayBackend(PageBackend):
         export_settings: export settings of overlays (names ticked first) as package file.
         import_settings: import overlay settings package file.
         open_presets: show Presets page.
-        open_layout_editor: open Layout Editor tool.
+        capture_screen: picture of the screen of this name (app window hidden meanwhile), None if not taken.
+        pick_screenshot: picture file chosen by the user, "" if cancelled.
+        ask: ask a question in the page (text, action button text, on_result(chosen)), else confirm answers.
+
+    Messages (moves, batch switch, test on screen) show in the page toast (show_toast), Undo in it; signals
+    overlayMoved, bulkToggled & notice tell them too. Every reversible change of the page (switch, batch switch,
+    move) goes on one undo history: Ctrl+Z (undo(), page shortcut) undoes the last one, Undo of a toast its own.
     """
 
-    countsChanged = Signal()
+    countsChanged = Signal()  # rows, enabled, failed, shown & shown enabled
+    filterCountsChanged = Signal()  # rows of each filter choice (state & category chips)
     filterChanged = Signal()
     rowsChanged = Signal()
     viewChanged = Signal()
     presetChanged = Signal()
     liveChanged = Signal()
     screenChanged = Signal()
+    lockChanged = Signal()  # overlays locked or unlocked (screen view: moves allowed or not)
+    backgroundChanged = Signal()  # screenshot under the screen view
     overlayMoved = Signal(str)  # label of overlay moved from screen view (undo offered)
+    bulkToggled = Signal(str)  # shown overlays enabled or disabled: message (undo offered)
+    notice = Signal(str)  # short message for the page toast
+    undoChanged = Signal()  # page undo history changed (Ctrl+Z enabled or not)
 
     def __init__(
         self,
@@ -709,7 +766,9 @@ class OverlayBackend(PageBackend):
         export_settings: Callable[[list[str]], object] = lambda names: None,
         import_settings: Callable[[], object] = lambda: None,
         open_presets: Callable[[], object] = lambda: None,
-        open_layout_editor: Callable[[], object] = lambda: None,
+        capture_screen: Callable[[str], QImage | None] = lambda name: None,
+        pick_screenshot: Callable[[], str] = lambda: "",
+        ask: Callable[[str, str, Callable[[bool], object]], object] | None = None,
     ):
         super().__init__(parent, "Overlays")
         from ... import safe_mode
@@ -721,20 +780,31 @@ class OverlayBackend(PageBackend):
         self._export_settings = export_settings
         self._import_settings = import_settings
         self._open_presets = open_presets
-        self._open_layout_editor = open_layout_editor
+        self._capture_screen = capture_screen
+        self._pick_screenshot = pick_screenshot
+        self._ask = ask
         self._safe_mode = safe_mode.state.enabled
+        self._positions_locked = positions_locked()
+        self._background: dict[str, Any] = {}  # screenshot under the screen view: url & desktop rect
+        # Page undo history (Ctrl+Z, toasts): (kind, overlay name or "", undo action), last change last
+        self._undo: list[tuple[str, str, Callable[[], object]]] = []
         self._inputs_changed = False  # setting refreshed while hidden: previews checked once shown
+        self._shown_once = False  # page shown at least once: a refresh while hidden waits for the next show
+        self._refresh_pending = (False, False)  # states & marks changed by refreshes not yet shown (see refresh)
         self.previews = PreviewCache(render_preview, self._preview_ready, self, self.preview_signature)
         self.live = LiveRunner(make_live_preview, self._live_frame, f"{self.previews.prefix}#live", self)
         self._live_url = ""
         self.source = OverlayModel(self, self.previews)
         self.proxy = OverlayFilter(self, self.source)
-        self.proxy.rowsInserted.connect(self.countsChanged)
-        self.proxy.rowsRemoved.connect(self.countsChanged)
-        self.proxy.modelReset.connect(self.countsChanged)
+        self.proxy.rowsInserted.connect(self._count_shown)
+        self.proxy.rowsRemoved.connect(self._count_shown)
+        self.proxy.modelReset.connect(self._count_shown)
         self._search = ""
         self._view = self._saved_view()  # view shown, see refresh
         self._counts = (0, 0)  # enabled & failed rows, see _recount
+        self._totals = (0, 0, 0, 0, 0)  # rows, enabled, failed, shown & shown enabled (count properties)
+        self._state_counts = [0, 0, 0]  # rows of All, Active & Inactive choice
+        self._category_counts: dict[str, int] = dict.fromkeys(CATEGORY_KEYS, 0)  # rows of each chip
         self._favorites: set[str] = set(name_list(FAVORITES_KEY))
         self._preset = (cfg.filename.setting, cfg.filename.setting in cfg.user.filelock)
         self._screen: dict[str, Any] = {}
@@ -747,6 +817,7 @@ class OverlayBackend(PageBackend):
         self.source.set_rows([self._new_row(name) for name in module_control.names])
         self.proxy.resort()
         self._recount()
+        self._update_counts()
 
     # State
     def _failed(self, name: str, enabled: bool) -> bool:
@@ -784,6 +855,35 @@ class OverlayBackend(PageBackend):
         rows = self.source.rows
         self._counts = (sum(row.enabled for row in rows), sum(row.failed for row in rows))
 
+    def _update_counts(self):
+        """Rows of each filter choice & shown rows counted again (state, marks or filters changed), page told only of
+        counts that changed"""
+        proxy = self.proxy
+        rows = [row for row in self.source.rows if proxy.accepts(row, use_state=False)]
+        active = sum(row.enabled for row in rows)
+        state_counts = [len(rows), active, len(rows) - active]
+        category_counts = dict.fromkeys(CATEGORY_KEYS, 0)
+        for row in self.source.rows:
+            if proxy.accepts(row, use_category=False):
+                category_counts[row.category] += 1
+                category_counts[CATEGORY_ALL] += 1
+                category_counts[CATEGORY_FAVORITES] += row.favorite
+                category_counts[CATEGORY_RECENT] += row.name in proxy.recent
+        if state_counts != self._state_counts or category_counts != self._category_counts:
+            self._state_counts, self._category_counts = state_counts, category_counts
+            self.filterCountsChanged.emit()
+        self._count_shown()
+
+    def _count_shown(self):
+        """Count properties worked out (rows shown or their state changed), countsChanged sent if one changed"""
+        proxy = self.proxy
+        shown = proxy.rowCount()
+        shown_active = sum(bool(proxy.data(proxy.index(row, 0), OverlayModel.EnabledRole)) for row in range(shown))
+        totals = (len(self.source.rows), *self._counts, shown, shown_active)
+        if totals != self._totals:
+            self._totals = totals
+            self.countsChanged.emit()
+
     def update_overlay(self, name: str):
         """Overlay state from setting, after toggle or config saved"""
         index = self.source.index_of.get(name)
@@ -800,7 +900,7 @@ class OverlayBackend(PageBackend):
         if (enabled and proxy.state != FILTER_ALL) or (marks and proxy.category in (CATEGORY_FAVORITES, CATEGORY_RECENT)):
             self._set_filter()
         elif enabled or marks:
-            self.countsChanged.emit()
+            self._update_counts()
 
     def preview_signature(self, name: str) -> object:
         """Inputs of overlay picture: shared inputs (read again after refresh), overlay options & style"""
@@ -809,7 +909,12 @@ class OverlayBackend(PageBackend):
     @Slot()
     def refresh(self):
         """Setting or preset changed (also hotkey & tray toggles): states read again, previews whose inputs
-        changed rendered again (inputs read only while page is shown: never while racing)"""
+        changed rendered again (inputs read only while page is shown: never while racing)
+
+        Rows follow the setting at once (a toggled overlay is right whenever the page is read); the rest (counts,
+        filters & chips, view, preset, lock, screen layout, previews) only serves the shown page: while the page is
+        hidden (racing, window in the tray) it is done once, when the page is shown again.
+        """
         from ..widget_preview import inputs_changed
 
         names = set(self._control.names)
@@ -829,9 +934,20 @@ class OverlayBackend(PageBackend):
                 marks_changed = marks_changed or favorite != row.favorite
         inputs_changed()
         self._inputs_changed = True
+        pending_changed, pending_marks = self._refresh_pending
+        self._refresh_pending = (pending_changed or changed, pending_marks or marks_changed)
+        # A page never shown yet has no shown state to protect: counts & chips follow at once
+        if self._shown_once and self.defer_while_hidden(self._refresh_page):
+            return
+        self._refresh_page()
+
+    def _refresh_page(self):
+        """Part of refresh serving the shown page (see refresh), several refreshes while hidden: once"""
+        changed, marks_changed = self._refresh_pending
+        self._refresh_pending = (False, False)
         self.live.forget_still()
         self.live.stop()  # options may have changed: started again by hover
-        if self.previews.active:
+        if self.previews.active and self._inputs_changed:  # not checked by set_active already
             self._check_previews()
         self._states_changed(changed, marks_changed)
         if marks_changed:
@@ -844,7 +960,15 @@ class OverlayBackend(PageBackend):
         if preset != self._preset:
             self._preset = preset
             self.presetChanged.emit()
+        self._read_lock()
         self._screen_changed()
+
+    def _read_lock(self):
+        """Overlays locked or unlocked (tray, hotkey, Home page): page told only if changed"""
+        locked = positions_locked()
+        if locked != self._positions_locked:
+            self._positions_locked = locked
+            self.lockChanged.emit()
 
     def _check_previews(self):
         """Previews whose inputs changed marked out of date, those of shown rows rendered again in background
@@ -857,6 +981,7 @@ class OverlayBackend(PageBackend):
         """Page shown or hidden: previews checked & rendered only while shown"""
         from ..widget_preview import set_showing
 
+        self._shown_once = self._shown_once or active
         set_showing(self, active)
         self.previews.set_active(active)
         if active and self._inputs_changed:
@@ -891,26 +1016,24 @@ class OverlayBackend(PageBackend):
 
     @Property(int, notify=countsChanged)
     def totalCount(self) -> int:
-        return len(self.source.rows)
+        return self._totals[0]
 
     @Property(int, notify=countsChanged)
     def activeCount(self) -> int:
-        return self._counts[0]
+        return self._totals[1]
 
     @Property(int, notify=countsChanged)
     def failedCount(self) -> int:
-        return self._counts[1]
+        return self._totals[2]
 
     @Property(int, notify=countsChanged)
     def shownCount(self) -> int:
-        return self.proxy.rowCount()
+        return self._totals[3]
 
-    @Property(list, notify=countsChanged)
+    @Property(list, notify=filterCountsChanged)
     def stateCounts(self) -> list[int]:
         """Rows of All, Active & Inactive choice (search & category filter applied)"""
-        rows = [row for row in self.source.rows if self.proxy.accepts(row, use_state=False)]
-        active = sum(row.enabled for row in rows)
-        return [len(rows), active, len(rows) - active]
+        return self._state_counts
 
     @Property(list, notify=rowsChanged)
     def categories(self) -> list[dict]:
@@ -928,17 +1051,10 @@ class OverlayBackend(PageBackend):
         )
         return chips
 
-    @Property(dict, notify=countsChanged)
+    @Property(dict, notify=filterCountsChanged)
     def categoryCounts(self) -> dict[str, int]:
         """Rows of each chip (search & state filter applied)"""
-        counts = dict.fromkeys(CATEGORY_KEYS, 0)
-        for row in self.source.rows:
-            if self.proxy.accepts(row, use_category=False):
-                counts[row.category] += 1
-                counts[CATEGORY_ALL] += 1
-                counts[CATEGORY_FAVORITES] += row.favorite
-                counts[CATEGORY_RECENT] += row.name in self.proxy.recent
-        return counts
+        return self._category_counts
 
     @Property(str, notify=filterChanged)
     def searchText(self) -> str:
@@ -990,6 +1106,20 @@ class OverlayBackend(PageBackend):
     def screenLayout(self) -> dict:
         return self._screen
 
+    @Property(bool, notify=lockChanged)
+    def positionsLocked(self) -> bool:
+        return self._positions_locked
+
+    @Property(dict, notify=backgroundChanged)
+    def background(self) -> dict:
+        """Screenshot under the screen view: url & desktop rect (x, y, w, h), empty if none"""
+        return self._background
+
+    @Property(int, notify=countsChanged)
+    def shownActiveCount(self) -> int:
+        """Shown overlays enabled (Disable button count; Enable button: the others)"""
+        return self._totals[4]
+
     # Filters
     def _set_filter(self, **values):
         """Change filter values (words, state, category), shown rows updated (animated in page)"""
@@ -1003,7 +1133,7 @@ class OverlayBackend(PageBackend):
         if resort:  # recent chip: last edited first
             proxy.resort()
         self.filterChanged.emit()
-        self.countsChanged.emit()
+        self._update_counts()
         self._screen_changed()
 
     @Slot(str)
@@ -1069,9 +1199,47 @@ class OverlayBackend(PageBackend):
         self.viewChanged.emit()
         self._screen_changed()
 
+    # Undo history of the page
+    def _push_undo(self, kind: str, name: str, action: Callable[[], object], merge: bool = False
+                   ) -> Callable[[], object]:
+        """Reversible change put on the page undo history (merge: same change as the last one, kept as one step:
+        arrow key presses in a row), returns the Undo of its toast (that change only, once)"""
+        entry = (kind, name, action)
+        if merge and self._undo and self._undo[-1][:2] == (kind, name):
+            entry = self._undo[-1]
+        else:
+            self._undo.append(entry)
+            del self._undo[:-UNDO_DEPTH]
+            self.undoChanged.emit()
+        return lambda: self._run_undo(entry)
+
+    def _run_undo(self, entry: tuple[str, str, Callable[[], object]]):
+        """Change of a toast undone, once (undone by Ctrl+Z already: nothing)"""
+        if any(item is entry for item in self._undo):
+            self._undo = [item for item in self._undo if item is not entry]
+            self.undoChanged.emit()
+            entry[2]()
+
+    @Property(bool, notify=undoChanged)
+    def canUndo(self) -> bool:
+        return bool(self._undo)
+
+    @Slot()
+    def undo(self):
+        """Ctrl+Z: last change of the page undone (switch, batch switch, move)"""
+        if self._undo:
+            self._run_undo(self._undo[-1])
+
     # Actions
     @Slot(str)
     def toggle(self, name: str):
+        """Overlay switched on or off, undone by Ctrl+Z (no toast: the switch shows it)"""
+        if name in self.source.index_of:
+            self._control.toggle(name)
+            self.update_overlay(name)
+            self._push_undo("toggle", name, lambda: self.toggle_back(name))
+
+    def toggle_back(self, name: str):
         if name in self.source.index_of:
             self._control.toggle(name)
             self.update_overlay(name)
@@ -1115,24 +1283,63 @@ class OverlayBackend(PageBackend):
         self._set_shown(False)
 
     def _set_shown(self, enable: bool):
-        """Enable or disable shown overlays (every overlay without filter), confirmed if set so"""
+        """Enable or disable shown overlays (every overlay without filter) at once, Undo offered by the page"""
         names = [name for name in self.proxy.shown_names() if bool(cfg.user.setting[name]["enable"]) != enable]
         if not names:
             return
-        word = "Enable" if enable else "Disable"
-        everything = len(names) == len(self.source.rows) or not self.filtered
-        if cfg.application["show_confirmation_for_batch_toggle"]:
-            text = f"<b>{word}</b> all overlays?" if everything else f"<b>{word}</b> {len(names)} shown overlays?"
-            if not self._confirm(trm(text)):
-                return
-        if everything:
+        if len(names) == len(self.source.rows) or not self.filtered:
             if enable:
                 self._control.enable_all()
             else:
                 self._control.disable_all()
         else:
             self._control.set_enabled(names, enable)  # saved & on demand modules updated once
+        state = "enabled" if enable else "disabled"
+        text = trm(f"1 overlay {state}" if len(names) == 1 else f"{len(names)} overlays {state}")
+        self.bulkToggled.emit(text)
+        self._toast(text, self._push_undo("bulk", "", lambda: self.switch_back(names, enable)))
         app_signal.refresh.emit(True)  # other pages & menus follow, rows updated by refresh
+
+    @Slot()
+    def undoBulk(self):
+        """Overlays switched by the last Enable / Disable put back as they were (once)"""
+        entry = next((item for item in reversed(self._undo) if item[0] == "bulk"), None)
+        if entry is not None:
+            self._run_undo(entry)
+
+    def switch_back(self, names: list[str], enable: bool):
+        """Overlays switched by an Enable / Disable put back as they were"""
+        self._control.set_enabled([name for name in names if name in self.source.index_of], not enable)
+        app_signal.refresh.emit(True)
+
+    @Slot()
+    def testOnScreen(self):
+        """Running overlays show a simulated race for a few seconds (saved values), again: stopped"""
+        from ..overlay_test import TEST_SECONDS, overlay_test
+
+        test = overlay_test()
+        if test.running:
+            test.stop()
+            return
+        shown = test.start()
+        if shown:
+            self._notify(trm(f"{shown} overlay(s) on screen show this situation for {TEST_SECONDS} s (saved values)"))
+        else:
+            self._notify(tr("No overlay on screen now: enable overlays, unlock them or start the game"))
+
+    def _toast(self, text: str, undo: Callable[[], object] | None = None):
+        """Message in the page toast (Undo button if undo is set), nothing without a page (tests)"""
+        from PySide6.QtWidgets import QWidget
+
+        from ..toast import show_toast
+
+        page = self.parent()
+        if isinstance(page, QWidget):
+            show_toast(page, text, action_text=tr("Undo") if undo is not None else "", action=undo)
+
+    def _notify(self, text: str):
+        self.notice.emit(text)
+        self._toast(text)
 
     # Presets
     @Slot(result=list)
@@ -1205,6 +1412,7 @@ class OverlayBackend(PageBackend):
 
     def _update_screen(self):
         """Screens & running overlays at their place, page told only if changed"""
+        self._read_lock()
         screens = screen_rects()
         bounds = bounds_of(rect for _, rect, _ in screens)
         rects = self.overlay_rects()
@@ -1236,20 +1444,103 @@ class OverlayBackend(PageBackend):
             self._screen = layout
             self.screenChanged.emit()
 
-    @Slot(str, int, int)
-    def moveOverlay(self, name: str, x: int, y: int):
-        """Move running overlay to desktop position (kept inside screens), saved & undoable (edit mode history)"""
+    def _movable(self, name: str) -> tuple[Callable[..., object], QRect] | None:
+        """Move function & geometry of running overlay, None if it cannot be moved (not running, overlays locked)"""
+        self._read_lock()
+        if self._positions_locked:
+            return None
         widget = self._control.active_modules.get(name)
         move = getattr(widget, "move_overlay", None)
         geometry = getattr(widget, "geometry", None)
         if not callable(move) or not callable(geometry):
+            return None
+        rect = geometry()
+        return (move, QRect(rect)) if isinstance(rect, QRect) else None
+
+    def _place(self, name: str, x: int, y: int, merge: bool):
+        """Move running overlay to desktop position (kept inside screens), saved & undoable"""
+        movable = self._movable(name)
+        if movable is None:
+            self._update_screen()
             return
-        bounds = bounds_of(rect for _, rect, _ in screen_rects())
-        pos = clamped_position(geometry(), x, y, bounds)
-        if pos != geometry().topLeft():
-            move(pos, "Move")
-            self.overlayMoved.emit(module_label(name))
+        move, rect = movable
+        pos = clamped_position(rect, x, y, bounds_of(rect for _, rect, _ in screen_rects()))
+        if pos != rect.topLeft():
+            if merge:
+                move(pos, "Move", merge=True)  # presses in a row: one undo step, layout stored once they stop
+            else:
+                move(pos, "Move")
+            label = module_label(name)
+            self.overlayMoved.emit(label)
+            self._toast(trm(f"Overlay moved, not saved (locked preset): {label}") if self.presetLocked
+                        else trm(f"Overlay moved: {label}"), self._push_undo("move", name, self.undoMove, merge))
         self._update_screen()
+
+    @Slot(str, int, int)
+    def moveOverlay(self, name: str, x: int, y: int):
+        """Move running overlay to desktop position (dragged), saved & undoable (edit mode history)"""
+        self._place(name, x, y, merge=False)
+
+    @Slot(str, int, int)
+    def nudgeOverlay(self, name: str, dx: int, dy: int):
+        """Move running overlay by dx, dy pixels (arrow keys), saved & undoable"""
+        movable = self._movable(name)
+        if movable is None:
+            self._update_screen()
+            return
+        rect = movable[1]
+        self._place(name, rect.x() + dx, rect.y() + dy, merge=True)
+
+    @Slot(str, int, int, int, bool, result="QVariantMap")
+    def snapOverlay(self, name: str, x: int, y: int, distance: int, snap: bool) -> dict:
+        """Place of overlay dragged to x, y (desktop): kept on the screens, snapped to the edges & centers of other
+        overlays & screens within distance pixels (snap), with the alignment lines to draw (linesX, linesY)"""
+        from ...widget._layout_guide import alignment_lines
+
+        widget = self._control.active_modules.get(name)
+        geometry = getattr(widget, "geometry", None)
+        if not callable(geometry):
+            return {"x": x, "y": y, "linesX": [], "linesY": []}
+        screens = [rect for _, rect, _ in screen_rects()]
+        bounds = bounds_of(screens)
+        target = QRect(geometry())
+        target.moveTopLeft(clamped_position(target, x, y, bounds))
+        others = []
+        for other, other_widget in self._control.active_modules.items():
+            other_geometry = getattr(other_widget, "geometry", None)
+            if other != name and callable(other_geometry):
+                rect = other_geometry()
+                if isinstance(rect, QRect) and rect.isValid():
+                    others.append(QRect(rect))
+        if snap:
+            snapped = snap_position(target, others, screens, distance)
+            target.moveTopLeft(clamped_position(target, snapped.x(), snapped.y(), bounds))
+        lines_x: set[int] = set()
+        lines_y: set[int] = set()
+        for screen in screens:
+            screen_x, screen_y = alignment_lines(target, others, screen)
+            lines_x |= screen_x
+            lines_y |= screen_y
+        return {"x": target.x(), "y": target.y(), "linesX": sorted(lines_x), "linesY": sorted(lines_y)}
+
+    @Slot(result="QVariantMap")
+    def snapSettings(self) -> dict:
+        """Snapping of the screen view, as in game edit mode (application options): magnetic (Ctrl inverts it),
+        distance in desktop pixels, alignment guides shown"""
+        options = cfg.application
+        return {
+            "magnetic": bool(options.get("enable_magnetic_snap", True)),
+            "distance": max(int(options.get("snap_gap", 0)), int(options.get("snap_distance", 0))),
+            "guides": bool(options.get("show_layout_guides", True)),
+        }
+
+    @Slot(bool)
+    def setMagneticSnap(self, magnetic: bool):
+        """Snap switch of the screen view: the edit mode option (Snap button of the in-game toolbar too)"""
+        from ...widget._edit_mode import toggle_application_option
+
+        if bool(cfg.application.get("enable_magnetic_snap", True)) != magnetic:
+            toggle_application_option("enable_magnetic_snap")
 
     @Slot()
     def undoMove(self):
@@ -1260,8 +1551,93 @@ class OverlayBackend(PageBackend):
         self._update_screen()
 
     @Slot()
-    def openLayoutEditor(self):
-        self._open_layout_editor()
+    def unlockPositions(self):
+        """Unlock overlays (as Unlock Overlay of the Home page & tray menu): movable again, here & in game"""
+        if positions_locked():
+            self.ctx.octrl.toggle.lock()
+            app_signal.refresh.emit(True)  # Home page, tray menu & notification bar follow
+        self._read_lock()
+
+    @Slot()
+    def unlockPreset(self):
+        """Unlock loaded preset (moves saved again), confirmed"""
+        filename = cfg.filename.setting
+        if filename not in cfg.user.filelock:
+            return
+        text = trm(f"Unlock <b>{filename}</b> preset?")
+        if self._ask is None:
+            if self._confirm(text):
+                self._unlock_preset(filename)
+            return
+        page = weakref.ref(self)
+
+        def answered(chosen: bool):
+            backend = page()
+            if chosen and backend is not None:
+                backend._unlock_preset(filename)
+
+        self._ask(text, tr("Unlock Preset"), answered)
+
+    @staticmethod
+    def _unlock_preset(filename: str):
+        if filename not in cfg.user.filelock or cfg.filename.setting != filename:
+            return  # unlocked or another preset loaded meanwhile
+        cfg.user.filelock.pop(filename, None)
+        cfg.save(config_type=ConfigType.FILELOCK)
+        app_signal.refresh.emit(True)  # preset state read again by every page (this one too)
+
+    # Screenshot under the screen view
+    def _set_background(self, image: QImage | None, rect: QRect):
+        if image is None or image.isNull() or not rect.isValid():
+            return
+        url = STORE.put(f"{self.previews.prefix}#background", image)
+        self._background = {"url": url, **rect_value(rect)}
+        self.backgroundChanged.emit()
+
+    @Slot(str)
+    def captureBackground(self, screen: str):
+        """Picture of a screen (the game running there) shown under the overlays of that screen; a capture wider
+        than the stored size (4K screen) is scaled down in background, only the small picture is kept"""
+        rect = next((rect for name, rect, _ in screen_rects() if name == screen), None)
+        if rect is None:
+            return
+        image = self._capture_screen(screen)
+        if image is None or image.isNull():
+            return
+        if image.width() <= BACKGROUND_MAX_WIDTH:
+            self._set_background(image, rect)
+            return
+        rect = QRect(rect)
+        self.jobs.run("scale screenshot", lambda: (shrink_background(image), rect), self._background_scaled,
+                      key="background")
+
+    def _background_scaled(self, result: tuple[QImage, QRect]):
+        self._set_background(*result)
+
+    @Slot()
+    def loadBackground(self):
+        """Screenshot file shown under the overlays of the screen it was taken on (else the main screen): decoded
+        & scaled down in background (UI never waits for a big PNG), only the small picture is kept"""
+        filename = self._pick_screenshot()
+        if not filename:
+            return
+        self.jobs.run("read screenshot", partial(read_background, filename), self._background_read, key="background")
+
+    def _background_read(self, result: tuple[QSize, QImage]):
+        size, image = result
+        if image.isNull():
+            self._notify(tr("Unable to load image."))
+            return
+        screens = screen_rects()
+        primary = next((rect for _, rect, main in screens if main), screens[0][1] if screens else QRect())
+        self._set_background(image, screen_for_image(size, screen_scales(), primary))
+
+    @Slot()
+    def clearBackground(self):
+        if self._background:
+            STORE.discard(f"{self.previews.prefix}#background")
+            self._background = {}
+            self.backgroundChanged.emit()
 
     def close(self):
         """Page closed (older name of release)"""

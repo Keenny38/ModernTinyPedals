@@ -19,7 +19,7 @@ The app is built with PySide6 (Qt 6) and runs in English or French.
 - **Broadcast Director** (LMU): cast a race live or in a replay, with every game camera in one click, an assisted or automatic director (battles, overtakes, contacts, pit stops...), a commentator screen, a timing table and its own broadcast graphics for your stream (standings tower, driver and battle cards, banners, onboard, track map...), placed with a layout editor.
 - **Connections**: remote control (Stream Deck, Companion, SimHub), WebSocket telemetry stream, web dashboard for a phone or tablet, stream overlays as browser sources (OBS, Streamlabs, XSplit, vMix), also for a race you spectate, with a 16:9 layout for ultrawide screens and a layout editor, SteamVR overlay and VR mirror window, session recorder.
 - **Reliable updates**: Windows installer, in-app updates with SHA-256 check, signed build provenance for every release file.
-- **Extensible**: widget plugins and JSON language packs.
+- **Extensible**: overlay plugins and JSON language packs.
 
 ## Wiki pages
 

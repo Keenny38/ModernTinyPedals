@@ -36,14 +36,17 @@ simple mode, color themes and display profile (options set by profile are locked
 from __future__ import annotations
 
 import logging
+import os
+import time
 import weakref
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, NamedTuple, Protocol
 
 from PySide6.QtCore import Property, QObject, QPoint, QTimer, Signal, Slot
 
+from ... import app_signal
 from ...i18n import tr, trm
 from ...i18n.options import module_label, option_help_specific, option_label
 from ...module_control import ModuleControl
@@ -53,7 +56,7 @@ from ...template.widget import WIDGET_OPTION_UI
 from ...template.widget.black_box_ui import OptionUI, theme_color
 from ...template.widget.option_rules import ANY_OF, INACTIVE_RULES, fixes_of, font_offset_inactive
 from ...widget._style import OVERLAY_SCALE_RANGE, overlay_theme
-from ..module_view import sort_key
+from ..module_view import highlight, sort_key
 from ..widget_preview import set_showing
 from .models import DictListModel
 from .option_kinds import (
@@ -102,7 +105,7 @@ ROW_ROLES = (
     "toggle", "toggleChecked", "collapsed", "count", "changedCount", "customizedCount",
     "checked", "choices", "choiceIndex", "text", "number", "decimals", "step", "minimum", "maximum",
     "color", "modified", "changed", "error", "defaultText", "dimmed", "locked", "note", "hint", "rangeText", "shared",
-    "table", "orders",
+    "table", "orders", "marked",
 )
 NAV_ROLES = (
     "key", "label", "category", "categoryLabel", "color", "enabled", "changed", "errors", "matches", "customized",
@@ -119,6 +122,7 @@ LIST_OPTIONS = {
         lambda: list(cfg.user.classes),
     ),
 }
+TYPING_GROUP_SECONDS = 1.5  # keys typed in one option within this time: one undo step (as on the Settings page)
 MAX_ROWS = 400  # options shown at once (search in every overlay): more asks for a narrower search
 PREVIEW_DELAY_MS = 250  # preview rendered once edits pause
 PREVIEW_SCALE_MAX = 3.0  # zoomed preview drawn up to this size (sharp), scaled up above
@@ -128,6 +132,8 @@ INFO_DELAY_MS = 100  # header of selected overlay (customized count) told once e
 WARM_INTERVAL_MS = 0  # options of other overlays read one per event loop tick
 # Options always different from default (moved, switched on): not counted as customized
 NOT_CUSTOMIZED = frozenset(("enable", "position_x", "position_y"))
+# Options of the page header, not rows: overlay on / off switched at once (never a pending edit)
+HEADER_KEYS = frozenset(("enable",))
 PREVIEW_OFF = 0
 PREVIEW_LOADING = 1
 PREVIEW_READY = 2
@@ -144,6 +150,7 @@ class OverlayOptionsHost(Protocol):
     def pick_folder(self, folder: str) -> str: ...
     def pick_image(self, filename: str) -> str: ...
     def edit_table(self, text: str) -> str | None: ...
+    def open_folder(self, folder: str) -> None: ...
     def notify(self, text: str) -> None: ...
     def applied(self, names: list[str]) -> None: ...
     def export_overlays(self, names: list[str]) -> None: ...
@@ -193,7 +200,7 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     """Shown options & sections of overlay, for design given by values (unsaved design switch)"""
     from ...widget._modern import design_option_keys, uses_modern_design
 
-    keys = default_keys(name)
+    keys = [key for key in default_keys(name) if key not in HEADER_KEYS]
     design_config = SimpleNamespace(user=SimpleNamespace(config=cfg.user.config, setting={name: values}))
     try:
         keys = design_option_keys(design_config, name, keys)
@@ -226,7 +233,9 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
             dependencies = section_dependencies(sections)
         dependencies = dict(dependencies)
         for key, control in dependency_fixes.items():
-            if control:
+            if control == key:  # leads its own section
+                dependencies.pop(key, None)
+            elif control:
                 dependencies[key] = control
             else:
                 dependencies.pop(key, None)
@@ -273,6 +282,8 @@ class OverlayOptionsBackend(PageBackend):
         self._search_texts: dict[str, str] = {}
         self._pending: dict[str, Any] = {}  # option id: valid value not saved yet
         self._invalid: dict[str, tuple[str, str]] = {}  # option id: (typed text, English reason)
+        self._typed: dict[str, str] = {}  # option id: text being typed, shown as typed (not reformatted)
+        self._typing = ("", 0.0)  # option typed last & when, see typeText
         self._undo: list[tuple[dict, dict]] = []
         self._redo: list[tuple[dict, dict]] = []
         self._step_depth = 0
@@ -289,6 +300,7 @@ class OverlayOptionsBackend(PageBackend):
         self._nav_filter = ""
         self._active_only = False
         self._match_count = 0
+        self._overlay_matches: dict[str, int] = {}  # overlay: matching options, counted by update_rows (every overlay)
         self._truncated = 0
         self._highlight = ""
         self._shared: dict[str, int] = {}  # option key: overlays having it
@@ -418,6 +430,10 @@ class OverlayOptionsBackend(PageBackend):
             return all(word in text for word in self._words)
         return True
 
+    def count_matches(self, name: str) -> int:
+        """Options of overlay matching the search & "Modified" filter (overlay list count)"""
+        return sum(self.matches(name, key) for key in self.layout(name).keys)
+
     def shown_in_mode(self, layout: OverlayLayout, key: str) -> bool:
         """Simple mode (overlays with many options): on/off & choice options (main ones if listed, see
         OptionUI.simple_switches), and the common ones"""
@@ -439,13 +455,18 @@ class OverlayOptionsBackend(PageBackend):
         """Rows of shown options, synced in place (editors keep focus & typed text)"""
         rows: list[dict] = []
         self._match_count = 0
+        self._overlay_matches = {}
         self._truncated = 0
         self._helped = set()
         self._row_overrides = {}
         self._row_inactive = {}
         if self.filtering and self._scope_all:
             for name in self._names:
-                self._overlay_rows(name, rows, with_name=True)
+                # Matches counted once per overlay (overlay list reads them): overlays without any skip their
+                # values, overrides & inactive rules (most of them, for a search word)
+                self._overlay_matches[name] = count = self.count_matches(name)
+                if count:
+                    self._overlay_rows(name, rows, with_name=True)
         elif self._overlay:
             self._overlay_rows(self._overlay, rows, with_name=False)
         for number, row in enumerate(rows):
@@ -580,7 +601,7 @@ class OverlayOptionsBackend(PageBackend):
             "choiceIndex": -1, "text": "", "number": 0.0, "decimals": 0, "step": 1.0, "minimum": 0.0,
             "maximum": 0.0, "color": "", "modified": False, "changed": False, "error": "", "defaultText": "",
             "dimmed": False, "locked": False, "note": "", "hint": "", "rangeText": "", "shared": 0, "table": False,
-            "orders": [],
+            "orders": [], "marked": "",
         }
 
     def _error_text(self, oid: str) -> str:
@@ -645,7 +666,8 @@ class OverlayOptionsBackend(PageBackend):
             help=option_help_specific(name, key),
             kind=kind.kind,
             checked=bool(value) if kind.kind == KIND_BOOL else False,
-            text=invalid[0] if invalid else "" if kind.kind == KIND_BOOL else display_value(kind, value),
+            text=self._typed[oid] if oid in self._typed else invalid[0] if invalid
+                 else "" if kind.kind == KIND_BOOL else display_value(kind, value),
             color=value if kind.kind == KIND_COLOR and not invalid and isinstance(value, str) else "",
             modified=default is not None and value != default,
             changed=oid in self._pending or oid in self._invalid,
@@ -654,6 +676,7 @@ class OverlayOptionsBackend(PageBackend):
             locked=locked,
             shared=max(self._shared.get(key, 1) - 1, 0) if key not in NOT_CUSTOMIZED else 0,
             table=kind.kind == KIND_TEXT and "by_compound" in key,
+            marked=highlight(option_label(key), self._words) if self._words else "",
         )
         if key in overrides:
             state = tr("on") if overrides[key] else tr("off")
@@ -792,7 +815,10 @@ class OverlayOptionsBackend(PageBackend):
             matches = 0
             if self.filtering and self._scope_all:
                 layout = self.layout(name)
-                matches = sum(self.matches(name, key) for key in layout.keys)
+                counted = self._overlay_matches.get(name)  # counted by update_rows, not again here
+                if counted is None:
+                    counted = self._overlay_matches[name] = self.count_matches(name)
+                matches = counted
             rows.append({
                 "key": name,
                 "label": module_label(name),
@@ -1151,6 +1177,21 @@ class OverlayOptionsBackend(PageBackend):
             self.filterChanged.emit()
             self.stateChanged.emit()
 
+    @Slot(bool)
+    def setOverlayEnabled(self, enable: bool):
+        """Selected overlay turned on or off now (header switch, as on the Overlays page), never a pending edit:
+        started or closed, saved, other pages follow"""
+        name = self._overlay
+        if name not in self._names or bool(cfg.user.setting[name]["enable"]) == bool(enable):
+            return
+        set_enabled = getattr(self._control, "set_enabled", None)
+        if callable(set_enabled):
+            set_enabled([name], bool(enable))
+        else:  # control without grouped switch (plugins' own)
+            self._control.toggle(name)
+        self.update_nav()  # state dot of overlay list, header (overlayInfo)
+        app_signal.refresh.emit(True)  # Overlays page, menus & tray follow
+
     @Slot(str)
     def setNavFilter(self, text: str):
         self._nav_filter = text
@@ -1255,14 +1296,19 @@ class OverlayOptionsBackend(PageBackend):
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(text)
+            self.notify_host(tr("Copied"))  # told: nothing else shows the copy
 
     # Edits
     def _snapshot(self) -> tuple[dict, dict]:
         return dict(self._pending), dict(self._invalid)
 
     @contextmanager
-    def _step(self) -> Iterator[None]:
-        """Edits made inside are one undo step, page updated once"""
+    def _step(self, merge: bool = False) -> Iterator[None]:
+        """Edits made inside are one undo step, page updated once
+
+        Args:
+            merge: part of the undo step before (keys typed in a row in one option).
+        """
         if self._step_depth == 0:
             self._step_before = self._snapshot()
         self._step_depth += 1
@@ -1273,7 +1319,7 @@ class OverlayOptionsBackend(PageBackend):
             if self._step_depth == 0:
                 before, self._step_before = self._step_before, None
                 after = self._snapshot()
-                if before is not None and after != before:
+                if before is not None and after != before and not merge:
                     self._undo.append(before)
                     del self._undo[:-100]
                     self._redo.clear()
@@ -1281,11 +1327,20 @@ class OverlayOptionsBackend(PageBackend):
                         self._preset = cfg.filename.setting
                 self.changed(edited_ids(before, after) if before is not None else None)
 
-    def _set(self, oid: str, value: Any = None, text: str | None = None):
-        """Set pending value (dropped if same as saved), invalid typed text marked"""
+    def _set(self, oid: str, value: Any = None, text: str | None = None, typing: bool = False):
+        """Set pending value (dropped if same as saved), invalid typed text marked; header options (overlay on /
+        off) are never pending (see setOverlayEnabled)
+
+        Args:
+            typing: text being typed: shown as typed (not reformatted while typing).
+        """
         name, key = split_id(oid)
-        if name not in cfg.user.setting or key not in cfg.user.setting[name]:
+        if name not in cfg.user.setting or key not in cfg.user.setting[name] or key in HEADER_KEYS:
             return
+        if typing and text is not None:
+            self._typed[oid] = text
+        else:
+            self._typed.pop(oid, None)
         kind = self.kind(key)
         reason = check_value(key, kind, value) if text is None else text_reason(key, kind, text)
         if text is not None and not reason:
@@ -1340,11 +1395,39 @@ class OverlayOptionsBackend(PageBackend):
                 self._release(oid)
                 self._set(oid, choices[index])
 
+    def _typing_step(self, oid: str, typing: bool) -> bool:
+        """Keys typed in a row in one option, and the text once the field is left: one undo step"""
+        now = time.monotonic()
+        same = self._typing[0] == oid and (not typing or now - self._typing[1] < TYPING_GROUP_SECONDS)
+        self._typing = (oid, now) if typing else ("", 0.0)
+        return same
+
     @Slot(str, str)
     def setText(self, oid: str, text: str):
-        with self._step():
+        """Text of a field once typed (Enter, field left): value taken & shown as saved"""
+        with self._step(merge=self._typing_step(oid, False)):
             self._release(oid)
             self._set(oid, text=text)
+
+    @Slot(str, str)
+    def typeText(self, oid: str, text: str):
+        """Text being typed: taken at once (unsaved changes bar, Apply, Ctrl+S see it), checked as typed"""
+        with self._step(merge=self._typing_step(oid, True)):
+            self._release(oid)
+            self._set(oid, text=text, typing=True)
+
+    @Slot(str)
+    def revertOption(self, oid: str):
+        """Saved value back in field (Esc in a field)"""
+        name, key = split_id(oid)
+        if name not in cfg.user.setting or key not in cfg.user.setting[name]:
+            return
+        self._typing = ("", 0.0)
+        if oid in self._pending or oid in self._invalid:
+            with self._step():
+                self._set(oid, self.saved(name, key))
+        elif self._typed.pop(oid, None) is not None:  # same text as saved typed: shown as saved again
+            self.changed({oid})
 
     @Slot(str, float)
     def setNumber(self, oid: str, number: float):
@@ -1390,10 +1473,8 @@ class OverlayOptionsBackend(PageBackend):
             return
         text = (f"Reset <b>{section_title(section)}</b> options to default?<br><br>"
                 "Changes are only saved after clicking Apply or Save Button.")
-        if not self._host.confirm(trm(text)):
-            return
-        with self._step():
-            self._reset_keys(name, section.keys)
+        keys = section.keys
+        self._ask_then(trm(text), lambda backend: backend._reset_if_known(name, keys))
 
     @Slot()
     def resetOverlay(self):
@@ -1403,10 +1484,30 @@ class OverlayOptionsBackend(PageBackend):
             return
         text = (f"Reset all <b>{module_label(name)}</b> options to default?<br><br>"
                 "Changes are only saved after clicking Apply or Save Button.")
-        if not self._host.confirm(trm(text)):
+        self._ask_then(trm(text), lambda backend: backend._reset_if_known(name, default_keys(name)))
+
+    def _ask_then(self, text: str, then: Callable[[OverlayOptionsBackend], object]):
+        """Reset asked in the page (host ask: dialog bridge, answered later), else answered now by host confirm;
+        then(backend) once chosen, never once the page is gone (weak reference: no cycle through the dialog)"""
+        ask = getattr(self._host, "ask", None)
+        if not callable(ask):
+            if self._host.confirm(text):
+                then(self)
             return
-        with self._step():
-            self._reset_keys(name, default_keys(name))
+        page = weakref.ref(self)
+
+        def answered(chosen: bool):
+            backend = page()
+            if chosen and backend is not None and not backend.page_released:
+                then(backend)
+
+        ask(text, tr("Reset"), answered)
+
+    def _reset_if_known(self, name: str, keys):
+        """Options back to default (one undo step) if overlay still listed"""
+        if name in self._names:
+            with self._step():
+                self._reset_keys(name, keys)
 
     def notify_host(self, text: str):
         self._host.notify(text)
@@ -1613,6 +1714,8 @@ class OverlayOptionsBackend(PageBackend):
         if self._undo:
             self._redo.append(self._snapshot())
             self._pending, self._invalid = self._undo.pop()
+            self._typed.clear()  # fields show restored values
+            self._typing = ("", 0.0)
             self._layouts.clear()
             self.changed()
 
@@ -1621,6 +1724,8 @@ class OverlayOptionsBackend(PageBackend):
         if self._redo:
             self._undo.append(self._snapshot())
             self._pending, self._invalid = self._redo.pop()
+            self._typed.clear()
+            self._typing = ("", 0.0)
             self._layouts.clear()
             self.changed()
 
@@ -1632,6 +1737,7 @@ class OverlayOptionsBackend(PageBackend):
                 designs = {split_id(oid)[0] for oid in self._pending if oid.endswith("/enable_classic_layout")}
                 self._pending.clear()
                 self._invalid.clear()
+                self._typed.clear()
                 for name in designs:
                     self._design_changed(name)
 
@@ -1676,6 +1782,8 @@ class OverlayOptionsBackend(PageBackend):
                 if name not in names:
                     names.append(name)
         self._pending.clear()
+        self._typed.clear()
+        self._typing = ("", 0.0)
         self._undo.clear()
         self._redo.clear()
         self._preset = ""
@@ -1711,6 +1819,7 @@ class OverlayOptionsBackend(PageBackend):
                 self._pending.pop(oid)  # same value saved meanwhile
         self._invalid = {oid: value for oid, value in self._invalid.items()
                          if split_id(oid)[0] in cfg.user.setting}
+        self._typed = {oid: text for oid, text in self._typed.items() if oid in self._pending or oid in self._invalid}
         if not self._pending and not self._invalid:
             self._preset = ""
         self._layouts.clear()
@@ -1768,6 +1877,14 @@ class OverlayOptionsBackend(PageBackend):
         text = self._host.edit_table(invalid[0] if invalid else str(self.value(name, key)))
         if text is not None:
             self.setText(oid, text)
+
+    @Slot(str)
+    def openFolder(self, oid: str):
+        """Open folder of path option (saved value) in file manager"""
+        name, key = split_id(oid)
+        open_folder = getattr(self._host, "open_folder", None)
+        if name in self._names and key in cfg.user.setting[name] and callable(open_folder):
+            open_folder(os.path.abspath(str(self.saved(name, key))))
 
     # Preview
     def set_active(self, active: bool):

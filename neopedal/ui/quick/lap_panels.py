@@ -430,6 +430,7 @@ class ChartPanels(BackendBase):
         keep = {series["key"] for panel in self._panels for series in panel["series"]}
         keep.update(key for panel in self._panels for series in panel["series"] for _, key in series["lods"])
         keep.update(self._xy_keys)
+        keep.update(self._dashboard.vertex_keys())  # simple view summary band delta lines
         keep.update(self._session.shape_keys().values())
         keep.update(panel["envelope"] for panel in self._panels if panel["envelope"])
         if self._overview:
@@ -729,7 +730,7 @@ class ChartPanels(BackendBase):
             ]
             lines.append(f"{channel_title(channel)}{f' ({unit})' if unit else ''}: " + " | ".join(texts))
         QApplication.clipboard().setText("\n".join(lines))
-        self.set_status(tr("Values copied to clipboard."))
+        self.set_status(tr("Values copied"))
 
     @Slot(int, result=list)
     def sectorRange(self, sector: int) -> list[float]:

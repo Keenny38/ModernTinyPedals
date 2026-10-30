@@ -17,12 +17,13 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Checks card of Home page: what keeps overlays from showing right, found from app & game state
+Status banner of Home page: what keeps overlays from showing right, found from app & game state
 
 Game closed: game setup reminder of the selected game (display mode, plugin). Le Mans Ultimate running without
 data (its window found, shared memory empty): plugins not enabled in game. Then app settings that change what
 overlays show (active state override, spectate mode, no overlay enabled), update available, lap recording off
-(session debrief & telemetry). Nothing wrong while driving: ready.
+(session debrief & telemetry). Nothing wrong while driving: ready. home_status makes the banner: the session on
+track, else the most important check, is its title (verdict), the other checks are listed below it.
 """
 
 from __future__ import annotations
@@ -90,3 +91,24 @@ def home_checks(state: CheckState) -> list[dict]:
     if state.running and not any(row["level"] in ("error", "warning") for row in rows):
         rows.insert(0, check("ready", "success", tr("Ready"), tr("Game connected, overlays on.")))
     return rows
+
+
+def home_status(rows: list[dict], session: dict) -> dict:
+    """Status banner of Home page: verdict (level, title, text, primary action) & the other checks (rows)
+
+    On track: "In session · track · session · place" (level "live"), every check below it. Else the game state
+    ("Game not running", "Game running without data"), or the most important check ("Ready", "No overlay
+    enabled"...), is the verdict, the others below it. Update available is left out: the banner's update button
+    tells it once.
+    """
+    rows = [row for row in rows if row["key"] != "update"]
+    if session.get("track"):
+        title = " · ".join(part for part in (tr("In session"), session["track"], session.get("session", ""),
+                                             session.get("position", "")) if part)
+        verdict = check("session", "live", title, session.get("vehicle", ""))
+        return {**verdict, "rows": [row for row in rows if row["key"] != "ready"]}
+    if not rows:
+        return {**check("ready", "success", tr("Ready"), ""), "rows": []}
+    # Game state first (closed, or running without data), else the most important check
+    verdict = next((row for row in rows if row["key"] in ("plugin", "game")), rows[0])
+    return {**verdict, "rows": [row for row in rows if row is not verdict]}

@@ -50,6 +50,7 @@ Item {
             spacing: theme.space2
             Text {
                 text: root.stats.title || ""
+                textFormat: Text.PlainText
                 color: theme.text
                 font.weight: Font.DemiBold
                 font.features: { "tnum": 1 }
@@ -94,11 +95,12 @@ Item {
                         width: parent.width
                         spacing: theme.space3
                         ColorDot { size: Math.round(theme.em * 0.6); color: modelData.color }
-                        Text { text: modelData.label; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                        Text { text: modelData.distance; color: theme.dimText; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
-                        Text { text: modelData.time; color: theme.text; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
+                        Text { text: modelData.label; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
+                        TpText { role: "caption"; tabular: true; text: modelData.distance; elide: Text.ElideNone }
+                        Text { text: modelData.time; color: theme.text; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                         Text {
                             text: modelData.gap
+                            textFormat: Text.PlainText
                             Layout.preferredWidth: theme.em * 4.5
                             horizontalAlignment: Text.AlignRight
                             color: modelData.gap.charAt(0) === "+" ? theme.loss : modelData.gap !== "" ? theme.gain : theme.dimText
@@ -116,12 +118,11 @@ Item {
             delegate: Column {
                 required property var modelData
                 width: ListView.view.width
-                Text {
+                TpText {
                     width: parent.width
+                    role: "label"
                     text: modelData.title
-                    color: theme.text
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontLabel
                     elide: Text.ElideRight
                 }
                 Repeater {
@@ -131,6 +132,7 @@ Item {
                         width: parent.width
                         leftPadding: theme.space4
                         text: modelData.text
+                        textFormat: Text.PlainText
                         color: modelData.color
                         font.pointSize: theme.fontSmall
                         font.features: { "tnum": 1 }

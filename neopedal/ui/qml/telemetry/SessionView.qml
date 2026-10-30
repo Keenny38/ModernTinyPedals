@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import NeoPedal
 import "../components"
 
-// Session of current track: every lap time (shown laps in their color, best in gold, invalid hollow),
+// Session of current track: every lap time (shown laps in their color, best in purple, invalid hollow),
 // fuel & tyre wear used each lap, off tracks & track limits. Click a lap: show or hide it in charts.
 // Long run: pace & lap time trend of clean laps without outliers (traffic, mistakes: faded), per % tyre wear.
 Item {
@@ -39,7 +39,7 @@ Item {
 
     // Valid laps: count, mean, consistency, fuel used (worked out by backend)
     readonly property var stats: session.stats || ({"count": 0, "mean": 0, "deviation": 0, "fuel": 0, "fuelCount": 0})
-    // Lap point of chart: shown laps in their color, best lap gold, invalid hollow
+    // Lap point of chart: shown laps in their color, best lap purple (best), invalid hollow
     component LapPoint: Item {
         property var lap: ({})
         property real best: 0
@@ -47,7 +47,7 @@ Item {
         property real grow: 1
         readonly property real size: theme.em * (lap.shown ? 0.85 : 0.6) * grow
         readonly property color tone: lap.shown ? lap.color
-            : (lap.valid && (higherBetter ? lap.time >= best - 1e-6 : lap.time <= best + 1e-6) ? theme.gold : theme.text)
+            : (lap.valid && (higherBetter ? lap.time >= best - 1e-6 : lap.time <= best + 1e-6) ? theme.purple : theme.text)
         visible: lap.time > 0
         opacity: lap.outlier ? 0.4 : 1
         Rectangle {
@@ -113,10 +113,11 @@ Item {
             Layout.fillWidth: true
             spacing: theme.space5
             visible: root.laps.length > 0
-            Text { text: "★ " + i18n.tr("Best") + " " + root.timeText(root.session.best); color: theme.gold; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
-            Text { text: i18n.tr("Average") + " " + root.timeText(root.stats.mean); color: theme.text; font.features: { "tnum": 1 } }
+            TpLapTime { text: i18n.tr("Best") + " " + root.timeText(root.session.best); record: "session"; reserveMark: false }  // ◆ purple: shared record mark
+            Text { text: i18n.tr("Average") + " " + root.timeText(root.stats.mean); color: theme.text; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
             Text {
                 text: i18n.tr("Consistency") + " ±" + root.num(root.stats.deviation, root.metric.decimals) + " " + root.metric.unit
+                textFormat: Text.PlainText
                 color: theme.text
                 font.features: { "tnum": 1 }
                 visible: root.stats.count > 1
@@ -125,10 +126,11 @@ Item {
                 visible: root.stats.fuelCount > 0
                 text: i18n.tr("Fuel") + " " + root.num(root.stats.fuel * (root.session.fuelScale || 1) / Math.max(root.stats.fuelCount, 1), 2)
                       + " " + (root.session.fuelUnit || "") + "/" + i18n.tr("lap")
+                textFormat: Text.PlainText
                 color: theme.text
                 font.features: { "tnum": 1 }
             }
-            BusyIndicator { running: root.session.busy === true && pageState.active; visible: running; implicitWidth: theme.em * 1.2; implicitHeight: implicitWidth }
+            TpSpinner { visible: root.session.busy === true }
         }
         // Long run: clean laps without outliers
         Flow {
@@ -137,6 +139,7 @@ Item {
             visible: root.trend.pace !== undefined
             Text {
                 text: i18n.tr("Long-run pace") + " " + root.timeText(root.trend.pace || 0)
+                textFormat: Text.PlainText
                 color: theme.text
                 font.features: { "tnum": 1 }
                 ToolTip.visible: paceArea.containsMouse
@@ -153,6 +156,7 @@ Item {
                 text: ((root.trend.slope || 0) > threshold ? "▲ " : (root.trend.slope || 0) < -threshold ? "▼ " : "")
                       + i18n.tr("Trend") + " " + root.signedText(root.trend.slope || 0, root.metric.time ? 3 : root.metric.decimals + 1)
                       + " " + root.metric.unit + "/" + i18n.tr("lap")
+                textFormat: Text.PlainText
                 color: worse > threshold ? theme.loss : worse < -threshold ? theme.gain : theme.text
                 font.features: { "tnum": 1 }
                 ToolTip.visible: trendArea.containsMouse
@@ -164,6 +168,7 @@ Item {
             Text {
                 visible: root.trend.wearSlope !== undefined
                 text: root.signedText(root.trend.wearSlope || 0, 3) + " s " + i18n.tr("per % tyre wear")
+                textFormat: Text.PlainText
                 color: theme.text
                 font.features: { "tnum": 1 }
             }
@@ -203,7 +208,7 @@ Item {
                     var scaleY = builtHeight > 0 ? height / builtHeight : 1
                     return Qt.matrix4x4(scaleX, 0, 0, padLeft * (1 - scaleX), 0, scaleY, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
                 }
-                readonly property string shapeStyle: [theme.em, theme.window, theme.text, theme.gold].join("|")
+                readonly property string shapeStyle: [theme.em, theme.window, theme.text, theme.purple].join("|")
                 // Laps with track limits or off tracks: count over their point (few laps: items)
                 readonly property var marked: {
                     var found = []
@@ -221,7 +226,7 @@ Item {
                         "stripTops": [timeHeight + stripGap, timeHeight + stripGap * 2 + stripHeight],
                         "stripHeight": stripHeight, "em": theme.em, "best": root.session.best || 0,
                         "higherBetter": root.metric.higherBetter === true,
-                        "window": "" + theme.window, "text": "" + theme.text, "gold": "" + theme.gold,
+                        "window": "" + theme.window, "text": "" + theme.text, "bestColor": "" + theme.purple,
                         "fuelColor": "" + theme.seriesFuel, "wearColor": "" + theme.seriesWear
                     })
                     builtWidth = width
@@ -256,6 +261,7 @@ Item {
                         Text {
                             y: -height / 2
                             text: root.timeText(parent.value).replace(/(\.\d)\d+$/, "$1")
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
@@ -269,8 +275,7 @@ Item {
                     y: chartCanvas.yAt(root.session.best || 0)
                     width: chartCanvas.width - chartCanvas.padLeft - chartCanvas.padRight
                     height: 1
-                    color: theme.gold
-                    opacity: 0.7
+                    color: theme.tint(theme.purple, "outline")
                 }
                 // Trend line & GPU shapes in a multisampled layer while shown (smooth edges, window without MSAA)
                 Item {
@@ -291,17 +296,17 @@ Item {
                         height: 2
                         transformOrigin: Item.Left
                         rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
-                        color: theme.purple
+                        color: theme.accent  // not purple: purple is the best lap
                         opacity: 0.75
                     }
-                    // Valid laps joined, lap points (shown laps in their color, best lap gold, invalid hollow) & fuel /
+                    // Valid laps joined, lap points (shown laps in their color, best lap purple, invalid hollow) & fuel /
                     // tyre wear bars: GPU shapes (hovered point drawn larger on top by an item)
                     Item {
                         objectName: "sessionShapes"
                         transform: Matrix4x4 { matrix: chartCanvas.shapeMatrix }
                         GpuShape {
                             key: chartCanvas.shapeKeys.segments || ""
-                            color: theme.tint(theme.text, 0.3)
+                            color: theme.tint(theme.text, "strong")
                         }
                         GpuShape { key: chartCanvas.shapeKeys.points || "" }
                         GpuShape { key: chartCanvas.shapeKeys.bars || "" }
@@ -317,6 +322,7 @@ Item {
                         x: chartCanvas.xAt(modelData) - width / 2
                         y: chartCanvas.yAt(lap.time || 0) - size / 2 - height
                         text: lap.limits > 0 ? "✕" + lap.limits : "◇" + lap.offtrack
+                        textFormat: Text.PlainText
                         color: lap.limits > 0 && !lap.outlier ? theme.warning : theme.dimText  // outlier: dim, not faded
                         font.pointSize: theme.fontTiny
                     }
@@ -343,11 +349,12 @@ Item {
                         width: chartCanvas.width
                         height: chartCanvas.stripHeight
                         visible: high > 0
-                        Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontTiny }
+                        Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontTiny; textFormat: Text.PlainText }
                         Text {
                             anchors.bottom: parent.bottom
                             text: strip.name === "fuel" ? root.num(strip.high * (root.session.fuelScale || 1), 2) + " " + (root.session.fuelUnit || "")
                                                         : root.num(strip.high, 1) + " %"
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
@@ -384,7 +391,7 @@ Item {
                 compact: true
                 loading: root.laps.length === 0 && (root.session.busy === true || backend.loading)
                 empty: root.laps.length === 0 && root.session.busy !== true && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE81C"  // history
                 title: i18n.tr("No lap recorded in this session.")
             }
@@ -425,6 +432,7 @@ Item {
                         lines.push(lap.shown ? i18n.tr("Click: hide from charts") : i18n.tr("Click: show in charts · double-click: reference"))
                         return lines.join("\n")
                     }
+                    textFormat: Text.PlainText
                 }
             }
         }

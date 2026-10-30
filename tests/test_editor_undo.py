@@ -1,4 +1,4 @@
-"""Editor undo & redo tests"""
+"""Editor undo & redo tests (table editor pages: snapshots of backend rows)"""
 
 import pytest
 
@@ -24,30 +24,37 @@ def class_editor(monkeypatch):
 
 
 def alias(editor, row):
-    return editor.table_classes.item(row, 1).text()
+    return editor.backend.rows[row][1]
+
+
+def set_alias(editor, row, text):
+    backend = editor.backend
+    assert backend.setCell(backend.keys[row], 1, text)
 
 
 def test_undo_redo_cell_edit(class_editor):
-    class_editor.table_classes.item(0, 1).setText("HYPER")
-    class_editor.table_classes.item(1, 1).setText("GT")
+    set_alias(class_editor, 0, "HYPER")
+    set_alias(class_editor, 1, "GT")
     assert (alias(class_editor, 0), alias(class_editor, 1)) == ("HYPER", "GT")
+    assert class_editor.backend.canUndo and not class_editor.backend.canRedo
 
     class_editor.undo()
     assert (alias(class_editor, 0), alias(class_editor, 1)) == ("HYPER", "GT3")
     class_editor.undo()
     assert (alias(class_editor, 0), alias(class_editor, 1)) == ("HY", "GT3")
+    assert not class_editor.backend.canUndo and class_editor.backend.canRedo
     class_editor.undo()  # nothing more to undo
     assert alias(class_editor, 0) == "HY"
 
-    class_editor.redo()
+    class_editor.backend.redo()  # Redo button of page
     class_editor.redo()
     assert (alias(class_editor, 0), alias(class_editor, 1)) == ("HYPER", "GT")
 
 
 def test_new_edit_clears_redo(class_editor):
-    class_editor.table_classes.item(0, 1).setText("A")
+    set_alias(class_editor, 0, "A")
     class_editor.undo()
-    class_editor.table_classes.item(0, 1).setText("B")
+    set_alias(class_editor, 0, "B")
     class_editor.redo()  # redo history cleared by new edit
     assert alias(class_editor, 0) == "B"
 
@@ -59,10 +66,11 @@ def test_heatmap_undo(monkeypatch):
     for name in ("config", "setting", "heatmap"):
         monkeypatch.setattr(cfg.user, name, copy_setting(getattr(cfg.default, name)), raising=False)
     editor = HeatmapEditor(None)
-    before = editor.capture_table()
-    editor.table_heatmap.item(0, 0).setText("-99.0")
-    assert editor.capture_table() != before
+    backend = editor.backend
+    before = backend.capture_state()
+    assert backend.setCell(backend.keys[0], 0, "-99")
+    assert backend.capture_state() != before
     editor.undo()
-    assert editor.capture_table() == before
+    assert backend.capture_state() == before
     editor.set_unmodified()
     editor.close()

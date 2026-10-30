@@ -38,7 +38,7 @@ class DriverStatsViewer(BaseDialog):
         from .quick.stats_backend import DriverStatsBackend
 
         super().__init__(parent)
-        self.set_utility_title(tr("Driver Stats Viewer"))
+        self.set_utility_title(tr("Driver Stats"))
         self.setMinimumSize(UIScaler.size(60), UIScaler.size(30))
         self.backend = DriverStatsBackend(self)
         self.view = create_quick_view(

@@ -3,6 +3,87 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.28.0 (2026-10-30)
+
+Hotkeys on your wheel and button box, signed updates, a command palette and a notification center, dialogs inside the app, a Team tab to plan an endurance race with its drivers, a class square and values you switch one by one in the overlays, and hundreds of fixes from full audits of the overlays, pages, performance and security.
+
+### New
+
+#### Hotkeys on game controllers and mouse buttons
+
+- **Any button of a wheel, button box, joystick or gamepad**, alone or with `Ctrl` / `Shift` / `Alt`: up to 16 devices, 128 buttons and the d-pad each (`Joy1 Button 5`, `Joy2 Pov Up`), virtual controllers included (SimHub Control Mapper, vJoy). The mouse `middle`, `back` and `forward` buttons too.
+- A switch or rotary held when the key binding dialog opens is ignored until released. Controller buttons also work on Linux.
+
+#### Command palette, notifications and shortcuts
+
+- **Command palette** (`Ctrl+K`, or the search button of the navigation bar): results grouped by pages, tools, menu commands, settings, overlays, modules, presets and options, recent commands first. Start with `>` for commands only, `@` for options, `#` for presets.
+- **Notification center**: a bell in the navigation bar with the number of unread messages and their history (`Clear All`). Problems in the background (an overlay that crashed, a file that could not be saved) land there with `View Log` and `Create Bug Report`. While the window is in the tray, Windows shows the notification.
+- **`Keyboard Shortcuts`** sheet (`Ctrl+/` or `F1`) with a search box. **Back / Forward** like a browser (`Alt+Left` / `Alt+Right` or the mouse buttons). `Ctrl+F` searches the page shown, `Ctrl+Shift+F` finds any option.
+- Every page has a header with its path (`Tools › Brake Editor`); the `Tools` page is redrawn with a `Pages` section, and the bar has a `More` button.
+
+#### Race Calculator: Team tab
+
+- **`Line-up`**: type the name of each driver before the race (`Add Driver`, `Remove Driver`); a removed driver takes its pace, driving times and stints with it.
+- **`Stint Plan`**: the driver of each stint, or `Auto` to let the plan choose; `Keep Rotation` and `All Auto` set every stint at once (`input_stint_drivers`). The names show in the plan, the timeline, the `Driving Time` card and the exports.
+- **Le Mans Ultimate names**: the real team names of the game replace the typed ones; a close name keeps its place (`Keenny` becomes `Keenny Hess`) and its planned stints.
+- **`Plan a Race in 3 Questions`** on first use: race length, pit stop time and where the data comes from, then the whole calculator (`Skip`, `show_quick_setup`).
+
+#### Other pages
+
+- **Presets**: `Preset Comparison`, `Preset Transfer`, `Restore Backup` and `Recently Deleted Presets` (`Restore`, `Empty Trash`) are now inside the page. `Set Primary for Class` asks for every session, practice, qualifying or race only.
+- **Telemetry viewer**: a summary band with **`Analyze My Last Lap`** and the corners where you lose time (`Shift+[` / `Shift+]` to go through them), and a `Compare Laps` menu. The `Imported Laps` library, the track notes editor and the session recorder are redrawn.
+- **Race Results**: session comments under the key figures: your race pace against the class median, places gained or lost on lap 1, lap time trend of each stint.
+- **Driver Stats** in three tabs (`Overview`, `Progression`, `Compare`) with filter chips; a `This Week` card on Home; a streaming step in the setup wizard.
+
+#### Overlays
+
+- **Class square** (Relative, Standings, Rivals, modern design): with `show_class_name` off, the class column shows only the position in class on a square in the class color, narrower.
+- **`Driver Badge` column** (`column_driver_badge`, off by default): the game badge of each driver in its own column, shown without the ranks and moved on its own.
+- **Fuel and Virtual Energy: each value on its own** (both designs): `show_remaining`, `show_refueling` / `show_refilling`, `show_estimated_laps`, `show_estimated_minutes`, `show_estimated_consumption`, `show_saving_target`, `show_early_pitstop_count`, `show_delta_consumption`, `show_end_remaining`, `show_fuel_ratio`, `show_fuel_bias` replace the options that switched values in pairs (your settings are converted).
+- **Pace Notes** (modern design) on the Track Notes card: the note in bold, comments under it.
+
+![Class square: position in class on the class color](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-class-square.png)
+
+![Fuel: minutes, early stops and delta turned off on their own](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-fuel-values-on-their-own.png)
+
+![Pace Notes on the modern notes card](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-pace-notes-card.png)
+
+### Improvements
+
+- **Dialogs inside the page**: confirmations, alerts and text or number inputs open in the page instead of Windows pop-ups; `Enter` runs the action, actions that erase something are red with the focus on `Cancel`. `Undo` instead of a confirmation wherever a message offers it (Overlays page, Stream, Broadcast Director, tyres, Driver Stats, laps). File pickers remember the last folder.
+- **Settings**: `Changed Only` filter, search highlighted, an `Apply` bar and a prompt for unsaved changes. `Apply` no longer reloads the whole app: application and notification settings apply at once, overlay style restarts only the overlays, remote control, web dashboard, stream and VR restart only their own server. Global hotkeys, preset auto load, overlay previews, remote control, web dashboard, stream overlays and VR switches apply as soon as you switch them. Units, API options and a global font moved into Settings.
+- **Table editors** (Brake, Heatmap, Track Info, Tyre Compound, Vehicle Brand, Vehicle Class) share one table: sort, filter, type in the cells, units of your choice, live heatmap preview, `Ctrl+S` saves.
+- **Hotkeys** page redrawn: search, `Assigned only`, `Clear All` with undo.
+- **Overlays page**: the screen view works from the keyboard, follows locks and snapping, one screen at a time; `Profile`, `Theme` and `Filters` menus. Turning many overlays on at once can be undone (`show_confirmation_for_batch_toggle` removed).
+- **One look everywhere**: title bar in the app theme, card shadows, smaller page titles, the same lists, menus and switches on every page, lap times in one style, numbers, dates and units in your locale, colorblind status colors the same in the app, overlays, OBS pages and web dashboard. One name per page (`Calculator`, `Driver Stats`, `What's New`) and `Car` instead of `Vehicle`.
+- **Overlays**: values not known yet show a dash instead of `0.00` (battery without hybrid, power to weight before calibration, speedometer, downforce...), no more `-0.00`. **Engine** and **Engine Temperature**: the game overheating warning is one option for both designs, `show_game_overheating_warning`. **Tyre Load**: same gauge scale in both designs. **Lift and Coast LED** (modern): double vertical LEDs side by side. Modern designs follow `show_compound_color_by_type`, `suffix_brake_migration` and the Onboard Setting captions.
+- **Previews closer to real values**: tyre temperatures (inner edge hottest) and their trend, downforce ratio, stint consistency, toe and slip angle signs, regeneration.
+- **Fewer freezes of the window**: turning every overlay or module off, deleting or restoring many laps, opening large tracks, reloading a preset while a file is held by OneDrive or an antivirus, stopping the recorder, restarting the API or a server, and saving delta, fuel, sectors and stint data now run in the background. Overlays repaint only when their text changes, telemetry laps load with much less memory.
+- **Standings**: a space between the top places and the places around you when places in between are left out (combined mode, both designs); with the class column kept beside the class headers, the position badge shows the overall position; `Gap Trend` column centered. The options Standings and Rivals inherit from Relative now show their help on the Overlay Options page and in the option search (55 and 67 options); help for `time_interval_width` and `mixed_compound_symbol`.
+
+![Lift and Coast LED: double vertical LEDs side by side](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-lift-coast-double-leds.png)
+
+### Fixes
+
+- **Hotkeys**: modifiers must match exactly (`C` no longer runs with `Ctrl+C`, `Ctrl+A` no longer with `Ctrl+Shift+A`); while you bind a key, app shortcuts (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Enter`, `Space`) no longer run, so any combination can be bound; a short press of a wheel button or a rotary step is no longer missed.
+- **Electric Motor** (Le Mans Ultimate): power was about 6.7 times too high; it now comes from the game, and `Regen` shows the power recovered.
+- **Flag**: `pit closed` under full course yellow, blue flag gap and class from the same car, yellow flag distance without cars stopped in the pit lane, no traffic chip in the garage. **Pit Lane Helper**: no false limiter alarm at pit exit. **Spotter** and **Radar** leave out cars in the pit lane or garage.
+- **Sectors**, **Delta Graph**, **Deltabest**: a late S3 time of the game still shows, laps followed through the out lap, `Last` no longer measured against an out lap. **Standings**: the class best lap is the fastest lap of the class; cars no longer shown pitting during the first lap of a session. **Stint Timer** no longer adds spectated drivers.
+- **Spectating and Broadcast Director**: overlays reset when the followed car changes (tyre compounds, wear per lap, brake bias, speedometer, friction circle, gap trend); a car taking the slot of another no longer inherits its laps and stops.
+- **Track Map, Elevation, Navigation**: a map of another track with the same file date loads. **Session**, **Track Clock**: times over 10 hours no longer cut. Fixes in Damage, Brake Wear, Virtual Energy, Steering Angle, Pedal, Black Box, Chat, Weather, Weather Forecast and Corner Coach.
+- **Race Calculator**: `Pit Menu` sends the refill of the **next** stop and is disabled outside a Le Mans Ultimate session; a stop & go or a visit to the garage stall is no longer counted as a pit stop; start fuel, energy and wear are taken on the grid only; spectating another car no longer mixes stop counts; no phantom stop when replanning on the out lap; a driver under its minimum keeps the car; no more one-lap stints when the maximum driving times cannot cover the race.
+- **Telemetry viewer**: temperature and pressure channels read from the cache again, a lap hidden by a filter shows when checked, `Share Lap...` finishes when the app is closed right away, MoTeC part exports line up on aligned imported laps, the cursor no longer stays stuck after a drag released off the chart.
+- **Settings no longer lost when quitting** right after a session (track maps, window position); a save blocked for a moment by an antivirus is retried. A corrupt history file, a MoTeC file cut short or huge numbers in a JSON file no longer break a page.
+- **Standings, Relative, Rivals**: cars that finished or are in the garage show their last lap instead of an empty pit time, and the gaps of finished cars stay as they were at the line instead of falling to `0.0` once the cars are in the garage; a Bronze driver or safety rank no longer cut to `…`; laps behind written `2L` in the gap column, as in the interval column; a dash instead of `0.0` for an interval to a car without a lap time; RaceControl no longer asked for ranks while the strength of field is not shown; the running lap time of a car stopped on track no longer runs on for an hour; classic layout: no brand logo drawn in the space between classes.
+
+### Security
+
+- **Signed updates**: each official release comes with a signed manifest (`NeoPedal-<version>-manifest.json` and `.sig`); the app installs an official update only with a valid signature, else it shows why it refused it. A custom update repository needs an Authenticode-signed installer.
+- **Remote control**: commands with an effect on the whole app (`quit_application`, `restart_application`, `restart_api`, API and preset selection, every `preset_*`) now need the access token (`enable_access_token`, `access_token`): turn it on and put the token in your Stream Deck, Companion or SimHub actions.
+- **Web dashboard**: `access_code` of at least 8 characters (a shorter one is replaced), a login valid only on the device that made it, pages of other sites can no longer try codes, repeated wrong codes blocked.
+- **Shared files**: names of other drivers and imported texts are shown as plain text; presets you import keep your own file paths and game API address; `Import Settings…` keeps your update repository, LAN access, access codes and trusted plugins. Plugins: trust covers every file of the folder, native code is refused.
+- Size and time limits on every request to the local servers, the game REST API and RaceControl.
+
 ## 0.27.0 (2026-10-21)
 
 A new Home page with a debrief of your last session, a richer What's New page, a livelier Overlays page, the official circuit of Le Mans Ultimate on the track map from the first meters, a race calculator that follows the real race (drivers, penalties, pit menu), new telemetry channels, goals and road conditions in Driver Stats, and smoother animations on fast screens.

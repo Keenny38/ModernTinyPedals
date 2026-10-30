@@ -71,9 +71,9 @@ Slider {
         height: width
         radius: width / 2
         visible: slider.handleShown || slider.pressed
-        color: slider.pressed ? Qt.darker(theme.accent, 1.15) : theme.accent
+        color: slider.pressed ? theme.accentPressed : theme.accent
         border.width: 2
-        border.color: theme.base
+        border.color: theme.surfaceCard
         scale: slider.pressed || slider.hovered ? 1.15 : 1
         Behavior on scale { NumberAnimation { duration: theme.motionFast } }
     }

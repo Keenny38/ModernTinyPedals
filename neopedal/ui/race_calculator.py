@@ -35,15 +35,35 @@ from functools import partial
 
 from PySide6.QtCore import QUrl
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout  # noqa: F401  (QMessageBox: tests patch it)
 
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..userfile.tyre_strategy import DEFAULT_TYRE_SET
 from ._common import BaseEditor, UIScaler
+from .quick import dialogs
 from .quick.race_backend import RaceBackend
 from .toast import show_toast
 
 MIN_PAGE = 46  # narrowest page width (in lines): race setup & key figures on two rows
+
+
+def prepare_race(parent, track: str, vehicle: str, lap_time: float = 0.0) -> bool:
+    """Race calculator page opened for a race of a track & vehicle (Driver Stats "Prepare Race"): consumption
+    history of the track & class loaded when recorded, else lap time given (seconds, personal best) filled in;
+    False if the page could not open
+
+    Args:
+        parent: widget of the page asking (app window found from it).
+        vehicle: vehicle class, "Class - Brand" or vehicle name of driver stats.
+    """
+    from .tools_view import open_tool
+
+    page = open_tool("race_calculator.RaceCalculator", parent)
+    backend = getattr(page, "backend", None)
+    if not isinstance(backend, RaceBackend):
+        return False
+    backend.prepare_race(track, vehicle, lap_time)
+    return True
 
 
 class RaceCalculator(BaseEditor):
@@ -138,9 +158,9 @@ class RaceCalculator(BaseEditor):
         if event.isAccepted():  # Esc closes too (BaseEditor.reject), page released once
             self.release_page()
 
-    # Race host: dialogs & toasts of the backend
+    # Race host: dialogs & toasts of the backend (in the page: TpDialogHost, see quick/dialogs.py)
     def warn(self, text: str):
-        QMessageBox.warning(self, tr("Error"), text)
+        dialogs.alert(self, tr("Error"), text)
 
     def toast(self, text: str):
         show_toast(self, text)
@@ -155,7 +175,19 @@ class RaceCalculator(BaseEditor):
         show_toast(self, text, action_text=tr("Show in Folder"), action=partial(show_in_folder, path))
 
     def confirm(self, text: str) -> bool:
+        """Answer at once (page closing: kept open or not), a window over the page"""
         return self.confirm_operation(message=text)
+
+    def ask(self, text: str, on_yes: Callable[[], object], action_text: str = "", danger: bool = False):
+        """Confirmation in the page, on_yes() once confirmed (later: the page keeps running meanwhile). confirm
+        replaced from outside (tests, scripts): it answers at once, as before"""
+        confirm = getattr(self.confirm, "__func__", self.confirm)
+        if not str(getattr(confirm, "__module__", "") or "").startswith("neopedal."):
+            if self.confirm(text):
+                on_yes()
+            return
+        action = action_text or tr("Confirm")
+        dialogs.confirm(self, tr("Confirm"), trm(text), action, lambda chosen: chosen and on_yes(), danger)
 
     def open_file(self, directory: str, file_filter: str) -> str:
         return QFileDialog.getOpenFileName(self, dir=directory, filter=file_filter)[0]

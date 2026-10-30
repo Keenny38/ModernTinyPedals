@@ -20,7 +20,8 @@
 Chat Widget, modern design
 
 Chat feed card, newest message at bottom (card growing upward) or at top (growing downward): sender name in its own color (same color for a sender
-all race, accent for messages of player), messages without sender (game notices) dimmed,
+all race, accent for messages of player, none while spectating), long names cut to half the line, messages without
+sender (game notices) dimmed,
 message wrapped to card width, optional time. Messages just sent are highlighted with an accent
 edge, messages fade out at the end of display duration, also while not driving (overlay updates paused:
 messages shown keep fading out, card gone once none left). Card grows with lines shown, nothing drawn
@@ -37,6 +38,7 @@ from zlib import crc32
 from PySide6.QtCore import QRectF, QTimer
 from PySide6.QtGui import QPainter
 
+from ... import realtime_state
 from ...api_control import api
 from .._race_aids import HiddenPreview
 from ..chat import MAX_LINES, SAMPLE_PLAYER, sample_messages, stack_blocks
@@ -52,6 +54,7 @@ NAME_TOKENS = ("positive", "warning", "best", "orange", "caution")  # other send
 NEW_ALPHA = 36  # background tint of new message lines
 EXPIRE_MS = 125  # messages fading out checked at this interval while overlay updates are paused
 PLACEMENT_OPACITY = 0.5  # sample conversation drawn in edit mode without message
+NAME_SHARE = 0.5  # sender name cut to this share of text width at most (message keeps the rest of first line)
 # Kind of message line
 OTHER, OWN, NOTICE = 0, 1, 2
 
@@ -116,7 +119,7 @@ class Realtime(HiddenPreview, ModernOverlay):
 
     # Data
     def wrap(self, name: str, text: str) -> tuple[str, ...]:
-        """Message lines fitting text width, first line after sender name"""
+        """Message lines fitting text width, first line after sender name (name as shown, see read_lines)"""
         key = (name, text)
         lines = self.wrap_cache.get(key)
         if lines is not None:
@@ -168,6 +171,7 @@ class Realtime(HiddenPreview, ModernOverlay):
             else:
                 kind, color = OTHER, crc32(name.encode("utf-8")) % len(NAME_TOKENS)
             new = age < self.new_duration
+            name = self.elided("name", name, self.text_w * NAME_SHARE)  # long name never leaves no room for text
             wrapped = self.wrap(name, text)
             blocks.append([
                 Line(stamp if index == 0 else "", name if index == 0 else "", part, color, new, step, index == 0, kind)
@@ -194,7 +198,8 @@ class Realtime(HiddenPreview, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         self._expire_timer.stop()
-        self.player_name = api.read.vehicle.driver_name().strip()
+        # Spectating: car followed is not player's, its driver's messages are not player's own
+        self.player_name = "" if realtime_state.spectating else api.read.vehicle.driver_name().strip()
         self._messages = api.read.session.chat_messages()
         self.refresh(self.read_lines(self._messages, time()))
 
@@ -236,7 +241,7 @@ class Realtime(HiddenPreview, ModernOverlay):
         line_h = self.line_h
         height = line_h * len(lines) + pad * 2
         card = QRectF(0, 0 if self.newest_at_top else self.height() - height, self.width(), height)
-        panel(painter, card, theme, self.radius(0.5), self.depth_effects)
+        panel(painter, card, theme, self.panel_radius(), self.depth_effects)
         text_left = pad + self.edge + self.time_w
         top = card.top() + pad
         base_opacity = PLACEMENT_OPACITY if placement else 1.0

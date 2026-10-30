@@ -9,29 +9,33 @@ RowLayout {
     id: header
     property string title: ""
     property string glyph: ""
+    property string fallback: ""  // icon text without icon font
+    property color tint: theme.headerTint  // icon color
     property string tip: ""
     property string count: ""
     property bool warning: false  // title in loss color with warning icon
     property bool busy: false  // waiting for data: small spinner after the title
     property string level: "card"
     property bool closable: false
+    property string closeTip: i18n.tr("Close")  // popup windows: i18n.tr("Close") + " (Esc)"
     default property alias actions: actionRow.data
     signal closed()
 
     Layout.fillWidth: true
-    spacing: theme.em * 0.5
-    implicitHeight: Math.max(Math.round(theme.em * (level === "popup" ? 2.3 : 2)), actionRow.implicitHeight)
+    spacing: theme.space3
+    implicitHeight: Math.max(Math.round(level === "popup" ? theme.controlHeight : theme.em * 2), actionRow.implicitHeight)
 
     Icon {
         glyph: header.warning ? "" : header.glyph  // warning
-        fallback: header.warning ? "!" : ""
-        color: header.warning ? theme.loss : theme.accent
-        size: header.level === "popup" ? theme.em * 1.15 : theme.em * 0.95
+        fallback: header.warning ? "!" : header.fallback
+        color: header.warning ? theme.loss : header.tint
+        size: theme.iconMd
         Layout.alignment: Qt.AlignVCenter
     }
     Text {
         id: titleText
         text: header.title
+        textFormat: Text.PlainText
         color: header.warning ? theme.loss : theme.text
         font.weight: Font.DemiBold
         font.pointSize: header.level === "popup" ? theme.fontHeading : theme.fontPoint
@@ -45,43 +49,29 @@ RowLayout {
         ToolTip.text: header.tip !== "" ? (titleText.truncated ? header.title + "\n" + header.tip : header.tip) : header.title
         ToolTip.delay: theme.tipDelay
     }
-    Rectangle {  // count chip
+    TpCountBadge {
         visible: header.count !== ""
-        implicitHeight: Math.round(theme.em * 1.4)
-        implicitWidth: countText.implicitWidth + theme.em * 0.9
-        radius: height / 2
-        color: theme.hover
+        text: header.count
         Layout.alignment: Qt.AlignVCenter
-        Text {
-            id: countText
-            anchors.centerIn: parent
-            text: header.count
-            color: theme.dimOn(theme.hover)
-            font.pointSize: theme.fontSmall
-            font.weight: Font.DemiBold
-            font.features: { "tnum": 1 }
-        }
     }
-    BusyIndicator {
+    TpSpinner {
         visible: header.busy
-        running: visible && pageState.active
-        implicitWidth: Math.round(theme.em * 1.3)
-        implicitHeight: implicitWidth
         Layout.alignment: Qt.AlignVCenter
     }
     Item { visible: header.count !== "" || header.busy; Layout.fillWidth: true }
     RowLayout {
         id: actionRow
         spacing: theme.space3
+        Layout.fillWidth: false  // a nested layout fills by default: would share the title's room
         Layout.alignment: Qt.AlignVCenter
     }
     TpButton {
         visible: header.closable
         flat: true
         size: "sm"
-        glyph: ""  // cancel
+        glyph: theme.glyphs.close
         fallback: "✕"
-        tip: i18n.tr("Close")
+        tip: header.closeTip
         Layout.alignment: Qt.AlignVCenter
         onClicked: header.closed()
     }

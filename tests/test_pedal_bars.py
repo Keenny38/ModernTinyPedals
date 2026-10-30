@@ -116,7 +116,9 @@ def test_trailing_bars_alert_pressure_and_pause(widgets, inputs, monkeypatch, mo
     assert bars["brake"][0] == 1.0 and bars["throttle"][0] == 0.6  # pressure share of peak
     pressure["value"] = [1.0, 1.0, 0.5, 0.5]
     assert dict(zip(widget.bar_keys, widget.read_bars()))["brake"][0] == 0.5
-    widget.post_update()  # next car: peak found again
+    widget.post_update()  # paused (pit stop): peak kept
+    assert dict(zip(widget.bar_keys, widget.read_bars()))["brake"][0] == 0.5
+    widget.vehicle_reset()  # next car or session: peak found again
     assert dict(zip(widget.bar_keys, widget.read_bars()))["brake"][0] == 1.0
     # Plot paused (time unchanged): bars still follow inputs & alerts
     update(widget)

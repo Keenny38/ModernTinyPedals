@@ -19,7 +19,7 @@
 """
 Electric motor Widget, modern design
 
-Motor & water temperature (overheat highlight), RPM, torque, power, regeneration level.
+Motor & water temperature (overheat highlight), RPM, torque, power deployed, regeneration power.
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ... import units
 from ...api_control import api
-from .base import ModernOverlay, display_order_options
+from ..electric_motor import fitted
+from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ class Realtime(StatsMixin, ModernOverlay):
             ("rpm", "RPM", "88888"),
             ("torque", "Torque", "888.88Nm"),
             ("power", "Power", f"888.88{self.symbol_power}"),
-            ("regeneration_level", "Regen", f"+888.88{self.symbol_power}"),
+            ("regeneration_level", "Regen", f"888.88{self.symbol_power}"),
         )
         stats = [Stat(key, label, sample) for key, label, sample in items if wcfg[f"show_{key}"]]
         stats = self.display_ordered(stats)
@@ -93,11 +93,14 @@ class Realtime(StatsMixin, ModernOverlay):
             elif key == "rpm":
                 values.append(Value(f"{int(emotor.rpm())}"))
             elif key == "torque":
-                values.append(Value(f"{emotor.torque():.2f}"[:6] + "Nm"))
+                values.append(Value(fitted(emotor.torque()) + "Nm"))
             elif key == "power":
-                power = calc.engine_power(emotor.torque(), emotor.rpm())
-                values.append(Value(f"{self.unit_power(power):.2f}"[:6] + self.symbol_power))
+                values.append(Value(fitted(self.unit_power(emotor.power())) + self.symbol_power))
             elif key == "regeneration_level":
-                regen = self.unit_power(emotor.regeneration_level())
-                values.append(Value(f"{regen:+.2f}"[:7] + self.symbol_power, self.theme.positive if regen > 0 else None))
+                regen = emotor.regeneration_level()
+                if regen < 0:  # not available (rF2)
+                    values.append(Value(DASH, self.theme.text_faint))
+                else:
+                    text = fitted(self.unit_power(regen))
+                    values.append(Value(text + self.symbol_power, self.theme.positive if float(text) else None))
         self.refresh(tuple(values))

@@ -45,7 +45,7 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
-from .._common import delta_shown, tyre_punctured
+from .._common import delta_shown, impact_cone_position, tyre_punctured
 from .._data import run_laps as stint_laps_left
 from .._modern.draw import readable_on
 from .common import REAR_MAX_STEER
@@ -232,12 +232,15 @@ class DataReader:
     steer_vehicle: str | None
     last_vehicle_name: str | None
     impact_time: float | None
+    impact_shown_time: float
     recorder_impact_time: float | None
     impact_rebase: bool
     recorder_impact_rebase: bool
     impact_direction: str
     pause_start: float | None
     last_session_elapsed: float
+    last_session: tuple[int, str] | None
+    stint_vehicle: str | None
     last_fast_time: float
     brake_cold: float
     brake_hot: float
@@ -672,13 +675,16 @@ class DataReader:
         else:
             new_impact = last_time is not None and is_new_impact(impact_time, last_time)
         if new_impact:
-            self.impact_position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
-            self.impact_visible = True
+            position = impact_cone_position()  # None: light (kerbs, scraping) or empty impact, cone kept as it is
+            if position is not None:
+                self.impact_position = position
+                self.impact_shown_time = impact_time
+                self.impact_visible = True
         elif last_time is not None and impact_time < last_time:
             self.impact_visible = False  # new session: impact of old one no longer shown
         self.impact_time = impact_time  # before widget started, or new session: not shown
         # Impact time may be kept on a new session while elapsed restarts: negative age = old impact
-        impact_age = api.read.timing.elapsed() - impact_time
+        impact_age = api.read.timing.elapsed() - self.impact_shown_time
         if self.impact_visible and not 0 <= impact_age <= self.wcfg["damage_panel_impact_cone_duration"]:
             self.impact_visible = False
 
@@ -727,9 +733,11 @@ class DataReader:
         else:
             impact = last_impact is not None and is_new_impact(impact_time, last_impact)
         self.recorder_impact_time = impact_time  # impact before widget started: not an incident
-        if impact:  # same direction as the damage panel cone
-            position = tick_read(self, "impact_position", api.read.vehicle.impact_position)
-            self.impact_direction = impact_arrow(calc.degrees(calc.oriyaw(*position)))
+        if impact:  # same impacts & direction as the damage panel cone
+            position = impact_cone_position()  # None: light (kerbs, scraping) or empty impact, not an incident
+            impact = position is not None
+            if position is not None:
+                self.impact_direction = impact_arrow(calc.degrees(calc.oriyaw(*position)))
         slips = tuple(minfo.wheels.slipRatio) if self.use_wheels else WHEELS_ZERO
         incident = recorder.add(
             Sample(now, speed, self.throttle, self.brake, self.gear, self.abs_active, self.tc_active, slip,
@@ -839,10 +847,14 @@ class DataReader:
         self.last_state = ()  # repaint
 
     def check_new_session(self):
-        """New session (session time going back): recorder & event log forget the old session,
-        lap statistics and stint pressure range start again"""
+        """New session (session time going back, or other session type, length or track: joined a session further
+        on): recorder & event log forget the old session, lap statistics, stint & stint pressure range start again"""
         elapsed = tick_read(self, "elapsed", api.read.session.elapsed)
-        if math.isfinite(elapsed) and elapsed < self.last_session_elapsed - 1:
+        session = (api.read.session.identifier()[0], api.read.session.track_name())
+        went_back = math.isfinite(elapsed) and elapsed < self.last_session_elapsed - 1
+        other_session = self.last_session is not None and self.last_session != session
+        self.last_session = session
+        if went_back or other_session:
             incident = self.recorder.reset()  # incident still recording is kept, not lost
             if incident is not None:
                 self.record_incident(incident)
@@ -851,6 +863,7 @@ class DataReader:
                 stats.reset()
             for pressure_range in self.pressure_ranges:
                 pressure_range.reset()
+            self.stint.reset()
             self.stats_lap = None
             # Game impact time may be kept from the old session (or reset to 0): its next change is
             # compared to 0, an impact older than the last one seen is still a new impact
@@ -932,7 +945,11 @@ class DataReader:
                 positions[index], forces[index], wheel.susp_velocity, self.susp_low_speed, self.susp_bump_margin)
 
     def update_stint(self, in_pits: bool):
-        """Average tread wear per lap & pressure of 4 wheels, compared with previous stint"""
+        """Average tread wear per lap & pressure of 4 wheels, compared with previous stint (of same car)"""
+        if self.stint_vehicle != self.vehicle_name:  # other car: its stints never compared with this one's
+            if self.stint_vehicle is not None:
+                self.stint.reset()
+            self.stint_vehicle = self.vehicle_name
         pressures = [wheel.pressure for wheel in self.wheels if wheel.pressure > 0]
         wears = [wheel.wear_per_lap for wheel in self.wheels if wheel.wear_per_lap > 0]
         self.stint.update(

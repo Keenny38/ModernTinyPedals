@@ -17,12 +17,13 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Home page backend (qml/home/Home.qml): app & game state at a glance, last session & its debrief, driver, checks,
-quick access
+Home page backend (qml/home/Home.qml): status banner (verdict of game & checks, version, update), game & session,
+overlays, preset, last session & its debrief, driver, quick access
 
 Each card is one property, told to the page only when its value changed (see publish). Read only while the page is
 shown: game state every second (LIVE_MS), session history, driver ranks & game window every few seconds (SLOW_TICKS);
-files (debrief laps, profile & results) on worker threads. Work asked while hidden runs once shown again.
+files (debrief laps, profile & results) on worker threads, cards waiting for them told by loading (the page keeps
+their place). Work asked while hidden runs once shown again.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable
 from time import monotonic
 from typing import Any
@@ -101,6 +103,41 @@ def last_session_card(record: SessionRecord, logos: LogoCache) -> dict:
     }
 
 
+# Highlights of "This week": kind, glyph (check, star, target), noun (one, many), tone
+WEEK_HIGHLIGHTS = (
+    ("goal_reached", "\ue73e", ("goal reached", "goals reached"), "gain"),
+    ("record", "\ue735", ("new personal best", "new personal bests"), "gain"),
+    ("goal_near", "\uf272", ("goal within reach", "goals within reach"), "accent"),
+)
+
+
+def week_card(items: list[dict]) -> dict:
+    """"This week" card of Home (stats_analysis.weekly_progress items, texts translated): summary as on the Driver
+    Stats page ("3 sessions · 1 h 05 min · 42 laps") & counts of goals reached, new personal bests & goals within
+    reach (kind, glyph, text, tone); empty when nothing was driven"""
+    from .stats_common import format_duration, plural
+
+    if not items or items[0].get("kind") != "summary":
+        return {}
+    summary = items[0]
+    counts: dict[str, int] = {}
+    for item in items[1:]:
+        counts[item["kind"]] = counts.get(item["kind"], 0) + 1
+    return {
+        "summary": " · ".join((plural(summary["sessions"], "session", "sessions"),
+                               format_duration(summary["seconds"]), plural(summary["laps"], "lap", "laps"))),
+        "highlights": [{"kind": kind, "glyph": glyph, "text": plural(counts[kind], *nouns), "tone": tone}
+                       for kind, glyph, nouns, tone in WEEK_HIGHLIGHTS if counts.get(kind)],
+    }
+
+
+def clock_text(seconds: float) -> str:
+    """Time left: h:mm:ss, m:ss under an hour"""
+    total = max(int(seconds), 0)
+    hours, minutes = divmod(total // 60, 60)
+    return f"{hours}:{minutes:02d}:{total % 60:02d}" if hours else f"{minutes}:{total % 60:02d}"
+
+
 def find_game_window() -> bool:
     """Le Mans Ultimate window open (worker thread), False off Windows"""
     if sys.platform != "win32":
@@ -129,6 +166,9 @@ class HomeBackend(PageBackend):
     driverChanged = Signal()
     checksChanged = Signal()
     quickChanged = Signal()
+    statusChanged = Signal()
+    loadingChanged = Signal()
+    weekChanged = Signal()
 
     def __init__(self, parent: QObject | None, window: Any, select_page: Callable[[str], object]):
         super().__init__(parent, "Home")
@@ -137,7 +177,9 @@ class HomeBackend(PageBackend):
         self.logos = LogoCache()
         self._values: dict[str, Any] = {
             "header": {}, "game": {}, "overlay": {}, "preset": {}, "counts": {}, "lastSession": {}, "debrief": {},
-            "driver": {}, "checks": [], "quick": [],
+            "driver": {}, "checks": [], "quick": [], "status": {}, "week": {},
+            # read in background: card place kept meanwhile
+            "loading": {"debrief": False, "driver": True, "week": True},
         }
         self._tick = 0
         self._record: SessionRecord | None = None
@@ -147,6 +189,9 @@ class HomeBackend(PageBackend):
         self._driver_data: Any = None  # DriverData once read
         self._driver_read_time = -DRIVER_DATA_SECONDS
         self._driver_key: tuple | None = None  # what driver card shows (made again only when changed)
+        self._driver_loaded = False  # profile & race record read once (driver card known, or nothing to show)
+        self._records: list[SessionRecord] | None = None  # session history read with the debrief (None: not yet)
+        self._week_key: tuple | None = None  # what "This week" card was made from (made again only when changed)
         self._game_window = False  # game window found while game sends no data
         self._timer = self.page_timer(self.poll, LIVE_MS)
         notifier().changed.connect(self.pictures_changed)  # logos fetched from game meanwhile
@@ -207,6 +252,26 @@ class HomeBackend(PageBackend):
         """Quick access buttons: key, label, glyph, letter"""
         return self._values["quick"]
 
+    @Property(dict, notify=statusChanged)
+    def status(self) -> dict:
+        """Status banner (see home_checks.home_status): verdict level, title, text, action & other check rows"""
+        return self._values["status"]
+
+    @Property(dict, notify=loadingChanged)
+    def loading(self) -> dict:
+        """Cards still read in background: debrief, driver, week"""
+        return self._values["loading"]
+
+    @Property(dict, notify=weekChanged)
+    def week(self) -> dict:
+        """Progress of the last 7 days (see week_card): summary & highlights, empty when nothing was driven"""
+        return self._values["week"]
+
+    def set_loading(self, name: str, value: bool):
+        loading = self._values["loading"]
+        if loading.get(name) != value:
+            self.publish("loading", {**loading, name: value}, self.loadingChanged)
+
     # Page state
     def page_shown(self):
         self._timer.start()
@@ -223,7 +288,7 @@ class HomeBackend(PageBackend):
         """Setting, preset or language changed: every card made again (once shown if hidden)"""
         if self.defer_while_hidden(self.refresh):
             return
-        self._debrief_key = self._driver_key = None  # texts in the language set
+        self._debrief_key = self._driver_key = self._week_key = None  # texts in the language set
         self._record_read = False
         self.refresh_all()
 
@@ -245,8 +310,9 @@ class HomeBackend(PageBackend):
         self.refresh_live()
 
     def refresh_slow(self):
-        """Session history (last session & debrief), driver ranks & data, game window"""
+        """Session history (last session & debrief, this week), driver ranks & data, game window"""
         self.refresh_last_session()
+        self.refresh_week()
         self.refresh_driver()
         self.check_game_window()
 
@@ -314,7 +380,8 @@ class HomeBackend(PageBackend):
             status = tr("Running")
         else:
             status = tr("Not running") if state == "not running" else tr(state)
-        self.publish("game", {"name": api.name, "running": running, "status": status, **session}, self.gameChanged)
+        self.publish("game", {"name": api.name, "running": running, "status": status, "lmu": api.name == API_LMU_NAME,
+                              **session}, self.gameChanged)
         overlay = cfg.overlay
         self.publish("overlay", {
             "locked": bool(overlay["fixed_position"]), "autoHide": bool(overlay["auto_hide"]),
@@ -324,18 +391,29 @@ class HomeBackend(PageBackend):
         self.refresh_checks()
 
     def session_info(self) -> dict:
-        """Current session: track, session, place, lap & logos, empty if not on track"""
+        """Current session: track, session, place ("P3/24", "P3" & "/24" apart), lap (of laps in a lap race), time
+        left (timed session), vehicle & logos, empty if not on track"""
         read = api.read
         try:
             if not read.state.active():
                 return {}
             track = read.session.track_name()
             total = read.vehicle.total_vehicles()
+            place = read.vehicle.place()
+            lap = f"{tr('Lap')} {read.lap.completed_laps() + 1}"  # LMU lap number = completed laps
+            finish = read.session.finish_type()
+            laps = read.lap.maximum() if finish in (1, 2) else 0
+            if 0 < laps < 100000:  # lap race: total laps (huge when unlimited)
+                lap += f"/{laps}"
+            remaining = read.session.remaining() if finish != 1 else 0.0
             info = {
                 "track": track,
                 "session": session_name(read.session.session_type()),
-                "place": f"P{read.vehicle.place()}/{total}" if total > 1 else "",
-                "lap": f"{tr('Lap')} {read.lap.number()}",
+                "place": f"P{place}/{total}" if total > 1 else "",
+                "position": f"P{place}" if total > 1 and place > 0 else "",
+                "total": f"/{total}" if total > 1 and place > 0 else "",
+                "lap": lap,
+                "timeLeft": clock_text(remaining) if 0 < remaining < 360000 else "",
                 "vehicle": read.vehicle.vehicle_name(),
             }
         except (AttributeError, TypeError, ValueError, IndexError):
@@ -345,12 +423,12 @@ class HomeBackend(PageBackend):
         return info
 
     def refresh_checks(self):
-        from ..home_checks import CheckState, home_checks
+        from ..home_checks import CheckState, home_checks, home_status
 
         recorder = cfg.user.setting.get("module_recorder", {})
         state = self._values["game"]
         latest = self._values["header"].get("latest", "")
-        self.publish("checks", home_checks(CheckState(
+        rows = home_checks(CheckState(
             game=api.name,
             running=bool(state.get("running")),
             game_window=self._game_window,
@@ -359,7 +437,9 @@ class HomeBackend(PageBackend):
             overlays=wctrl.number_active,
             recorder=bool(recorder.get("enable", True)) and bool(recorder.get("enable_lap_recording", True)),
             update=latest,
-        )), self.checksChanged)
+        ))
+        self.publish("checks", rows, self.checksChanged)
+        self.publish("status", home_status(rows, state), self.statusChanged)
 
     def check_game_window(self):
         """Le Mans Ultimate window looked for (worker thread) while no data comes: plugins off in game"""
@@ -404,21 +484,69 @@ class HomeBackend(PageBackend):
         if record is None:
             self._debrief_key = self._debrief_data = None
             self.publish("debrief", {}, self.debriefChanged)
+            self.set_loading("debrief", False)
+            self._records = []  # nothing driven: no week either
+            self.refresh_week()
             return
-        from ..home_debrief import read_debrief, stats_goal
+        from ..home_debrief import read_session_history, stats_goal
 
         goal = stats_goal(record.track, record.vehicle)  # set on driver stats page
         key = (record, goal, current_language())
         if key == self._debrief_key:
             return
         self._debrief_key = key
-        self.jobs.run("session debrief", lambda: read_debrief(record, goal), self.debrief_read, key="debrief")
+        self.set_loading("debrief", True)
+        self.jobs.run("session debrief", lambda: read_session_history(record, goal), self.history_read,
+                      self.debrief_failed, key="debrief")
+
+    def history_read(self, result: tuple[Any, list[SessionRecord]]):
+        """Debrief & session history read (one disk pass): debrief card, then "This week" from the same records"""
+        data, records = result
+        self._records = records
+        self.debrief_read(data)
+        self.refresh_week()
 
     def debrief_read(self, data: Any):
         from ..home_debrief import debrief_card, worth_showing
 
         self._debrief_data = data if data is not None and worth_showing(data) else None
         self.publish("debrief", debrief_card(data) if self._debrief_data is not None else {}, self.debriefChanged)
+        self.set_loading("debrief", False)
+
+    def debrief_failed(self, error: BaseException):
+        """Laps unreadable: no debrief (its place freed), error logged"""
+        logger.warning("HOME: session debrief not read: %s", error)
+        self.debrief_read(None)
+        if self._records is None:  # history unreadable: no week (place freed)
+            self._records = []
+            self.refresh_week()
+
+    # This week
+    def refresh_week(self):
+        """Progress of the last 7 days from the session history read with the debrief (no disk pass here), made
+        in background again once history, lap time goals, language or the hour changed"""
+        records = self._records
+        if records is None:  # read with the debrief: card place kept meanwhile
+            return
+        from .stats_analysis import parse_goals, weekly_progress
+        from .stats_common import CONFIG_NAME
+
+        goals = parse_goals(cfg.user.config.get(CONFIG_NAME, {}).get("goals"))
+        now = time.time()
+        key = (id(records), len(records), int(now // 3600), tuple(sorted(goals.items())), current_language())
+        if key == self._week_key:
+            return
+        self._week_key = key
+        self.jobs.run("weekly progress", lambda: weekly_progress(records, goals, now), self.week_read,
+                      self.week_failed, key="week")
+
+    def week_read(self, items: list[dict]):
+        self.publish("week", week_card(items), self.weekChanged)
+        self.set_loading("week", False)
+
+    def week_failed(self, error: BaseException):
+        logger.warning("HOME: weekly progress not made: %s", error)
+        self.week_read([])
 
     # Driver
     def read_driver_data(self):
@@ -426,11 +554,18 @@ class HomeBackend(PageBackend):
         from ..home_driver import read_driver_data
 
         self._driver_read_time = monotonic()
-        self.jobs.run("driver card", read_driver_data, self.driver_data_read, key="driver")
+        self.jobs.run("driver card", read_driver_data, self.driver_data_read, self.driver_data_failed, key="driver")
 
     def driver_data_read(self, data: Any):
         self._driver_data = data
+        self._driver_loaded = True
         self.refresh_driver()
+        self.set_loading("driver", False)
+
+    def driver_data_failed(self, error: BaseException):
+        """Profile or results unreadable: card from what was read before (or ranks only, or none), error logged"""
+        logger.warning("HOME: driver card data not read: %s", error)
+        self.driver_data_read(self._driver_data)
 
     def refresh_driver(self):
         """Driver card: ranks checked in background (game menu file changed), made again only when changed"""
@@ -561,6 +696,21 @@ class HomeBackend(PageBackend):
         record = self._record
         if backend is not None and record is not None:
             backend.show_combo(record.track, record.vehicle)
+
+    @Slot()
+    def openLiveCalculator(self):
+        """Race Calculator on its Live tab (plan of the session going on)"""
+        dialog = self.open_tool("race_calculator.RaceCalculator")
+        backend = getattr(dialog, "backend", None)
+        if backend is not None:
+            from .race_base import TABS
+
+            backend.setTab(TABS.index("live"))
+
+    @Slot()
+    def openDirector(self):
+        """Broadcast Director (Le Mans Ultimate)"""
+        self.open_tool("broadcast_director.BroadcastDirector")
 
     @Slot()
     def openDriverStats(self):

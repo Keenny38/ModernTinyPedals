@@ -238,13 +238,20 @@ def install_exception_hooks(_logger: logging.Logger) -> None:
     threading.excepthook = log_thread_exception
 
 
+def set_log_stream(_logger: logging.Logger, log_stream, level: int = logging.INFO) -> logging.Handler:
+    """In-memory log (log dialog, bug report) attached first thing at start: messages of the instance lock &
+    settings import are kept, while log files can only be opened once the config folder is final"""
+    _logger.setLevel(level)
+    return new_stream_handler(_logger, log_stream, level)
+
+
 def set_logging_level(_logger: logging.Logger, filepath: str, filename: str, log_stream=None, log_level=1) -> None:
     """Set logging level
 
     Args:
         _logger: logger instance.
         filepath: log file path.
-        log_stream: log stream object.
+        log_stream: log stream object (None if attached already, see set_log_stream).
         log_level:
             0 = output only warning or error to console.
             1 = output all log to console.

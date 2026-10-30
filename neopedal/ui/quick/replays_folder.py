@@ -28,11 +28,11 @@ import threading
 import time
 
 from PySide6.QtCore import Property, QUrl, Slot
-from PySide6.QtWidgets import QFileDialog, QInputDialog
+from PySide6.QtWidgets import QFileDialog
 
 from ...i18n import tr, trm
 from ...process.game_info import GameReplay
-from . import replay_files
+from . import dialogs, last_folder, replay_files
 from .replays_base import ReplaysBase
 from .replays_common import OFFLINE, copy_reporter, size_text
 
@@ -101,12 +101,13 @@ class ReplaysFolder(ReplaysBase):
     def addReplays(self):
         """Replay files chosen in a file dialog copied to replay folder of game"""
         if not self.replay_folder():
-            self.notify(tr("Replay folder unknown: start LMU once so the page lists its replays."), True)
+            self.notify(tr("Replay folder unknown: start LMU once so the page lists its replays"), True)
             return
         paths, _ = QFileDialog.getOpenFileNames(
-            self._window, tr("Add Replays"), os.path.expanduser("~"),
+            self._window, tr("Add Replays"), last_folder.start_folder("replays_add"),
             f"{tr('LMU replays')} (*{replay_files.REPLAY_EXTENSION})")
         if paths:
+            last_folder.remember("replays_add", paths[0])
             self.add_files(paths)
 
     @Slot(list)
@@ -117,17 +118,17 @@ class ReplaysFolder(ReplaysBase):
     def add_files(self, paths: list[str]):
         folder = self.replay_folder()
         if not folder:
-            self.notify(tr("Replay folder unknown: start LMU once so the page lists its replays."), True)
+            self.notify(tr("Replay folder unknown: start LMU once so the page lists its replays"), True)
             return
         sources = [path for path in paths if replay_files.is_replay_file(path)]
         if not sources:
-            self.notify(tr("No LMU replay file (.Vcr) to add."), True)
+            self.notify(tr("No LMU replay file (.Vcr) to add"), True)
             return
         self.start_copy(sources, folder, "add")
 
     def start_copy(self, sources: list[str], folder: str, kind: str):
         if self.request_copy.busy:
-            self.notify(tr("Replays are still being copied, try again once done."), True)
+            self.notify(tr("Replays are still being copied, try again once done"), True)
             return
         self.copy_progress, self.copy_kind = 0.0, kind
         self.copy_cancel = cancelled = threading.Event()
@@ -154,7 +155,7 @@ class ReplaysFolder(ReplaysBase):
         elif result.added:
             self.notify(trm(f"{count} replay(s) added to the game replay folder"))
         else:
-            self.notify(tr("These replays are already in the game replay folder."))
+            self.notify(tr("These replays are already in the game replay folder"))
         if result.added and self.copy_kind == "add":
             self.refresh_files(added=result.added)
 
@@ -169,24 +170,30 @@ class ReplaysFolder(ReplaysBase):
         replays = self.chosen_replays(key)
         if not folder or not replays:
             return
-        target = QFileDialog.getExistingDirectory(self._window, tr("Export Replays"), os.path.expanduser("~"))
+        target = QFileDialog.getExistingDirectory(self._window, tr("Export Replays"),
+                                                  last_folder.start_folder("replays_export"))
         if target:
+            last_folder.remember("replays_export", target)
             self.start_copy([replay_files.replay_path(folder, replay.name) for replay in replays], target, "export")
 
     @Slot(str)
     def renameReplay(self, key: str):
-        """Replay file renamed (name given in a dialog), game lists it under its new name"""
+        """Replay file renamed (name given in the page), game lists it under its new name"""
         folder = self.replay_folder()
         if not folder or self.replay_of(key) is None:
             return
-        name, accepted = QInputDialog.getText(self._window, tr("Rename Replay"), tr("New replay name:"), text=key)
-        name = name.strip()
-        if not accepted or not name or name == key:
-            return
+        dialogs.ask_text(self._window, tr("Rename Replay"), tr("New replay name:"),
+                         lambda name: self.rename_replay(key, name.strip()), key, accept_text=tr("Rename"))
+
+    def rename_replay(self, key: str, name: str) -> bool:
+        """Replay renamed (name typed), True: input closed; False: name refused (told), input kept to correct it"""
+        folder = self.replay_folder()
+        if not folder or not name or name == key or self.replay_of(key) is None:  # gone meanwhile
+            return True
         error = replay_files.rename_replay(folder, key, name)
         if error:
             self.notify(trm(f"Unable to rename: {error}"), True)
-            return
+            return False
         if key in self.protected:
             self.protected = (self.protected - {key}) | {name}
             self.save_settings()
@@ -199,6 +206,7 @@ class ReplaysFolder(ReplaysBase):
         if renamed:
             self.update_selected_protected()
             self.selectionChanged.emit()
+        return True
 
     @Slot(str)
     def toggleProtected(self, key: str):
@@ -218,7 +226,8 @@ class ReplaysFolder(ReplaysBase):
         self.delete_replays(self.chosen_replays(key))
 
     def delete_replays(self, replays: list[GameReplay], title: str = "Delete Replays"):
-        """Replays (protected ones kept) moved to the recycle bin in background, after confirmation"""
+        """Replays (protected ones kept) moved to the recycle bin in background, after a red confirmation: the app
+        cannot undo it (recycle bin of the system)"""
         if self.trash_busy():
             return
         folder = self.replay_folder()
@@ -231,14 +240,18 @@ class ReplaysFolder(ReplaysBase):
         size = size_text(sum(replay.size for replay in replays))
         message = (f"Move replay <b>{replays[0].name}</b> ({size}) to the recycle bin?" if len(replays) == 1
                    else f"Move <b>{len(replays)}</b> replays ({size}) to the recycle bin?")
-        if not self._window.confirm_operation(title, message):
-            return
-        self.start_trash([replay_files.replay_path(folder, replay.name) for replay in replays], "replays", len(kept))
+        paths = [replay_files.replay_path(folder, replay.name) for replay in replays]
+
+        def confirmed(chosen: bool):
+            if chosen and not self.trash_busy():  # asked in the page: another deletion may have started meanwhile
+                self.start_trash(paths, "replays", len(kept))
+
+        dialogs.confirm(self._window, tr(title), trm(message), tr(title), confirmed, danger=True)
 
     def trash_busy(self) -> bool:
         """Files still being moved to the recycle bin (told): one deletion at a time"""
         if self.request_trash.busy:
-            self.notify(tr("Files are still being moved to the recycle bin, try again once done."), True)
+            self.notify(tr("Files are still being moved to the recycle bin, try again once done"), True)
         return self.request_trash.busy
 
     def start_trash(self, paths: list[str], kind: str, kept: int = 0):
@@ -284,23 +297,25 @@ class ReplaysFolder(ReplaysBase):
 
     @Slot()
     def deleteOlderThan(self):
-        """Replays older than a number of days (asked) moved to the recycle bin, protected ones kept"""
-        days, accepted = QInputDialog.getInt(self._window, tr("Delete Old Replays"),
-                                             tr("Delete replays older than (days):"), 30, 1, 3650)
-        if accepted:
+        """Replays older than a number of days (asked in the page) moved to the recycle bin, protected ones kept"""
+        def older_than(days: int):
             limit = time.time() - days * 86400
             self.delete_replays([replay for replay in self.replays if 0 < replay.time < limit], "Delete Old Replays")
 
+        dialogs.ask_number(self._window, tr("Delete Old Replays"), tr("Delete replays older than (days):"),
+                           older_than, 30, 1, 3650)
+
     @Slot()
     def keepLatest(self):
-        """Replays but the latest ones (number asked) moved to the recycle bin, protected ones kept"""
-        count, accepted = QInputDialog.getInt(self._window, tr("Keep Latest Replays"),
-                                              tr("Number of latest replays kept:"), 20, 1, 1000)
-        if accepted:
+        """Replays but the latest ones (number asked in the page) moved to the recycle bin, protected ones kept"""
+        def keep(count: int):
             # Replays of unknown time (0) kept, as Delete Older Than does: their age is unknown
             dated = [replay for replay in self.replays if replay.time > 0]
             latest = sorted(dated, key=lambda replay: replay.time, reverse=True)
             self.delete_replays(latest[count:], "Keep Latest Replays")
+
+        dialogs.ask_number(self._window, tr("Keep Latest Replays"), tr("Number of latest replays kept:"),
+                           keep, 20, 1, 1000)
 
     @Slot()
     def deleteTempFiles(self):
@@ -309,13 +324,18 @@ class ReplaysFolder(ReplaysBase):
             return
         self.update_files()
         if not self.temp:
-            self.notify(tr("No temporary file left by the game."))
+            self.notify(tr("No temporary file left by the game"))
             return
         size = self.temp_size()
-        if not self._window.confirm_operation(
-                "Delete Temporary Files", f"Move <b>{len(self.temp)}</b> temporary files ({size}) to the recycle bin?"):
-            return
-        self.start_trash(list(self.temp), "temp")
+        paths = list(self.temp)
+
+        def confirmed(chosen: bool):
+            if chosen and not self.trash_busy():
+                self.start_trash(paths, "temp")
+
+        dialogs.confirm(self._window, tr("Delete Temporary Files"),
+                        trm(f"Move <b>{len(paths)}</b> temporary files ({size}) to the recycle bin?"),
+                        tr("Delete Temporary Files"), confirmed, danger=True)
 
     def refresh_files(self, added: list[str] | None = None, deleted: list[str] | None = None):
         """Replays list updated after files changed: at once from files, then from game (ids, metadata)"""

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
-from ._columns import DriverTable, lap_time_key, pit_time_key, styles
+from ._columns import DriverTable, lap_time_key, pit_time_key, pit_time_shown, styles
 from ._common import player_vehicle
 from ._painter import DeltaLapTime
 
@@ -40,6 +40,7 @@ class Realtime(DriverTable):
     """Draw widget"""
 
     wcfg: "RivalsConfig"
+    blank_state = 2  # row of car ahead without car ahead (class leader): cells kept, text cleared
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -116,10 +117,10 @@ class Realtime(DriverTable):
         plr_veh_info = player_vehicle()  # neutral if none: no rival rows
         rivals_list = plr_veh_info.classAheadIndex, plr_veh_info.classBehindIndex
 
-        # Standings update
+        # Standings update: car ahead row (blank if none: car behind stays in its row), car behind row
         for idx, rvl_idx in enumerate(rivals_list):
 
-            # Get vehicle dataset
+            # Set row state: 1 - show, 2 - blank (car ahead row), 0 - hide (car behind row)
             if rvl_idx >= 0:
                 self.row_visible[idx] = True
                 state = 1
@@ -127,7 +128,7 @@ class Realtime(DriverTable):
                 continue  # skip if already empty
             else:
                 self.row_visible[idx] = False
-                state = 0
+                state = self.blank_state if idx == 0 else 0
 
             # Get vehicle dataset
             veh_info = minfo.vehicles.dataSet[rvl_idx]
@@ -135,7 +136,7 @@ class Realtime(DriverTable):
             self.update_columns(idx, veh_info, False, False, in_race, state)
             # Time interval
             if self.wcfg["show_time_interval"]:
-                is_ahead = veh_info.positionOverall < plr_veh_info.positionOverall
+                is_ahead = idx == 0  # by row (positions may be equal: start of session)
                 if is_ahead:
                     time_int = plr_veh_info.gapBehindNextInClass
                 else:
@@ -149,7 +150,7 @@ class Realtime(DriverTable):
                 if self.wcfg["show_pitstop_duration_while_requested_pitstop"] and plr_veh_info.pitRequested:
                     lap_key = pit_time_key(veh_info.inPit, veh_info.pitTimer.elapsed)
                 elif in_race or self.wcfg["show_best_laptime"]:
-                    if veh_info.pitTimer.pitting:
+                    if pit_time_shown(veh_info):
                         lap_key = pit_time_key(veh_info.inPit, veh_info.pitTimer.elapsed)
                     else:
                         lap_key = lap_time_key(veh_info.lastLapTime, veh_info.isValidLap)
@@ -166,7 +167,10 @@ class Realtime(DriverTable):
         """Time interval"""
         if target.last != data:
             target.last = data
-            text = self.int_to_next(data[0], data[1])[:self.int_width].strip(".")
+            if data[-1] == self.blank_state:
+                text = ""
+            else:
+                text = self.int_to_next(data[0], data[1])[:self.int_width].strip(".")
             if not self.wcfg["time_interval_align_center"]:
                 text = f"{text:>{self.int_width}}"
             target.text = text
@@ -177,7 +181,7 @@ class Realtime(DriverTable):
         """Vehicle delta laptime"""
         if target.last != data:
             target.last = data
-            target.delta = data[0]
+            target.delta = () if data[-1] == self.blank_state else data[0]
             self.toggle_visibility(target, data[-1])
 
     # Additional methods

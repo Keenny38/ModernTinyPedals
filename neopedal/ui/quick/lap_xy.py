@@ -38,6 +38,7 @@ from PySide6.QtWidgets import QApplication
 
 from ...i18n import tr, trm
 from ...setting import cfg
+from ...userfile.corner_analysis import resample_sorted
 from ...userfile.lap_geometry import (
     coordinate_array,
 )
@@ -212,6 +213,26 @@ class XyTabs(BackendBase):
                 "zero": [(0 - x_low) / (x_high - x_low), (0 - y_low) / (y_high - y_low)],
                 "xRange": [x_low, x_high], "yRange": [y_low, y_high]}  # zoomed plot asks ticks of part shown
 
+    def xy_weights(self, column: str, lap: PlotLap, distances: Sequence[float]) -> list[float]:
+        """Lap time each sample of xy_samples stands for (histogram weights), lap times of the samples found in one
+        pass (distances ascending), kept per lap, channel & zoomed part: the chart zoom asks the histogram again at
+        each zoom end"""
+        key = (lap.key, id(lap.data), column, self.data.version, len(distances), distances[0], distances[-1])
+        weights = self._xy_weights.get(key)
+        if weights is None:
+            own, times = self.data.lap_times(lap)
+            scale = self.data.scale_of(lap)
+            if own:
+                grid = [distance / scale for distance in distances] if scale != 1.0 else distances
+                lap_times: Sequence[float] = resample_sorted(own, times, grid)
+            else:
+                lap_times = distances
+            weights = time_weights(lap_times)
+            if len(self._xy_weights) >= 64:  # laps or zoomed parts no longer shown
+                self._xy_weights.clear()
+            self._xy_weights[key] = weights
+        return weights
+
     @Slot(str, result=dict)
     def histogram(self, column: str) -> dict:
         """Share of lap time spent in each value range of channel, each shown lap (zoomed chart part if zoomed)"""
@@ -223,10 +244,7 @@ class XyTabs(BackendBase):
             distances, values = self.xy_samples(column, lap)
             if len(distances) < 2:
                 continue
-            own, times = self.data.lap_times(lap)
-            scale = self.data.scale_of(lap)
-            lap_times = [interpolate(own, times, distance / scale) for distance in distances] if own else distances
-            samples.append((lap, values, time_weights(lap_times)))
+            samples.append((lap, values, self.xy_weights(column, lap, distances)))
         if not samples:
             return {}
         if column in INTEGER_CHANNELS:  # one bar per whole value (gear 1, 2, 3...)

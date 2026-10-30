@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStatusBar,
     QVBoxLayout,
     QWidget,
 )
@@ -63,19 +64,19 @@ from ..i18n import tr, trm
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
-from ..template.page_registry import tool_pages
+from ..template.page_registry import PAGE_MAIN, page_spec, page_wiki, tool_pages
 from . import (
     draw_focus_ring,
     status_color,
 )
 from ._common import MODIFIED_MARKER, BaseDialog, UIScaler
-from .lazy_page import IdlePageRelease, LazyPage, PageRelease, release_quick_views
+from .lazy_page import IdlePageRelease, LazyPage, PageFade, PageRelease, release_quick_views
 from .menu import APIMenu, open_config_application
-from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
-from .notification import NotifyBar
+from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, page_name, rail_entries, rail_text
+from .notification import NotifyBar, notification_store
 from .ordered_picker import icon_font_family
 from .pace_notes_view import PaceNotesControl, PaceNotesPlayback
-from .tools_view import RENAMED_TOOLS, TOOL_SECTIONS, ToolsView, open_tool
+from .tools_view import LISTED_TOOL_SECTIONS, RENAMED_TOOLS, TOOL_SECTIONS, ToolsView, open_tool
 from .window_geometry import (
     keep_on_screen,
     max_content_size,
@@ -93,6 +94,12 @@ RAIL_TOGGLES = (
     ("auto_hide", "Auto Hide", "\ue7b3", "H"),  # red eye
     ("vr_compatibility", "VR Compatibility", "\ue7f4", "V"),  # tv monitor
 )
+RAIL_LABEL_SCALE = 0.9  # rail labels: fontLabel token of QML pages (quick.FONT_SCALE)
+RAIL_LABEL_MIN_PT = 7.5  # never smaller (readable at 100% scale)
+# Rail polled this often for states not pushed by app_signal.refresh (API version, Broadcast Director); refresh
+# signals (hotkeys, tray, pages) update it at once. A tick costs a few hundred µs of Python on the UI thread.
+RAIL_POLL_MS = 2500
+BREADCRUMB_SEPARATOR = "\u203a"  # single right angle quote
 
 
 def show_restored(window: QWidget):
@@ -150,6 +157,7 @@ class NavButton(QAbstractButton):
         super().__init__(parent)
         self.compact = compact  # icon only, label in tooltip
         self.dot_color: QColor | None = None  # status dot drawn at top right
+        self.badge_text = ""  # count badge drawn at top right instead of the dot (unread notifications)
         self.modified = False  # page has unsaved changes: marker before label, see set_modified
         self.setText(text)
         self.setCheckable(True)
@@ -213,13 +221,17 @@ class NavButton(QAbstractButton):
             painter.drawRoundedRect(area, radius, radius)
         draw_focus_ring(painter, self, area, radius)
         color = accent if self.isChecked() else (text if self.underMouse() else muted)
+        if not self.isEnabled():
+            color = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText)
         painter.setPen(color)
         icon_font = QFont(self.icon_font)
         if self.compact:
             icon_font.setPixelSize(round(area.height() * 0.44))
             painter.setFont(icon_font)
             painter.drawText(area, Qt.AlignmentFlag.AlignCenter, self.glyph)
-            if self.dot_color is not None:
+            if self.badge_text:  # count in a filled pill: number, not color alone
+                self.paint_badge(painter, area)
+            elif self.dot_color is not None:
                 dot = area.height() * 0.22
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(self.dot_color)
@@ -237,7 +249,8 @@ class NavButton(QAbstractButton):
             painter.drawEllipse(QRectF(icon_rect.center().x() + icon_rect.height() * 0.3, icon_rect.top(), dot, dot))
             painter.restore()
         label_font = QFont(self.font())
-        label_font.setPixelSize(max(round(area.height() * 0.2), 8))
+        # Label size of fontLabel token (quick.FONT_SCALE), never below a readable size
+        label_font.setPointSizeF(max(self.font().pointSizeF() * RAIL_LABEL_SCALE, RAIL_LABEL_MIN_PT))
         label_font.setBold(self.isChecked())
         painter.setFont(label_font)
         painter.setPen(text if self.isChecked() else color)
@@ -245,6 +258,30 @@ class NavButton(QAbstractButton):
         label_text = f"{MODIFIED_MARKER}{self.text()}" if self.modified else self.text()
         label = QFontMetricsF(label_font).elidedText(label_text, Qt.TextElideMode.ElideRight, label_rect.width())
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+    def paint_badge(self, painter: QPainter, area: QRectF):
+        """Count badge at top right: danger fill, white count (4.5:1)"""
+        font = QFont(self.font())
+        font.setPointSizeF(max(self.font().pointSizeF() * 0.7, 6.5))
+        font.setBold(True)
+        metrics = QFontMetricsF(font)
+        height = metrics.height()
+        width = max(metrics.horizontalAdvance(self.badge_text) + height * 0.6, height)
+        pill = QRectF(area.right() - width, area.top(), width, height)
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(status_color("badge_danger")))
+        painter.drawRoundedRect(pill, height / 2, height / 2)
+        painter.setPen(QColor(status_color("badge_text")))
+        painter.setFont(font)
+        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, self.badge_text)
+        painter.restore()
+
+    def set_badge(self, text: str):
+        """Count badge (unread notifications), "" hides it; named in tooltip & accessible description"""
+        if text != self.badge_text:
+            self.badge_text = text
+            self.update()
 
 
 class ScrollFade(QWidget):
@@ -300,48 +337,124 @@ class ScrollFade(QWidget):
         painter.drawLine(QPointF(center, tip), QPointF(center + size, base))
 
 
+def qml_shows_title(widget: QWidget) -> bool | None:
+    """A Qt Quick page of widget shows its own page title (TpPageHeader with a title): host shows none
+
+    Returns:
+        True if found, False if not found in the loaded page(s), None while no Qt Quick page is loaded yet.
+    """
+    loaded = False
+    for view in widget.findChildren(QWidget):
+        root_object = getattr(view, "rootObject", None) if view.inherits("QQuickWidget") else None
+        root = root_object() if callable(root_object) else None
+        loaded = loaded or root is not None
+        items = [(root, 0)] if root is not None else []
+        while items:
+            item, depth = items.pop()
+            if item.metaObject().className().startswith("TpPageHeader") and item.property("title"):
+                return True
+            if depth < 6:  # page header sits near the page root
+                items.extend((child, depth + 1) for child in item.childItems())
+    return False if loaded else None
+
+
+PAGE_MARGIN = 0.8  # page margins in em, as padPage of Qt Quick pages (quick.SPACE_SCALE)
+
+
+def page_title_font(font: QFont) -> QFont:
+    """Page title look of Qt Quick pages (TpText title role): display face, fontHeading size, DemiBold"""
+    from .quick import FONT_SCALE, display_font
+
+    family, style = display_font()
+    title = QFont(font)
+    title.setFamily(family)
+    if style:  # variable font file: its Display instance by style name (weight comes with it)
+        title.setStyleName(style)
+    else:
+        title.setWeight(QFont.Weight.DemiBold)
+    title.setPointSizeF(UIScaler.FONT_POINT * FONT_SCALE["fontHeading"])
+    return title
+
+
 class DialogPage(QWidget):
-    """Dialog shown as page inside app: title & close button, then dialog (scrolled if larger than page)
+    """Dialog shown as page inside app: shell header (breadcrumb, title, close button), then dialog
+    (scrolled if larger than page)
+
+    Header: where the page was opened from (opener page, else page shown then: "Home \u203a", "Tools \u203a"...) then
+    page title in the page title look of Qt Quick pages (TpText title role), left out when the page shows its own
+    title (OWNS_TITLE class attribute of the dialog, else found in its Qt Quick page). Tools of the navigation rail
+    keep the title only (pages like any other, selected in rail: no breadcrumb, no Close). The dialog's own Close
+    buttons are hidden: the header has one (no double Close).
 
     Emits closed when dialog closes itself (close button, Save & close, Esc): page is then removed.
     Emits modified_changed when dialog unsaved changes marker is shown or cleared.
     Emits minimum_changed when page area minimum asked by dialog changes, see minimum_size.
+    Emits crumb_clicked with the crumb target (opener or origin page, main page key) when a breadcrumb part is clicked.
     """
 
     closed = Signal(QWidget)
     modified_changed = Signal()
     minimum_changed = Signal()
+    crumb_clicked = Signal(object)
     restored = False  # reopened by app (pages left open at last quit), not opened by user
 
-    def __init__(self, dialog: BaseDialog, parent=None, opener: "DialogPage | None" = None):
+    def __init__(self, dialog: BaseDialog, parent=None, opener: "DialogPage | None" = None,
+                 origin: "DialogPage | str | None" = None):
         super().__init__(parent)
         self.setObjectName("dialogPage")
         # Page never sets main window minimum size (open pages are kept, hidden, in page stack)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.dialog = dialog
         self.opener = opener  # page this one was opened from (lap library of lap viewer...), kept open with it
+        # Page shown when this one opened (main page key, other dialog page), breadcrumb only (not kept open for it)
+        self.origin = origin
         self._closed = False
         self._closable = True  # see set_closable
+        self._owns_title: bool | None = getattr(dialog, "OWNS_TITLE", None)  # None: looked for once shown
         self._own_close_buttons: list[QAbstractButton] | None = None
         self.title = title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
+        spec = page_spec(type(dialog).__name__)
+        self.wiki = page_wiki(type(dialog).__name__)  # user guide page (help button)
+        # Breadcrumb: page opened from, else page shown then, else Tools page for tools listed there
+        button_crumb = QPushButton(self)
+        button_crumb.setObjectName("dialogPageCrumb")
+        button_crumb.setFlat(True)
+        button_crumb.setStyleSheet(  # link look: accent text, no frame
+            "QPushButton { border: none; background: transparent; padding: 0; color: palette(highlight); }"
+            "QPushButton:hover, QPushButton:focus { text-decoration: underline; }")
+        button_crumb.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_crumb.clicked.connect(lambda: self.crumb_clicked.emit(self.crumb_target()))
+        self._button_crumb = button_crumb
+        self._crumb_tools = spec is not None and spec.category != PAGE_MAIN and spec.listed
+        label_separator = QLabel(BREADCRUMB_SEPARATOR, self)
+        label_separator.setEnabled(False)
+        self._label_separator = label_separator
         label_title = QLabel(title, self)
         label_title.setObjectName("dialogPageTitle")
-        font = label_title.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() * 1.15)
-        label_title.setFont(font)
+        label_title.setTextFormat(Qt.TextFormat.PlainText)
+        label_title.setFont(page_title_font(label_title.font()))
+        label_title.setAccessibleName(title)
         self._label_title = label_title
         dialog.modified_changed.connect(self.show_modified)
-        self.show_modified()
         button_close = QPushButton(tr("Close"), self)
-        button_close.setToolTip(tr("Close and go back to previous page"))
+        button_close.setToolTip(tr("Close and go back to previous page") + " (Esc)")
         button_close.clicked.connect(dialog.close)
         self._button_close = button_close
         layout_title = QHBoxLayout()
-        layout_title.setContentsMargins(UIScaler.pixel(10), UIScaler.pixel(6), UIScaler.pixel(10), 0)
+        margin = round(UIScaler.FONT_PIXEL_SCALED * PAGE_MARGIN)  # title lined up with page contents (padPage)
+        layout_title.setContentsMargins(margin, margin, margin, 0)
+        layout_title.setSpacing(UIScaler.pixel(4))
+        layout_title.addWidget(button_crumb)
+        layout_title.addWidget(label_separator)
         layout_title.addWidget(label_title, stretch=1)
+        layout_title.addStretch(0)  # title hidden (page shows its own): Close kept at right, not widened
         layout_title.addWidget(button_close)
         self._layout_title = layout_title
+        self._header = QWidget(self)
+        self._header.setObjectName("dialogPageHeader")
+        self._header.setLayout(layout_title)
+        self.refresh_breadcrumb()
+        self.show_modified()
 
         dialog.in_app_page = True  # shown as page, see embedded_host
         # Size the dialog was designed for as window (resize & minimum size), main window grows
@@ -366,8 +479,50 @@ class DialogPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addLayout(layout_title)
+        layout.addWidget(self._header)
         layout.addWidget(scroll, stretch=1)
+        self.hide_own_close_buttons()
+
+    def owns_title(self) -> bool:
+        """Page shows its own title (Qt Quick page header), looked for once its page is built"""
+        if self._owns_title is None and self.dialog is not None:
+            self._owns_title = qml_shows_title(self.dialog)  # looked for again while no page is loaded
+        return bool(self._owns_title)
+
+    def crumb(self) -> tuple[object, str]:
+        """Breadcrumb (target, text): page opened from, else page shown when opened (main page key, other page still
+        open), else "tools" (Tools page) for tools listed there; none on navigation rail tools (pages like any other)"""
+        if not self._closable:
+            return None, ""
+        if self.opener is not None:
+            return self.opener, self.opener.title
+        origin = self.origin
+        if isinstance(origin, DialogPage) and shiboken6.isValid(origin) and not origin._closed:
+            return origin, origin.title
+        if isinstance(origin, str) and origin in PAGE_INDEX:
+            return origin, page_name(PAGE_INDEX[origin])
+        return ("tools", tr("Tools")) if self._crumb_tools else (None, "")
+
+    def crumb_target(self) -> object:
+        """Breadcrumb target: page opened from or shown then (DialogPage, main page key), None if no breadcrumb"""
+        return self.crumb()[0]
+
+    def refresh_breadcrumb(self):
+        """Breadcrumb parts shown (see crumb), then title unless page shows its own; header left out when empty
+        (rail tool showing its own title)"""
+        crumb = self.crumb()[1]
+        owns_title = self.owns_title()
+        self._button_crumb.setText(crumb)
+        self._button_crumb.setToolTip(trm(f"Go to {crumb}") if crumb else "")
+        self._button_crumb.setVisible(bool(crumb))
+        self._label_separator.setVisible(bool(crumb) and not owns_title)
+        self._label_title.setVisible(not owns_title)
+        self._header.setVisible(self._closable or bool(crumb) or not owns_title)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._owns_title is None:  # Qt Quick page built when first shown: title looked for once loaded
+            QTimer.singleShot(0, self, self.refresh_breadcrumb)
 
     def is_modified(self) -> bool:
         """Dialog shows unsaved changes marker"""
@@ -386,18 +541,30 @@ class DialogPage(QWidget):
         modified = self.is_modified()
         self._label_title.setText(self.display_title())
         self._label_title.setToolTip(tr("Unsaved changes") if modified else "")
+        self._label_title.setAccessibleDescription(tr("Unsaved changes") if modified else "")
         self.modified_changed.emit()
 
     def set_closable(self, closable: bool):
-        """Close buttons (title & dialog own) & Esc key, off for tools of navigation rail (pages like any other)"""
+        """Close button, breadcrumb & Esc key, off for tools of navigation rail (pages like any other: title kept)"""
         if closable == self._closable:
             return
         self._closable = closable
         self._button_close.setVisible(closable)
+        self.refresh_breadcrumb()
+        self.hide_own_close_buttons()
+
+    def hide_own_close_buttons(self):
+        """Dialog's own Close buttons hidden: header has one (no double Close), rail tools have none"""
         if self._own_close_buttons is None:  # found once, dialog layout does not change
             self._own_close_buttons = self.dialog_close_buttons()
         for button in self._own_close_buttons:
-            button.setVisible(closable)
+            if shiboken6.isValid(button):
+                button.setVisible(False)
+
+    def esc_closes(self) -> bool:
+        """Esc closes page: page has a Close button, dialog does not keep Esc for itself (ESC_CLOSES = False:
+        Broadcast Director, whose keys drive cameras)"""
+        return self._closable and getattr(self.dialog, "ESC_CLOSES", True)
 
     def dialog_close_buttons(self) -> list[QAbstractButton]:
         """Close buttons of dialog itself (not of dialogs opened from it)"""
@@ -423,15 +590,15 @@ class DialogPage(QWidget):
         return minimum() if callable(minimum) else QSize(0, 0)
 
     def title_height(self) -> int:
-        return self._layout_title.sizeHint().height()
+        return self._layout_title.sizeHint().height() if not self._header.isHidden() else 0
 
     def eventFilter(self, watched, event):
         # Hidden by itself (not because page is hidden): dialog closed
         if watched is self.dialog and event.type() == QEvent.Type.Hide and self.dialog.isHidden():
             self.notify_closed()
-        # Esc does not close pages without close button
-        if (watched is self.dialog and not self._closable and event.type() == QEvent.Type.KeyPress
-                and event.key() == Qt.Key.Key_Escape):
+        # Esc does not close pages without close button, nor pages keeping Esc (see esc_closes)
+        if (watched is self.dialog and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape and not self.esc_closes()):
             return True
         return super().eventFilter(watched, event)
 
@@ -455,9 +622,11 @@ def kept_when_hidden(dialog) -> bool:
 class TabView(QWidget):
     """Main view: navigation rail on the left, page on the right"""
 
+    page_shown = Signal()  # shown page, its title or its unsaved changes marker changed (window title)
+
     def __init__(self, parent):
         super().__init__(parent)
-        # Notify bar
+        # Notify bar: status chips in the window status bar (one band), see NotifyBar
         notify_bar = NotifyBar(self)
         notify_bar.presetlocked.clicked.connect(self.select_preset_tab)
         notify_bar.spectate.clicked.connect(self.select_spectate_tab)
@@ -505,7 +674,10 @@ class TabView(QWidget):
         self._dialog_parent = parent
         self._return_index = 0  # page shown again when last dialog page closes
         self._page_history: list[QWidget] = []  # pages shown before, see previous_shown
+        # Pages left by going back (Forward shows them again): page, or tool path of a page closed since
+        self._forward_history: list[QWidget | str] = []
         self._going_back = False
+        self._going_forward = False
         self._restoring_pages = False  # reopening pages: window not brought to front
         self._closing_pages = False  # closing several pages (quit, Close All) or view replaced: left pages not closed
         self._left_pages_timer = QTimer(self)  # pages left for another one closed once page change is done
@@ -541,6 +713,22 @@ class TabView(QWidget):
         self._rail_scroll.viewport().setAutoFillBackground(False)
         rail_list.setAutoFillBackground(False)
         self._rail_shortcuts: list[QShortcut] = []
+        # Back & forward, like a browser (Alt+Left / Alt+Right, mouse back & forward buttons)
+        layout_history = QHBoxLayout()
+        layout_history.setSpacing(UIScaler.pixel(2))
+        self._button_back = NavButton(f"{tr('Back')} (Alt+Left)", "\ue72b", "\u2039", icon_family, rail, compact=True)
+        self._button_back.setObjectName("railBack")
+        self._button_back.setCheckable(False)
+        self._button_back.clicked.connect(self.go_back)
+        self._button_forward = NavButton(
+            f"{tr('Forward')} (Alt+Right)", "\ue72a", "\u203a", icon_family, rail, compact=True)
+        self._button_forward.setObjectName("railForward")
+        self._button_forward.setCheckable(False)
+        self._button_forward.clicked.connect(self.go_forward)
+        for button in (self._button_back, self._button_forward):
+            button.setAccessibleName(button.toolTip())
+            layout_history.addWidget(button)
+        layout_rail.addLayout(layout_history)
         self.build_rail_items()
         for widget in (rail, rail_list):
             widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -559,7 +747,8 @@ class TabView(QWidget):
             button.clicked.connect(lambda _=False, name=option: self.toggle_overlay(name))
             self._toggles[option] = button
             layout_quick.addWidget(button, index // 2, index % 2)
-        button_config = NavButton(f"{tr('Config')} (Ctrl+,)", "\ue713", "C", icon_family, rail, compact=True)
+        button_config = NavButton(f"{tr('Settings')} (Ctrl+,)", "\ue713", "S", icon_family, rail, compact=True)
+        button_config.setObjectName("railSettings")
         button_config.setCheckable(False)
         button_config.clicked.connect(lambda: open_config_application(parent, ""))  # page as left
         layout_quick.addWidget(button_config, 1, 1)
@@ -573,16 +762,39 @@ class TabView(QWidget):
         button_search.setCheckable(False)
         button_search.clicked.connect(parent.open_command_palette)
         layout_quick.addWidget(button_search, 2, 0)
+        # Notification center: unread count badge, see notification.NotificationStore
+        self._button_notices = NavButton(tr("Notifications"), "\uea8f", "!", icon_family, rail, compact=True)  # bell
+        self._button_notices.setObjectName("railNotifications")
+        self._button_notices.setCheckable(False)
+        self._button_notices.clicked.connect(self.show_notification_center)
+        layout_quick.addWidget(self._button_notices, 3, 0)
+        # Pages & tools left out of the rail, rail customization
+        self._button_more = NavButton(tr("More"), "\ue712", "\u2026", icon_family, rail, compact=True)  # more
+        self._button_more.setObjectName("railMore")
+        self._button_more.setCheckable(False)
+        self._button_more.clicked.connect(self.show_more_menu)
+        layout_quick.addWidget(self._button_more, 3, 1)
+        # Help of shown page (user guide)
+        self._button_help = NavButton(tr("Help"), "\ue897", "?", icon_family, rail, compact=True)  # help
+        self._button_help.setObjectName("railHelp")
+        self._button_help.setCheckable(False)
+        self._button_help.clicked.connect(self.open_page_help)
+        layout_quick.addWidget(self._button_help, 4, 1)
         # Pages of tools & config dialogs left open, shown while any
-        self._button_pages = NavButton(tr("Open Pages"), "", "P", icon_family, rail, compact=True)
+        self._button_pages = NavButton(tr("Open Pages"), "\ue8a9", "P", icon_family, rail, compact=True)
         self._button_pages.setCheckable(False)
         self._button_pages.clicked.connect(self.show_pages_menu)
         self._button_pages.setVisible(False)
-        layout_quick.addWidget(self._button_pages, 3, 0)
+        layout_quick.addWidget(self._button_pages, 4, 0)
+        for button in (button_config, self._button_api, button_search, self._button_notices, self._button_more,
+                       self._button_help, self._button_pages):
+            button.setAccessibleName(button.toolTip().split(" (")[0])
         layout_rail.addLayout(layout_quick)
+        notification_store().changed.connect(self.refresh_notification_badge)
+        self.refresh_notification_badge()
         self._rail_timer = QTimer(self)
         self._rail_timer.timeout.connect(self.refresh_rail_shown)
-        self._rail_timer.start(1000)  # also follows changes from hotkeys, tray menu & API
+        self._rail_timer.start(RAIL_POLL_MS)  # also follows changes from hotkeys, tray menu & API
         self.refresh_rail()
 
         last_page = cfg.application["last_page_index"]
@@ -599,14 +811,26 @@ class TabView(QWidget):
         layout_body.setSpacing(0)
         layout_body.addWidget(rail)
         layout_body.addWidget(self._pages, stretch=1)
+        # Page change fades in (window background fading out over the new page), see PageFade
+        self._page_fade = PageFade(self._pages)
+        self._pages.currentChanged.connect(self._page_fade.start)
 
         # Main view
         layout_main = QVBoxLayout()
         layout_main.setContentsMargins(0, 0, 0, 0)
         layout_main.setSpacing(0)
         layout_main.addLayout(layout_body, stretch=1)
-        layout_main.addWidget(notify_bar)
+        status_bar = getattr(parent, "statusBar", None)
+        if callable(status_bar) and isinstance(status_bar(), QStatusBar):
+            status_bar().addWidget(notify_bar, 1)  # one band: status chips, then saving state on the right
+        else:
+            layout_main.addWidget(notify_bar)
         self.setLayout(layout_main)
+        self._pages.currentChanged.connect(self.history_changed)
+        self._pages.currentChanged.connect(self.page_shown)
+        self.page_shown.connect(self.refresh_help_button)
+        self.history_changed()
+        self.refresh_help_button()
 
         # Connect app signal
         app_signal.updates.connect(notify_bar.updates.checking)
@@ -643,7 +867,9 @@ class TabView(QWidget):
         entries = rail_entries()
         for position, key in enumerate(current_rail_items(), 1):
             entry = entries[key]
-            button = NavButton(tr(entry.label), entry.glyph, entry.letter, self._icon_family, self._rail)
+            button = NavButton(rail_text(entry.label, entry.tooltip), entry.glyph, entry.letter, self._icon_family,
+                               self._rail)
+            button.setAccessibleName(tr(entry.tooltip))
             hint = f" (Ctrl+{position})" if position <= 9 else ""
             button.setToolTip(f"{tr(entry.tooltip)}{hint}")
             if entry.page >= 0:
@@ -670,7 +896,7 @@ class TabView(QWidget):
     def show_rail_menu(self, position):
         """Rail context menu: customize entries"""
         menu = QMenu(self)
-        menu.addAction(tr("Customize Navigation Bar...")).triggered.connect(self.open_rail_editor)
+        menu.addAction(tr("Customize Navigation Bar…")).triggered.connect(self.open_rail_editor)
         menu.exec(self._rail.mapToGlobal(position))
         menu.deleteLater()
 
@@ -714,17 +940,34 @@ class TabView(QWidget):
                 release_quick_views(dialog)  # QML unloaded before its backend goes
                 dialog.deleteLater()  # second copy of open dialog: never shown
                 return True
-            page = DialogPage(dialog, self._pages, self.page_of(dialog.parentWidget()))
-            page.closed.connect(self.close_dialog_page)
-            page.modified_changed.connect(self.refresh_open_pages)
-            page.modified_changed.connect(self.schedule_close_left_pages)
-            page.minimum_changed.connect(self.update_page_minimum)
+            page = DialogPage(dialog, self._pages, self.page_of(dialog.parentWidget()), self.shown_origin())
+            self.connect_page(page)
             self._pages.addWidget(page)
             self.show_page_widget(page)
             self.refresh_open_pages()
         finally:
             self._restoring_pages = restoring
         return True
+
+    def shown_origin(self) -> DialogPage | str | None:
+        """Page shown now, breadcrumb of a page opened from it (menu, palette, Home quick access...): main page key
+        or dialog page, None while pages are reopened (startup)"""
+        if self._restoring_pages:
+            return None
+        current = self._pages.currentWidget()
+        if isinstance(current, DialogPage):
+            return current
+        index = self._pages.currentIndex()
+        return NAV_PAGES[index][0] if 0 <= index < len(NAV_PAGES) else None
+
+    @staticmethod
+    def tool_path(page: DialogPage) -> str | None:
+        """Tool dialog path of page ("module.DialogClass"), None if not a tool page"""
+        if page.dialog is None:
+            return None
+        name = type(page.dialog).__name__
+        return next((path for _, entries in TOOL_SECTIONS for _, _, path in entries
+                     if path.rsplit(".", 1)[-1] == name), None)
 
     @staticmethod
     def page_of(widget: QWidget | None) -> DialogPage | None:
@@ -1156,7 +1399,9 @@ class TabView(QWidget):
             page.closed.disconnect(self.close_dialog_page)
             page.modified_changed.disconnect(self.refresh_open_pages)
             page.modified_changed.disconnect(self.schedule_close_left_pages)
+            page.modified_changed.disconnect(self.page_shown)
             page.minimum_changed.disconnect(self.update_page_minimum)
+            page.crumb_clicked.disconnect(self.show_crumb)
             self._pages.removeWidget(page)
             page.setParent(None)
             kept.append(page)
@@ -1178,10 +1423,10 @@ class TabView(QWidget):
         for page in pages:
             if not any(page.opener is other for other in pages):  # tool page reopened as new page
                 page.opener = None
-            page.closed.connect(self.close_dialog_page)
-            page.modified_changed.connect(self.refresh_open_pages)
-            page.modified_changed.connect(self.schedule_close_left_pages)
-            page.minimum_changed.connect(self.update_page_minimum)
+            if not any(page.origin is other for other in pages) and isinstance(page.origin, DialogPage):
+                page.origin = None
+            page.refresh_breadcrumb()  # crumb text in the new language
+            self.connect_page(page)
             self._pages.addWidget(page)
         self.refresh_open_pages()
 
@@ -1264,9 +1509,20 @@ class TabView(QWidget):
         self._pages.removeWidget(page)
         page.deleteLater()
         for other in self.dialog_pages():
-            if other.opener is page:
-                other.opener = None
+            if other.opener is page or other.origin is page:
+                other.opener = None if other.opener is page else other.opener
+                other.origin = None if other.origin is page else other.origin
+                other.refresh_breadcrumb()
         self._page_history = [shown for shown in self._page_history if shown is not page]
+        # Forward to a closed tool page opens it again, other closed pages are left out
+        path = self.tool_path(page) if isinstance(page, DialogPage) else None
+        forward: list[QWidget | str] = []
+        for entry in self._forward_history:
+            if entry is not page:
+                forward.append(entry)
+            elif path:
+                forward.append(path)
+        self._forward_history = forward
         self._grown_for.discard(page)
         # No open page needs grown window anymore (hidden page released: size kept, user never closed it)
         if not self._grown_for and not self._idle_closing:
@@ -1280,10 +1536,34 @@ class TabView(QWidget):
                 self.set_current_index(self._pages.indexOf(previous))
             else:
                 self.set_current_index(min(self._return_index, len(NAV_PAGES) - 1))
+        self.history_changed()
+
+    def connect_page(self, page: DialogPage):
+        """Dialog page signals followed by view"""
+        page.closed.connect(self.close_dialog_page)
+        page.modified_changed.connect(self.refresh_open_pages)
+        page.modified_changed.connect(self.schedule_close_left_pages)
+        page.modified_changed.connect(self.page_shown)
+        page.minimum_changed.connect(self.update_page_minimum)
+        page.crumb_clicked.connect(self.show_crumb)
+
+    def show_crumb(self, target: object):
+        """Breadcrumb part clicked: page it names shown (page opened from or shown then, main page by key)"""
+        if isinstance(target, DialogPage) and self._pages.indexOf(target) >= 0:
+            self.show_page_widget(target, bring_to_front=False)
+        elif isinstance(target, str) and target in PAGE_INDEX:
+            self.select_page(PAGE_INDEX[target])
 
     def remember_shown(self, current: QWidget | None, new: QWidget | None):
-        """Page left for another one, shown again when that one closes or going back"""
-        if current is None or current is new or self._going_back:
+        """Page left for another one, shown again when that one closes or going back
+
+        A page shown another way than Back & Forward clears Forward, like a browser.
+        """
+        if current is None or current is new:
+            return
+        if not self._going_back and not self._going_forward:
+            self._forward_history.clear()
+        if self._going_back:
             return
         if current in self._page_history:
             self._page_history.remove(current)
@@ -1298,11 +1578,25 @@ class TabView(QWidget):
                 return page
         return None
 
+    def can_go_back(self) -> bool:
+        current = self._pages.currentWidget()
+        return any(page is not current and self._pages.indexOf(page) >= 0 for page in self._page_history)
+
+    def can_go_forward(self) -> bool:
+        current = self._pages.currentWidget()
+        return any(isinstance(entry, str) or (entry is not current and self._pages.indexOf(entry) >= 0)
+                   for entry in self._forward_history)
+
     def go_back(self) -> bool:
-        """Show page shown before current one (Alt+Left, mouse back button), True if any"""
-        previous = self.previous_shown(self._pages.currentWidget())
+        """Show page shown before current one (Alt+Left, mouse back button), True if any; page left is
+        shown again by Forward"""
+        current = self._pages.currentWidget()
+        previous = self.previous_shown(current)
         if previous is None:
             return False
+        if current is not None:
+            self._forward_history.append(current)
+            del self._forward_history[:-20]
         self._going_back = True  # page left now is not remembered: going back again goes further back
         try:
             if isinstance(previous, DialogPage):
@@ -1311,11 +1605,147 @@ class TabView(QWidget):
                 self.set_current_index(self._pages.indexOf(previous))
         finally:
             self._going_back = False
+        self.history_changed()
         return True
+
+    def go_forward(self) -> bool:
+        """Show page left by going back (Alt+Right, mouse forward button), True if any; a tool page closed
+        meanwhile (left pages close) is opened again"""
+        current = self._pages.currentWidget()
+        while self._forward_history:
+            entry = self._forward_history.pop()
+            if isinstance(entry, str) or (entry is not current and self._pages.indexOf(entry) >= 0):
+                break
+        else:
+            self.history_changed()
+            return False
+        self._going_forward = True  # page left now goes to Back history, rest of Forward kept
+        try:
+            if isinstance(entry, str):
+                open_tool(entry, self._dialog_parent)
+            elif isinstance(entry, DialogPage):
+                self.show_page_widget(entry, bring_to_front=False)
+            else:
+                self.set_current_index(self._pages.indexOf(entry))
+        finally:
+            self._going_forward = False
+        self.history_changed()
+        return True
+
+    def history_changed(self, *_):
+        """Back & Forward buttons enabled while there is a page to go to"""
+        if not hasattr(self, "_button_back"):
+            return
+        self._button_back.setEnabled(self.can_go_back())
+        self._button_forward.setEnabled(self.can_go_forward())
+
+    def page_title(self, page: QWidget | None = None) -> str:
+        """Title of page (shown one by default) in app language, unsaved changes marker included"""
+        page = self._pages.currentWidget() if page is None else page
+        if isinstance(page, DialogPage):
+            return page.display_title()
+        index = self._pages.indexOf(page) if page is not None else -1
+        if 0 <= index < len(NAV_PAGES):
+            return page_name(index)
+        return ""
+
+    def page_modified(self) -> bool:
+        """Shown page has unsaved changes"""
+        current = self._pages.currentWidget()
+        return isinstance(current, DialogPage) and current.is_modified()
+
+    def page_wiki(self) -> str:
+        """User guide page of shown page (see PageSpec.wiki)"""
+        current = self._pages.currentWidget()
+        if isinstance(current, DialogPage):
+            return current.wiki
+        index = self._pages.currentIndex()
+        spec = page_spec(NAV_PAGES[index][0]) if 0 <= index < len(NAV_PAGES) else None
+        return spec.wiki if spec is not None else ""
+
+    def open_page_help(self):
+        """User guide page of shown page in browser (contents of the user guide if none)"""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from ..const_app import URL_USER_GUIDE
+
+        wiki = self.page_wiki()
+        QDesktopServices.openUrl(QUrl(f"{URL_USER_GUIDE}/{wiki}" if wiki else URL_USER_GUIDE))
+
+    def refresh_help_button(self):
+        """Help button tooltip names shown page"""
+        title = self.page_title().removeprefix(MODIFIED_MARKER)
+        tooltip = trm(f"Help: {title}") if title else tr("Help")
+        if self._button_help.toolTip() != tooltip:
+            self._button_help.setToolTip(tooltip)
+
+    def hidden_entries(self) -> tuple[list[tuple[int, str]], list[tuple[str, str]]]:
+        """Pages (index, title) & listed tools (path, title) left out of the navigation rail"""
+        shown = set(current_rail_items())
+        pages = [(index, page_name(index)) for index, (key, *_) in enumerate(NAV_PAGES) if key not in shown]
+        tools = [(path, tr(label)) for _, entries in LISTED_TOOL_SECTIONS for label, _, path in entries
+                 if path.split(".", 1)[0] not in shown]
+        return pages, tools
+
+    def show_more_menu(self):
+        """More menu next to its button"""
+        menu = self.more_menu()
+        button = self._button_more
+        menu.exec(button.mapToGlobal(button.rect().topRight()))
+        menu.deleteLater()
+
+    def more_menu(self) -> QMenu:
+        """More menu: pages & tools left out of the rail, rail customization"""
+        menu = QMenu(self)
+        pages, tools = self.hidden_entries()
+        if pages:
+            menu.addSection(tr("Pages"))
+            for index, title in pages:
+                menu.addAction(title).triggered.connect(lambda _=False, page=index: self.select_page(page))
+        if tools:
+            menu.addSection(tr("Tools"))
+            for path, title in tools:
+                menu.addAction(title).triggered.connect(
+                    lambda _=False, tool=path: open_tool(tool, self._dialog_parent))
+        menu.addSeparator()
+        menu.addAction(tr("Customize Navigation Bar…")).triggered.connect(self.open_rail_editor)
+        return menu
+
+    def refresh_notification_badge(self):
+        """Unread notifications count on bell (errors in its tooltip)"""
+        store = notification_store()
+        unread = store.unread_count()
+        self._button_notices.set_badge(str(min(unread, 99)) if unread else "")
+        tooltip = tr("Notifications")
+        if unread:
+            tooltip = f"{tooltip} \u00b7 {trm(f'{unread} unread')}"
+        self._button_notices.setToolTip(tooltip)
+        self._button_notices.setAccessibleDescription(trm(f"{unread} unread") if unread else "")
+
+    def show_notification_center(self):
+        """Notification center (history of messages) above the bell"""
+        from .notification import open_notification_center
+
+        open_notification_center(self._dialog_parent, self._button_notices)
 
     def current_index(self) -> int:
         """Current page index"""
         return self._pages.currentIndex()
+
+    def current_page(self) -> QWidget | None:
+        """Shown page (app page, or dialog page)"""
+        return self._pages.currentWidget()
+
+    def rail_shortcut_labels(self) -> list[tuple[str, str]]:
+        """Ctrl+1..9 of rail entries: (keys, entry name), keyboard shortcuts sheet"""
+        labels = []
+        for index in range(min(self._rail_items.count(), 9)):
+            item = self._rail_items.itemAt(index)
+            button = item.widget() if item is not None else None
+            if isinstance(button, NavButton):
+                labels.append((f"Ctrl+{index + 1}", button.accessibleName() or button.text()))
+        return labels
 
     def page_changed(self, index: int):
         """Shown page remembered at once, so a restart reopens it even after a crash or a
@@ -1356,16 +1786,22 @@ class TabView(QWidget):
         """Open pages with an on / off switch: dot on their rail entry (green on, grey off), Broadcast Director
         notice (on), each second"""
         buttons = self.rail_tool_buttons()
+        statuses = {}
         for name, module_name, function in PAGE_SWITCHES:
             module = sys.modules.get(module_name)  # imported only by the page
             status = getattr(module, function)() if module is not None else ""
+            statuses[name] = status
             button = buttons.get(name)
             if button is not None:
                 dot_color = QColor(status_color("success" if status == "on" else "inactive")) if status else None
                 if button.dot_color != dot_color:
                     button.dot_color = dot_color
                     button.update()
-        self._notify_bar.refresh_director()
+        tools = self._lazy_pages["tools"].page  # Tools page shows the same states, when built
+        if isinstance(tools, ToolsView):
+            tools.set_statuses(statuses)
+        if shiboken6.isValid(self._notify_bar):  # status bar replaced first on language change
+            self._notify_bar.refresh_director()
 
     def toggle_overlay(self, option: str):
         """Toggle overlay option from rail"""
@@ -1392,14 +1828,29 @@ class TabView(QWidget):
     def set_current_index(self, index: int, build: bool = True):
         """Select page by index (build: built at once, else when shown)"""
         page = self._pages.widget(index)
-        if isinstance(page, LazyPage) and build and not self._releasing_pages:
-            page.ensure_page()  # built even while window hidden: page state readable once selected
+        lazy = page if isinstance(page, LazyPage) and build and not self._releasing_pages else None
+        window = self.window()
+        # Page built in a shown window: placeholder painted first, page built right after (click answered at once)
+        skeleton = (lazy is not None and lazy.page is None and window.isVisible() and not window.isMinimized()
+                    and self._pages.isVisible() and self._pages.currentWidget() is not lazy)
+        if lazy is not None and not skeleton:
+            lazy.ensure_page()  # built even while window hidden: page state readable once selected
         self.remember_shown(self._pages.currentWidget(), self._pages.widget(index))
+        if skeleton and lazy is not None:
+            lazy.show_skeleton()
+            self._pages.setCurrentIndex(index)
+            lazy.repaint()
+            lazy.ensure_page()
         self._pages.setCurrentIndex(index)
         self.sync_rail_selection()
         button = self._nav.button(index)
         if button is not None and not button.isChecked():
             button.setChecked(True)
+        elif button is None:  # page left out of the rail (More menu, palette): no rail entry selected
+            self._nav.setExclusive(False)
+            for other in self._nav.buttons():
+                other.setChecked(False)
+            self._nav.setExclusive(True)
         if button is not None:
             self._rail_scroll.ensureWidgetVisible(button, 0, self.rail_fade_height())  # selected entry scrolled into view
 

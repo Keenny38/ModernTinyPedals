@@ -26,7 +26,8 @@ single class mode.
 
 from __future__ import annotations
 
-from math import ceil
+from math import ceil, inf
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtGui import QColor
@@ -35,11 +36,12 @@ from ...const_common import MAX_SECONDS
 from ...i18n import tr_overlay
 from ...module_info import minfo
 from ...template.widget.drivers_ui import STANDINGS_COLUMNS
-from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text, live_trends
-from .rows import DASH, class_style, laptime_text
-from .table import LAPTIME, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+from .drivers import DRIVER_OPTIONS, SAMPLE_RANKS, Context, DriverTable, gap_text, live_trends, rank_modules
+from .rows import DASH, class_style
+from .table import RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
 
 DEFAULT_SPLIT_GAP = 5  # split_gap template default: space between class groups of design
+LEVELS_INTERVAL = 1.0  # seconds between strength of field reads (see class_levels)
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import StandingsConfig
@@ -51,6 +53,7 @@ class Realtime(DriverTable):
     wcfg: StandingsConfig
 
     COLUMNS = STANDINGS_COLUMNS
+    running_tenths = False  # up to 126 rows: running lap time of other cars in whole seconds
     options = (
         *DRIVER_OPTIONS,
         "show_column_headers",
@@ -65,8 +68,8 @@ class Realtime(DriverTable):
         "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap", "time_gap_leader_text",
         "display_order_time_gap", "column_track_limits",
         "display_order_track_limits", "column_energy_per_lap", "show_energy_per_lap_average",
-        "display_order_energy_per_lap", "column_driver_ranks", "show_driver_badge",
-        "display_order_driver_ranks", "column_gap_trend", "display_order_gap_trend",
+        "display_order_energy_per_lap", "column_driver_ranks", "column_driver_badge",
+        "display_order_driver_ranks", "display_order_driver_badge", "column_gap_trend", "display_order_gap_trend",
     )
 
     def __init__(self, config, widget_name):
@@ -95,6 +98,7 @@ class Realtime(DriverTable):
         self.class_sof = self.class_headers and bool(wcfg["show_class_sof"])  # strength of field in class headers
         self.sof_label = tr_overlay("SoF")
         self.rank_colors: dict[str, QColor] = {}
+        self.levels_cache: tuple[float, int, dict[str, Any]] = (-inf, -1, {})  # (read time, cars, class levels)
         self.setup_table()
         # Space between class groups follows split gap (pixels in classic design, design space at default)
         self.table = self.table._replace(split_scale=max(float(wcfg["split_gap"]), 0.0) / DEFAULT_SPLIT_GAP)
@@ -122,24 +126,18 @@ class Realtime(DriverTable):
                 if self.int_leader == DASH:
                     return Cell(TEXT, DASH, "value", theme.text_faint)
                 return Cell(TEXT, self.int_leader, "label", theme.accent)
-            if not ctx.in_race and not 0 < veh.bestLapTime < MAX_SECONDS:  # best lap interval: no time yet
+            # Best lap interval: no time yet, own or of the car ahead (vehicles module gives 0 then)
+            if not ctx.in_race and (not 0 < veh.bestLapTime < MAX_SECONDS or not gap > 0):
                 return Cell(TEXT, DASH, "value", theme.text_faint)
             return Cell(TEXT, gap_text(gap, self.int_decimals), "value", theme.text_dim)
         return Cell()
 
     def laptime_cell(self, veh, ctx: Context) -> Cell:
-        """Last lap in race (or if best lap column shown, or running time shown), else best lap (purple if fastest
-        of class), sector bars of lap being driven"""
-        if ctx.in_race or self.wcfg["column_best_laptime"] or self.wcfg.get("show_running_lap_time", True):
+        """Last lap (or running time) in race or if best lap column shown, else best lap (purple if fastest of
+        class), sector bars of lap being driven"""
+        if ctx.in_race or self.wcfg["column_best_laptime"]:
             return super().laptime_cell(veh, ctx)
-        theme = self.theme
-        best, class_best = veh.bestLapTime, veh.classBestLapTime
-        valid = 0 < best < MAX_SECONDS
-        fastest = (self.wcfg.get("show_highlighted_fastest_last_laptime", True) and valid
-                   and abs(best - (veh.classBestLap or class_best)) < 0.0005)
-        sectors = self.sector_parts(veh, ctx) if self.wcfg.get("show_lap_sectors", True) else ()
-        return Cell(LAPTIME, laptime_text(best), "dim", theme.best if fastest else theme.text_dim,
-                    extra=self.laptime_extra(sectors))
+        return self.best_lap_cell(veh, ctx)
 
     def gap_cell(self, veh, ctx: Context) -> Cell:
         """Gap to leader (race), or to leader best lap (other sessions)"""
@@ -152,8 +150,8 @@ class Realtime(DriverTable):
                 position, gap = veh.positionOverall, veh.gapBehindLeader
             if position == 1:
                 return leader_cell
-            text = gap_text(gap, self.gap_decimals)
-            return Cell(TEXT, text if text == DASH else f"+{text}", "strong", theme.text)
+            text = gap_text(gap, self.gap_decimals)  # laps without sign, as the interval column & classic design
+            return Cell(TEXT, text if text == DASH or isinstance(gap, int) else f"+{text}", "strong", theme.text)
         best = veh.bestLapTime
         leader_best = veh.classBestLapTime if self.class_gap else minfo.vehicles.leaderBestLapTime
         gap = best - leader_best
@@ -170,8 +168,7 @@ class Realtime(DriverTable):
         text = class_name.replace("_", " ").strip() or DASH
         if level is None or level.driver is None:
             return ClassHeader(text, color)
-        from ...process import driver_ranks as dr
-
+        dr = rank_modules()[0]
         colors = self.rank_colors
         if not colors:  # rank colors made once
             colors.update((name, QColor(value)) for name, value in
@@ -185,10 +182,8 @@ class Realtime(DriverTable):
         """Strength of field of each class: average ranks of its drivers (all cars of class, shown or not)"""
         from ...process import field_ranks as fr
 
+        dr, rank_info = rank_modules()
         if self.demo:
-            from ...process import driver_ranks as dr
-            from .drivers import SAMPLE_RANKS
-
             ranks: dict[str, list] = {}
             for veh in data_set:
                 if veh.driverName:
@@ -196,13 +191,20 @@ class Realtime(DriverTable):
                     ranks.setdefault(veh.vehicleClass, []).append(
                         dr.DriverRanks("", "", "", "", dr.Rank(*sample[:2], 50), dr.Rank(*sample[2:4], 50)))
             return {name: fr.average_level(found) for name, found in ranks.items()}
-        from ...rank_info import field_level
-
+        field_level = rank_info.field_level
+        # Driver names change at driver swaps only (ranks arrive in background): levels read again every
+        # LEVELS_INTERVAL or once the field size changed, not on every update
+        now = monotonic()
+        read_at, cars, levels = self.levels_cache
+        if cars == len(data_set) and now - read_at < LEVELS_INTERVAL:
+            return levels
         names: dict[str, list[str]] = {}
         for veh in data_set:
             if veh.driverName:
                 names.setdefault(veh.vehicleClass, []).append(veh.driverName)
-        return {name: field_level(class_names) for name, class_names in names.items()}
+        levels = {name: field_level(class_names) for name, class_names in names.items()}
+        self.levels_cache = (now, len(data_set), levels)
+        return levels
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

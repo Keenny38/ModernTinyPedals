@@ -51,7 +51,8 @@ class GaugeQuad(QuadMixin, ModernOverlay):
         self.setup()
         sample = f"{self.sample}.{'8' * self.decimals}" if self.decimals else self.sample
         section = Section(widget_name, self.label, sample, min_width=GAUGE_WIDTH)
-        self.set_size(*self.build_quads([section], center_width=self.center_width(), show_labels=bool(self.label)))
+        self.set_size(*self.build_quads([section], center_width=self.center_width(),
+                                        show_labels=bool(self.label) and self.caption_shown()))
 
     def setup(self):
         """Read options (override)"""
@@ -68,7 +69,7 @@ class GaugeQuad(QuadMixin, ModernOverlay):
               mark: float = -1.0) -> Tile:
         """Tile of gauge value: text, level 0-1, gauge color, mark 0-1 (-1 = none)"""
         theme = self.theme
-        text = f"{text_value:.{self.decimals}f}"
+        text = f"{text_value:z.{self.decimals}f}"  # z: no -0
         return Tile((text,), colors=(theme.negative if warning else theme.text,),
                     level=fraction(level), level_color=theme.tint(color, GAUGE_ALPHA),
                     mark=fraction(mark) if mark >= 0 else -1.0)

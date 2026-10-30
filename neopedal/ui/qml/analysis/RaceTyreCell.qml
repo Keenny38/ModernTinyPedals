@@ -17,7 +17,7 @@ Rectangle {
     radius: theme.radiusMd
     color: drop.containsDrag ? theme.tint(theme.accent, "strong")
          : area.containsMouse || activeFocus ? theme.hover
-         : theme.dark ? Qt.darker(theme.base, 1.2) : Qt.darker(theme.base, 1.02)
+         : theme.surfaceSunken
     border.width: drop.containsDrag ? 1.5 : 1
     border.color: drop.containsDrag ? theme.accent : theme.border
     activeFocusOnTab: true
@@ -44,6 +44,7 @@ Rectangle {
         }
         Text {
             text: cell.info.name || ""
+            textFormat: Text.PlainText
             color: cell.info.dim ? theme.dimText : theme.text
             font.weight: cell.info.dim ? Font.Normal : Font.DemiBold
             font.pointSize: theme.fontLabel
@@ -58,6 +59,7 @@ Rectangle {
         anchors.rightMargin: theme.em * 0.5
         y: cell.height - height - theme.em * 0.4
         text: cell.info.text || ""
+        textFormat: Text.PlainText
         color: cell.info.color || theme.text
         font.pointSize: theme.fontSmall
         font.weight: Font.DemiBold
@@ -91,6 +93,7 @@ Rectangle {
         visible: !cell.fitted
         anchors.centerIn: parent
         text: drop.containsDrag ? i18n.tr("Drop") : "+"
+        textFormat: Text.PlainText
         color: theme.dimText
         font.pointSize: (drop.containsDrag ? theme.fontLabel : theme.fontHeading)
     }

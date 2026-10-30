@@ -47,6 +47,7 @@ from functools import lru_cache
 from itertools import pairwise
 from typing import IO, NamedTuple, TypeVar
 
+from ..validator import avoid_reserved_filename, load_json_strict
 from . import read_json, replace_retry
 
 logger = logging.getLogger(__name__)
@@ -54,10 +55,15 @@ logger = logging.getLogger(__name__)
 LAP_EXTS = (".csv.gz", ".csv")
 INFO_PREFIX = "# "
 # Lap file read at most (corrupt or crafted file of a shared folder never fills memory): info line &
-# sample line length (characters), samples (recorder keeps 90 000 at most, imported laps more)
+# sample line length (characters), samples (recorder keeps 90 000 at most, imported laps more), columns
+# (recorder writes about 110, MoTeC import fewer), values (rows x columns) & characters of sample lines:
+# a small .csv.gz of very wide rows never expands to many GB of text values
 MAX_INFO_LENGTH = 1_000_000
 MAX_LINE_LENGTH = 100_000
 MAX_FILE_ROWS = 1_000_000
+MAX_FILE_COLUMNS = 512
+MAX_FILE_VALUES = 64_000_000
+MAX_FILE_CHARACTERS = 300_000_000
 IMPORT_FOLDER = ".imported"  # laps imported from other files (MoTeC), not a track folder
 VIEWER_SETTING = ".lap_viewer.json"  # lap viewer settings (see ui.lap_viewer), lap selection of each track
 _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
@@ -70,6 +76,7 @@ DISTANCE_SCALE_MIN = 0.01  # recorded track lengths differing more are another c
 DISTANCE_SCALE_TOLERANCE = 0.001  # lap end distances differing less are the same (no distance scaling)
 DISTANCE_SCALE_MAX = 0.10  # lap lengths differing more are not the same lap (lap cut short)
 EXACT_COLUMNS = ("time", "lap_time", "distance")  # double precision, others single (mm precision, half size)
+PARSE_CHUNK = 2000  # sample lines parsed together into the packed columns (peak memory: columns + one chunk of text)
 LAP_END_SECONDS = 1.0  # lap start & end added to lap time curve only if first / last sample this close in time
 LAP_END_METERS = 60.0  # and in distance (farther: lap cut short, not a late game update)
 LAP_END_OVERSHOOT = 1.0  # meters, last samples this far past track length (rounded imported length) end the lap
@@ -217,23 +224,16 @@ def list_laps(filepath: str, track: str) -> list[LapFile]:
     return lap_files(os.path.join(filepath, track))
 
 
-WINDOWS_RESERVED_NAMES = frozenset((
-    "CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
-))
-
-
 def lap_folder_name(combo_name: str) -> str:
     """Folder name of track & class laps, valid on every system ("unknown" if empty)
 
     Windows silently drops trailing spaces & dots of a folder name, then files cannot be
     written in it ("Track - " when class is empty).
     """
-    name = combo_name.strip().rstrip(". ")
+    name = "".join(char for char in combo_name if char >= " ").strip().rstrip(". ")  # no control character
     if name.endswith(" -"):  # empty class name
         name = name[:-2].rstrip(". ")
-    if name.split(".")[0].upper() in WINDOWS_RESERVED_NAMES:
-        name = f"{name}_"
-    return name or "unknown"
+    return avoid_reserved_filename(name) or "unknown"
 
 
 def viewer_reference_name(filepath: str, track: str) -> str:
@@ -272,8 +272,8 @@ def parse_info(line: str) -> dict:
     if not line.startswith(INFO_PREFIX):
         return {}
     try:
-        info = json.loads(line[len(INFO_PREFIX):])
-    except ValueError:
+        info = load_json_strict(line[len(INFO_PREFIX):], allow_nan=True)
+    except ValueError:  # also nested too deeply
         return {}
     return info if isinstance(info, dict) else {}
 
@@ -290,16 +290,30 @@ def load_lap(path: str) -> LapData:
             if not header or "distance" not in header:
                 raise ValueError("not a NeoPedal telemetry file")
             width = len(header)
-            rows: list[list[str]] = []
+            if width > MAX_FILE_COLUMNS:
+                raise ValueError(f"more than {MAX_FILE_COLUMNS} columns")
+            max_rows = min(MAX_FILE_ROWS, MAX_FILE_VALUES // width)
+            # Parsed in chunks straight into packed arrays: the text of the whole file (a str object per value) and
+            # a float object per value never exist at once. Columns interpolated along time later (SCORING_COLUMNS)
+            # are parsed in double precision so their values are the same as if parsed from the text.
+            arrays = [array("d" if name in SCORING_COLUMNS else column_type(name)) for name in header]
+            chunk: list[list[str]] = []
+            count = 0
             for row in reader:
                 if len(row) == width:
-                    if len(rows) >= MAX_FILE_ROWS:
-                        raise ValueError(f"more than {MAX_FILE_ROWS} samples")
-                    rows.append(row)
+                    if count >= max_rows:
+                        raise ValueError(f"more than {max_rows} samples")
+                    count += 1
+                    chunk.append(row)
+                    if len(chunk) >= PARSE_CHUNK:
+                        extend_columns(arrays, chunk)
+                        chunk = []
+            if chunk:
+                extend_columns(arrays, chunk)
     except (EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError, csv.Error) as error:
         raise ValueError(f"unreadable file: {error}") from error
-    columns = dict(zip(header, parse_columns(rows, width)))
-    if not columns["distance"]:
+    columns: dict[str, Column] = dict(zip(header, arrays))
+    if not len(columns["distance"]):
         raise ValueError("no telemetry sample")
     start, end = lap_bounds(columns["distance"])
     if start > 0 or end < len(columns["distance"]):
@@ -331,6 +345,27 @@ def column_type(name: str) -> str:
     return "d" if name in EXACT_COLUMNS else "f"
 
 
+def extend_columns(columns: Sequence[array], rows: list[list[str]]) -> None:
+    """Text rows appended to packed columns (one per value of a row), rows with a non number value left out
+
+    Whole columns are converted at once (C loops), row by row only if a value is not a number.
+    """
+    lengths = [len(column) for column in columns]
+    try:
+        for column, values in zip(columns, zip(*rows)):
+            column.extend(map(float, values))
+    except ValueError:
+        for column, length in zip(columns, lengths):  # columns extended so far put back, rows checked one by one
+            del column[length:]
+        for row in rows:
+            try:
+                numbers = [float(value) for value in row]
+            except ValueError:
+                continue
+            for column, number in zip(columns, numbers):
+                column.append(number)
+
+
 def parse_columns(rows: list[list[str]], width: int) -> list[list[float]]:
     """Text rows to number columns, rows with a non number value left out
 
@@ -349,7 +384,7 @@ def parse_columns(rows: list[list[str]], width: int) -> list[list[float]]:
     return [list(column) for column in zip(*numbers)] if numbers else [[] for _ in range(width)]
 
 
-def lap_bounds(distances: list[float]) -> tuple[int, int]:
+def lap_bounds(distances: Sequence[float]) -> tuple[int, int]:
     """Index range of samples that belong to lap (start, end)
 
     Lap distance is reset a bit after lap start time (game updates scoring less often than
@@ -372,7 +407,7 @@ def lap_bounds(distances: list[float]) -> tuple[int, int]:
     return start, end
 
 
-def smooth_distance(times: list[float], distances: list[float]) -> list[float]:
+def smooth_distance(times: Sequence[float], distances: Sequence[float]) -> list[float]:
     """Distance interpolated along time between distance updates
 
     Game updates lap distance less often than other telemetry (about 5 times per second),
@@ -382,7 +417,7 @@ def smooth_distance(times: list[float], distances: list[float]) -> list[float]:
     count = len(distances)
     changes = [0] + [index for index in range(1, count) if distances[index] != distances[index - 1]]
     if len(changes) < 2 or len(changes) == count:
-        return distances
+        return list(distances)
     result = list(distances)
     for first, last in pairwise(changes):
         t0, t1 = times[first], times[last]
@@ -394,12 +429,12 @@ def smooth_distance(times: list[float], distances: list[float]) -> list[float]:
     return result
 
 
-def smooth_steps(times: list[float], values: list[float]) -> list[float]:
+def smooth_steps(times: Sequence[float], values: Sequence[float]) -> list[float]:
     """Values interpolated along time between game updates (value held between updates otherwise)"""
     count = len(values)
     changes = [0] + [index for index in range(1, count) if values[index] != values[index - 1]]
     if len(changes) < 2 or len(changes) == count:
-        return values
+        return list(values)
     result = list(values)
     for first, last in pairwise(changes):
         t0, t1 = times[first], times[last]
@@ -422,13 +457,18 @@ def median_sector_bounds(laps: Sequence[LapData]) -> list[float]:
 
 
 def bounded_lines(file: IO[str]) -> Iterator[str]:
-    """Lines of file, ValueError on a line longer than MAX_LINE_LENGTH (never read whole into memory)"""
+    """Lines of file, ValueError on a line longer than MAX_LINE_LENGTH or more than MAX_FILE_CHARACTERS read
+    (never read whole into memory)"""
+    remaining = MAX_FILE_CHARACTERS
     while True:
         line = file.readline(MAX_LINE_LENGTH + 1)
         if not line:
             return
         if len(line) > MAX_LINE_LENGTH:
             raise ValueError("line too long")
+        remaining -= len(line)
+        if remaining < 0:
+            raise ValueError(f"more than {MAX_FILE_CHARACTERS} characters")
         yield line
 
 

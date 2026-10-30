@@ -9,7 +9,7 @@ import time
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, Qt, qInstallMessageHandler
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, QPointF, Qt, qInstallMessageHandler
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtQml import QQmlExpression
 from PySide6.QtTest import QTest
@@ -57,6 +57,16 @@ def track_maps(view, expanded: bool) -> list:
 
 def focused(view):
     return view.quickWindow().activeFocusItem()
+
+
+def open_corner_detection(view):
+    """Corner detection popup of the corner tool opened ("⋯" button): its slider is then in the window"""
+    button = named(view, "cornerMore")
+    QMetaObject.invokeMethod(button, "clicked")
+    wait(0.4)
+    popup = button.findChild(QObject, "cornerDetection")
+    assert popup is not None and popup.property("visible")
+    return popup
 
 
 def center_of(item, dx: float = 0.0) -> QPoint:
@@ -198,10 +208,14 @@ def test_escape_never_closes_viewer(opener, warnings):
     # Hysteresis slider & XY channel lists never take keys when clicked (Tab reaches them)
     backend.setSideTab(2)
     wait(0.4)
+    open_corner_detection(view)  # expert setting in the corner tool's "⋯" popup
     slider = find(view, lambda item: "Slider" in class_name(item) and item.property("from") == 3.0)[0]
     assert slider.property("focusPolicy") == Qt.FocusPolicy.TabFocus.value
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center_of(slider))
     wait(0.2)
+    assert focused(view) is chart
+    QMetaObject.invokeMethod(named(view, "cornerMore"), "clicked")  # popup closed again: keys stay on charts
+    wait(0.3)
     assert focused(view) is chart
     backend.setSideTab(5)
     wait(0.4)
@@ -224,7 +238,7 @@ def test_map_focus_mode_keys(opener, warnings):
     large_map = track_maps(view, True)[0]
     assert focused(view) is large_map
     quarters = backend._map_quarters
-    key(view, Qt.Key.Key_R)  # map turned, reference lap unchanged
+    key(view, Qt.Key.Key_R, Qt.KeyboardModifier.ShiftModifier)  # map turned (Shift+R), reference lap unchanged
     assert backend._map_quarters == (quarters + 1) % 4
     key(view, Qt.Key.Key_3)
     assert backend.mapMode == "speed"
@@ -321,6 +335,7 @@ def test_hysteresis_applied_while_slider_moves(opener):
     view, backend = dialog.view, dialog.backend
     backend.setSideTab(2)
     wait(0.4)
+    open_corner_detection(view)
     slider = find(view, lambda item: "Slider" in class_name(item) and item.property("from") == 3.0)[0]
     value = 10 if backend.cornerTable.hysteresis != 10 else 12
     slider.setProperty("value", float(value))

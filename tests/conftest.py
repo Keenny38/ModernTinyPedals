@@ -61,6 +61,9 @@ def quit_like_app(isolated_user_paths):
     module_recorder = sys.modules.get("neopedal.module.module_recorder")
     if module_recorder is not None:
         module_recorder.LAP_SAVER.shutdown(wait=True, cancel_futures=True)
+    data_saver = sys.modules.get("neopedal.userfile.data_saver")
+    if data_saver is not None:
+        data_saver.DATA_SAVER.shutdown(wait=True, cancel_futures=True)
     from neopedal.setting import cfg
 
     cfg.flush()

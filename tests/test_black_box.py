@@ -36,10 +36,11 @@ def widget(ui_env, monkeypatch):
             speed=lambda: 30.0, in_pits=lambda: False, in_garage=lambda: False, vehicle_name=lambda: "car",
             class_name=lambda: "GT3",
             damage_severity=lambda: (0, 1, 0, 0, 3, 0, 0, 0),
-            aero_damage=lambda: -1.0, impact_time=lambda: 0.0, impact_position=lambda: (0.0, 0.0),
+            aero_damage=lambda: -1.0, impact_time=lambda: 0.0, impact_position=lambda: (0.0, -1.0),
+            impact_magnitude=lambda: 1000.0,  # real impact (light ones ignored by the cone)
         ),
         timing=SimpleNamespace(elapsed=lambda: 100.0),
-        session=SimpleNamespace(elapsed=lambda: 100.0),
+        session=SimpleNamespace(elapsed=lambda: 100.0, identifier=lambda: (360001, 100, 3), track_name=lambda: "track"),
         lap=SimpleNamespace(number=lambda: 3),
         wheel=SimpleNamespace(
             is_detached=lambda: (False, True, False, False), suspension_damage=lambda: (0.0, 0.0, 0.6, 0.0),
@@ -1815,3 +1816,30 @@ def test_setting_popup_maximum_events_and_direction_color(widget, monkeypatch):
     monkeypatch.setitem(widget.wcfg, "enable_setting_popup_direction_color", True)
     assert widget.setting_popup_color(up._replace(direction=-1)) == widget.wcfg["setting_popup_decrease_color"]
     assert widget.wipers_text(1) == widget.wcfg["text_wipers_auto"]
+
+
+def test_impact_cone_ignores_light_and_empty_impacts(widget, monkeypatch):
+    """Kerbs & scraping (light impacts) or empty impact (position 0, 0): cone not shown, nor kept alive"""
+    from neopedal.api_control import api
+
+    duration = widget.wcfg["damage_panel_impact_cone_duration"]
+    widget.timerEvent(None)
+    monkeypatch.setattr(api.read.vehicle, "impact_magnitude", lambda: 80.0)
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 95.0)
+    widget.timerEvent(None)
+    assert not widget.impact_visible  # light impact
+    monkeypatch.setattr(api.read.vehicle, "impact_magnitude", lambda: 1500.0)
+    monkeypatch.setattr(api.read.vehicle, "impact_position", lambda: (0.0, 0.0))
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 96.0)
+    widget.timerEvent(None)
+    assert not widget.impact_visible  # empty impact
+    monkeypatch.setattr(api.read.vehicle, "impact_position", lambda: (1.0, 0.0))
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 97.0)
+    widget.timerEvent(None)
+    assert widget.impact_visible and widget.impact_position == (1.0, 0.0)
+    # Later light impact: cone age still from the real impact, expires on time
+    monkeypatch.setattr(api.read.vehicle, "impact_magnitude", lambda: 50.0)
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 96.5 + duration)
+    monkeypatch.setattr(api.read.timing, "elapsed", lambda: 97.5 + duration)
+    widget.timerEvent(None)
+    assert not widget.impact_visible

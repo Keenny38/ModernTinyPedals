@@ -28,13 +28,14 @@ from functools import lru_cache
 from itertools import chain
 from operator import itemgetter
 from time import monotonic
+from typing import NamedTuple
 
 from .. import realtime_state
 from ..api_control import api
 from ..calculation import asym_max
 from ..const_common import MAX_SECONDS, MAX_VEHICLES
-from ..module_info import minfo
-from ._base import WAIT_STATE_CHANGE, DataModule
+from ..module_info import ScoringSnapshot, minfo
+from ._base import WAIT_STATE_CHANGE, DataModule, vehicles_updates
 
 REF_PLACES = tuple(range(1, MAX_VEHICLES + 1))
 TEMP_RELATIVE_AHEAD = [(0.0, -1)] * MAX_VEHICLES
@@ -47,6 +48,7 @@ RELATIVE_DELTA_INTERVAL = 1.0  # seconds between relative delta updates
 class Realtime(DataModule):
     """Relative & standings data"""
 
+    WAKE_ON_VEHICLES = True  # follows scoring passes of vehicles module while it runs (its snapshot read once)
     __slots__ = ()
 
     def __init__(self, config, module_name):
@@ -63,6 +65,7 @@ class Realtime(DataModule):
         slot_ids = [-1] * MAX_VEHICLES  # vehicle slot id per index, of relative delta data
         last_stamp: tuple = ()  # scoring data stamp of last update
         last_delta_update = 0.0  # time of last relative delta update
+        last_plr_slot = -1  # slot id of car gaps are measured from, of relative delta data
 
         while not _event_wait(update_interval):
             if not realtime_state.paused:
@@ -81,50 +84,41 @@ class Realtime(DataModule):
                 if last_version_update != self.cfg.version_update:
                     last_version_update = self.cfg.version_update
                     # Read again at every setting change: preset loaded or options applied may hand new dicts
-                    setting_relative = self.cfg.user.setting["relative"]
-                    setting_standings = self.cfg.user.setting["standings"]
-                    show_in_garage = setting_relative["show_vehicle_in_garage"]
-                    is_exclusive_mode = setting_standings["enable_single_class_exclusive_mode"]
-                    is_split_mode = setting_standings["enable_multi_class_split_mode"]
-                    min_top_veh = min_top_vehicles_in_class(
-                        setting_standings["minimum_top_vehicles"])
-                    veh_limit_exclusive = max_vehicles_in_class(
-                        setting_standings["maximum_vehicles_exclusive_mode"], min_top_veh, 2)
-                    veh_limit_combined = max_vehicles_in_class(
-                        setting_standings["maximum_vehicles_combined_mode"], min_top_veh, 2)
-                    veh_limit_other = other_class_vehicles(setting_standings["maximum_vehicles_per_split_others"])
-                    veh_limit_player = max_vehicles_in_class(
-                        setting_standings["maximum_vehicles_per_split_player"], min_top_veh, 2)
-                    class_rank = class_order_rank(setting_standings["class_order"])
+                    show_in_garage = self.cfg.user.setting["relative"]["show_vehicle_in_garage"]
+                    limits = standings_limits(self.cfg.user.setting["standings"])
 
                 # Relative delta updated at 1 second interval (same time with or without new data)
                 now = monotonic()
                 update_relative_delta = now - last_delta_update >= RELATIVE_DELTA_INTERVAL
 
                 # Skip while inputs not updated since last tick: every vehicle input is scoring data
-                # (updated 5 times per second, along with session elapsed time)
+                # (updated 5 times per second, along with session elapsed time), read by vehicles module
+                # first while it runs (its last scoring pass followed: this module is woken once published)
                 read = api.read
                 veh_total = max(read.vehicle.total_vehicles(), 1)
                 plr_index = read.vehicle.player_index()
+                snapshot = scoring_snapshot(minfo.vehicles.scoringSnapshot, veh_total, read.session.elapsed())
                 stamp = (
-                    read, read.session.elapsed(), veh_total, plr_index,
-                    realtime_state.resets, last_version_update,
+                    read, read.session.elapsed() if snapshot is None else snapshot.scoringTime, veh_total,
+                    plr_index, realtime_state.resets, last_version_update,
                 )
                 if last_stamp == stamp and not update_relative_delta:
                     continue
                 last_stamp = stamp
                 if update_relative_delta:
                     last_delta_update = now
+                # Car identity, not index (index shifts when a car with lower index joins or leaves)
+                plr_slot = read.vehicle.slot_id(plr_index) if 0 <= plr_index < veh_total else -1
+                if last_plr_slot != plr_slot:
+                    last_plr_slot = plr_slot
+                    # Other car followed (spectating, Director): gap changes of every car from scratch
+                    reset_relative_delta(
+                        slot_ids, output.relativeDeltaAhead, output.relativeDeltaBehind)
 
                 # Base info
                 plr_place = read.vehicle.place()
 
-                # Scoring data of this sample already read by vehicles module (most updates), else read here
-                snapshot = minfo.vehicles.scoringSnapshot
-                if snapshot is not None and (snapshot.scoringTime != stamp[1] or len(snapshot.rows) != veh_total):
-                    snapshot = None
-
-                # Get vehicles info
+                # Get vehicles info (scoring data of vehicles module snapshot if any, else read from game)
                 (relative_ahead, relative_behind, classes_list, draw_order_list, is_multi_class,
                  ) = get_vehicles_info(
                     veh_total, plr_index, show_in_garage, update_relative_delta,
@@ -134,24 +128,11 @@ class Realtime(DataModule):
                 # Update vehicle class position info
                 plr_class_name, plr_class_place = update_position_in_class(classes_list, plr_index)
 
-                # Create standings index list
-                if is_exclusive_mode:  # single class exclusive list
-                    standings_index_list = standings_index_from_same_class(
-                        min_top_veh, classes_list, plr_class_name, plr_class_place,
-                        veh_limit_exclusive)
-                elif is_split_mode and is_multi_class:  # multi-class split list
-                    standings_index_list = list(chain(*list(standings_index_from_all_classes(
-                        min_top_veh, classes_list, plr_class_name, plr_class_place,
-                        veh_limit_other, veh_limit_player, class_rank))))
-                else:  # mixed class list
-                    classes_list.sort(key=itemgetter(1))  # sort by overall position
-                    standings_index_list = calc_standings_index(
-                        min_top_veh, veh_limit_combined, plr_place, classes_list)
-
                 # Output data
                 output.relativeAhead = relative_ahead
                 output.relativeBehind = relative_behind
-                output.standings = standings_index_list
+                output.standings = standings_index(
+                    limits, classes_list, plr_place, plr_class_name, plr_class_place, is_multi_class)
                 output.drawOrder = draw_order_list
 
             else:
@@ -159,6 +140,23 @@ class Realtime(DataModule):
                     reset = False
                     update_interval = WAIT_STATE_CHANGE  # game paused: idle until activity changes
                     create_reference_place.cache_clear()
+
+
+def scoring_snapshot(
+    snapshot: ScoringSnapshot | None, veh_total: int, session_elapsed: float,
+) -> ScoringSnapshot | None:
+    """Scoring data of vehicles module to use for this update, None to read game scoring instead
+
+    While vehicles module runs (vehicles_updates.active), its last scoring pass is followed: this module is
+    woken once it is published, so the snapshot is the scoring data to use even when the game has a newer
+    sample already (read by vehicles module next, this module woken again). Else only a snapshot of the
+    current game scoring sample (vehicles module just stopped). Never a snapshot of another car count.
+    """
+    if snapshot is None or len(snapshot.rows) != veh_total:
+        return None
+    if vehicles_updates.active or snapshot.scoringTime == session_elapsed:
+        return snapshot
+    return None
 
 
 def reset_relative_delta(
@@ -223,13 +221,16 @@ def get_vehicles_info(
             recorded_index += 1
 
             if update_relative_delta:  # update at 1 sec interval
-                # Other vehicle took index (joined, left): delta of previous one not kept
+                # Other vehicle took index (joined, left), or all reset (new session, other car followed):
+                # delta of previous one not kept, first gap is the reference of next changes (not a change from 0)
                 if slot_ids is not None:
                     slot_id = api.read.vehicle.slot_id(index)
                     if slot_ids[index] != slot_id:
                         slot_ids[index] = slot_id
                         relative_delta_ahead[index].reset()
                         relative_delta_behind[index].reset()
+                        relative_delta_ahead[index].last = diff_time_ahead
+                        relative_delta_behind[index].last = -diff_time_behind
                 relative_delta_ahead[index].update(diff_time_ahead)
                 relative_delta_behind[index].update(-diff_time_behind)
 
@@ -314,8 +315,9 @@ def update_position_in_class(sorted_veh_class: list, plr_index: int, veh_data: t
     plr_class_place = 0
     if veh_data is None:
         veh_data = minfo.vehicles.dataSet
+    class_best = class_best_laptimes(sorted_veh_class)
 
-    for class_name, _, opt_index, laptime_best, laptime_last in sorted_veh_class:
+    for class_name, _, opt_index, _, laptime_last in sorted_veh_class:
         output_data = veh_data[opt_index]
 
         if last_class_name == class_name:
@@ -326,7 +328,7 @@ def update_position_in_class(sorted_veh_class: list, plr_index: int, veh_data: t
             place_in_class = 1  # reset position counter
             opt_index_ahead = -1  # no opponent ahead of class leader
             opt_index_leader = opt_index
-            laptime_class_best = laptime_best
+            laptime_class_best = class_best[class_name]  # fastest of class, not of class leader
             last_fastest_laptime = MAX_SECONDS  # reset last fastest
             if last_fastest_index != -1:  # mark fastest last lap
                 veh_data[last_fastest_index].isClassFastestLastLap = True
@@ -369,6 +371,8 @@ def standings_index_from_all_classes(
         else:
             veh_limit = veh_limit_other
             plr_place = 0
+        if veh_limit <= 0:  # class hidden: no empty group (gap without vehicles)
+            continue
         yield calc_standings_index(min_top_veh, veh_limit, plr_place, class_list)
 
 
@@ -421,9 +425,14 @@ def create_reference_place(
 def standings_index_from_place_reference(
     ref_place_list: tuple, class_index_list: list, veh_total: int
 ):
-    """Match place from reference list to generate standings player index list"""
+    """Match place from reference list to generate standings player index list (-1 where places are skipped:
+    top places, then the places around the player, apart)"""
+    last_ref = 0
     for ref_index in ref_place_list:
         if 0 < ref_index <= veh_total:  # prevent out of range
+            if ref_index > last_ref + 1:
+                yield -1  # places left out between: shown apart
+            last_ref = ref_index
             yield class_index_list[ref_index - 1][2]  # 2 - player index
         else:
             break
@@ -493,5 +502,62 @@ def class_order_rank(class_order: str) -> dict[str, int]:
 
 
 def sort_class_collection(collection: list) -> float:
-    """Sort class collection by class best laptime"""
-    return collection[0][3]  # 3 class best laptime
+    """Sort class collection by class best laptime (fastest of class, not of class leader)"""
+    return min(vehicle[3] for vehicle in collection)  # 3 best laptime
+
+
+def class_best_laptimes(sorted_veh_class: list) -> dict[str, float]:
+    """Best laptime of each class (fastest of class, MAX_SECONDS if none)"""
+    class_best: dict[str, float] = {}
+    for class_name, _, _, laptime_best, _ in sorted_veh_class:
+        class_best[class_name] = min(laptime_best, class_best.get(class_name, MAX_SECONDS))
+    return class_best
+
+
+class StandingsLimits(NamedTuple):
+    """Standings options read by module (see standings_limits)"""
+
+    is_exclusive_mode: bool
+    is_split_mode: bool
+    min_top_veh: int
+    veh_limit_exclusive: int
+    veh_limit_combined: int
+    veh_limit_other: int
+    veh_limit_player: int
+    class_rank: dict[str, int]
+
+
+def standings_limits(setting_standings: Mapping) -> StandingsLimits:
+    """Display mode & vehicle limits of standings options"""
+    min_top_veh = min_top_vehicles_in_class(setting_standings["minimum_top_vehicles"])
+    return StandingsLimits(
+        is_exclusive_mode=setting_standings["enable_single_class_exclusive_mode"],
+        is_split_mode=setting_standings["enable_multi_class_split_mode"],
+        min_top_veh=min_top_veh,
+        veh_limit_exclusive=max_vehicles_in_class(
+            setting_standings["maximum_vehicles_exclusive_mode"], min_top_veh, 2),
+        veh_limit_combined=max_vehicles_in_class(
+            setting_standings["maximum_vehicles_combined_mode"], min_top_veh, 2),
+        veh_limit_other=other_class_vehicles(setting_standings["maximum_vehicles_per_split_others"]),
+        veh_limit_player=max_vehicles_in_class(
+            setting_standings["maximum_vehicles_per_split_player"], min_top_veh, 2),
+        class_rank=class_order_rank(setting_standings.get("class_order", "")),
+    )
+
+
+def standings_index(
+    limits: StandingsLimits, classes_list: list, plr_place: int, plr_class_name: str, plr_class_place: int,
+    is_multi_class: bool,
+) -> list[int]:
+    """Standings index list of display mode (-1: gap between classes), classes_list sorted by class (sorted by
+    overall position in place in mixed class mode)"""
+    if limits.is_exclusive_mode:  # single class exclusive list
+        return standings_index_from_same_class(
+            limits.min_top_veh, classes_list, plr_class_name, plr_class_place, limits.veh_limit_exclusive)
+    if limits.is_split_mode and is_multi_class:  # multi-class split list
+        return list(chain(*standings_index_from_all_classes(
+            limits.min_top_veh, classes_list, plr_class_name, plr_class_place,
+            limits.veh_limit_other, limits.veh_limit_player, limits.class_rank))) or [-1]
+    # Mixed class list
+    classes_list.sort(key=itemgetter(1))  # sort by overall position
+    return calc_standings_index(limits.min_top_veh, limits.veh_limit_combined, plr_place, classes_list)

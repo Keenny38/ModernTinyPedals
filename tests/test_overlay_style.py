@@ -84,8 +84,8 @@ def test_styled_config_writes_through():
 
 @pytest.mark.parametrize(("theme", "colorblind", "expected"), [
     ("Modern Dark", False, "#F87171"),  # loss of status colors (app pages, stream graphics)
-    ("Modern Dark", True, "#D55E00"),
-    ("Legacy Dark", True, "#D55E00"),
+    ("Modern Dark", True, "#F08A50"),  # colorblind loss, same as app pages & stream pages
+    ("Legacy Dark", True, "#F08A50"),
 ])
 def test_colorblind_variant(theme, colorblind, expected):
     default = {"font_color": "#FF2200"}

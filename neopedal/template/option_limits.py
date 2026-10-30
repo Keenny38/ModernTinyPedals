@@ -47,7 +47,7 @@ OPTION_LIMITS: tuple[tuple[str, OptionLimit], ...] = (
     ("^display_order_", NO_LIMIT),
     ("^opacity$", OptionLimit(0, 1)),
     ("_percentage_threshold$", OptionLimit(0, 100)),
-    ("^background_opacity_percentage$", OptionLimit(0, 100)),
+    ("^(radar_)?background_opacity_percentage$", OptionLimit(0, 100)),
     ("^overlay_opacity_percentage$", OptionLimit(10, 100)),  # 0 would hide every overlay
     ("_port$", OptionLimit(1, 65535, True)),
     ("^minimum_update_interval$", OptionLimit(1, 1000, True)),
@@ -57,6 +57,13 @@ OPTION_LIMITS: tuple[tuple[str, OptionLimit], ...] = (
     # Sizes with an upper limit: larger ones make overlays of tens of thousands of pixels (memory, crash)
     ("^global_scale$", OptionLimit(0.1, 50)),  # radar pixels per meter
     ("^font_scale_", OptionLimit(0, 10)),
+    # Global font override of Settings page: font size & offset of every overlay changed by at most this much
+    ("^font_(size|offset_vertical)_addend$", OptionLimit(-20, 20, True)),
+    # Pace notes playback (ranges of the former pace notes page)
+    ("^pace_notes_sound_volume$", OptionLimit(0, 100, True)),
+    ("^pace_notes_sound_maximum_duration$", OptionLimit(0.2, 60)),
+    ("^pace_notes_sound_maximum_queue$", OptionLimit(1, 50, True)),
+    ("^pace_notes_global_offset$", OptionLimit(-9999, 9999)),
     ("^(status_icon|damage_panel|battery_bar|trace_height)_scale$", OptionLimit(0, 20)),
     ("^font_size", OptionLimit(1, 200, True)),
     ("padding", OptionLimit(0, 10)),  # bar padding: font size multiplier

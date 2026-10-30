@@ -19,6 +19,7 @@ TpPopup {
         Text {
             Layout.fillWidth: true
             text: parent.title
+            textFormat: Text.PlainText
             color: theme.text
             wrapMode: Text.WordWrap  // whole title on several lines, never cut
         }
@@ -26,6 +27,7 @@ TpPopup {
             Layout.fillWidth: true
             visible: text !== ""
             text: parent.hint
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             wrapMode: Text.WordWrap
@@ -149,11 +151,12 @@ TpPopup {
                             wrap: true
                             text: i18n.tr("Write events to a file as they happen")
                             tip: i18n.tr("One CSV file per session in the broadcast_logs folder: race control log")
+                            checkable: false  // follows backend
                             checked: backend.log.logEvents
-                            onToggled: backend.log.setLogEvents(checked)
+                            onClicked: backend.log.setLogEvents(!backend.log.logEvents)
                         }
                         TpButton {
-                            glyph: ""  // folder open
+                            glyph: theme.glyphs.openFolder
                             fallback: "…"
                             flat: true
                             tip: i18n.tr("Open Folder")
@@ -166,8 +169,9 @@ TpPopup {
                         wrap: true
                         text: i18n.tr("Pause the director when the camera changes in the game")
                         tip: i18n.tr("Off when another app also moves the game camera: the director keeps cutting")
+                        checkable: false  // follows backend
                         checked: backend.followGameCuts
-                        onToggled: backend.setFollowGameCuts(checked)
+                        onClicked: backend.setFollowGameCuts(!backend.followGameCuts)
                     }
                     TpSwitch {
                         objectName: "followSwitch"
@@ -175,8 +179,9 @@ TpPopup {
                         wrap: true
                         text: i18n.tr("Overlays follow the car on air")
                         tip: i18n.tr("Spectate mode on the car on air: overlays and stream sources show it")
+                        checkable: false  // follows backend
                         checked: backend.followOverlays
-                        onToggled: backend.setFollowOverlays(checked)
+                        onClicked: backend.setFollowOverlays(!backend.followOverlays)
                     }
                 }
             }

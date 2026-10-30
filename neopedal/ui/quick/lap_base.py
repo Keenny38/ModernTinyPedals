@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from .lap_dashboard import DashboardTab
     from .lap_export import LapExports
     from .lap_library import TrackListModel
+    from .lap_library_panel import ImportedLaps
     from .lap_map_marks import MapMarks
     from .lap_map_pointer import MapPointer
     from .lap_session import SessionTab
@@ -180,10 +181,13 @@ class BackendBase:
         _index_saves: dict[str, dict]
         _info_cache: dict[str, tuple[float, dict]]
         _infos_generation: int
+        _file_actions: int
         _infos_reading: bool
         _infos_track: str
         _labels: dict[str, str]
+        _library: ImportedLaps
         _lap_cache: dict[str, LapData | None]
+        _lap_order: str
         _lap_offsets: dict[str, tuple[tuple, lap_map.MapLine, list[float], list[int]]]
         _lap_shapes: dict[tuple, tuple]
         _layout: str
@@ -256,8 +260,11 @@ class BackendBase:
         _restore_view: tuple[float, float] | None
         _revision: int
         _road: lap_map.MapLine
+        _road_numbered: bool
         _selected_corner: int
         _session: SessionTab
+        _session_kinds: list[str]
+        _session_order: str
         _shape_checks: dict[tuple[str, str], tuple[tuple[float, float], bool | None]]
         _side_tab: int
         _simple_view: bool
@@ -275,6 +282,7 @@ class BackendBase:
         _trail_state: tuple[dict, float, list[float]] | None
         _trash_loading: bool
         _trash_rows: list[dict]
+        _trash_serial: int
         _turned: dict[str, tuple]
         _undo: list[list[tuple[str, str, dict, bool, bool]]]
         _warning: str
@@ -284,6 +292,7 @@ class BackendBase:
         _weights: dict[str, float]
         _window: QWidget
         _xy: dict[str, str]
+        _xy_weights: dict[tuple, list[float]]
         _xy_keys: set[str]
         _zones: dict[str, tuple[LapData, tuple]]
         _zoom_timer: QTimer
@@ -299,6 +308,7 @@ class BackendBase:
         lapsTrashed: SignalInstance
         legend_model: DictListModel
         listChanged: SignalInstance
+        listOrderChanged: SignalInstance
         map_lap_model: DictListModel
         mapChanged: SignalInstance
         mapDataChanged: SignalInstance
@@ -351,7 +361,8 @@ class BackendBase:
         def limits_parts_folder(self, track: str) -> str: ...
         def load_lap_file(self, path: str) -> LapData: ...
         def load_laps(self): ...
-        def load_track(self, track: str, new_lap: LapFile | None = None, background: bool = True): ...
+        def load_track(self, track: str, new_lap: LapFile | None = None, background: bool = True,
+                       listed: tuple[list[LapFile], IndexedInfos] | None = None): ...
         def main_circuit(self) -> tuple[dict, str]: ...
         def mark_values(self, entry: LapEntry, vehicle: str) -> dict: ...
         def notify_status(self): ...

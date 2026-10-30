@@ -34,7 +34,7 @@ from ... import units
 from ...api_control import api
 from ...module_info import minfo
 from ..engine import smoothed_energy_rate
-from .base import ModernOverlay
+from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -82,13 +82,16 @@ class Realtime(StatsMixin, ModernOverlay):
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
-        self.post_update()
+        self.vehicle_reset()
 
     def post_update(self):
-        """Peak power found again for next car (power to weight ratio)"""
         self.ema_power = 0.0
-        self.max_power_kw = 0.0
         self.ema_energy_rate = 0.0
+
+    def vehicle_reset(self):
+        """Peak power found again for next car or session (power to weight ratio), kept across pit stops"""
+        self.post_update()
+        self.max_power_kw = 0.0
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -138,6 +141,9 @@ class Realtime(StatsMixin, ModernOverlay):
                 weight = minfo.wheels.totalStaticWeight
                 self.ema_power += 0.2 * (power_kw - self.ema_power)
                 self.max_power_kw = max(self.max_power_kw, self.ema_power)
-                ratio = self.unit_power(self.max_power_kw) / self.unit_weight(weight) if weight > 0 else 0.0
-                values.append(Value(f"{ratio:.3f}", self.theme.text_dim))
+                if weight > 0:
+                    values.append(Value(f"{self.unit_power(self.max_power_kw) / self.unit_weight(weight):.3f}",
+                                        self.theme.text_dim))
+                else:  # static weight not known yet (found at standstill after a reset)
+                    values.append(Value(DASH, self.theme.text_faint))
         self.refresh(tuple(values))

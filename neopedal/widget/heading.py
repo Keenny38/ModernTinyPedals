@@ -41,7 +41,7 @@ class HeadingMixin:
 
     def setup_heading(self):
         """Last data"""
-        self.last_pos: tuple[float, float] = (0.0, 0.0)
+        self.last_pos: tuple[float, float] | None = None  # None: no position read yet
         self.yaw_angle = 0.0
         self.slip_angle = 0.0
 
@@ -58,13 +58,16 @@ class HeadingMixin:
         # Vehicle orientation yaw
         veh_ori_yaw = calc.degrees(api.read.vehicle.orientation_yaw_radians()) + 180
 
-        # Direction of travel yaw angle
-        if self.last_pos != pos_curr and speed > 1:
-            self.yaw_angle = veh_ori_yaw - calc.degrees(calc.oriyaw(
-                pos_curr[0] - self.last_pos[0], pos_curr[1] - self.last_pos[1])) + 180
-            self.last_pos = pos_curr
-        elif speed <= 1:
+        # Direction of travel yaw angle (first reading: no direction yet, never from world origin)
+        last_pos = self.last_pos
+        if speed <= 1:
             self.yaw_angle = 0
+            self.last_pos = pos_curr
+        elif last_pos is None:
+            self.last_pos = pos_curr
+        elif last_pos != pos_curr:
+            self.yaw_angle = veh_ori_yaw - calc.degrees(calc.oriyaw(
+                pos_curr[0] - last_pos[0], pos_curr[1] - last_pos[1])) + 180
             self.last_pos = pos_curr
 
         # Slip angle
@@ -75,14 +78,8 @@ class HeadingMixin:
         return veh_ori_yaw
 
     def display_yaw_angle(self, angle):
-        """Set yaw angle display range"""
-        if angle < -180:
-            angle = 360 + angle
-        elif angle > 180:
-            angle = 360 - angle
-        if abs(angle) > 180:
-            angle = 360 - abs(angle)
-        return angle
+        """Yaw angle in -180 to 180 range, sign kept (190 is -170, not 170)"""
+        return (angle + 180) % 360 - 180
 
 
 class Realtime(HeadingMixin, Overlay):

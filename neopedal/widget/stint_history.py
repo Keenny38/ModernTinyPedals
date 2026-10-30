@@ -34,6 +34,14 @@ if TYPE_CHECKING:
     from ..template.widget_config_types import StintHistoryConfig
 
 
+def stint_time_text(seconds: float) -> str:
+    """Stint time in 5 characters at most: minutes & seconds, hours & minutes from 100 minutes (1h40)"""
+    if seconds < 6000:
+        return calc.sec2stinttime(seconds)
+    minutes = int(seconds // 60)
+    return f"{minutes // 60}h{minutes % 60:02d}"
+
+
 class Realtime(HistoryTable):
     """Draw widget"""
 
@@ -129,7 +137,7 @@ class Realtime(HistoryTable):
             target.last = data
             if data < 0:
                 data = 0
-            target.text = calc.sec2stinttime(data)
+            target.text = stint_time_text(data)
             target.update()
 
     def update_cmpd(self, target, data):

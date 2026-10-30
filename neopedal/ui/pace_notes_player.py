@@ -22,7 +22,6 @@ Pace notes audio player (Qt Multimedia), only imported while pace notes playback
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from PySide6.QtCore import QBasicTimer, QUrl, Slot
@@ -32,7 +31,7 @@ from .. import overlay_signal, realtime_state
 from ..api_control import api
 from ..module_info import minfo
 from ..setting import cfg
-from ..userfile.track_notes import COLUMN_PACENOTE
+from ..userfile.track_notes import COLUMN_PACENOTE, pace_note_sound_file
 
 # Notes checked this often at most (ms): note index set by notes module, sound loading & audio output add their
 # own delay anyway. 50 ms = 4 m at 300 km/h, global offset moves notes earlier. Faster only costs CPU (older
@@ -113,13 +112,14 @@ class PaceNotesPlayer(QMediaPlayer):
         if self._play_queue:
             self.__play_next_in_queue()
 
-    def set_source(self) -> None:
-        """Set sound source"""
-        pace_note = self._play_queue[0]
-        sound_path = self.mcfg["pace_notes_sound_path"]
-        sound_format = self.mcfg["pace_notes_sound_format"].strip(".")
-        sound_file = os.path.abspath(f"{sound_path}{pace_note}.{sound_format}")
+    def set_source(self) -> bool:
+        """Set sound source, False if note is not a sound file name of sound folder (nothing to play)"""
+        sound_file = pace_note_sound_file(
+            self.mcfg["pace_notes_sound_path"], self._play_queue[0], self.mcfg["pace_notes_sound_format"])
+        if not sound_file:
+            return False
         self.setSource(QUrl.fromLocalFile(sound_file))
+        return True
 
     def set_volume(self, value: int) -> None:
         """Set volume (0 - 100)"""
@@ -141,7 +141,7 @@ class PaceNotesPlayer(QMediaPlayer):
         if (self.is_playing() and
             self.position() < self.mcfg["pace_notes_sound_maximum_duration"] * 1000):
             return
-        # Play next sound in queue
-        self.set_source()
-        self.play()
+        # Play next sound in queue (note not naming a sound file of sound folder skipped)
+        if self.set_source():
+            self.play()
         self._play_queue.pop(0)  # remove playing notes from queue

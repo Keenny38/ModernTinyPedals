@@ -77,8 +77,11 @@ def save_car_setup_file(
     """Save car setup file atomically, error logged (never stops stats module)"""
     if len(dataset) < 2:
         return
-    with atomic_write(f"{filepath}{filename}{extension}", newline="") as temp_file:
-        for line in dataset:
-            temp_file.write(line)
-            temp_file.write(CRLF)
-        logger.info("USERDATA: %s%s saved", filename, extension)
+    try:
+        with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as temp_file:
+            for line in dataset:
+                temp_file.write(line)
+                temp_file.write(CRLF)
+    except OSError:  # logged by atomic_write, target untouched
+        return
+    logger.info("USERDATA: %s%s saved", filename, extension)

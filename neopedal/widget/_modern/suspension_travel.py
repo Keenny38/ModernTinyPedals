@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
+from ..suspension_travel import travel_text
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .quad import QuadMixin, Section, Tile
@@ -49,17 +50,12 @@ SECTIONS = (
 )
 
 
-def number(value: float) -> str:
-    """Value cut to 4 characters"""
-    return f"{value:.2f}"[:4].strip(".")
-
-
 class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
 
     wcfg: SuspensionTravelConfig
 
-    options = ("font_size", "layout", *(f"show_{key}" for key, _ in SECTIONS),
+    options = ("font_size", "layout", "show_caption", *(f"show_{key}" for key, _ in SECTIONS),
                "show_live_position_relative_to_static_position", *display_order_options("suspension_travel"))
 
     def __init__(self, config, widget_name):
@@ -105,7 +101,7 @@ class Realtime(QuadMixin, ModernOverlay):
                                               level_color=theme.tint(theme.warning, 110)))
                 else:
                     color = theme.accent if key == "live_position" else None
-                    sections[key].append(Tile((number(values[key]),), colors=(color,)))
+                    sections[key].append(Tile((travel_text(values[key]),), colors=(color,)))
         state = tuple(tuple(sections[key]) for key in self.keys)
         self.refresh_keyed(state, tuple(self.pixel_key(tiles, [rect.width() for rect in slot.tiles], "level", "mark")
                                         for slot, tiles in zip(self.quad_slots, state)))

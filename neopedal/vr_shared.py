@@ -789,15 +789,20 @@ def trusted_owner(path: str) -> bool:
     return owner is not None and (owner == current_user_sid() or owner in TRUSTED_OWNER_SIDS)
 
 
-def restrict_to_user(folder: str) -> None:
-    """Folder (& what it will hold) accessible by the user running the app only (SYSTEM & Administrators too):
-    access inherited from the shared base dropped (system drive root lets every user change subfolders)
+def restrict_to_user(folder: str, mode: int = 0o700) -> None:
+    """Folder (& what it will hold) or file accessible by the user running the app only (SYSTEM & Administrators
+    too): access inherited from the shared base dropped (system drive root lets every user change subfolders,
+    a config folder moved to a shared disk lets every user read a private key)
+
+    Args:
+        folder: folder or file path.
+        mode: POSIX permission bits (Windows: ignored, DACL set).
 
     Raises:
         OSError: access not changed.
     """
     if not WINDOWS:
-        os.chmod(folder, 0o700)
+        os.chmod(folder, mode)
         return
     from ctypes import wintypes
 
@@ -806,7 +811,8 @@ def restrict_to_user(folder: str) -> None:
         raise PermissionError(f"user unknown, access of {folder} not restricted")
     advapi32, kernel32 = _win_security()
     descriptor = ctypes.c_void_p()
-    sddl = f"D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"  # protected: nothing inherited
+    flags = "OICI" if os.path.isdir(folder) else ""  # inheritance flags of a folder, meaningless on a file
+    sddl = f"D:P(A;{flags};FA;;;{user})(A;{flags};FA;;;SY)(A;{flags};FA;;;BA)"  # protected: nothing inherited
     if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
         raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
     try:
@@ -826,7 +832,7 @@ def restrict_to_user(folder: str) -> None:
 def secure_shared_root(root: str, parents: int = SHARED_PARENTS_CHECKED) -> None:
     """Root of layer copies in a folder shared by every user (ProgramData, Public, system drive root) made or
     checked: root & its parents owned by this user (a folder made first by another user, named after this user,
-    could have the DLL changed later), root accessible by this user only
+    could have the DLL changed later), root & every folder made for it accessible by this user only
 
     Raises:
         OSError: root or a parent owned by another user, or root not made.
@@ -839,11 +845,28 @@ def secure_shared_root(root: str, parents: int = SHARED_PARENTS_CHECKED) -> None
                 raise PermissionError(f"{folder} owned by another user")
 
     check_parents()
+    created = missing_folders(root)
     os.makedirs(root, exist_ok=True)
-    if not trusted_owner(root):
-        raise PermissionError(f"{root} owned by another user")
-    restrict_to_user(root)
+    # Every folder made here, topmost first: else app & openxr_layer folders keep the access inherited from the
+    # shared base (system drive root: every signed-in user may modify them)
+    for folder in dict.fromkeys((*created, os.path.abspath(root))):
+        if not trusted_owner(folder):
+            raise PermissionError(f"{folder} owned by another user")
+        restrict_to_user(folder)
     check_parents()  # made meanwhile by another user
+
+
+def missing_folders(path: str) -> list[str]:
+    """Folders of path not existing yet, topmost first (folders os.makedirs makes)"""
+    missing: list[str] = []
+    folder = os.path.abspath(path)
+    while not os.path.exists(folder):
+        missing.append(folder)
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            break
+        folder = parent
+    return missing[::-1]
 
 
 def install_layer(manifest: str, root: str) -> str:

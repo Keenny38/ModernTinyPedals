@@ -216,7 +216,8 @@ def parse_garage(refuel: Any, tyres: Any = None, session: Any = None) -> GarageD
         team = refuel.get("teamInfo")
         names = team.get("driverNames") if isinstance(team, dict) else None
         if isinstance(names, list):
-            values["drivers"] = tuple(str(name) for name in names if str(name).strip())[:MAX_DRIVERS]
+            values["drivers"] = tuple(name.strip() for name in names
+                                      if isinstance(name, str) and name.strip())[:MAX_DRIVERS]  # null: no name
         new: dict[str, None] = {}
         used: list[tuple[TyreOffer, ...]] = []
         entries = {str(entry.get("name", "")).strip().upper(): entry for entry in _pit_menu(refuel)}
@@ -373,8 +374,12 @@ def race_length() -> tuple[str, int] | None:
 
 
 def before_start() -> bool:
-    """Race session, no race lap completed yet: car amounts of now are the race start amounts"""
-    return api.read.session.session_type() == RACE_SESSION and api.read.lap.completed_laps() <= 0
+    """Race session, cars on the grid: car amounts of now are the race start amounts (completed laps stay 0
+    through formation lap & first lap, the car burns its start amounts meanwhile; formation lap fuel is an
+    input of its own)"""
+    read = api.read
+    return (read.session.session_type() == RACE_SESSION and read.session.before_formation()
+            and read.lap.completed_laps() <= 0)
 
 
 def start_minutes_now() -> int:

@@ -24,8 +24,10 @@ Game values used (LMU & rF2 scoring): race clock = session time (mCurrentET) - r
 (mStartET), as race length of a live race is end time - start time; time left = end time -
 session time; tread = mean of tyre wear (fraction of tread left, 1 = new), as other modules
 read it. Stops: the game count (mNumPitstops) when the race state is first read, then a stop is
-counted when the car stood still in the pits or got fuel, energy or tyres there, so a stop is
+counted when the car stood still in its pit box or got fuel, energy or tyres there, so a stop is
 counted once leaving the pits (whenever the game counts it) and drive-through penalties are not.
+A visit to the garage stall is no stop unless the car got fuel, energy or tyres, or the game counts
+it (LMU: service at the pit box, then the garage; standing still in the garage alone never counts).
 Lap & race clock of the last stop seen are kept, so the stint in progress is counted from the
 real stop (not the one planned). Session change: see validator.is_same_session.
 
@@ -59,6 +61,7 @@ class StopRecord(NamedTuple):
     driver_in: str  # driver of the stint ended by the stop (in the car at pit entry), "" unknown
     driver_out: str  # driver of the next stint (in the car leaving the pits), "" unknown
     entry_clock: float = -1.0  # race clock at pit entry, -1 = unknown
+    tyres: bool = False  # tyres changed during the stop (tread rose while in the pits)
 
 
 class StopCounter:
@@ -78,30 +81,45 @@ class StopCounter:
         self.in_pits = False
         self.counting = False  # pit visit seen from its start (counted on leaving if serviced)
         self.still_since = 0.0
-        self.serviced = False  # stood still, fuel, energy or tyres during this pit visit
-        self.amounts = (0.0, 0.0, 0.0)
+        self.serviced = False  # fuel, energy or tyres added during this pit visit
+        self.tyres_changed = False  # tread rose during this pit visit (tyres changed)
+        self.amounts = (0.0, 0.0, 0.0)  # fuel (liters), energy & tread (%) at pit entry
         self.last_stop_lap = -1  # race laps done at last stop seen, -1 = unknown
         self.last_stop_clock = -1.0  # race clock leaving the pits after last stop seen, -1 = unknown
         self.stops: list[StopRecord] = []  # stops seen in this session
         self.driver = ""  # driver in the car (last update)
         self.entry_driver = ""  # driver in the car at pit entry
         self.entry_clock = -1.0  # race clock at pit entry
+        self.entry_penalty = False  # penalty pending at pit entry: standing still is serving it, not a stop
+        self.garage_visit = False  # garage stall reached in this visit: standing still there is no stop
+        self.stood_still = False  # car stood still in this visit (a drive-through never does)
+        self.game_rise = False  # game count rose during this visit
+        self.unserviced: tuple[int, float, str, str, float, bool] | None = None  # visit left uncounted (lap,
+        # clock, drivers in & out, entry clock, tyres): counted if the game counts it just after the pit exit
+        self.car = -1  # slot id of car counted (spectating: other car followed, counted again)
 
     def update(self, session: tuple, in_pits: bool, speed: float, fuel: float, energy: float,
                tread: float, game_stops: int, now: float | None = None, laps: float = 0.0,
-               clock: float = 0.0, driver: str = "") -> int:
+               clock: float = 0.0, driver: str = "", penalty: bool = False, car: int = -1,
+               garage: bool = False) -> int:
         """Stops done
 
         Args:
             session: session identifier (stamp, elapsed seconds, total laps).
+            fuel: fuel in tank (liters, as the game gives it: the refuel threshold never depends on
+                the display unit).
             now: time (seconds), monotonic clock by default.
             laps: race laps done & progress of lap (lap of a stop).
             clock: race clock (seconds).
             driver: driver in the car (scoring driver name), "" unknown.
+            penalty: penalty pending (stop & go served in the pits is no stop unless car serviced).
+            car: slot id of car (another car: counted from its own game count).
+            garage: car in its garage stall (standing still there is no stop).
         """
         now = monotonic() if now is None else now
         token = session_token(session, now)
-        if not is_same_session(self.session, token):
+        if not is_same_session(self.session, token) or car != self.car:
+            self.car = car
             self.baseline = self.last_game = game_stops
             self.counted = 0
             self.visit_seen = False
@@ -111,6 +129,7 @@ class StopCounter:
             self.last_stop_clock = -1.0
             self.stops = []
             self.entry_driver = ""
+            self.unserviced = None
         self.session = token
         self.driver = driver
         if in_pits and not self.in_pits:  # pit entry (before game count: it may rise at entry)
@@ -118,39 +137,74 @@ class StopCounter:
             self.counting = True
             self.visit_seen = True
             self.serviced = False
+            self.tyres_changed = False
             self.still_since = 0.0
             self.amounts = (fuel, energy, tread)
             self.entry_driver = driver
             self.entry_clock = max(clock, 0.0)
+            self.entry_penalty = penalty
+            self.garage_visit = garage
+            self.stood_still = False
+            self.game_rise = False
+            self.unserviced = None
         if game_stops > self.last_game:
             if not self.visit_seen:
                 self.counted += game_stops - self.last_game
                 self.last_stop_lap = -1
                 self.last_stop_clock = -1.0
+            elif self.in_pits:
+                self.game_rise = True
+            elif self.unserviced is not None:  # visit left uncounted, counted by the game just after the pit exit
+                self.record_stop(*self.unserviced)
+            self.unserviced = None
             self.visit_seen = False
             self.last_game = game_stops
         if in_pits:
+            self.garage_visit = self.garage_visit or garage
             if speed < STILL_SPEED:
                 if not self.still_since:
                     self.still_since = now
                 elif now - self.still_since >= STILL_SECONDS:
-                    self.serviced = True
+                    self.stood_still = True
             else:
                 self.still_since = 0.0
             fuel_before, energy_before, tread_before = self.amounts
-            if fuel > fuel_before + 0.5 or energy > energy_before + 1.0 or tread > tread_before + 1.0:
+            if tread > tread_before + 1.0:
+                self.tyres_changed = True
+            if fuel > fuel_before + 0.5 or energy > energy_before + 1.0 or self.tyres_changed:
                 self.serviced = True
         elif self.in_pits:  # pit exit
             self.in_pits = False
-            if self.counting and self.serviced:
-                self.counted += 1
-                self.last_stop_lap = max(round(laps), 0)  # stop at end of lap, line crossed in pit lane or not
-                self.last_stop_clock = max(clock, 0.0)
-                self.stops.append(StopRecord(
-                    self.baseline + self.counted, self.last_stop_lap, self.last_stop_clock,
-                    self.entry_driver, driver, self.entry_clock))
+            # Whole visit known: stood still in the pit box (garage stall never reached, no penalty to serve),
+            # or stood still & counted by the game (service at the pit box, then the garage), or fuel, energy
+            # or tyres added
+            held = self.stood_still and not self.entry_penalty
+            serviced = self.serviced or (held and (not self.garage_visit or self.game_rise))
+            # Stop at end of lap, line crossed in pit lane or not
+            stop = (max(round(laps), 0), max(clock, 0.0), self.entry_driver, driver, self.entry_clock,
+                    self.tyres_changed)
+            if self.counting and serviced:
+                self.record_stop(*stop)
+            elif self.counting and self.visit_seen and held:
+                self.unserviced = stop
             self.counting = False
         return self.baseline + self.counted
+
+    def record_stop(self, lap: int, clock: float, driver_in: str, driver_out: str, entry_clock: float,
+                    tyres: bool = False):
+        """Stop seen counted: lap & race clock leaving the pits, drivers, tyres changed"""
+        self.counted += 1
+        self.last_stop_lap = lap
+        self.last_stop_clock = clock
+        self.stops.append(StopRecord(self.baseline + self.counted, lap, clock, driver_in, driver_out, entry_clock,
+                                     tyres))
+
+    def tyre_stop_laps(self) -> tuple[int, ...] | None:
+        """Race laps done at each stop seen where tyres were changed (empty: tyres of the start still on), None
+        when a stop of the race was not seen (counted from the game count: tyres unknown, plan used instead)"""
+        if len(self.stops) < self.baseline + self.counted:
+            return None
+        return tuple(stop.lap for stop in self.stops if stop.tyres)
 
     def stint_drivers(self) -> tuple[str, ...]:
         """Driver of each stint of the race (first stint first, stint in progress last), "" unknown
@@ -183,7 +237,8 @@ class StopCounter:
 
 
 class LiveRead(NamedTuple):
-    """Race state (None out of a race or before the first lap) & values read, for checking"""
+    """Race state (None out of a race or before the first lap) & values read, for checking ("" out of a race,
+    or if not asked)"""
 
     state: RaceState | None
     in_pits: bool
@@ -191,36 +246,39 @@ class LiveRead(NamedTuple):
 
 
 def read_race_state(unit_fuel: Callable[[float], float], counter: StopCounter,
-                    symbol_fuel: str = "L") -> LiveRead:
-    """Race state of the player car, counter updated"""
+                    symbol_fuel: str = "L", describe: bool = True) -> LiveRead:
+    """Race state of the player car, counter updated (describe: text of values read, False for overlays updated
+    many times a second that never show it)"""
     session = api.read.session
     in_pits = api.read.vehicle.in_pits()
-    fuel = unit_fuel(api.read.engine.fuel())
+    liters = api.read.engine.fuel()
+    fuel = unit_fuel(liters)
     energy = api.read.engine.virtual_energy() * 100
     tread = sum(api.read.tyre.wear()) * 25
     game_stops = api.read.vehicle.number_pitstops()
     laps_done = api.read.lap.completed_laps()
     progress = api.read.lap.progress()
     elapsed = max(session.elapsed() - max(session.start(), 0.0), 0.0)
-    stops = counter.update(
-        session.identifier(), in_pits, api.read.vehicle.speed(), fuel, energy, tread, game_stops,
-        laps=laps_done + progress, clock=elapsed, driver=api.read.vehicle.driver_name())
+    penalty = api.read.vehicle.penalty()
+    penalties = max(api.read.vehicle.number_penalties(), penalty.pending, 0)
+    stops = counter.update(  # fuel in liters: a refuel is seen from the same amount whatever the display unit
+        session.identifier(), in_pits, api.read.vehicle.speed(), liters, energy, tread, game_stops,
+        laps=laps_done + progress, clock=elapsed, driver=api.read.vehicle.driver_name(), penalty=penalties > 0,
+        car=api.read.vehicle.slot_id(), garage=api.read.vehicle.in_garage())
     if session.session_type() != RACE_SESSION or not session.in_race():
         return LiveRead(None, in_pits, "")
     seconds_left = session.remaining()
     if seconds_left <= 0 < session.end():  # timer ended: time since (negative)
         seconds_left = min(session.end() - session.elapsed(), 0.0)
-    penalty = api.read.vehicle.penalty()
-    penalties = max(api.read.vehicle.number_penalties(), penalty.pending, 0)
     stop_go = float(penalty.seconds) if penalties and "stop" in penalty.kind.casefold() else 0.0
     repair = max(api.read.vehicle.repair_time(), 0.0)
-    text =(f"{laps_done} (+{progress:.2f}) · {clock(elapsed)} / {clock(seconds_left)} · "
-            f"{fuel:.1f} {symbol_fuel} · {energy:.0f} % · {tread:.0f} % · {stops} ({game_stops})")
+    text = (f"{laps_done} (+{progress:.2f}) · {clock(elapsed)} / {clock(seconds_left)} · "
+            f"{fuel:.1f} {symbol_fuel} · {energy:.0f} % · {tread:.0f} % · {stops} ({game_stops})") if describe else ""
     if laps_done <= 0:  # plan made before the start is the plan of the race
         return LiveRead(None, in_pits, text)
     state = RaceState(laps_done, progress, elapsed, seconds_left, fuel, energy, tread, stops,
                       counter.last_stop_lap, counter.last_stop_clock, counter.stint_drivers(),
-                      counter.stint_seconds(), penalties, stop_go, repair)
+                      counter.stint_seconds(), penalties, stop_go, repair, counter.tyre_stop_laps())
     return LiveRead(state, in_pits, text)
 
 

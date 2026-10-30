@@ -597,11 +597,13 @@ def test_game_replays_standings_and_camera(replays_page):
     assert kevin["gap"] == "" and kevin["status"] == "Finished" and kevin["statusTone"] == "gain"
     assert kevin["onCamera"] and not kevin_other["onCamera"]  # same name: camera by slot
     assert kevin["fastest"] and kevin["incidents"] == 1 and kevin["vehicle"] == "Oreca 07"
-    assert zaac["gap"] == "+1 lap" and zaac["status"] == "In Pits" and zaac["last"] == "-"
+    assert zaac["gap"] == "+1 lap" and zaac["status"] == "In Pits" and zaac["last"] == "—"
     assert kevin_other["status"] == "Garage" and kevin_other["statusTone"] == "dim"
     assert zaac["player"] and zaac["number"] == "7" and zaac["vehicle"] == "Team Z" and zaac["classPosition"] == 1
     assert [car["name"] for car in backend.classes] == ["LMP2", "Hypercar"]
-    assert backend.classes[1]["color"] == "#FF4400"  # vehicle class editor color
+    from neopedal.template.setting_classes import CLASS_COLORS
+
+    assert backend.classes[1]["color"] == CLASS_COLORS["Hypercar"]  # vehicle class editor color
     backend.setClassFilter("Hypercar")
     assert [row["driver"] for row in backend.standingRows.rows] == ["Zaac Latta"]
     backend.setClassFilter("Hypercar")  # same class again: all
@@ -829,7 +831,10 @@ def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
     assert sorted(path.name for path in folder.iterdir()) == ["Algarve P1 1.Vcr", "Monza R1 3.Vcr"]
     wait_requests(backend.request_replays)
     # Rename: file renamed, protection follows
-    monkeypatch.setattr(replays_backend.QInputDialog, "getText", lambda *args, **kwargs: ("Algarve best", True))
+    from neopedal.ui.quick import dialogs as page_dialogs
+
+    monkeypatch.setattr(page_dialogs, "ask_text", lambda parent, title, label, on_accept, text="", **kwargs:
+                        on_accept("Algarve best"))  # name typed in the page
     backend.renameReplay("Algarve P1 1")
     assert (folder / "Algarve best.Vcr").exists() and backend.protected == {"Algarve best"}
     wait_requests(backend.request_replays)
@@ -893,10 +898,10 @@ def test_game_replays_french_messages():
 
     i18n.set_language("Français")
     try:
-        assert i18n.trm("Move <b>3</b> replays (1,2 Go) to the recycle bin?") == "Mettre <b>3</b> rejeux (1,2 Go) à la corbeille ?"
+        assert i18n.trm("Move <b>3</b> replays (1,2 Go) to the recycle bin?") == "Mettre <b>3</b> rejeux (1,2 Go) à la corbeille du système ?"
         assert i18n.trm("Move replay <b>Spa R1 1</b> (182 Mo) to the recycle bin?") == (
-            "Mettre le rejeu <b>Spa R1 1</b> (182 Mo) à la corbeille ?")
-        assert i18n.trm("2 replay(s) moved to the recycle bin") == "2 rejeu(x) mis à la corbeille"
+            "Mettre le rejeu <b>Spa R1 1</b> (182 Mo) à la corbeille du système ?")
+        assert i18n.trm("2 replay(s) moved to the recycle bin") == "2 rejeu(x) mis à la corbeille du système"
         assert i18n.trm("1 replay(s) added to the game replay folder") == "1 rejeu(x) ajouté(s) au dossier des rejeux du jeu"
         assert i18n.trm("Unable to delete (replay open in game?): a.Vcr").startswith("Impossible de supprimer")
         assert i18n.trm("Unable to rename: name already used") == "Impossible de renommer : nom déjà utilisé"
@@ -983,7 +988,7 @@ def test_game_replays_practice_gap_energy_and_live_time(replays_page):
     backend.refresh_state()
     wait_requests(backend.request_state)
     rows = {row["driver"]: row for row in backend.standingRows.rows}
-    assert rows["Y Lheritier"]["gap"] == "" and rows["W Bils"]["gap"] == "+1.729" and rows["K Hess"]["gap"] == "-"
+    assert rows["Y Lheritier"]["gap"] == "" and rows["W Bils"]["gap"] == "+1.729" and rows["K Hess"]["gap"] == "—"
     assert rows["Y Lheritier"]["energy"] == "13%" and rows["W Bils"]["energy"] == "69%"
     assert rows["K Hess"]["energy"] == "" and rows["K Hess"]["energyLevel"] == -1.0  # hidden (0 from game)
     assert backend.hasEnergy and backend.liveTime == 1809.0 and backend.replayTime == -1.0
@@ -1157,7 +1162,9 @@ def test_game_replays_shown_as_app_page(window):  # noqa: F811
         dialog.backend.setListMode(0)  # sessions list & classification tab: game no longer asked
         dialog.backend.setTab(0)
         assert not replays._shown and not replays._timer.isActive()
-        dialog.backend.setTab(4)  # replay tab: asked again
+        dialog.backend.setTab(4)  # no session (no results file): no replay tab, game still not asked
+        assert dialog.backend.shownTab == -1 and not replays._shown
+        dialog.backend.setListMode(1)  # replays list (player there): asked again
         assert replays._shown
         view.set_current_index(1)  # another page: game no longer asked
         assert not replays._shown and not replays._timer.isActive()
@@ -1179,11 +1186,15 @@ def test_game_connection_keeps_connection(monkeypatch):
     class Response:
         def __init__(self, status, body):
             self.status, self.body, self.will_close = status, body, False
+            self.length = len(body)
 
-        def read(self):
-            return self.body
+        def read(self, amount=-1):  # body read in chunks (size bounded), b"" at the end
+            data, self.body = (self.body, b"") if amount < 0 else (self.body[:amount], self.body[amount:])
+            return data
 
     class Connection:
+        response_class = None
+
         def __init__(self, host, port, timeout):
             opened.append(host)
             self.answer = None
@@ -1359,7 +1370,7 @@ def test_game_replays_text_helpers(ui_env):
     assert replays_backend.day_text(0, today) == "Unknown Date"
     assert replays_backend.event_type_text("specialevent") == "Special Event"
     assert replays_backend.event_type_text("new-kind") == "New Kind"
-    assert replays_backend.session_text("QUALIFY") == "Qualify"
+    assert replays_backend.session_text("QUALIFY") == "Qualifying"
 
 
 def test_lap_info_tyre_compound(monkeypatch):

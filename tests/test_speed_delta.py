@@ -1,5 +1,6 @@
 """Speed delta overlay: speed difference to reference laps at same lap distance (delta module laps)"""
 
+import math
 from importlib import import_module
 
 import pytest
@@ -35,7 +36,7 @@ def test_speed_delta_positive_when_faster():
     steady = lap(lambda distance: 50.0)
     assert calc.speed_delta(steady, 1000.0, 52.0) == pytest.approx(2.0)
     assert calc.speed_delta(steady, 1000.0, 47.5) == pytest.approx(-2.5)
-    assert calc.speed_delta((), 1000.0, 47.5) == 0.0  # no reference lap
+    assert math.isnan(calc.speed_delta((), 1000.0, 47.5))  # no reference lap: unknown, not "no difference"
 
 
 @pytest.fixture

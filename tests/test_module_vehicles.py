@@ -8,8 +8,6 @@ import pytest
 
 from neopedal.api_control import api
 from neopedal.module.module_vehicles import (
-    calc_gap_behind_leader,
-    calc_gap_behind_next,
     calc_time_gap_behind,
     update_finish_time,
     update_qualify_position,
@@ -56,22 +54,6 @@ def test_negative_gap_is_corrected_by_a_lap(ui_env, monkeypatch):
     set_reader(monkeypatch, "timing", "estimated_time_into", lambda index: (5.0, 95.0)[index])
     set_reader(monkeypatch, "timing", "estimated_laptime", 100.0)
     assert calc_time_gap_behind(0, 1, 0.5) == pytest.approx(10.0)
-
-
-def test_lapped_cars_report_laps_not_seconds(ui_env, monkeypatch):
-    set_reader(monkeypatch, "lap", "behind_next", 2)
-    set_reader(monkeypatch, "timing", "behind_next", 9.9)
-    assert calc_gap_behind_next(1) == 2
-    set_reader(monkeypatch, "lap", "behind_next", 0)
-    assert calc_gap_behind_next(1) == pytest.approx(9.9)
-
-
-def test_gap_to_leader_prefers_laps_too(ui_env, monkeypatch):
-    set_reader(monkeypatch, "lap", "behind_leader", 3)
-    set_reader(monkeypatch, "timing", "behind_leader", 44.0)
-    assert calc_gap_behind_leader(2) == 3
-    set_reader(monkeypatch, "lap", "behind_leader", 0)
-    assert calc_gap_behind_leader(2) == pytest.approx(44.0)
 
 
 # --- Qualify position

@@ -33,6 +33,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter
 
 from ...api_control import api
+from ...i18n import tr_overlay as tr
 from .._pedal_alert import ALERT_THEME_COLORS, PedalAlertMixin
 from .base import CENTER, ModernOverlay
 from .draw import panel, rounded
@@ -47,6 +48,11 @@ PEDALS = (  # key, label, theme color
     ("brake", "B", "negative"),
     ("throttle", "T", "positive"),
 )
+
+
+def reading_text(filtered: float, raw: float) -> str:
+    """Pedal reading: highest of filtered & raw input (as classic design)"""
+    return f"{max(filtered, raw) * 100:.0f}"
 
 
 class PedalBarsMixin:
@@ -130,10 +136,9 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
         self.alert_colors = {alert: getattr(self.theme, color) for alert, color in ALERT_THEME_COLORS.items()}
         self.setup_alerts(self.keys)
         self.gradients: dict[int, QLinearGradient] = {}
-        self.labels = {key: label for key, label, _ in PEDALS}
+        self.labels = {key: tr(label) for key, label, _ in PEDALS}
         self.horizontal = wcfg["enable_horizontal_style"]
         self.show_readings = wcfg["show_readings"]
-        self.post_update()
         length = max(float(wcfg["bar_length"]), 10.0)
         thickness = max(float(wcfg["bar_width_unfiltered"]) + float(wcfg["bar_width_filtered"]), 4.0)
         pad = unit * 0.35
@@ -162,7 +167,8 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
                      + (unit * 0.2 + reading_w if reading_w else 0))
             height = pad * 2 + count * row + max(count - 1, 0) * gap
         else:
-            column = max(thickness, self.text_width("label", "FFB") + unit * 0.2)
+            column = max(thickness, self.text_width("label", "FFB") + unit * 0.2,
+                         self.text_width("small", "100") + unit * 0.2 if self.show_readings else 0.0)
             for index, key in enumerate(self.keys):
                 left = pad + index * (column + gap)
                 reading_rect = QRectF(left, pad, column, reading)
@@ -175,13 +181,9 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
             height = pad * 2 + reading + max_h + max_gap + length + unit * 0.15 + label
         self.set_size(width, height)
 
-    def post_update(self):
-        """Peak brake pressure found again for next car (filtered brake as share of peak)"""
-        self.max_brake_pressure = 0.01
-
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for key in self.keys:
             track, label, _ = self.rects[key]
             rounded(painter, track, min(track.width(), track.height()) / 2, theme.surface_raised)
@@ -203,7 +205,8 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
                 cap = self.max_rects[key]
                 rounded(painter, cap, min(cap.width(), cap.height()) / 2, color)
             if self.show_readings:
-                self.draw_text(painter, reading, f"{filtered * 100:.0f}", "small", theme.text_dim, CENTER, elide=False)
+                self.draw_text(painter, reading, reading_text(filtered, raw), "small", theme.text_dim, CENTER,
+                               elide=False)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -219,9 +222,7 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
                 if not wcfg["show_brake_filtered"]:
                     filtered = raw
                 elif wcfg["show_brake_pressure"]:
-                    pressure = sum(api.read.brake.pressure())
-                    self.max_brake_pressure = max(self.max_brake_pressure, pressure)
-                    filtered = pressure / self.max_brake_pressure
+                    filtered = self.brake_pressure_share()
                 else:
                     filtered = inputs.brake()
                 values.append((filtered, raw))
@@ -239,6 +240,6 @@ class Realtime(PedalAlertMixin, PedalBarsMixin, ModernOverlay):
         """What a pedal draws: fill & tick in device pixels, reading text, full travel lights, alert lit"""
         track = self.rects[key][0]
         length = track.width() if self.horizontal else track.height()
-        reading = f"{filtered * 100:.0f}" if self.show_readings else ""
+        reading = reading_text(filtered, raw) if self.show_readings else ""
         return (self.pixel_steps(min(max(filtered, 0.0), 1.0), length), self.pixel_steps(min(max(raw, 0.0), 1.0), length),
                 reading, filtered >= 1, raw >= 1, alert)

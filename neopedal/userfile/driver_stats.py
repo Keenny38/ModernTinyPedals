@@ -365,7 +365,7 @@ def load_stats_json_file(
         stats_user = {}
         save_json_file(stats_user, filename, filepath, extension, compact_json=True)
         return stats_user
-    except (AttributeError, TypeError, KeyError, ValueError, OSError):
+    except (AttributeError, TypeError, KeyError, ValueError, OSError, RecursionError):
         if show_log:
             logger.info("MISSING: invalid %s stats (%s) data", filename, extension)
     return None

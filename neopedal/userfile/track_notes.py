@@ -32,6 +32,7 @@ from typing import Any
 
 from ..const_common import CRLF
 from ..const_file import FileFilter
+from ..validator import is_network_path
 from . import atomic_write
 
 NOTESTYPE_PACE = "Pace Notes"
@@ -49,6 +50,7 @@ HEADER_PACE_NOTES = COLUMN_DISTANCE, COLUMN_PACENOTE, COLUMN_COMMENT, COLUMN_TAG
 HEADER_TRACK_NOTES = COLUMN_DISTANCE, COLUMN_TRACKNOTE, COLUMN_COMMENT, COLUMN_TAGS
 
 METADATA_FIELDNAMES = "TITLE", "AUTHOR", "DATE", "DESCRIPTION"
+UNSAFE_NOTE_CHARS = frozenset('/\\:<>"|?*')  # pace note text used as sound file name
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +300,32 @@ def save_notes_file(
         return
     with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as temp_file:
         writer(temp_file, table_header, dataset, metadata, filename)
+
+
+def pace_note_sound_file(sound_path: str, pace_note: Any, sound_format: Any) -> str:
+    """Sound file of a pace note in sound folder, empty if note or format is not a plain file name
+
+    Note text comes as is from the notes file (shared with presets): a folder ("/", "\\"), drive (":")
+    or parent ("..") in it would play any local file, or a network one (sign-in hash sent to its host).
+    The sound folder (preset option) is never a network path either.
+    """
+    if not isinstance(pace_note, str) or not isinstance(sound_format, str) or not isinstance(sound_path, str):
+        return ""
+    note = pace_note.strip()
+    extension = sound_format.strip().strip(".")
+    if (not note or ".." in note or any(char in UNSAFE_NOTE_CHARS or ord(char) < 32 for char in note)
+            or not extension.isascii() or not extension.isalnum() or len(extension) > 8):
+        return ""
+    sound_file = os.path.abspath(f"{sound_path}{note}.{extension}")
+    folder = os.path.dirname(os.path.abspath(f"{sound_path}_"))  # folder sound files are joined to
+    if is_network_path(sound_path) or is_network_path(folder):
+        return ""
+    try:
+        if os.path.commonpath((folder, sound_file)) != folder:
+            return ""
+    except ValueError:  # other drive
+        return ""
+    return sound_file
 
 
 def verify_notes(note_line: dict, column_key: str) -> bool:

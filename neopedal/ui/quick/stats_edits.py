@@ -23,6 +23,7 @@ Driver stats viewer part (StatsEdits, mixin of DriverStatsBackend): Edits of sta
 from __future__ import annotations
 
 import copy
+import html
 import logging
 import time
 from collections.abc import Callable, Iterable
@@ -35,7 +36,6 @@ from PySide6.QtCore import (
     QLocale,
     Slot,
 )
-from PySide6.QtWidgets import QMessageBox
 
 from ... import calculation as calc
 from ...i18n import tr, trm
@@ -59,6 +59,7 @@ from ...userfile.driver_stats import (
     stats_entry,
     validate_stats_file,
 )
+from . import dialogs
 from .formatting import date_locale, format_date
 from .stats_common import (
     HEADER_KEYS,
@@ -84,21 +85,21 @@ class StatsEdits(StatsHost):
 
     @Slot()
     def completeLapTimes(self):
-        """Lap times missing or slower in stats taken from results files, after confirmation (undo: Ctrl+Z)"""
+        """Lap times missing or slower in stats taken from results files, at once: undone from the toast (naming
+        the first changes) or with Ctrl+Z (reversible: never confirmed)"""
         fixes = self._fixes
         if not fixes or self.editing:
             return
         lines = []
         for fix in fixes[:MAX_FIX_LINES]:
             before = calc.sec2laptime_full(fix.current) if fix.current else "-"
-            lines.append(f"{fix.track} · {fix.vehicle} · {tr(HEADER_KEYS[fix.stat])}: "
+            lines.append(f"{html.escape(fix.track)} · {html.escape(fix.vehicle)} · {tr(HEADER_KEYS[fix.stat])}: "
                          f"{before} → <b>{calc.sec2laptime_full(fix.laptime)}</b> ({format_date(fix.time)})")
         if len(fixes) > MAX_FIX_LINES:
-            lines.append("...")
-        message = (trm(f"Complete {len(fixes)} lap time(s) from race results?") + "<br><br>" + "<br>".join(lines)
-                   + "<br><br>" + tr("Undo with Ctrl+Z while this page is open."))
-        if self.confirm(message):
-            self.run_locked(StatsJob("edit", self.write_fixes, (tuple(fixes),), self.edit_written))
+            lines.append("…")
+        done_text = tr("%1 lap time(s) completed from race results").replace("%1", str(len(fixes)))
+        self.run_locked(StatsJob("edit", self.write_fixes, (tuple(fixes),), self.edit_written,
+                                 ("<br>".join([done_text, *lines]),)))
 
     @classmethod
     def write_fixes(cls, fixes: tuple[ri.BestLapFix, ...]) -> tuple[str, StatsEdit | None]:
@@ -123,18 +124,21 @@ class StatsEdits(StatsHost):
 
     @Slot()
     def deleteSelected(self):
-        """Delete key: remove selected vehicle (All Tracks: delete selected track), after confirmation"""
+        """Delete key: remove selected vehicle (All Tracks: delete selected track), undone from the toast"""
         if self.selected_stats_key:
             self.removeVehicle()
         elif self._selected["tracks"]:
             self.deleteTrack(self._selected["tracks"])
 
     # Edits: applied to stats file read again, undo & redo
-    def confirm(self, message: str) -> bool:
-        return bool(self._window.confirm_operation(message=message))
+    def ask(self, message: str, on_yes: Callable[[], object], action_text: str = ""):
+        """Confirmation in the page (message translated by message rules), on_yes() once confirmed: later, the
+        page keeps running meanwhile (check again what may have changed)"""
+        dialogs.confirm(self._window, tr("Confirm"), trm(message), action_text or tr("Confirm"),
+                        lambda chosen: chosen and not self._released and on_yes())
 
     def warning(self, text: str):
-        QMessageBox.warning(self._window, tr("Error"), text)
+        dialogs.alert(self._window, tr("Error"), text)
 
     @staticmethod
     def load_fresh_stats() -> dict | None:
@@ -186,18 +190,21 @@ class StatsEdits(StatsHost):
         return None
 
     def edit_stats(self, path: tuple[str, ...], value: Any,
-                   history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None = None) -> bool:
+                   history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None = None,
+                   done_text: str = "") -> bool:
         """Set stats at path (None removes it, empty path: whole file), history changed, undo recorded
 
         Saved on worker thread after edits asked before (see run_locked), page updated once saved.
 
         Args:
             history_change: history records -> (records removed, records added), run on worker thread.
+            done_text: toast once saved, with Undo (translated, names escaped).
 
         Returns:
             True if done now (never: saved in background).
         """
-        return self.run_locked(StatsJob("edit", self.write_edit, (path, value, history_change), self.edit_written))
+        return self.run_locked(StatsJob("edit", self.write_edit, (path, value, history_change), self.edit_written,
+                                        (done_text,)))
 
     @classmethod
     def write_edit(cls, path: tuple[str, ...], value: Any,
@@ -235,8 +242,8 @@ class StatsEdits(StatsHost):
                 return "history", StatsEdit(path, None, None, removed, added, history_only=True)
         return "saved", StatsEdit(path, before, copy.deepcopy(value), removed, added)
 
-    def edit_written(self, result: tuple[str, StatsEdit | None]):
-        """Edit saved (UI thread): undo recorded & page reloaded, or warned"""
+    def edit_written(self, result: tuple[str, StatsEdit | None], done_text: str = ""):
+        """Edit saved (UI thread): undo recorded & page reloaded, told by a toast with Undo (Ctrl+Z too), or warned"""
         outcome, edit = result
         self._backups = None  # listed again (backup made before edit)
         if outcome == "unreadable":
@@ -247,6 +254,15 @@ class StatsEdits(StatsHost):
             self.edit_done(edit)
             if outcome == "history":
                 self.stats_unsaved_history_changed()
+            elif done_text and not self._released:
+                self.toast_undo(done_text)
+
+    def toast_undo(self, text: str):
+        """Edit saved without confirmation (reversible): page toast with Undo, as Ctrl+Z"""
+        from ..toast import show_toast
+
+        show_toast(self._window, text, action_text=tr("Undo"),
+                   action=lambda: None if self._released else self.undo())
 
     def edit_done(self, edit: StatsEdit):
         """Edit saved: undo recorded, page reloaded"""
@@ -327,42 +343,33 @@ class StatsEdits(StatsHost):
 
     @Slot(str)
     def deleteTrack(self, track: str = ""):
-        """Delete stats of track (empty: selected track) & its session history"""
+        """Delete stats of track (empty: selected track) & its session history at once: undone from the toast or
+        with Ctrl+Z (reversible: never confirmed)"""
         if self.editing:  # stats shown not up to date yet
             return
         track = track or self.selected_stats_key
         if not track or track not in self.stats_temp:
             self.warning(tr("No data found."))
             return
-        msg_text = (
-            "Delete all stats from<br>"
-            f"<b>{track}</b> ?<br><br>"
-            "Undo with Ctrl+Z while this page is open."
-        )
-        if self.confirm(msg_text):
-            self.edit_stats((track,), None, lambda records: (
-                [record for record in records if record.track == track], []))
+        self.edit_stats((track,), None, lambda records: (
+            [record for record in records if record.track == track], []),
+            tr("Stats of %1 deleted").replace("%1", f"<b>{html.escape(track)}</b>"))
 
     @Slot()
     def removeVehicle(self):
-        """Remove selected vehicle stats & its session history"""
+        """Remove selected vehicle stats & its session history at once (undone from the toast or with Ctrl+Z)"""
         if self.editing:
             return
         vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
-        if not vehicle:
-            self.warning(tr("No data selected."))
+        if not vehicle:  # nothing selected: action disabled, nothing to tell
             return
         if vehicle not in self.selected_stats_dict:
             self.warning(tr("No data found."))
             return
         track = self.selected_stats_key
-        msg_text = (
-            f"Remove all stats from <b>{vehicle}</b>?<br><br>"
-            "Undo with Ctrl+Z while this page is open."
-        )
-        if self.confirm(msg_text):
-            self.edit_stats((track, vehicle), None, lambda records: (
-                [record for record in records if record.track == track and record.vehicle == vehicle], []))
+        self.edit_stats((track, vehicle), None, lambda records: (
+            [record for record in records if record.track == track and record.vehicle == vehicle], []),
+            tr("Stats of %1 removed").replace("%1", f"<b>{html.escape(vehicle)}</b>"))
 
     @Slot(str, str)
     def resetLapTime(self, vehicle: str, column: str):
@@ -374,13 +381,13 @@ class StatsEdits(StatsHost):
         if not laptime:
             self.warning(tr("No lap time found."))
             return
-        msg_text = (
-            f"Reset <b>{calc.sec2laptime_full(laptime)}</b> lap time for <b>{vehicle}</b>?<br><br>"
-            "Undo with Ctrl+Z while this page is open."
-        )
-        if not self.confirm(msg_text):
+        self.reset_lap_time(self.selected_stats_key, vehicle, column, laptime)
+
+    def reset_lap_time(self, track: str, vehicle: str, column: str, laptime: float):
+        """Lap time of vehicle reset at once (undone from the toast or with Ctrl+Z), its session bests in history
+        too"""
+        if self.editing or track != self.selected_stats_key:  # other track shown meanwhile: edits apply to it
             return
-        track = self.selected_stats_key
         sessions = {"pb": (), "qb": SESSION_GROUPS[2], "rb": SESSION_GROUPS[3]}[column]
 
         def reset_history(records: list[SessionRecord]) -> tuple[list, list]:
@@ -389,7 +396,9 @@ class StatsEdits(StatsHost):
                      and (not sessions or record.session in sessions)]
             return reset, [record._replace(best=0.0) for record in reset]
 
-        self.edit_stats((track, vehicle, column), DriverStats.__dict__[column], reset_history)
+        done_text = (tr("Lap time %1 reset for %2").replace("%1", f"<b>{calc.sec2laptime_full(laptime)}</b>")
+                     .replace("%2", f"<b>{html.escape(vehicle)}</b>"))
+        self.edit_stats((track, vehicle, column), DriverStats.__dict__[column], reset_history, done_text)
 
     # Backups
     @Property(list, notify=StatsCore.editsChanged)
@@ -411,23 +420,23 @@ class StatsEdits(StatsHost):
 
     @Slot(str)
     def restoreBackup(self, name: str):
-        """Stats file as saved in backup (undo: stats before restore), read in background once confirmed"""
+        """Stats file as saved in backup, read in background then restored as an edit: undone from the toast or
+        with Ctrl+Z (stats before restore; reversible: never confirmed)"""
         if self.editing:
             return
         date = next((entry["date"] for entry in self.cached_backups() if entry["name"] == name), name)
-        if not self.confirm(trm(f"Restore stats saved on <b>{date}</b>?<br><br>Undo with Ctrl+Z while this page is open.")):
-            return
-        self.jobs.run("stats backup", partial(read_stats_backup, cfg.path.config, name), self.backup_read,
-                      self.backup_failed, key="backup")
+        self.jobs.run("stats backup", partial(read_stats_backup, cfg.path.config, name),
+                      partial(self.backup_read, date=date), self.backup_failed, key="backup")
 
-    def backup_read(self, stats_backup: dict | None):
+    def backup_read(self, stats_backup: dict | None, date: str = ""):
         """Backup read (checked): restored as an edit"""
         if self._released or self.editing:
             return
         if stats_backup is None:
             self.warning(tr("Unable to read stats file."))
             return
-        self.edit_stats((), stats_backup)
+        self.edit_stats((), stats_backup, done_text=tr("Stats restored from the backup of %1").replace(
+            "%1", f"<b>{html.escape(date)}</b>"))
 
     def backup_failed(self, error: BaseException):
         logger.warning("DRIVER STATS: backup not read", exc_info=(type(error), error, error.__traceback__))
@@ -444,7 +453,7 @@ class StatsEdits(StatsHost):
             actions += [{"id": "show", "text": tr("Show Track"), "enabled": True},
                         {"id": "delete", "text": tr("Delete Track"), "enabled": editable}]
         elif column == "vehicle":
-            actions.append({"id": "remove", "text": tr("Remove Vehicle"), "enabled": editable})
+            actions.append({"id": "remove", "text": tr("Remove Car"), "enabled": editable})
         elif DriverStats.is_lap_time(column):
             laptime = valid_laptime(self.selected_stats_dict.get(key, {}).get(column, 0))
             actions.append({"id": "reset", "text": tr("Reset Lap Time"), "enabled": bool(laptime) and editable})

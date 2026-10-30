@@ -200,7 +200,7 @@ class Realtime(TrailingMixin, PedalBarsMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         chart = self.chart
         rounded(painter, chart, self.radius(0.3), theme.tint(theme.surface_alt, 200))
         if self.wcfg["show_reference_line"]:

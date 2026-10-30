@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from ... import calculation as calc
 from ...api_control import api
+from ..suspension_force import FULL_GAUGE_RATIO
 from .gauge_quad import GaugeQuad
 
 if TYPE_CHECKING:
@@ -50,5 +51,5 @@ class Realtime(GaugeQuad):
         for force in forces:
             ratio = calc.part_to_whole_ratio(force, total) * 100
             value = ratio if self.wcfg["show_force_ratio"] else force
-            tiles.append(self.gauge(value, value, ratio / 50, self.theme.best))
+            tiles.append(self.gauge(value, value, ratio / FULL_GAUGE_RATIO, self.theme.best))
         return tuple(tiles)

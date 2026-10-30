@@ -62,6 +62,7 @@ FUEL_CALCULATOR_INPUTS = {
     "input_stints_per_driver": 1,
     "input_driver_table": "",  # pace:min:max of each driver, see fuel_strategy.parse_driver_table
     "input_driver_names": "",  # name of each driver, one per line (LMU team order), see fuel_strategy.driver_numbers
+    "input_stint_drivers": "",  # driver planned for each stint "2,0,1" (0 = chosen by plan), see parse_stint_drivers
     "input_saving_cost": 0.0,
     "input_race_start_minutes": -1,
     "enable_safety_car": False,
@@ -103,7 +104,6 @@ GLOBAL_DEFAULT = {
         "enable_auto_load_preset": False,
         "enable_global_hotkey": False,
         "show_option_group_title": True,
-        "show_confirmation_for_batch_toggle": True,
         "show_overlay_previews": True,  # Overlays page: cards with preview, compact list if off
         "show_overlay_screen_view": False,  # Overlays page: running overlays on a map of the screens instead
         "overlays_sort_order": 0,  # Overlays page sort: 0 name, 1 enabled first, 2 category
@@ -115,7 +115,8 @@ GLOBAL_DEFAULT = {
         # What's New of the versions since the newest one run (last_run_version), once at first start of a newer one
         "show_release_notes_after_update": True,
         "last_run_version": "",
-        # Driver & Safety Rank read online from RaceControl (sign in with a game ticket), see process/raceos.py
+        # Driver & Safety Rank read online from RaceControl (sign in with a game ticket), see process/raceos.py:
+        # sends the Steam session ticket of the running game to raceos.gg (online service of the game, not the app)
         "enable_online_driver_ranks": True,
         'snap_distance': 10,
         "snap_gap": 0,
@@ -143,14 +144,18 @@ GLOBAL_DEFAULT = {
         "rail_items": default_rail(),  # see page_registry.PageSpec.rail
         # Home page quick access buttons in order: tool dialog module names, page keys & actions,
         # see ui.home_view.quick_access_entries
+        # (default: entries not in the default navigation bar, see page_registry.PageSpec.rail)
         "home_quick_access": (
-            "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,"
-            "race_results_viewer,widget,module,preset,spectate,"
+            "perf_view,track_map_viewer,module,spectate,pacenotes,"
             "hotkey,tools,app_settings,bug_report,check_updates"
         ),
         "enable_layout_per_screen_setup": True,
         # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
         "open_pages": "",
+        # Command palette commands run last, newest first, keys separated by line breaks (see ui.command_palette)
+        "command_palette_recent": "",
+        # First close to tray told by a tray message, once (see ui.app.AppWindow.tell_closed_to_tray)
+        "close_to_tray_notice_shown": False,
     },
     "compatibility": {
         "enable_bypass_window_manager": (not PLATFORM.WINDOWS),
@@ -177,6 +182,9 @@ GLOBAL_DEFAULT = {
     "remote_control": {
         "enable_remote_control": False,
         "remote_control_port": 8337,
+        # X-NeoPedal header value must be access_token (generated if empty), see command_server.CommandServer
+        "enable_access_token": False,
+        "access_token": "",
     },
     "web_dashboard": {
         "enable_web_dashboard": False,
@@ -231,10 +239,10 @@ GLOBAL_DEFAULT = {
     "notification": {
         "notify_locked_preset": True,
         "font_color_locked_preset": "#FFFFFF",
-        "background_color_locked_preset": "#777777",
+        "background_color_locked_preset": "#767676",  # white text 4.5:1 (WCAG AA)
         "notify_spectate_mode": True,
         "font_color_spectate_mode": "#FFFFFF",
-        "background_color_spectate_mode": "#0088CC",
+        "background_color_spectate_mode": "#007ABC",  # white text 4.5:1 (WCAG AA)
         "notify_pace_notes_playback": True,
         "font_color_pace_notes_playback": "#FFFFFF",
         "background_color_pace_notes_playback": "#228800",
@@ -268,6 +276,7 @@ GLOBAL_DEFAULT = {
         "race_tab": 0,
         "live_unfollowed": "",
         "enable_game_data": True,
+        "show_quick_setup": True,
         "recent_history_file_names": "",
         "recent_race_plan_file_names": "",
         "recent_tyre_plan_file_names": "",

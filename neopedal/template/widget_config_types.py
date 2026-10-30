@@ -812,7 +812,7 @@ class EngineConfig(WidgetConfig):
     overheat_threshold_oil: float
     overheat_threshold_water: float
     warning_color_overheat: str
-    show_game_overheating_highlight: bool
+    show_game_overheating_warning: bool
     show_oil_temperature: bool
     font_color_oil: str
     background_color_oil: str
@@ -845,7 +845,6 @@ class EngineConfig(WidgetConfig):
     display_order_torque: int
     display_order_power: int
     display_order_power_to_weight_ratio: int
-    show_game_overheating_warning: bool
 
 
 class EngineTemperatureConfig(WidgetConfig):
@@ -863,7 +862,7 @@ class EngineTemperatureConfig(WidgetConfig):
     overheat_threshold_oil: float
     overheat_threshold_water: float
     warning_color_overheat: str
-    show_game_overheating_highlight: bool
+    show_game_overheating_warning: bool
     show_oil_temperature: bool
     font_color_oil_temperature: str
     background_color_oil_temperature: str
@@ -885,7 +884,6 @@ class EngineTemperatureConfig(WidgetConfig):
     font_color_rate_loss: str
     display_order_oil_temperature: int
     display_order_water_temperature: int
-    show_game_overheating_warning: bool
 
 
 class FlagConfig(WidgetConfig):
@@ -1139,22 +1137,28 @@ class FuelConfig(WidgetConfig):
     bar_padding: float
     bar_width: int
     bar_gap: int
-    show_absolute_refueling: bool
+    show_remaining: bool
     decimal_places_remaining: int
     font_color_remaining: str
     background_color_remaining: str
+    show_refueling: bool
+    show_absolute_refueling: bool
     decimal_places_refueling: int
     font_color_refueling: str
     background_color_refueling: str
+    show_estimated_laps: bool
     decimal_places_estimated_laps: int
     font_color_estimated_laps: str
     background_color_estimated_laps: str
+    show_estimated_minutes: bool
     decimal_places_estimated_minutes: int
     font_color_estimated_minutes: str
     background_color_estimated_minutes: str
+    show_estimated_consumption: bool
     decimal_places_estimated_consumption: int
     font_color_estimated_consumption: str
     background_color_estimated_consumption: str
+    show_saving_target: bool
     decimal_places_saving_target: int
     font_color_saving_target: str
     background_color_saving_target: str
@@ -1162,13 +1166,15 @@ class FuelConfig(WidgetConfig):
     decimal_places_pitstop_count: int
     font_color_pitstop_count: str
     background_color_pitstop_count: str
+    show_early_pitstop_count: bool
     decimal_places_early_pitstop_count: int
     font_color_early_pitstop_count: str
     background_color_early_pitstop_count: str
-    show_delta_consumption_and_end_remaining: bool
+    show_delta_consumption: bool
     decimal_places_delta_consumption: int
     font_color_delta_consumption: str
     background_color_delta_consumption: str
+    show_end_remaining: bool
     decimal_places_end_remaining: int
     font_color_end_remaining: str
     background_color_end_remaining: str
@@ -1557,6 +1563,7 @@ class LapTimeHistoryConfig(WidgetConfig):
     display_order_fuel: int
     display_order_fuel_ratio: int
     display_order_wear: int
+    show_invalid_lap_in_red: bool
 
 
 class LiftAndCoastLedConfig(WidgetConfig):
@@ -2040,6 +2047,7 @@ class RadarConfig(WidgetConfig):
     background_color: str
     show_circle_background: bool
     background_color_circle: str
+    radar_background_opacity_percentage: float
     show_edge_fade_out: bool
     edge_fade_in_radius: float
     edge_fade_out_radius: float
@@ -2328,6 +2336,7 @@ class RelativeConfig(WidgetConfig):
     display_order_gap_trend: int
     column_position: bool
     column_class: bool
+    show_class_name: bool
     column_position_change: bool
     column_driver_name: bool
     column_vehicle_name: bool
@@ -2353,8 +2362,9 @@ class RelativeConfig(WidgetConfig):
     column_time_gap: bool
     column_gap_trend: bool
     column_driver_ranks: bool
-    show_driver_badge: bool
     display_order_driver_ranks: int
+    column_driver_badge: bool
+    display_order_driver_badge: int
     column_delta_laptime: bool
     number_of_delta_laptime: int
     show_inverted_delta_laptime_layout: bool
@@ -2611,6 +2621,7 @@ class RivalsConfig(WidgetConfig):
     display_order_pit_status: int
     column_position: bool
     column_class: bool
+    show_class_name: bool
     column_position_change: bool
     column_driver_name: bool
     column_vehicle_name: bool
@@ -2641,8 +2652,9 @@ class RivalsConfig(WidgetConfig):
     column_track_limits: bool
     display_order_track_limits: int
     column_driver_ranks: bool
-    show_driver_badge: bool
     display_order_driver_ranks: int
+    column_driver_badge: bool
+    display_order_driver_badge: int
     column_gap_trend: bool
     display_order_gap_trend: int
 
@@ -3167,6 +3179,7 @@ class StandingsConfig(WidgetConfig):
     display_order_energy_per_lap: int
     column_position: bool
     column_class: bool
+    show_class_name: bool
     column_position_change: bool
     column_driver_name: bool
     column_vehicle_name: bool
@@ -3191,8 +3204,9 @@ class StandingsConfig(WidgetConfig):
     column_incidents: bool
     column_track_limits: bool
     column_driver_ranks: bool
-    show_driver_badge: bool
     display_order_driver_ranks: int
+    column_driver_badge: bool
+    display_order_driver_badge: int
     column_gap_trend: bool
     display_order_gap_trend: int
     column_stint_laps: bool
@@ -4332,22 +4346,28 @@ class VirtualEnergyConfig(WidgetConfig):
     bar_padding: float
     bar_width: int
     bar_gap: int
-    show_absolute_refilling: bool
+    show_remaining: bool
     decimal_places_remaining: int
     font_color_remaining: str
     background_color_remaining: str
+    show_refilling: bool
+    show_absolute_refilling: bool
     decimal_places_refilling: int
     font_color_refilling: str
     background_color_refilling: str
+    show_estimated_laps: bool
     decimal_places_estimated_laps: int
     font_color_estimated_laps: str
     background_color_estimated_laps: str
+    show_estimated_minutes: bool
     decimal_places_estimated_minutes: int
     font_color_estimated_minutes: str
     background_color_estimated_minutes: str
+    show_estimated_consumption: bool
     decimal_places_estimated_consumption: int
     font_color_estimated_consumption: str
     background_color_estimated_consumption: str
+    show_saving_target: bool
     decimal_places_saving_target: int
     font_color_saving_target: str
     background_color_saving_target: str
@@ -4355,20 +4375,23 @@ class VirtualEnergyConfig(WidgetConfig):
     decimal_places_pitstop_count: int
     font_color_pitstop_count: str
     background_color_pitstop_count: str
+    show_early_pitstop_count: bool
     decimal_places_early_pitstop_count: int
     font_color_early_pitstop_count: str
     background_color_early_pitstop_count: str
-    show_delta_consumption_and_end_remaining: bool
+    show_delta_consumption: bool
     decimal_places_delta_consumption: int
     font_color_delta_consumption: str
     background_color_delta_consumption: str
+    show_end_remaining: bool
     decimal_places_end_remaining: int
     font_color_end_remaining: str
     background_color_end_remaining: str
-    show_fuel_ratio_and_fuel_bias: bool
+    show_fuel_ratio: bool
     decimal_places_fuel_ratio: int
     font_color_fuel_ratio: str
     background_color_fuel_ratio: str
+    show_fuel_bias: bool
     decimal_places_fuel_bias: int
     font_color_fuel_bias: str
     background_color_fuel_bias: str

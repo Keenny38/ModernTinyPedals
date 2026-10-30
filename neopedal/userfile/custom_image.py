@@ -537,7 +537,7 @@ def own_logo_file(logo_folder: str, *brands: str) -> str:
         if found is None:
             matches = [(text.rfind(name), len(name), path) for name, path in files.items() if name and name in text]
             found = max(matches)[2] if matches else None
-        if found and image_exists(found, FileExt.PNG, 5_120_000):
+        if found and image_exists(found, FileExt.PNG, 5_120_000, allow_network=True):  # listed from user logo folder
             return found
     return ""
 

@@ -46,6 +46,7 @@ from .module_control import event_loop_running, mctrl, wctrl
 from .overlay_control import octrl
 from .replay import replay
 from .setting import cfg
+from .userfile.data_saver import wait_data_saver
 from .vr_overlay import vroverlay
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def start():
     cfg.set_next_to_load(f"{cfg.preset_files()[0]}{FileExt.JSON}")
     cfg.load_user()
     sync_screen_layout()
-    cfg.save()
+    cfg.save_loaded()  # preset written only if missing, repaired or migrated (unchanged file left alone)
     # 2 start api
     api.connect()
     api.start()
@@ -258,8 +259,11 @@ def close():
     write_pending()
     # 0 reload in progress never finished (modules still stopping waited below)
     cancel_reload()
-    # 1 unload modules (recorder module saves last lap)
+    # 1 unload modules (recorder module saves last lap); their queued data saves (delta, fuel, sectors,
+    # consumption) written before the process ends (each module already waits for its own, safety net)
     unload_modules()
+    if not wait_data_saver(LAP_SAVER_TIMEOUT):
+        logger.warning("CLOSING: data saving not finished")
     # 2 finish replay recording (manual recording is not stopped by recorder module)
     replay.stop_recording()
     if not replay.wait_closed(REPLAY_CLOSE_TIMEOUT):  # slow drive: never cut by the process end
@@ -270,6 +274,9 @@ def close():
     logger.info("API: closed")
     # 4 quitting or restarting before start finished is no crash
     safe_mode.clear_marker(cfg.path.config)
+    # 5 settings saved by stopped modules (track info, brands, brakes) written before the process ends:
+    # quit never waited for the saving thread (restart does, see restart)
+    cfg.flush()
 
 
 def restart():
@@ -281,6 +288,8 @@ def restart():
     cfg.flush()
     if not wait_lap_saver(LAP_SAVER_TIMEOUT):
         logger.warning("RESTARTING: lap saving not finished")
+    if not wait_data_saver(LAP_SAVER_TIMEOUT):
+        logger.warning("RESTARTING: data saving not finished")
     # 2 set restart env for skipping single instance check
     os.environ[RESTART_ENVIRONMENT] = "TRUE"
     command = restart_command()
@@ -472,7 +481,9 @@ def finish_reload(reload_preset: bool, flush: bool = True):
         if flush:
             cfg.flush()  # data saved by stopped modules (track info) written first, never lost by loading older file
         cfg.load_user()
-        cfg.save(0)  # save new changes in case preset was edited externally
+        # Save new changes in case preset was edited externally; an unchanged preset is not rewritten, only
+        # its modified time is set: the preset loaded last is the most recent one, loaded at next start
+        cfg.save(0)
     # 3 widget positions of current screen setup
     sync_screen_layout()
     # 4 restart api

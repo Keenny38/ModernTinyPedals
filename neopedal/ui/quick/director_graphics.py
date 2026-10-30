@@ -37,10 +37,12 @@ from ...i18n import tr
 from ...process import championship as champ
 from ...process import director as dr
 from ...process.game_info import Standing
+from ...process.results_text import MISSING, sector_text
 from ...rank_info import driver_ranks, poll_field
 from ...setting import cfg
 from ...template.setting_status_colors import SAME_TIME
 from ...userfile.badge_icons import badge_info
+from . import last_folder
 from .director_shared import (
     ACCENT,
     AUTO_EVENT_SECONDS,
@@ -74,7 +76,6 @@ from .director_shared import (
     interval_text,
     lap_text,
     load_championships,
-    localized,
     read_qualifying_times,
     save_championships,
     seconds_text,
@@ -278,7 +279,7 @@ class BroadcastGraphics(DirectorPart):
             rows = self.pit_neighbours(shown)
             if rows:
                 count = sum(1 for row in rows if not row["ahead"])
-                radar = {"title": tr("Pit lane"), "rows": rows[:6],
+                radar = {"title": tr("Pit Lane"), "rows": rows[:6],
                          "count": tr("%1 cars approaching").replace("%1", str(count)) if count else ""}
         on_demand = self.on_demand
         return {
@@ -444,12 +445,12 @@ class BroadcastGraphics(DirectorPart):
             "number": car.number, "name": short_name(car.driver), "color": class_color(car.car_class),
             "position": f"P{page.places.get(car.slot, 0)}", "running": running,
             "lapStart": car.lap_start, "now": page.session_time,
-            "best": lap_text(car.best), "target": lap_text(pole.best) if pole is not None else "-",
+            "best": lap_text(car.best), "target": lap_text(pole.best) if pole is not None else MISSING,
             "targetLabel": tr("Pole"),
             "delta": delta_text(delta) if delta is not None else "",
             "deltaTone": "" if delta is None else "gain" if delta < 0 else "loss",
             "status": status,
-            "sectors": [{"text": localized(f"{value:.3f}") if value > 0 else "-",
+            "sectors": [{"text": sector_text(value),  # times keep their dot, as the lap time
                          "tone": sector_tone(value, bests[index], class_bests[index])}
                         for index, value in enumerate(current)],
         }
@@ -880,8 +881,10 @@ class BroadcastGraphics(DirectorPart):
 
         parent = self.page.parent()
         path, _ = QFileDialog.getOpenFileName(parent if isinstance(parent, QWidget) else None,
-                                              tr("Import Championship"), "", "CSV (*.csv *.txt)")
+                                              tr("Import Championship"), last_folder.start_folder("championship"),
+                                              "CSV (*.csv *.txt)")
         if path:
+            last_folder.remember("championship", path)
             self.import_championship(path)
 
     def import_championship(self, path: str) -> bool:
@@ -968,8 +971,8 @@ class BroadcastGraphics(DirectorPart):
 
     @Slot()
     def resetGraphicsLayout(self):
-        """Every graphic of the layout preset in use (the one the editor changes) back to its place & size, places
-        kept for one undo"""
+        """Every graphic of the layout preset in use (the one the editor changes) back to its place & size at once,
+        places kept for one undo (toast, Ctrl+Z: reversible, never confirmed)"""
         from ...stream_director import director_feed, director_layout
 
         preset = director_layout.active()
@@ -978,7 +981,8 @@ class BroadcastGraphics(DirectorPart):
         self._layout_undo = (preset, places, director_layout.version) if places else None
         director_feed.bump()
         self.graphicsChanged.emit()
-        self.page.notify(tr("Graphics back to their places"))
+        self.page.notify(tr("Graphics back to their places"),
+                         undo=self.undoLayoutReset if self._layout_undo is not None else None)
 
     @Property(bool, notify=graphicsChanged)
     def canUndoLayoutReset(self) -> bool:
@@ -1089,13 +1093,28 @@ class BroadcastGraphics(DirectorPart):
 
     # League branding: name, logo, sponsors pictures (config folder)
     def brand_state(self) -> dict[str, Any]:
+        """Pictures as last listed: the folder is listed again every few seconds (pictures added) on a worker thread,
+        never here (published every second while a source shows the graphics)"""
         from ...stream_director import brand_pictures
 
         now = time.monotonic()
-        if now - self._brand[0] > 5:  # folder looked at again every few seconds (pictures added)
-            self._brand = (now, brand_pictures())
+        if now - self._brand[0] > 5 and not self.page.jobs.is_busy("brand"):
+            self._brand = (now, self._brand[1])
+            self.page.jobs.run("branding pictures", brand_pictures, self.brand_read, key="brand")
         logo, sponsors = self._brand[1]
         return {"name": self.settings["brandName"], "logo": logo, "sponsors": sponsors}
+
+    def brand_read(self, pictures: tuple[str, list[str]]):
+        if pictures != self._brand[1]:
+            self._brand = (self._brand[0], pictures)
+            self.publish_graphics()  # sources show the pictures now
+
+    def read_brand(self):
+        """Branding folder changed by the user here (logo copied or removed, sponsors folder opened): listed at once,
+        graphics show the files there now"""
+        from ...stream_director import brand_pictures
+
+        self._brand = (time.monotonic(), brand_pictures())
 
     @Slot()
     def chooseLogo(self):
@@ -1103,9 +1122,11 @@ class BroadcastGraphics(DirectorPart):
         from PySide6.QtWidgets import QFileDialog, QWidget
 
         parent = self.page.parent()
-        path, _ = QFileDialog.getOpenFileName(parent if isinstance(parent, QWidget) else None, tr("League logo"), "",
+        path, _ = QFileDialog.getOpenFileName(parent if isinstance(parent, QWidget) else None, tr("League logo"),
+                                              last_folder.start_folder("league_logo"),
                                               "Images (*.png *.jpg *.jpeg *.webp *.svg)")
         if path:
+            last_folder.remember("league_logo", path)
             self.set_logo(path)
 
     def set_logo(self, path: str) -> bool:
@@ -1126,7 +1147,7 @@ class BroadcastGraphics(DirectorPart):
         except OSError as error:
             self.page.notify(f"{tr('Logo not saved')}: {error}", True)
             saved = False
-        self._brand = (0.0, self._brand[1])  # graphics show the logo files there now (some removed before a failure)
+        self.read_brand()  # some logo files may be removed before a failure
         self.publish_graphics(force=True)
         self.logoChanged.emit()
         return saved
@@ -1166,7 +1187,7 @@ class BroadcastGraphics(DirectorPart):
         except OSError as error:
             self.page.notify(f"{tr('Logo not removed')}: {error}", True)
             removed = False
-        self._brand = (0.0, self._brand[1])  # graphics show the logo files left
+        self.read_brand()
         self.publish_graphics(force=True)
         self.logoChanged.emit()
         return removed
@@ -1182,7 +1203,7 @@ class BroadcastGraphics(DirectorPart):
         folder = os.path.join(brand_folder(), "sponsors")
         os.makedirs(folder, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
-        self._brand = (0.0, self._brand[1])
+        self.read_brand()
 
     # Layout presets & sources with some graphics only
     @Property(list, constant=True)

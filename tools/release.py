@@ -4,7 +4,7 @@ Publish a release of master: one command, checked before and after
 Refuses when master has local changes not pushed, nothing to release, a changelog without the version
 section, or Checks not passed on the master commit (waits while they run). Then starts the
 "Build and Release" workflow, follows it, and checks the published files (installer .exe, its .sha256,
-setup ZIP, source ZIP: every app updater finds its installer).
+setup ZIP, source ZIP: every app updater finds its installer; signed manifest: apps since 0.28 require it).
 
 Usage (from project root, GitHub CLI logged in):
     python tools/release.py               publish next version (asks before publishing)
@@ -27,7 +27,11 @@ REPO = "Keenny38/ModernTinyPedals"
 WORKFLOW = "build-release.yml"
 # Files of every release (name: NeoPedal-<version><suffix>). Apps up to 0.19 update only with the
 # installer .exe & its .sha256 file, apps since 0.20 with the setup ZIP (else the .exe), see neopedal/update.py
-RELEASE_ASSETS = ("-windows-setup.exe", "-windows-setup.exe.sha256", "-setup.zip", "-source.zip")
+BUILD_ASSETS = ("-windows-setup.exe", "-windows-setup.exe.sha256", "-setup.zip", "-source.zip")
+# Signed manifest of the build files (tools/sign_release.py, release job): apps since 0.28 install an official
+# release only with it (neopedal/release_manifest.py)
+MANIFEST_ASSETS = ("-manifest.json", "-manifest.json.sig")
+RELEASE_ASSETS = BUILD_ASSETS + MANIFEST_ASSETS
 POLL = 30  # seconds between GitHub checks
 
 

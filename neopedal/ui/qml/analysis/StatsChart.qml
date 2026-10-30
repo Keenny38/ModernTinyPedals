@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../components"
 
 // Personal best progression: best lap of each session (dots, new personal best in accent color, slow
 // sessions clipped hollow at bottom), personal best so far (steps over a soft area), level limits (dashed,
@@ -86,7 +87,7 @@ Item {
             var x0 = chart.plotX, span = chart.plotWidth
             var ticks = chart.chartData.ticks || []
             ctx.lineWidth = 1
-            ctx.strokeStyle = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.07 : 0.09)
+            ctx.strokeStyle = theme.chartGrid
             ctx.beginPath()
             for (var t = 0; t < ticks.length; t++) {
                 var ty = Math.round(chart.py(ticks[t].y)) + 0.5
@@ -248,6 +249,7 @@ Item {
             width: chart.labelWidth - theme.em * 0.5
             y: chart.py(modelData.y) - height / 2
             text: modelData.text
+            textFormat: Text.PlainText
             color: theme.dimText
             horizontalAlignment: Text.AlignRight
             font.pointSize: theme.fontCaption
@@ -260,6 +262,7 @@ Item {
         width: chart.labelWidth - theme.em * 0.5
         y: chart.py(chart.chartData.pbY || 0) - height / 2
         text: chart.chartData.top || ""
+        textFormat: Text.PlainText
         color: theme.accent
         horizontalAlignment: Text.AlignRight
         font.pointSize: theme.fontSmall
@@ -272,6 +275,7 @@ Item {
         width: chart.labelWidth - theme.em * 0.5
         y: chart.py(chart.chartData.goalY || 0) - height / 2
         text: chart.chartData.goal || ""
+        textFormat: Text.PlainText
         color: theme.gain
         horizontalAlignment: Text.AlignRight
         font.pointSize: theme.fontCaption
@@ -296,6 +300,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: modelData.letter || ""
+                textFormat: Text.PlainText
                 color: theme.inkOn(modelData.color)  // readable on level color
                 font.pointSize: theme.fontMicro
                 font.weight: Font.Bold
@@ -310,6 +315,7 @@ Item {
             y: chart.plotY + chart.plotHeight + theme.em * 0.35
             x: Math.max(chart.plotX, Math.min(chart.px(modelData.x) - width / 2, chart.plotX + chart.plotWidth - width))
             text: modelData.text
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontCaption
             font.features: { "tnum": 1 }
@@ -330,7 +336,7 @@ Item {
             if (index >= 0) chart.pointClicked(chart.points[index].session !== undefined ? chart.points[index].session : -1)
         }
     }
-    ToolTip {
+    TpToolTip {
         parent: chart
         visible: chart.hovered >= 0 && chart.hovered < chart.points.length
         text: visible ? chart.points[chart.hovered].tip : ""

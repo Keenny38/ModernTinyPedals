@@ -145,4 +145,7 @@ def classes(rows: list[ChampionshipRow]) -> list[str]:
 
 
 def points_text(points: float) -> str:
+    """Points as shown ("12", "12.5"), "-" if not a number"""
+    if not math.isfinite(points):
+        return "-"
     return str(int(points)) if points == int(points) else f"{points:.1f}"

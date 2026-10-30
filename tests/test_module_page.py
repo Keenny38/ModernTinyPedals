@@ -288,28 +288,34 @@ def test_toggle_and_enable_needed(modules):
     assert control.toggled[-1] == "module_sectors" and cfg.user.setting["module_sectors"]["enable"]
 
 
-def test_batch_toggle_shown_only(modules, monkeypatch):
+def test_batch_toggle_shown_only(modules):
+    """Enable / Disable of shown modules at once (as on the Overlays page): counts on the buttons, no question,
+    message with Undo"""
     control = modules.test["control"]
+    told = []
+    modules.bulkToggled.connect(told.append)
     modules.setSearch("sector")
+    assert modules.shownCount - modules.shownActiveCount == 1
     modules.enableShown()
-    assert control.toggled == ["module_sectors"] and not control.batch
-    assert "1 shown modules" in modules.test["answers"][0]
+    assert control.toggled == ["module_sectors"] and not control.batch and told == ["1 module enabled"]
+    assert not modules.test["answers"]  # never asked
     modules.clearFilters()
+    active = modules.shownActiveCount
+    assert active == modules.activeCount > 1
     modules.disableShown()
-    assert control.batch == ["disable"] and "all modules" in modules.test["answers"][1]
-    monkeypatch.setitem(cfg.application, "show_confirmation_for_batch_toggle", False)
-    modules.enableShown()
-    assert control.batch == ["disable", "enable"] and len(modules.test["answers"]) == 2
+    assert control.batch == ["disable"] and told[-1] == f"{active} modules disabled"
+    assert modules.shownActiveCount == 0
+    modules.undoBulk()  # toast Undo: the modules switched put back
+    assert modules.shownActiveCount == active
+    modules.undoBulk()  # once only
+    assert modules.shownActiveCount == active and not modules.test["answers"]
 
 
-def test_batch_toggle_declined(ui_env):
-    control = FakeControl(("module_delta", "module_fuel"))
-    for name in control.names:
-        cfg.user.setting[name]["enable"] = False
-    backend = ModuleBackend(None, control, FakeControl((), "widget"), lambda name: None, lambda text: False)
-    backend.enableShown()
-    assert not control.batch and not control.toggled
-    backend.deleteLater()
+def test_batch_toggle_option_retired():
+    """Modules switch at once with Undo like overlays: the batch confirmation option is gone"""
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
+
+    assert "show_confirmation_for_batch_toggle" not in GLOBAL_DEFAULT["application"]
 
 
 def test_config_and_reset_data(modules):
@@ -385,7 +391,8 @@ def test_qml_page_created_when_shown(page):
     assert not page.view.errors(), [error.toString() for error in page.view.errors()]
     settle()
     texts = item_texts(page.view)
-    assert {"Module", "Delta", "Sectors", "Running", "Error", "Disabled", "Enable All"} <= texts
+    assert {"Modules", "Delta", "Sectors", "Running", "Error", "Disabled"} <= texts
+    assert any(text.startswith("Enable (") for text in texts)  # count of modules it switches
     assert "Needed by 1 enabled overlay" in texts and "1 module could not start, see log." in texts
     assert not page.view.grabFramebuffer().isNull()
 
@@ -431,7 +438,7 @@ def test_qml_page_translated(modules):
         view.show()
         settle(10)
         texts = item_texts(view.view)
-        assert "Tout activer" in texts and "Enable All" not in texts
+        assert any(text.startswith("Activer (") for text in texts) and not any(text.startswith("Enable (") for text in texts)
         assert {"Modules", "4 / 5 activés", "Secteurs", "Nécessaire à 1 overlay activé"} <= texts
         view.close()
         view.deleteLater()
@@ -449,9 +456,14 @@ def test_page_reset_data_uses_reset_menu(page, monkeypatch):
     assert called == ["Reset Data"]
 
 
-def test_page_config_saved_restarts_module(page):
-    page.reload_module("module_fuel")
-    assert page.module_control.reloaded == ["module_fuel"]
+def test_page_config_opens_settings_at_module(page, monkeypatch):
+    """Gear of a card: Settings page at the module category (saving there restarts the module)"""
+    from neopedal.ui import app_settings
+
+    opened = []
+    monkeypatch.setattr(app_settings, "open_app_settings", lambda parent, section="", key="": opened.append(section))
+    page.open_config("module_fuel")
+    assert opened == ["module_fuel"]
 
 
 def test_qml_imports_bundled_modules():

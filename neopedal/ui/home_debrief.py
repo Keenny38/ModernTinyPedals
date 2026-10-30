@@ -88,9 +88,17 @@ def goal_progress(goal: float, best: float, record: SessionRecord, records: list
     return progress
 
 
-def read_debrief(record: SessionRecord, goal: float = 0.0) -> DebriefData:
-    """Debrief of a stint & progress of its lap time goal (goal: 0 if none), worker thread"""
+def read_session_history(record: SessionRecord, goal: float = 0.0) -> tuple[DebriefData, list[SessionRecord]]:
+    """Debrief of the last session & the whole session history read for it (Home "This week" card made from
+    the same records: one disk pass), worker thread"""
     records = load_history(cfg.path.config)
+    return read_debrief(record, goal, records), records
+
+
+def read_debrief(record: SessionRecord, goal: float = 0.0, records: list[SessionRecord] | None = None) -> DebriefData:
+    """Debrief of a stint & progress of its lap time goal (goal: 0 if none), worker thread; records: session
+    history already read, else read here"""
+    records = load_history(cfg.path.config) if records is None else records
     best = load_driver_stats((record.track, record.vehicle), cfg.path.config).pb
     best = best if 0 < best < 99999 else 0.0  # 99999: no lap
     debrief = build_debrief(record, records, cfg.path.telemetry, best)

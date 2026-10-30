@@ -171,6 +171,9 @@ def save_track_map_file(
     dist_node.setAttribute("points", svg_dists)
     root_node.appendChild(dist_node)
     # Save svg
-    with atomic_write(f"{filepath}{filename}{extension}") as svgfile:
-        new_svg.writexml(svgfile, indent="", addindent="\t", newl="\n", encoding="utf-8")
-        logger.info("USERDATA: %s%s saved", filename, extension)
+    try:
+        with atomic_write(f"{filepath}{filename}{extension}", raise_error=True) as svgfile:
+            new_svg.writexml(svgfile, indent="", addindent="\t", newl="\n", encoding="utf-8")
+    except OSError:  # already logged by atomic_write, map kept in memory (saved again on next lap)
+        return
+    logger.info("USERDATA: %s%s saved", filename, extension)

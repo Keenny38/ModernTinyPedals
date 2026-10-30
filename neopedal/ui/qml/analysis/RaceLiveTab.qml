@@ -4,8 +4,9 @@ import QtQuick.Layouts
 import "../components"
 
 // Race calculator live tab: every input value the game gives (car, session, LMU garage screens)
-// against the calculator, filled in one by one or all at once (values followed), race under way
-// and tyres the pit menu offers. Values followed are also filled in by Load Live & Follow Live.
+// against the calculator, filled in one by one or all at once (values followed), whether inputs follow each new
+// lap (Follow Live), race under way (plan of the rest of the race from now) and tyres the pit menu offers.
+// Values followed are also filled in when the Game Session source is chosen & by Follow Live.
 Item {
     id: tab
     // Parts notified apart: race time changes at each refresh, rows kept in place (title row before each group)
@@ -27,13 +28,23 @@ Item {
             title: i18n.tr("Game data")
             glyph: ""  // pulse
             busy: backend.liveBusy
-            tip: i18n.tr("Values of the car, the session and the LMU garage screens (pit stop times, tyres, team): followed values are filled in by Load Live, Follow Live and Fill In All")
+            tip: i18n.tr("Values of the car, the session and the LMU garage screens (pit stop times, tyres, team): followed values are filled in by the Game Session source, Follow Live and Fill In All")
             actions: [
+                RaceSwitch {
+                    objectName: "followLiveSwitch"
+                    Layout.fillWidth: false
+                    wrap: false
+                    text: tab.narrow ? "" : i18n.tr("Follow Live")
+                    tip: i18n.tr("Inputs follow each new lap of the live session (values followed below)")
+                    Accessible.name: i18n.tr("Follow Live")
+                    on: backend.header.followLive === true
+                    onSwitched: function(on) { backend.setFollowLive(on) }
+                },
                 TpButton {
                     enabled: !backend.liveBusy
                     flat: true
                     size: "sm"
-                    glyph: ""  // refresh
+                    glyph: theme.glyphs.refresh
                     fallback: "⟳"
                     text: tab.narrow ? "" : i18n.tr("Refresh")
                     tip: i18n.tr("Ask game again")
@@ -53,6 +64,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: backend.liveDataStatus
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 wrapMode: Text.Wrap
@@ -79,7 +91,7 @@ Item {
                 TpHeaderCell {
                     Layout.preferredWidth: list.actionsWidth
                     text: i18n.tr("Follow")
-                    tip: i18n.tr("Filled in by Load Live, Follow Live and Fill In All")
+                    tip: i18n.tr("Filled in by the Game Session source, Follow Live and Fill In All")
                 }
             }
             ListView {
@@ -145,12 +157,14 @@ Item {
                             Text {
                                 Layout.preferredWidth: list.titleWidth - theme.space2
                                 text: liveRow.title
+                                textFormat: Text.PlainText
                                 color: liveRow.known ? theme.text : theme.dimOn(rowSurface.color)
                                 elide: Text.ElideRight
                             }
                             Text {
                                 Layout.preferredWidth: list.valueWidth
                                 text: liveRow.game + (liveRow.differs ? " ●" : "")  // differs: mark too, not only color
+                                textFormat: Text.PlainText
                                 color: liveRow.differs ? theme.accent : liveRow.known ? theme.text : theme.dimOn(rowSurface.color)
                                 font.weight: liveRow.differs ? Font.DemiBold : Font.Normal
                                 font.features: { "tnum": 1 }
@@ -160,6 +174,7 @@ Item {
                             Text {
                                 Layout.preferredWidth: list.valueWidth
                                 text: liveRow.calc
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(rowSurface.color)
                                 font.features: { "tnum": 1 }
                                 horizontalAlignment: Text.AlignRight
@@ -170,6 +185,7 @@ Item {
                                 visible: !tab.narrow
                                 leftPadding: theme.space3
                                 text: liveRow.source
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(rowSurface.color)
                                 font.pointSize: theme.fontSmall
                                 elide: Text.ElideRight
@@ -184,7 +200,7 @@ Item {
                                     wrap: false
                                     enabled: liveRow.auto
                                     on: liveRow.followed
-                                    tip: liveRow.auto ? i18n.tr("Filled in by Load Live, Follow Live and Fill In All")
+                                    tip: liveRow.auto ? i18n.tr("Filled in by the Game Session source, Follow Live and Fill In All")
                                                                 : i18n.tr("Rough estimate: fill it in by hand")
                                     onSwitched: function(on) { backend.setLiveFollowed(liveRow.key, on) }
                                     Accessible.name: liveRow.title
@@ -223,6 +239,26 @@ Item {
                 TpSectionCard {
                     title: i18n.tr("Race in Progress")
                     glyph: ""  // flag
+                    RaceSwitch {  // live race: plan of the rest of the race (also proposed above the page in a race)
+                        objectName: "liveRaceSwitch"
+                        text: i18n.tr("Plan From Now")
+                        tip: i18n.tr("During a race: plan of the rest of the race from now (laps & time done, fuel, energy & tyres of the car, stops done)")
+                        on: backend.header.liveRace === true
+                        onSwitched: function(on) { backend.setLiveRace(on) }
+                    }
+                    Text {  // plan from lap N, in the pits, safety car... (values read in its tooltip)
+                        Layout.fillWidth: true
+                        visible: backend.liveStatus !== ""
+                        text: backend.liveStatus
+                        textFormat: Text.PlainText
+                        color: theme.dimText
+                        font.pointSize: theme.fontSmall
+                        wrapMode: Text.Wrap
+                        HoverHandler { id: statusHover; enabled: backend.liveTip !== "" }
+                        ToolTip.visible: statusHover.hovered
+                        ToolTip.text: backend.liveTip
+                        ToolTip.delay: theme.tipDelay
+                    }
                     Repeater {
                         model: tab.race.length  // count: rows kept while the values change at each refresh
                         TpKeyValue {
@@ -274,14 +310,14 @@ Item {
                                 required property string modelData
                                 spacing: theme.space2
                                 TpCompound { name: parent.modelData; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: parent.modelData; color: theme.text; anchors.verticalCenter: parent.verticalCenter }
+                                Text { text: parent.modelData; color: theme.text; anchors.verticalCenter: parent.verticalCenter; textFormat: Text.PlainText }
                             }
                         }
                     }
                     TpButton {
                         visible: (tab.tyres.used || 0) > 0
                         size: "sm"
-                        glyph: ""  // add
+                        glyph: theme.glyphs.add
                         text: i18n.tr("Add Used Tyres to Stock")
                         tip: i18n.tr("Used tyres the pit menu offers go to the tyre stock (Tyres tab) with their tread, to fit them by hand")
                         onClicked: backend.addGameTyres()
@@ -298,6 +334,7 @@ Item {
                                 Layout.preferredWidth: theme.em * 7.5
                                 Layout.alignment: Qt.AlignTop
                                 text: wheelRow.wheel.wheel
+                                textFormat: Text.PlainText
                                 elide: Text.ElideRight
                                 color: theme.dimText
                                 font.weight: Font.DemiBold
@@ -336,6 +373,7 @@ Item {
                                             }
                                             Text {
                                                 text: usedChip.chip.text
+                                                textFormat: Text.PlainText
                                                 color: usedChip.chip.color
                                                 font.pointSize: theme.fontSmall
                                                 font.features: { "tnum": 1 }

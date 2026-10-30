@@ -43,6 +43,20 @@ from tests.telemetry_sim import LapSim, fake_reader
 from tests.test_delta_session import STEP, TRACK, Driver, Game, lap_rows
 
 
+@pytest.fixture(autouse=True)
+def synchronous_saves(monkeypatch):
+    """Data saves written at once: these tests read the files right after a save made while driving, which
+    runs on the data saver thread since audit PERF-003"""
+    from neopedal.module import module_delta
+    from neopedal.userfile import data_saver
+
+    def save_now(saver, *args, sync=False, **kwargs):
+        data_saver.queue_save(saver, *args, sync=True, **kwargs)
+
+    for module in (module_delta, module_fuel, module_sectors, module_stint):
+        monkeypatch.setattr(module, "queue_save", save_now)
+
+
 @pytest.fixture
 def clock(monkeypatch):
     """Wall & monotonic clocks running with game time"""
@@ -366,11 +380,11 @@ def test_consumption_history_saved_while_driving(history_env, tmp_path, monkeypa
     monkeypatch.setattr(module_stint, "monotonic", lambda: now["now"])
     history = HistoryInfo()
     gen = module_stint.record_consumption_history(history, f"{tmp_path}/")
-    history_env["lap.number"] = 1
+    history_env["lap.completed_laps"] = 1
     gen.send(0)  # lap recorded, checkpoint not due
     assert not (tmp_path / "SimTrack - SimCar.consumption").exists()
     now["now"] = _base.CHECKPOINT_INTERVAL + 1
-    history_env["lap.number"] = 2
+    history_env["lap.completed_laps"] = 2
     minfo.delta.lapTimeLast = 91.0
     gen.send(0)  # next lap recorded: saved without reset
     laps, readable = read_consumption_history_file(f"{tmp_path}/", "SimTrack - SimCar")
@@ -508,7 +522,7 @@ def test_locked_consumption_history_never_replaced(history_env, tmp_path, monkey
     lock = lock_file(monkeypatch, consumption_history, tmp_path / "SimTrack - SimCar.consumption")
     history = HistoryInfo()
     gen = module_stint.record_consumption_history(history, folder)
-    history_env["lap.number"] = 10
+    history_env["lap.completed_laps"] = 10
     gen.send(0)
     minfo.delta.lapTimeCurrent = 20.0  # no lap recorded after reset
     gen.send(1)  # saved on reset: still locked, not saved
@@ -516,7 +530,7 @@ def test_locked_consumption_history_never_replaced(history_env, tmp_path, monkey
     assert load_consumption_history_file(folder, "SimTrack - SimCar") == tuple(SAVED_LAPS)
     lock["locked"] = True
     gen.send(2)  # reloaded: still locked
-    history_env["lap.number"] = 11
+    history_env["lap.completed_laps"] = 11
     minfo.delta.lapTimeCurrent = 5.0
     gen.send(2)
     minfo.delta.lapTimeCurrent = 20.0
@@ -530,7 +544,7 @@ def test_locked_consumption_history_never_replaced(history_env, tmp_path, monkey
 def test_missing_consumption_history_created(history_env, tmp_path):
     history = HistoryInfo()
     gen = module_stint.record_consumption_history(history, f"{tmp_path}/")
-    history_env["lap.number"] = 1
+    history_env["lap.completed_laps"] = 1
     gen.send(0)
     gen.send(1)
     laps, readable = read_consumption_history_file(f"{tmp_path}/", "SimTrack - SimCar")

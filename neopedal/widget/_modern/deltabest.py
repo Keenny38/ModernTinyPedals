@@ -36,7 +36,7 @@ from PySide6.QtGui import QPainter, QPen
 from ... import calculation as calc
 from ...api_control import api
 from ...module_info import minfo
-from .._common import delta_shown, game_deltabest, lap_delta_shown
+from .._common import delta_shown, game_deltabest, lap_delta_shown, lap_reference
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, readable_on, rounded
 
@@ -61,7 +61,6 @@ class Realtime(ModernOverlay):
         unit = self.unit
         self.add_font("delta", 1.45, "bold")
         self.source = wcfg["deltabest_source"]
-        self.laptime_source = f"lapTime{wcfg['deltabest_source']}"
         self.delta_source = f"delta{wcfg['deltabest_source']}"
         self.decimals = max(int(wcfg["decimal_places"]), 1)
         self.delta_range = calc.decimal_strip(wcfg["delta_display_range"], self.decimals)
@@ -98,8 +97,8 @@ class Realtime(ModernOverlay):
             delta = info.lapTimeLast - last if lap_delta_shown(last) else None
             self.new_lap = True
         else:
-            if self.new_lap:
-                self.last_laptime = getattr(info, self.laptime_source)
+            if self.new_lap:  # reference of lap under way, as live delta (game delta: game best lap)
+                self.last_laptime = lap_reference(self.source, self.game_delta)
                 self.new_lap = False
             delta = getattr(info, self.delta_source) if delta_shown(self.source) else None
             if delta is not None and self.game_delta:
@@ -116,11 +115,11 @@ class Realtime(ModernOverlay):
 
     def delta_text(self, delta: float) -> str:
         """Delta as displayed"""
-        return f"{calc.sym_max(delta, self.delta_range):+.{self.decimals}f}"
+        return f"{calc.sym_max(delta, self.delta_range):+z.{self.decimals}f}"
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         if self.rect_bar.height():
             rounded(painter, self.rect_bar, self.rect_bar.height() / 2, theme.surface_raised)
 
@@ -136,6 +135,8 @@ class Realtime(ModernOverlay):
                 bar = self.rect_bar
                 painter.fillRect(QRectF(center - 1, bar.top() - bar.height() * 0.35, 2, bar.height() * 1.7),
                                  theme.text_dim)
+            if invalid:  # invalidated out lap too, as classic design
+                self.draw_invalid(painter, pill)
             return
         color = theme.negative if delta > 0 else theme.positive
         bar = self.rect_bar
@@ -157,12 +158,16 @@ class Realtime(ModernOverlay):
         else:
             rounded(painter, pill, self.radius(0.4), theme.tint(color, 46))
             self.draw_text(painter, pill, text, "delta", color, CENTER, elide=False)
-        if invalid:  # lap invalidated by game: loss colored outline
-            width = max(self.unit * 0.14, 2.0)
-            pen = QPen(theme.negative, width)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            radius = max(min(self.radius(0.4), pill.height() / 2) - width / 2, 0)
-            inner = pill.adjusted(width / 2, width / 2, -width / 2, -width / 2)
-            painter.drawRoundedRect(inner, radius, radius)
+        if invalid:
+            self.draw_invalid(painter, pill)
+
+    def draw_invalid(self, painter: QPainter, pill: QRectF):
+        """Lap invalidated by game: loss colored outline of pill"""
+        width = max(self.unit * 0.14, 2.0)
+        pen = QPen(self.theme.negative, width)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        radius = max(min(self.radius(0.4), pill.height() / 2) - width / 2, 0)
+        inner = pill.adjusted(width / 2, width / 2, -width / 2, -width / 2)
+        painter.drawRoundedRect(inner, radius, radius)

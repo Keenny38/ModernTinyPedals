@@ -764,6 +764,100 @@ class SteamVRCheck:
         return not self._thread.is_alive()
 
 
+STEAMVR_START_WAIT_S = 0.02  # GUI waits this at most for a SteamVR start (quick start adopted at once, else later)
+
+
+def place_overlay(openvr, overlay, handle, setting: dict) -> None:
+    """Set SteamVR overlay position from "vr_overlay" setting"""
+    matrix = openvr.HmdMatrix34_t()
+    rows = overlay_transform(
+        float(setting["distance_meters"]),
+        float(setting["vertical_offset_meters"]),
+        float(setting["horizontal_offset_meters"]),
+    )
+    for row_index, row in enumerate(rows):
+        for column_index, value in enumerate(row):
+            matrix.m[row_index][column_index] = value
+    if setting["enable_attach_to_headset"]:
+        overlay.setOverlayTransformTrackedDeviceRelative(handle, openvr.k_unTrackedDeviceIndex_Hmd, matrix)
+    else:
+        overlay.setOverlayTransformAbsolute(handle, openvr.TrackingUniverseSeated, matrix)
+
+
+def release_openvr(openvr, overlay, handle) -> None:
+    """Destroy SteamVR overlay & shut openvr down (SteamVR may be closed already)"""
+    if overlay is not None and handle is not None:
+        try:
+            overlay.destroyOverlay(handle)
+        except Exception:  # SteamVR already closed
+            logger.debug("VR overlay: destroy failed", exc_info=True)
+    if openvr is not None:
+        try:
+            openvr.shutdown()
+        except Exception:
+            logger.debug("VR overlay: shutdown failed", exc_info=True)
+
+
+class SteamVRStart:
+    """openvr.init() & overlay creation in a background thread: IPC with vrserver, hundreds of ms (up to its
+    timeout while SteamVR closes), never on the GUI thread. Result (openvr module, system, overlay, handle, shown)
+    adopted by the GUI thread with take(), released by the thread itself if dropped (disable) before."""
+
+    def __init__(self, setting: dict):
+        self._setting = dict(setting)
+        self.error: Exception | None = None
+        self._result: tuple | None = None
+        self._dropped = False
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self.__run, daemon=True, name="SteamVR start")
+        self._thread.start()
+
+    def __run(self):
+        import openvr
+
+        overlay = handle = started = None
+        try:
+            system = openvr.init(openvr.VRApplication_Overlay)
+            started = openvr  # shut down on a later failure (never after a failed init)
+            overlay = openvr.IVROverlay()
+            handle = overlay.createOverlay("neopedal.overlay", "NeoPedal")
+            overlay.setOverlayWidthInMeters(handle, max(float(self._setting["overlay_width_meters"]), 0.05))
+            place_overlay(openvr, overlay, handle, self._setting)
+            overlay.showOverlay(handle)
+        except Exception as error:  # SteamVR closing, or openvr error: tried again later
+            logger.debug("VR overlay: SteamVR init failed", exc_info=True)
+            self.error = error
+            release_openvr(started, overlay, handle)
+            return
+        with self._lock:
+            if self._dropped:  # disabled meanwhile: nothing to adopt
+                release_openvr(openvr, overlay, handle)
+                return
+            self._result = (openvr, system, overlay, handle)
+
+    def done(self) -> bool:
+        return not self._thread.is_alive()
+
+    def wait(self, timeout: float) -> bool:
+        """Wait for the start up to timeout seconds, True if done"""
+        self._thread.join(timeout)
+        return self.done()
+
+    def take(self) -> tuple | None:
+        """Result (once), None if failed (see error) or dropped"""
+        with self._lock:
+            result, self._result = self._result, None
+        return result
+
+    def drop(self):
+        """Result never adopted: released now or by the thread once made"""
+        with self._lock:
+            self._dropped = True
+            result, self._result = self._result, None
+        if result is not None:
+            release_openvr(result[0], result[2], result[3])
+
+
 PLACEMENT_LIMIT = 100.0  # meters: largest width, distance & offsets the OpenXR layer draws (shared_frame.cpp)
 
 
@@ -813,6 +907,8 @@ class VROverlay(QObject):
         self._steamvr_wanted = False  # openvr available, waiting for SteamVR or running
         self._steamvr_retry_at = 0  # tick (ms) of next SteamVR process check
         self._steamvr_check: SteamVRCheck | None = None  # process check running in background
+        self._steamvr_start: SteamVRStart | None = None  # openvr init & overlay creation running in background
+        self._steamvr_start_report = False  # report a failure of that start as error
         self._steamvr_report = False  # first check after enable: report problems as error
         self._steamvr_error_shown = False
         self._steamvr_quitting = False  # SteamVR asked to quit: never connected again until its process is gone
@@ -886,6 +982,7 @@ class VROverlay(QObject):
         else:
             self.__close_openxr()
             self._steamvr_wanted = False
+            self.__drop_steamvr_start()
             self.__release_steamvr()
             if vr_shared.WINDOWS:
                 self.__unregister_openxr()
@@ -1132,7 +1229,7 @@ class VROverlay(QObject):
         Returns:
             True if openvr available.
         """
-        if self._handle is not None:
+        if self._handle is not None or self._steamvr_start is not None:  # running, or starting in background
             return True
         try:
             import openvr  # optional dependency  # noqa: F401
@@ -1160,6 +1257,9 @@ class VROverlay(QObject):
     def __poll_steamvr(self, now: int):
         """SteamVR process checked in background every STEAMVR_RETRY_MS (not while the OpenXR layer draws:
         SteamVR overlay would stay hidden), SteamVR overlay started once SteamVR runs (never starts SteamVR)"""
+        if self._steamvr_start is not None:  # start running: adopted once done (update_overlay), no new check
+            self.__adopt_steamvr()
+            return
         if self._steamvr_check is None and now >= self._steamvr_retry_at and not self._xr_drawing:
             # Overlays paused (not driving): checked rarely, at once when they resume (__wake)
             self._steamvr_retry_at = now + (STEAMVR_RETRY_MS if realtime_state.shown else STEAMVR_IDLE_RETRY_MS)
@@ -1180,22 +1280,24 @@ class VROverlay(QObject):
             logger.info("VR overlay: waiting for SteamVR")
 
     def __start_steamvr(self, setting: dict, report: bool = False):
-        """Start SteamVR overlay (SteamVR running)"""
+        """Start SteamVR overlay (SteamVR running): openvr init & overlay creation in a background thread
+        (SteamVRStart), adopted at once if quick, else on a later update_overlay tick (GUI never held)"""
         self._steamvr_retry_at = vr_shared.tick_ms() + STEAMVR_RETRY_MS
-        import openvr
+        self._steamvr_start_report = report
+        self._steamvr_start = SteamVRStart(setting)
+        if self._steamvr_start.wait(STEAMVR_START_WAIT_S):
+            self.__adopt_steamvr()
 
-        try:
-            self._system = openvr.init(openvr.VRApplication_Overlay)
-            self._openvr = openvr
-            self._overlay = openvr.IVROverlay()
-            self._handle = self._overlay.createOverlay("neopedal.overlay", "NeoPedal")
-            self._overlay.setOverlayWidthInMeters(self._handle, max(float(setting["overlay_width_meters"]), 0.05))
-            self.__set_transform(openvr, self._overlay, setting)
-            self._overlay.showOverlay(self._handle)
-            self._visible = True
-            self._hidden_for_openxr = False
-        except Exception as error:  # SteamVR closing, or openvr error: tried again later
-            logger.debug("VR overlay: SteamVR init failed", exc_info=True)
+    def __adopt_steamvr(self):
+        """SteamVR start done: overlay taken over (GUI thread), or failure reported & tried again later"""
+        start = self._steamvr_start
+        if start is None or not start.done():
+            return
+        self._steamvr_start = None
+        report, self._steamvr_start_report = self._steamvr_start_report, False
+        result = start.take()
+        if result is None:
+            error = start.error or RuntimeError("SteamVR start dropped")
             if not self._steamvr_error_shown:
                 self._steamvr_error_shown = True
                 if report and self._xr is None:
@@ -1204,39 +1306,22 @@ class VROverlay(QObject):
                     logger.warning("VR overlay: SteamVR overlay not started: %s", error)
             self.__release_steamvr()
             return
+        self._openvr, self._system, self._overlay, self._handle = result
+        self._visible = True
+        self._hidden_for_openxr = False
         self._compose_key = None  # image sent on next update
         self._checksum = None
         logger.info("ENABLED: VR overlay (SteamVR)")
 
-    def __set_transform(self, openvr, overlay, setting: dict):
-        """Set overlay position"""
-        matrix = openvr.HmdMatrix34_t()
-        rows = overlay_transform(
-            float(setting["distance_meters"]),
-            float(setting["vertical_offset_meters"]),
-            float(setting["horizontal_offset_meters"]),
-        )
-        for row_index, row in enumerate(rows):
-            for column_index, value in enumerate(row):
-                matrix.m[row_index][column_index] = value
-        if setting["enable_attach_to_headset"]:
-            overlay.setOverlayTransformTrackedDeviceRelative(
-                self._handle, openvr.k_unTrackedDeviceIndex_Hmd, matrix)
-        else:
-            overlay.setOverlayTransformAbsolute(self._handle, openvr.TrackingUniverseSeated, matrix)
+    def __drop_steamvr_start(self):
+        """SteamVR start running in background never adopted (disabled meanwhile)"""
+        start, self._steamvr_start = self._steamvr_start, None
+        if start is not None:
+            start.drop()
 
     def __release_steamvr(self):
         """Destroy SteamVR overlay & shut openvr down (SteamVR may be closed already)"""
-        if self._overlay is not None and self._handle is not None:
-            try:
-                self._overlay.destroyOverlay(self._handle)
-            except Exception:  # SteamVR already closed
-                logger.debug("VR overlay: destroy failed", exc_info=True)
-        if self._openvr is not None:
-            try:
-                self._openvr.shutdown()
-            except Exception:
-                logger.debug("VR overlay: shutdown failed", exc_info=True)
+        release_openvr(self._openvr, self._overlay, self._handle)
         was_running = self._handle is not None
         self._openvr = self._system = self._overlay = self._handle = self._buffer = self._buffer_image = None
         self._checksum = self._sent_at = None
@@ -1400,6 +1485,7 @@ class VROverlay(QObject):
         self._compose_key = self._paused_since = None
         self._steamvr_wanted = False
         self._steamvr_check = None  # background check result ignored
+        self.__drop_steamvr_start()
         self._has_image = False
         self.__release_steamvr()
         _composer.reset()  # canvas image released

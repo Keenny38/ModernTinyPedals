@@ -26,7 +26,7 @@ from operator import mul
 from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
-from ..const_common import FLOAT_INF, WHEELS_DELTA_DEFAULT, WHEELS_ZERO
+from ..const_common import FLOAT_INF, MIN_IMPACT_MAGNITUDE, WHEELS_DELTA_DEFAULT, WHEELS_ZERO
 from ..module_info import WheelsInfo, minfo
 from ..userfile.heatmap import (
     brake_failure_thickness,
@@ -425,7 +425,9 @@ def calc_brake_wear(output: WheelsInfo, min_delta_distance: float):
             )
 
         brake_curr_set = api.read.brake.wear()
-        if -1.0 in brake_curr_set:
+        if -1.0 in brake_curr_set:  # not provided (no game data yet, spectated car): shown as unavailable
+            output.maxBrakeThickness[:] = WHEELS_ZERO
+            output.currentBrakeThickness[:] = WHEELS_ZERO
             continue
 
         lap_stime = api.read.timing.start()
@@ -498,7 +500,7 @@ def calc_brake_wear(output: WheelsInfo, min_delta_distance: float):
             # Calibrate max thickness
             if brake_max_thickness[idx] < brake_curr:
                 brake_max_thickness[idx] = brake_curr
-                output.maxBrakeThickness[idx] = brake_curr
+            output.maxBrakeThickness[idx] = brake_max_thickness[idx]  # also restored after unavailable
 
             # Ignore wear difference while in pit
             if in_pits:
@@ -541,6 +543,7 @@ def calc_suspension_travel(output: WheelsInfo, average_samples: int, average_mar
     """Calculate suspension travel"""
     last_reset = None  # reset check
     last_offroad_time = 0.0
+    last_impact_time = -FLOAT_INF  # game time of last impact (light impacts ignored)
     update_static_position = True
 
     min_susp_pos_raw = [FLOAT_INF] * 4
@@ -575,6 +578,13 @@ def calc_suspension_travel(output: WheelsInfo, average_samples: int, average_mar
             min_susp_pos_ema[:] = WHEELS_ZERO
             max_susp_pos_ema[:] = WHEELS_ZERO
 
+            # Previous car or session values cleared until recorded again (0 = not recorded)
+            output.staticSuspensionPosition[:] = WHEELS_ZERO
+            output.minSuspensionPosition[:] = WHEELS_ZERO
+            output.maxSuspensionPosition[:] = WHEELS_ZERO
+            output.motionRatio[:] = WHEELS_ZERO
+            last_impact_time = -FLOAT_INF
+
         susp_pos_set = api.read.wheel.suspension_deflection()
         tyre_deflection_set = api.read.tyre.vertical_deflection()
         output.currentSuspensionPosition[:] = susp_pos_set
@@ -596,10 +606,13 @@ def calc_suspension_travel(output: WheelsInfo, average_samples: int, average_mar
         if last_offroad_time > elapsed_time:
             last_offroad_time = elapsed_time
 
-        # Skip for incident in last 3 seconds
+        if api.read.vehicle.impact_magnitude() >= MIN_IMPACT_MAGNITUDE:
+            last_impact_time = api.read.vehicle.impact_time()
+
+        # Skip for incident in last 3 seconds (impact time of previous session kept: ahead of elapsed time)
         if (api.read.vehicle.speed() < 1
             or elapsed_time - last_offroad_time < 3
-            or elapsed_time - api.read.vehicle.impact_time() < 3):
+            or 0 <= elapsed_time - last_impact_time < 3):
             continue
 
         wheel_pos_set = api.read.wheel.position_vertical()

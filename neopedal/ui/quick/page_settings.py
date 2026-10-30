@@ -32,6 +32,7 @@ import logging
 import os
 import weakref
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer
@@ -58,14 +59,14 @@ def load_settings(name: str) -> dict[str, Any]:
     try:
         with open(settings_path(name), encoding="utf-8-sig") as file:
             data = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return {}
     return data if isinstance(data, dict) else {}
 
 
 def write_settings(name: str, data: dict[str, Any]):
-    """Settings written at once (errors logged)"""
-    with atomic_write(settings_path(name)) as file:
+    """Settings written at once (errors logged, settings kept in memory & written again on next change)"""
+    with suppress(OSError), atomic_write(settings_path(name), raise_error=True) as file:
         file.write(json.dumps(data, indent=1, ensure_ascii=False))
 
 

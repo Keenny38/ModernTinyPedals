@@ -23,7 +23,8 @@ by the game (LMU: watched in game, playback, incidents, standings & map of the r
 Qt Quick page (ui/qml/RaceResults.qml): results state in quick/results_backend.py ("backend"), game replays &
 requests in quick/replays_backend.py ("replays"). Each session is linked to its replay (results files &
 replay files on disk): an event or a lap of the results opens the replay there. The game is asked only while
-the replay tab or the replays list shows.
+the replay tab or the replays list shows. The replay tab shows under a session only when the game saved the
+replay of that session; the replays list always has it (game replay or live session).
 """
 
 from PySide6.QtCore import QUrl
@@ -50,7 +51,7 @@ class RaceResultsViewer(BaseDialog):
         self._replays_active = False  # game asked (replay tab or replays list shown)
         self.backend.replaysLinked.connect(self.replays.set_results_links)
         self.backend.watchWanted.connect(self.watch)
-        self.backend.tabChanged.connect(self.update_replays_active)
+        self.backend.tabsChanged.connect(self.update_replays_active)
         self.backend.listModeChanged.connect(self.update_replays_active)
         self.backend.selectionChanged.connect(self.session_selected)
         self.replays.selectionChanged.connect(self.replay_selected)
@@ -71,7 +72,7 @@ class RaceResultsViewer(BaseDialog):
     def replays_wanted(self) -> bool:
         from .quick.results_backend import REPLAY_TAB
 
-        return self.isVisible() and (self.backend.tab == REPLAY_TAB or self.backend.list_mode == 1)
+        return self.isVisible() and (self.backend.shown_tab() == REPLAY_TAB or self.backend.list_mode == 1)
 
     def update_replays_active(self):
         """Game asked while replay tab or replays list shows on a shown page, not otherwise"""

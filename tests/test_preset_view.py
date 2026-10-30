@@ -4,7 +4,6 @@ names, delete...), files read only when changed & while shown, Qt Quick page"""
 import json
 import os
 import time
-from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -47,7 +46,6 @@ def page(ui_env, monkeypatch):
     write_preset("practice.json", {"speedometer": {"enable": False}}, age=60)
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: pytest.fail(f"warning: {args}")))
-    monkeypatch.setattr(preset_view, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)  # no file write
     monkeypatch.setattr(cfg.filename, "setting", "default.json")
     cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": ""}}
@@ -121,10 +119,11 @@ def test_primary_tags_for_class_and_track(page):
     page.backend.setPrimaryTrack("practice.json", "Spa")
     assert cfg.user.classes["GT3"]["preset"] == "practice" and cfg.user.tracks["Spa"]["preset"] == "practice"
     row = rows(page)["practice"]
-    assert row["classes"] == [{"name": "GT3", "color": "#00AA00"}] and row["tracks"] == ["Spa"]
+    assert row["classes"] == [{"name": "GT3", "color": "#00AA00", "session": ""}] and row["tracks"] == ["Spa"]
     page.backend.select("practice.json")
     details = page.backend.selected
-    assert details["classChoices"] == [] and details["trackChoices"] == []
+    assert details["classChoices"] == {"": [], "practice": ["GT3"], "qualify": ["GT3"], "race": ["GT3"]}
+    assert details["trackChoices"] == []
     page.backend.removePrimaryTrack("Spa")
     assert cfg.user.tracks["Spa"]["preset"] == ""
     page.backend.setPrimaryTrack("practice.json", "Spa")
@@ -132,6 +131,50 @@ def test_primary_tags_for_class_and_track(page):
     assert cfg.user.classes["GT3"]["preset"] == "" and cfg.user.tracks["Spa"]["preset"] == ""
     page.backend.setPrimaryClass("practice.json", "Unknown class")  # ignored
     assert "Unknown class" not in cfg.user.classes
+
+
+def test_primary_class_presets_by_session(page):
+    """Class preset of one session (GT3 in qualifying): own tag, removed alone, cleared with the preset tags"""
+    page.backend.setPrimaryClassSession("race.json", "GT3", "qualify")
+    page.backend.setPrimaryClassSession("race.json", "GT3", "race")
+    page.backend.setPrimaryClassSession("practice.json", "GT3", "")  # every session
+    page.backend.setPrimaryClassSession("race.json", "GT3", "warmup")  # unknown session: ignored
+    page.backend.setPrimaryClassSession("race.json", "Unknown class", "race")  # ignored
+    page.backend.setPrimaryClassSession("missing.json", "GT3", "practice")  # ignored
+    gt3 = cfg.user.classes["GT3"]
+    assert (gt3["preset"], gt3.get("preset_practice", ""), gt3["preset_qualify"], gt3["preset_race"]) == (
+        "practice", "", "race", "race")
+    assert "Unknown class" not in cfg.user.classes
+    assert [entry["session"] for entry in rows(page)["race"]["classes"]] == ["qualify", "race"]
+    assert [entry["session"] for entry in rows(page)["practice"]["classes"]] == [""]
+    page.backend.select("race.json")
+    assert page.backend.selected["classChoices"]["race"] == [] and page.backend.selected["classChoices"][""] == ["GT3"]
+    page.backend.removePrimaryClassSession("GT3", "qualify")
+    assert gt3["preset_qualify"] == "" and gt3["preset_race"] == "race" and gt3["preset"] == "practice"
+    page.backend.clearPrimary("race.json")
+    assert gt3["preset_race"] == "" and gt3["preset"] == "practice"
+
+
+def test_session_class_references_renamed_trashed_restored(ui_env, monkeypatch):
+    """Renaming a preset follows its session class presets, deleting clears them, restoring sets them again"""
+    from neopedal.ui import preset_management
+
+    monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
+    cfg.user.classes = {"GT3": {"preset": "race", "preset_race": "race", "preset_qualify": "quali"},
+                        "HY": {"preset": "", "preset_practice": "race"}}
+    references = preset_management.preset_references("race")
+    assert references["classes"] == ["GT3"]
+    assert references[preset_management.CLASS_SESSIONS] == ["preset_race:GT3", "preset_practice:HY"]
+    preset_management.update_preset_references("race", "sprint")
+    assert cfg.user.classes["GT3"]["preset_race"] == "sprint" and cfg.user.classes["HY"]["preset_practice"] == "sprint"
+    assert cfg.user.classes["GT3"]["preset_qualify"] == "quali"
+    preset_management.update_preset_references("sprint", "")
+    assert cfg.user.classes["GT3"]["preset_race"] == "" and cfg.user.classes["HY"]["preset_practice"] == ""
+    cfg.user.classes["HY"]["preset_practice"] = "other"  # set meanwhile: kept
+    preset_management.restore_preset_references("race", {**references, preset_management.CLASS_SESSIONS: [
+        *references[preset_management.CLASS_SESSIONS], "preset_bad:GT3", "preset_race:Gone"]})
+    assert cfg.user.classes["GT3"]["preset_race"] == "race" and cfg.user.classes["GT3"]["preset"] == "race"
+    assert cfg.user.classes["HY"]["preset_practice"] == "other" and "Gone" not in cfg.user.classes
 
 
 def test_tags_of_every_preset_read_once(page, monkeypatch):
@@ -147,7 +190,7 @@ def test_tags_of_every_preset_read_once(page, monkeypatch):
     assert len(calls) == 1  # once per refresh, not once per preset
     race, practice = rows(page)["race"], rows(page)["practice"]
     assert [entry["name"] for entry in race["classes"]] == ["GT3", "LMP2"] and race["tracks"] == ["Monza", "Spa"]
-    assert practice["classes"] == [{"name": "HY", "color": "#FF0000"}] and practice["tracks"] == []
+    assert practice["classes"] == [{"name": "HY", "color": "#FF0000", "session": ""}] and practice["tracks"] == []
     assert page.backend.trashCount == 0
     page.backend.remove("practice.json")
     page.refresh()
@@ -225,50 +268,19 @@ def test_name_typed_with_json_extension_used_once(page):
 
 
 def test_host_actions(page, monkeypatch):
-    calls = []
+    calls, panels = [], []
     for name in ("export_package", "import_package", "open_page"):
         monkeypatch.setattr(page, name, lambda *args, _name=name: calls.append((_name, *args)))
+    page.backend.panelRequested.connect(lambda name, key: panels.append((name, key)))
     page.backend.exportPackage("race.json")
     page.backend.importPackage()
-    page.backend.compare("race.json")
+    page.backend.compareWith("race.json")
+    page.backend.compareWith("missing.json")  # unknown: ignored
     page.backend.openPage("trash")
+    page.backend.openPage("folder")
     page.backend.exportPackage("missing.json")  # unknown: ignored
-    assert calls == [
-        ("export_package", "race.json"), ("import_package",),
-        ("open_page", "compare", "race.json"), ("open_page", "trash"),
-    ]
-
-
-def test_open_pages(page, monkeypatch):
-    from neopedal.ui import preset_view
-
-    opened = []
-    monkeypatch.setattr(preset_view, "PresetCompare", lambda *args, **kwargs: type(
-        "Shown", (), {"show": lambda self: opened.append(("compare", kwargs["preset_b"])),
-                      "shown_dialog": lambda self: self})())
-    for name in ("PresetTransfer", "RestoreBackup", "PresetTrash"):
-        monkeypatch.setattr(preset_view, name, lambda *args, _name=name: type(
-            "Shown", (), {"open": lambda self: opened.append(_name)})())
-    page.open_page("compare", "race.json")
-    for name in ("transfer", "restore", "trash"):
-        page.open_page(name)
-    assert opened == [("compare", "race.json"), "PresetTransfer", "RestoreBackup", "PresetTrash"]
-
-
-def test_compare_already_open_switched_to_presets_asked(page, monkeypatch):
-    from PySide6.QtWidgets import QComboBox
-
-    from neopedal.ui import preset_view
-
-    open_compare = SimpleNamespace(combo_a=QComboBox(), combo_b=QComboBox())
-    for combo in (open_compare.combo_a, open_compare.combo_b):
-        combo.addItems([cfg.filename.setting, "old.json", "race.json"])
-    open_compare.combo_b.setCurrentText("old.json")
-    monkeypatch.setattr(preset_view, "PresetCompare", lambda *args, **kwargs: type(
-        "Copy", (), {"show": lambda self: None, "shown_dialog": lambda self: open_compare})())
-    page.open_page("compare", "race.json")
-    assert open_compare.combo_a.currentText() == cfg.filename.setting
-    assert open_compare.combo_b.currentText() == "race.json"
+    assert calls == [("export_package", "race.json"), ("import_package",), ("open_page", "folder")]
+    assert panels == [("compare", "race.json"), ("trash", "")]  # panels of the QML page, no other page opened
 
 
 def test_files_read_while_shown_and_only_when_changed(page, monkeypatch):
@@ -342,12 +354,44 @@ def test_qml_page_created_when_shown(page):
     for _ in range(20):
         QCoreApplication.processEvents()
     texts = item_texts(page.view)
-    assert {"Preset", "race", "practice", "Auto Load Primary Preset"} <= texts
+    assert {"Presets", "race", "practice", "Auto Load Primary Preset"} <= texts
     page.backend.select("race.json")
     for _ in range(10):
         QCoreApplication.processEvents()
     assert "Load Preset" in item_texts(page.view)  # details panel of wide page
     assert not page.view.grabFramebuffer().isNull()
+
+
+def test_qml_class_session_tags_and_menus(page):
+    """Class preset of a session shown as "GT3 · Race" tag, class menus by session filled, no QML warning"""
+    from PySide6.QtCore import QObject, QtMsgType, qInstallMessageHandler
+
+    messages = []
+
+    def handler(kind, _context, text):
+        if kind != QtMsgType.QtDebugMsg:
+            messages.append(text)
+
+    previous = qInstallMessageHandler(handler)
+    try:
+        page.resize(1200, 760)
+        page.show()
+        page.backend.setPrimaryClassSession("race.json", "GT3", "race")
+        page.backend.select("race.json")
+        for _ in range(10):
+            QCoreApplication.processEvents()
+        assert "GT3  ·  Race" in item_texts(page.view)
+        root = page.view.rootObject()
+        root.setProperty("menuInfo", page.backend.selected)
+        for _ in range(10):
+            QCoreApplication.processEvents()
+        # Every session, practice & qualifying offer GT3 (row menu & details menu); race already set
+        actions = [obj for obj in root.findChildren(QObject) if obj.property("text") == "GT3"
+                   and obj.metaObject().className().startswith("Action_")]
+        assert len(actions) == 6
+    finally:
+        qInstallMessageHandler(previous)
+    assert not [text for text in messages if "qml" in text.lower()], messages
 
 
 def test_qml_page_translated(page):
@@ -365,10 +409,8 @@ def test_qml_page_translated(page):
 
 
 def test_check_preset_lists_and_repairs(page, monkeypatch):
-    from neopedal.ui import preset_view
-
     toasts, questions = [], []
-    monkeypatch.setattr(preset_view, "show_toast", lambda parent, text, *args, **kwargs: toasts.append(text))
+    page.backend.toastShown.connect(lambda text, error, undo: toasts.append(text))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(
         lambda *args, **kwargs: questions.append(args[2]) or QMessageBox.StandardButton.Yes))
     page.backend.checkPreset("practice.json")

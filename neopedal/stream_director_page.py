@@ -42,9 +42,10 @@ def tyre_badges() -> dict[str, tuple[str, str]]:
     return badges
 
 
-def director_html(language: str, title: str) -> str:
+def director_html(language: str, title: str, colorblind: bool = False) -> str:
+    """Broadcast graphics page; colorblind: colorblind safe status colors (overlay style option)"""
     return (DIRECTOR_HTML.replace("@@lang@@", escape(language)).replace("@@title@@", escape(title))
-            .replace("@@tyres@@", json.dumps(tyre_badges())).replace("@@status@@", status_css())
+            .replace("@@tyres@@", json.dumps(tyre_badges())).replace("@@status@@", status_css(colorblind=colorblind))
             .replace("@@energyLow@@", str(ENERGY_LOW)).replace("@@energyMedium@@", str(ENERGY_MEDIUM)))
 
 

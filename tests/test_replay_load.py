@@ -35,9 +35,10 @@ def replay_view(ui_env, monkeypatch):
     from neopedal.api_control import api
     from neopedal.replay import replay
     from neopedal.ui import replay_view as module
+    from neopedal.ui.quick import session_recorder_backend as recorder
 
-    monkeypatch.setattr(module, "restart_api", lambda: None)
-    monkeypatch.setattr(type(api), "name", property(lambda self: module.API_LMU_NAME))
+    monkeypatch.setattr(recorder, "restart_api", lambda: None)
+    monkeypatch.setattr(type(api), "name", property(lambda self: recorder.API_LMU_NAME))
     monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", FRAME_SIZE]])
     dialog = module.ReplayView(None)
     yield dialog
@@ -84,8 +85,8 @@ def test_long_replay_loads_without_blocking_event_loop(replay_view, tmp_path):
     replay_view.open_file(filename)
     assert not replay.active and replay_view.loader.busy  # returned at once, file scanned in background
     replay_view.refresh()
-    assert replay_view.label_file.text().startswith("Loading replay long.tpreplay:")
-    assert not replay_view.button_record.isEnabled()
+    assert replay_view.backend.loadText.startswith("Loading replay long.tpreplay:")
+    assert not replay_view.backend.canRecord
     deadline = time.monotonic() + 20
     while replay_view.loader.busy and time.monotonic() < deadline:
         QCoreApplication.processEvents()
@@ -93,7 +94,7 @@ def test_long_replay_loads_without_blocking_event_loop(replay_view, tmp_path):
     assert replay.active and len(replay.player.replay) == SCAN_CHECK_STEP * 20
     assert True in ticks  # event loop kept running while loading
     replay_view.refresh()
-    assert replay_view.label_file.text() == "long.tpreplay" and replay_view.button_play.isEnabled()
+    assert replay_view.backend.fileName == "long.tpreplay" and replay_view.backend.active
 
 
 def test_stale_load_ignored(replay_view, tmp_path, monkeypatch):
@@ -130,12 +131,12 @@ def test_stale_load_ignored(replay_view, tmp_path, monkeypatch):
 
 def test_load_error_reported(replay_view, tmp_path, monkeypatch):
     from neopedal.replay import replay
-    from neopedal.ui import replay_view as module
+    from neopedal.ui.quick import session_recorder_backend as module
 
     bad = tmp_path / "bad.tpreplay"
     bad.write_bytes(b"not a replay")
     warnings = []
-    monkeypatch.setattr(module.QMessageBox, "warning", lambda parent, title, text: warnings.append(text))
+    replay_view.backend.message.connect(lambda text, error: warnings.append(text))  # error toast of page
     called = []
     replay_view.open_file(str(bad), lambda: called.append(True))
     wait_loaded(replay_view)
@@ -175,8 +176,8 @@ def test_close_during_load_stops_thread(replay_view, tmp_path, monkeypatch):
 def test_lap_viewer_open_replay_seeks_after_load(viewer, tmp_path, monkeypatch):  # noqa: F811
     from neopedal.api_control import api
     from neopedal.replay import replay
-    from neopedal.ui import replay_view as module
     from neopedal.ui._common import BaseDialog
+    from neopedal.ui.quick import session_recorder_backend as module
 
     filename = write_long_replay(tmp_path, SCAN_CHECK_STEP * 3)
     monkeypatch.setattr(module, "restart_api", lambda: None)

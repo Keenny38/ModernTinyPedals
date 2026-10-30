@@ -25,6 +25,7 @@ drivers) or a minimum driving time.
 
 Driving time is counted from the driver name of the player car (teammates included while they
 drive it), from the moment the widget runs: kept while widget reloads, reset on new session.
+Not counted in spectate mode (player car is then the car watched, see realtime_state.spectating).
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter
 
 from .. import calculation as calc
+from .. import realtime_state
 from ..api_control import api
 from ..demo_state import drawing_demo
 from ..i18n import tr_overlay as tr
@@ -56,25 +58,21 @@ OVER = 3
 
 
 class DriverTimes:
-    """Driving time & laps of each driver of player car in current session, drivers in order seen"""
+    """Driving time of each driver of player car in current session, drivers in order seen"""
 
     def __init__(self):
         self.times: dict[str, float] = {}
-        self.laps: dict[str, int] = {}
         self.session = None
         self.last_elapsed = -1.0
-        self.last_lap = -1
         self.version = 0  # changed when drivers or times change
 
     def reset(self):
         self.times.clear()
-        self.laps.clear()
         self.last_elapsed = -1.0
-        self.last_lap = -1
         self.version += 1
 
-    def update(self, session: Any, elapsed: float, driver: str, driving: bool, lap: int):
-        """Add time since last update to driver (if driving), laps completed meanwhile"""
+    def update(self, session: Any, elapsed: float, driver: str, driving: bool):
+        """Add time since last update to driver (if driving), driver "": no driver of player car known"""
         if not finite(elapsed):
             return
         if session != self.session or elapsed < self.last_elapsed - MAX_STEP:  # new or restarted session
@@ -82,16 +80,12 @@ class DriverTimes:
             self.reset()
         if driver and driver not in self.times:
             self.times[driver] = 0.0
-            self.laps[driver] = 0
             self.version += 1
         step = elapsed - self.last_elapsed
         if driving and driver and self.last_elapsed >= 0 and 0 < step < MAX_STEP:
             self.times[driver] += step
             self.version += 1
-        if driver and self.last_lap >= 0 and 0 < lap - self.last_lap < 3:
-            self.laps[driver] += lap - self.last_lap
         self.last_elapsed = elapsed
-        self.last_lap = lap
 
 
 DRIVER_TIMES = DriverTimes()  # shared by widget instances: kept while widget reloads
@@ -147,10 +141,12 @@ class StintTimerMixin:
     def read_stint(self) -> StintReading:
         """Update driving times, readings"""
         times = self.driver_times
-        driver = api.read.vehicle.driver_name()
-        driving = api.read.vehicle.player_has_vehicle() and api.read.vehicle.in_paddock() != 2
-        times.update(api.read.session.identifier()[0], api.read.session.elapsed(), driver, driving,
-                     api.read.lap.completed_laps())
+        # Spectate mode (spectate page, Broadcast Director): player car read is the car watched, its drivers are
+        # not drivers of the player car
+        own_car = not realtime_state.spectating
+        driver = api.read.vehicle.driver_name() if own_car else ""
+        driving = own_car and api.read.vehicle.player_has_vehicle() and api.read.vehicle.in_paddock() != 2
+        times.update(api.read.session.identifier()[0], api.read.session.elapsed(), driver, driving)
         stint = minfo.history.stintDataCurrent
         stint_time = stint.totalTime if finite(stint.totalTime) else 0.0
         countdown, countdown_state = self.countdown(stint_time)
@@ -185,8 +181,8 @@ class StintTimerMixin:
         return calc.sec2countdown(left), WARNING if left <= self.stint_warning else NORMAL
 
     def fair_share(self) -> float:
-        """Race length divided by drivers (seconds), 0 if race length unknown (lap race)"""
-        if api.read.session.finish_type() == 1:  # laps only
+        """Race length divided by drivers (seconds), 0 out of a race or if race length unknown (lap race)"""
+        if not api.read.session.in_race() or api.read.session.finish_type() == 1:  # practice, laps only
             return 0.0
         length = api.read.session.end()
         if not (finite(length) and 0 < length < 360000):

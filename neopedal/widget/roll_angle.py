@@ -54,7 +54,7 @@ class Realtime(Overlay):
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.degree_sign_text = "°" if self.wcfg["show_degree_and_percentage_sign"] else ""
         self.percent_sign_text = "%" if self.wcfg["show_degree_and_percentage_sign"] else ""
-        self.decimals = max(int(self.wcfg["decimal_places"]), 1)
+        self.decimals = max(int(self.wcfg["decimal_places"]), 0)
 
         if self.wcfg["layout"] == 0:
             prefix_just = max(
@@ -80,7 +80,6 @@ class Realtime(Overlay):
             offset_y=font_m.voffset,
             fg_color=self.wcfg["font_color_roll_angle_front"],
             bg_color=self.wcfg["background_color_roll_angle_front"],
-            last=0,
         )
         self.set_primary_orient(
             target=self.bar_rollf,
@@ -96,7 +95,6 @@ class Realtime(Overlay):
             offset_y=font_m.voffset,
             fg_color=self.wcfg["font_color_roll_angle_rear"],
             bg_color=self.wcfg["background_color_roll_angle_rear"],
-            last=0,
         )
         self.set_primary_orient(
             target=self.bar_rollr,
@@ -104,6 +102,8 @@ class Realtime(Overlay):
         )
 
         self.calc_ema_roll = calc.ema_filter(self.wcfg["roll_angle_smoothing_samples"])
+        self.ema_rollf = self.ema_rollr = 0.0
+        self.ema_ratio = 0.5
 
         # Roll angle difference
         if self.wcfg["show_roll_angle_difference"]:
@@ -123,15 +123,15 @@ class Realtime(Overlay):
 
         # Roll angle ratio
         if self.wcfg["show_roll_angle_ratio"]:
-            text_ratio = self.format_ratio(0, self.prefix_ratio)
+            text_ratio = self.format_ratio(50, self.prefix_ratio)  # balanced, as smoothing start
+            widest = max(len(text_ratio), len(self.format_ratio(100, self.prefix_ratio)))  # 100 wider at 0 decimal
             self.bar_ratio = self.set_rawtext(
                 text=text_ratio,
-                width=font_m.width * len(text_ratio) + bar_padx,
+                width=font_m.width * widest + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_roll_angle_ratio"],
                 bg_color=self.wcfg["background_color_roll_angle_ratio"],
-                last=0,
             )
             self.set_primary_orient(
                 target=self.bar_ratio,
@@ -147,15 +147,15 @@ class Realtime(Overlay):
         rollf_deg = calc.slope_angle(height_fr - height_fl, self.wcfg["wheel_track_front"])
         rollr_deg = calc.slope_angle(height_rr - height_rl, self.wcfg["wheel_track_rear"])
 
-        ema_rollf_deg = self.calc_ema_roll(self.bar_rollf.last, rollf_deg)
-        ema_rollr_deg = self.calc_ema_roll(self.bar_rollr.last, rollr_deg)
+        self.ema_rollf = self.calc_ema_roll(self.ema_rollf, rollf_deg)
+        self.ema_rollr = self.calc_ema_roll(self.ema_rollr, rollr_deg)
 
-        self.update_roll(self.bar_rollf, ema_rollf_deg, self.prefix_rollf)
-        self.update_roll(self.bar_rollr, ema_rollr_deg, self.prefix_rollr)
+        self.update_text(self.bar_rollf, self.format_roll(self.ema_rollf, self.prefix_rollf))
+        self.update_text(self.bar_rollr, self.format_roll(self.ema_rollr, self.prefix_rollr))
 
         # Roll angle difference
         if self.wcfg["show_roll_angle_difference"]:
-            self.update_roll(self.bar_rolld, ema_rollr_deg - ema_rollf_deg, self.prefix_rolld)
+            self.update_text(self.bar_rolld, self.format_roll(self.ema_rollr - self.ema_rollf, self.prefix_rolld))
 
         # Roll angle ratio
         if self.wcfg["show_roll_angle_ratio"]:
@@ -163,30 +163,23 @@ class Realtime(Overlay):
                 ratio = calc.part_to_whole_ratio(rollf_deg, rollf_deg + rollr_deg, 0.5)
             else:
                 ratio = 0.5
-            ema_ratio = self.calc_ema_ratio(self.bar_ratio.last, ratio)
-            self.update_ratio(self.bar_ratio, ema_ratio, self.prefix_ratio)
+            self.ema_ratio = self.calc_ema_ratio(self.ema_ratio, ratio)
+            self.update_text(self.bar_ratio, self.format_ratio(self.ema_ratio * 100, self.prefix_ratio))
 
     # GUI update methods
-    def update_roll(self, target, data, prefix):
-        """Roll angle"""
-        if target.last != data:
-            target.last = data
-            target.text = self.format_roll(data, prefix)
-            target.update()
-
-    def update_ratio(self, target, data, prefix):
-        """Roll angle ratio"""
-        if target.last != data:
-            target.last = data
-            target.text = self.format_ratio(data * 100, prefix)
+    def update_text(self, target, text):
+        """Roll angle or ratio, repainted on text change only"""
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
     def format_roll(self, angle, prefix):
         """Format roll angle"""
-        roll_angle = f"{angle:+.{self.decimals}f}"
+        roll_angle = f"{angle:+z.{self.decimals}f}"
         return f"{prefix}{roll_angle:.{self.decimals + 3}}{self.degree_sign_text}"
 
     def format_ratio(self, angle, prefix):
-        """Format roll angle ratio"""
-        roll_angle = f"{angle:.{self.decimals + 1}f}"
-        return f"{prefix}{roll_angle:.{self.decimals + 3}}{self.percent_sign_text}"
+        """Format roll angle ratio (100% shown without decimal point when too wide)"""
+        roll_angle = f"{angle:.{self.decimals}f}"[:self.decimals + 3].rstrip(".")
+        return f"{prefix}{roll_angle}{self.percent_sign_text}"

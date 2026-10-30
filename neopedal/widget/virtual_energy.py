@@ -23,8 +23,7 @@ Virtual energy Widget
 from typing import TYPE_CHECKING
 
 from ..module_info import minfo
-from ._consumption import ConsumptionBars
-from ._painter import RawText
+from ._consumption import TEXT_DEFAULT, ConsumptionBars
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import VirtualEnergyConfig
@@ -36,21 +35,33 @@ class Realtime(ConsumptionBars):
     wcfg: "VirtualEnergyConfig"
     refill = "refilling"
     amount = "energy"
-    bar_ratio: RawText
-    bar_bias: RawText
 
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
-        self.show_ratio = self.wcfg["show_fuel_ratio_and_fuel_bias"]
         # Fuel ratio & fuel bias cells
-        extra_cells = (("bar_ratio", "fuel_ratio", False, 5), ("bar_bias", "fuel_bias", True, 5))
-        self.set_consumption_bars(extra_cells if self.show_ratio else ())
+        self.set_consumption_bars(((("fuel_ratio", "show_fuel_ratio"), ("fuel_bias", "show_fuel_bias")),))
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        if not minfo.energy.available:  # car without virtual energy: no values
+            self.clear_cells()
+            return
         self.update_consumption(minfo.energy, float)
+        self.update_cell("fuel_ratio", minfo.hybrid.fuelEnergyRatio)
+        self.update_cell("fuel_bias", minfo.hybrid.fuelEnergyBias, None, "+")
 
-        if self.show_ratio:
-            self.update_value(self.bar_ratio, minfo.hybrid.fuelEnergyRatio)
-            self.update_value(self.bar_bias, minfo.hybrid.fuelEnergyBias, None, "+")
+    def clear_cells(self):
+        """No value in cells, no low energy warning, empty level bar (drawn again once)"""
+        for name, target in self.cells.items():
+            if target.last is not None:
+                target.last = None
+                target.text = TEXT_DEFAULT
+                if name == "remaining":
+                    target.bg = self.bar_style_curr[0]
+                elif name == self.refill:
+                    target.bg = self.bar_style_need[0]
+                target.update()
+        if self.shown.level and self.bar_level.last is not None:
+            self.bar_level.last = None
+            self.bar_level.update_input(0.0, 0.0, 0.0)

@@ -204,7 +204,7 @@ class CameraDesk(DirectorPart):
         if not page.can_command():
             return
         if not gc.click_game_ui(page.game.local_game()):
-            page.notify(tr("Game window not found: LMU must be running on this computer."), True)
+            page.notify(tr("Game window not found: LMU must be running on this computer"), True)
             return
         QTimer.singleShot(GAME_UI_DELAY_MS, self, self.refreshHud)
 

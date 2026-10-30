@@ -46,7 +46,7 @@ class FakeGame:
         }
         self.asked: list[str] = []
 
-    def __call__(self, resource: str) -> tuple[int, bytes]:
+    def __call__(self, resource: str, max_body: int | None = None) -> tuple[int, bytes]:
         self.asked.append(resource)
         if not self.running:
             return 0, b""

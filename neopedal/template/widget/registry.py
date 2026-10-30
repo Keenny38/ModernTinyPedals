@@ -85,7 +85,8 @@ CATEGORY_COLORS: Mapping[str, str] = MappingProxyType({
 DEMO_HISTORY = "history"  # draws recent inputs: fed a corner before drawn
 DEMO_LAP = "lap"  # draws delta over the lap: fed last lap and current lap so far
 DEMO_SAMPLE = "sample"  # draws a sample of every item before first update (nothing to show on this data)
-DEMO_FEEDS = ("", DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE)
+DEMO_GAPS = "gaps"  # draws gaps per lap: fed gaps to cars ahead & behind at end of last laps
+DEMO_FEEDS = ("", DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE, DEMO_GAPS)
 
 
 @dataclass(frozen=True)
@@ -154,7 +155,7 @@ OVERLAYS: tuple[OverlaySpec, ...] = (
     overlay("friction_circle", TYRES, demo=DEMO_HISTORY),
     overlay("fuel", ENGINE),
     overlay("fuel_energy_saver", ENGINE),
-    overlay("gap_trend", TIMING),
+    overlay("gap_trend", TIMING, demo=DEMO_GAPS),
     overlay("gear", ENGINE),
     overlay("heading", TRACK),
     overlay("instrument", ENGINE),

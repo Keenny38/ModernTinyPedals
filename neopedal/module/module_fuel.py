@@ -27,6 +27,7 @@ Game estimate until a lap of car & track is recorded.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from collections.abc import Callable
 from math import ceil
@@ -39,6 +40,7 @@ from ..const_api import API_RF2_NAME
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..const_file import FileExt
 from ..module_info import FuelInfo, minfo
+from ..userfile.data_saver import queue_save
 from ..userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 from ..validator import generator_init, valid_delta_raw
 from ._base import PENDING_CHECK, WAIT_STATE_CHANGE, DataModule, PendingLap, derived_stamp, round6
@@ -49,6 +51,8 @@ METHOD_GAME = "game"  # game estimate, no lap of car & track recorded yet
 METHOD_LAST_LAP = "last_lap"  # last valid lap
 METHOD_MEDIAN = "median"  # median of last valid green flag laps
 MEDIAN_MIN_LAPS = 3  # green flag laps needed before median replaces last valid lap
+# Seconds virtual energy reads 0 with the car idle (garage, stopped) before energy is taken as absent (other car)
+ENERGY_ABSENT_DELAY = 3.0
 
 
 class Realtime(DataModule):
@@ -91,6 +95,7 @@ class Realtime(DataModule):
             fuel_density=0.0,
             green_flag_laps=green_flag_laps,
         )
+        energy_presence = EnergyPresence(minfo.energy.available)
 
         try:
             while not _event_wait(update_interval):
@@ -111,8 +116,13 @@ class Realtime(DataModule):
                     # Calculate fuel
                     waiting_fuel = gen_fuel_usage.send(vehicle_resets)
 
-                    # Calculate virtual energy if available
-                    minfo.energy.available = (api.read.engine.virtual_energy() != 0)
+                    # Calculate virtual energy if available (a 0 reading while driving is energy run down or
+                    # telemetry not matched yet, never a car without virtual energy)
+                    set_energy_available(energy_presence.update(
+                        api.read.engine.virtual_energy(),
+                        api.read.vehicle.in_garage() or api.read.vehicle.speed() < 0.1,
+                        time.monotonic(),
+                    ))
                     if minfo.energy.available:
                         waiting_energy = gen_energy_usage.send(vehicle_resets)
 
@@ -140,6 +150,47 @@ class Realtime(DataModule):
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_fuel_usage, gen_energy_usage)
+
+
+class EnergyPresence:
+    """Virtual energy on car, from telemetry reading: present once read above 0, absent only once it reads 0
+    for ENERGY_ABSENT_DELAY with the car idle (garage or stopped: car without virtual energy taken), never
+    while driving (energy run down to exactly 0, brief 0 while player telemetry is not matched yet)
+
+    Attributes:
+        present: virtual energy available on car.
+    """
+
+    __slots__ = ("present", "_zero_since")
+
+    def __init__(self, present: bool = False):
+        self.present = present
+        self._zero_since: float | None = None  # clock time reading became 0 with car idle
+
+    def update(self, reading: float, idle: bool, now: float) -> bool:
+        """Update with virtual energy reading (fraction), whether car is idle & clock time, returns present"""
+        if reading != 0:
+            self.present = True
+            self._zero_since = None
+        elif self.present:
+            if not idle:
+                self._zero_since = None
+            elif self._zero_since is None:
+                self._zero_since = now
+            elif now - self._zero_since >= ENERGY_ABSENT_DELAY:
+                self.present = False
+                self._zero_since = None
+        return self.present
+
+
+def set_energy_available(available: bool):
+    """Virtual energy available on car: once not (car without virtual energy), energy output and fuel
+    ratio & bias of previous car cleared"""
+    if minfo.energy.available and not available:
+        minfo.energy.reset()
+        minfo.hybrid.fuelEnergyRatio = 0.0
+        minfo.hybrid.fuelEnergyBias = 0.0
+    minfo.energy.available = available
 
 
 def detect_consumption_type(is_energy: bool) -> Callable:
@@ -234,12 +285,15 @@ def calc_consumption(
             green_laps.append(used_last_valid)
 
     def save_data():
-        """Reference lap saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
-        save_fuel_delta_file(
+        """Reference lap saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving), on the data
+        saver thread so estimates keep updating while the file is written"""
+        queue_save(
+            save_fuel_delta_file,
             filepath=filepath,
             filename=combo_name,
             extension=extension,
-            dataset=delta_array_last,
+            dataset=delta_array_last,  # tuple, never changed in place
+            sync=lap_state.sync_save,  # module stopping or player inactive: written at once
         )
         lap_state.delayed_save = False
 
@@ -492,5 +546,5 @@ def calc_consumption(
         output.oneLessPitConsumption = used_est_less
         output.consumptionMethod = method
         output.consumptionLaps = len(green_laps) if method == METHOD_MEDIAN else 0
-        if not is_energy:
-            output.weight = fuel_density * amount_curr
+        # Fuel weight from liters only: battery charge (electric car, percent) & energy (percent) weigh nothing
+        output.weight = fuel_density * amount_curr if telemetry_func is telemetry_fuel else 0.0

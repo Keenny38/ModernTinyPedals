@@ -22,17 +22,26 @@ Pace notes Widget
 
 from typing import TYPE_CHECKING
 
-from ..api_control import api
-from ..const_common import EMPTY_DICT, TEXT_NOTAVAILABLE
-from ..module_info import minfo
-from ..userfile.track_notes import COLUMN_COMMENT, COLUMN_DISTANCE, COLUMN_PACENOTE
+from ..i18n import tr_overlay
+from ..module_info import NotesInfo, minfo
+from ..userfile.track_notes import COLUMN_DISTANCE, COLUMN_PACENOTE
 from ._base import Overlay
+from .track_notes import TrackNotesMixin
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import PaceNotesConfig
 
 
-class Realtime(Overlay):
+class PaceNotesMixin(TrackNotesMixin):
+    """Current pace note & auto hide, for classic & modern widget"""
+
+    NOTE_COLUMN = COLUMN_PACENOTE
+
+    def notes_data(self) -> NotesInfo:
+        return minfo.pacenotes
+
+
+class Realtime(PaceNotesMixin, Overlay):
     """Draw widget"""
 
     wcfg: "PaceNotesConfig"
@@ -71,7 +80,7 @@ class Realtime(Overlay):
         # Pace notes
         if self.wcfg["show_pace_notes"]:
             self.bar_notes = self.set_rawtext(
-                text="PACE NOTES",
+                text=tr_overlay("PACE NOTES"),
                 width=font_m.width * notes_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
@@ -88,7 +97,7 @@ class Realtime(Overlay):
         if self.wcfg["show_comments"]:
             self.base_height = font_m.height
             self.bar_comments = self.set_rawtext(
-                text="COMMENTS",
+                text=tr_overlay("COMMENTS"),
                 width=font_m.width * comments_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
@@ -104,7 +113,7 @@ class Realtime(Overlay):
         # Debugging info
         if self.wcfg["show_debugging"]:
             self.bar_debugging = self.set_rawtext(
-                text="DEBUGGING",
+                text=tr_overlay("DEBUGGING"),
                 width=font_m.width * debugging_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
@@ -118,61 +127,21 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.last_notes_index = None
+        self.setup_notes()
         self.last_auto_hide = False
-        self.last_etime = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        in_pits = api.read.vehicle.in_pits()
-
-        if not in_pits:  # out pit
-            notes_current = minfo.pacenotes.out.currentNote
-            notes_next = minfo.pacenotes.out.nextNote
-            notes_index = minfo.pacenotes.out.currentIndex if notes_current else None
-        elif self.wcfg["show_pit_notes_while_in_pit"]:
-            notes_current = minfo.pacenotes.pit.currentNote
-            notes_next = minfo.pacenotes.pit.nextNote
-            notes_index = minfo.pacenotes.pit.currentIndex
-        else:  # not available
-            notes_current = EMPTY_DICT
-            notes_next = EMPTY_DICT
-            notes_index = None
-
-        if api.read.vehicle.in_garage():
-            self.update_auto_hide(False)
-        elif notes_index is not None:
-            if self.wcfg["maximum_display_duration"] <= 0:
-                self.update_auto_hide(False)
-            else:
-                etime = api.read.timing.elapsed()
-                note_key = (in_pits, notes_index)  # pit & track notes indexes counted apart
-                if self.last_notes_index != note_key:
-                    self.last_notes_index = note_key
-                    self.last_etime = etime
-                if self.last_etime > etime:
-                    self.last_etime = etime
-                self.update_auto_hide(
-                    etime - self.last_etime > self.wcfg["maximum_display_duration"])
-        elif self.wcfg["enable_auto_hide_if_not_available"]:
-            self.update_auto_hide(True)
+        notes_current, notes_next, in_pits = self.read_notes()
+        self.update_auto_hide(self.notes_hidden)
+        if self.notes_hidden:
             return
-        else:  # no note, no auto hide: never kept hidden from a note shown before
-            self.update_auto_hide(False)
 
         if self.wcfg["show_pace_notes"]:
-            if in_pits:
-                notes = notes_current.get(COLUMN_PACENOTE, self.wcfg["pit_notes_text"])
-            else:
-                notes = notes_current.get(COLUMN_PACENOTE, TEXT_NOTAVAILABLE)
-            self.update_notes(self.bar_notes, notes)
+            self.update_notes(self.bar_notes, self.note_text(notes_current, in_pits))
 
         if self.wcfg["show_comments"]:
-            if in_pits:
-                comments = notes_current.get(COLUMN_COMMENT, self.wcfg["pit_comments_text"])
-            else:
-                comments = notes_current.get(COLUMN_COMMENT, TEXT_NOTAVAILABLE)
-            self.update_comments(self.bar_comments, comments)
+            self.update_comments(self.bar_comments, self.comment_text(notes_current, in_pits))
 
         if self.wcfg["show_debugging"]:
             curr_distance = notes_current.get(COLUMN_DISTANCE, 0)

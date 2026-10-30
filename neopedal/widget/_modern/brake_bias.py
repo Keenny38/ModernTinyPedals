@@ -31,7 +31,7 @@ from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from ..brake_bias import brake_migration
-from .base import ModernOverlay, display_order_options
+from .base import ModernOverlay, display_order_options, signed
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
@@ -47,7 +47,8 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "show_brake_bias", "decimal_places_brake_bias", "show_front_and_rear",
         "show_percentage_sign", "show_baseline_bias_delta", "decimal_places_baseline_bias_delta",
-        "show_brake_migration", "decimal_places_brake_migration", "electric_braking_allocation",
+        "show_brake_migration", "decimal_places_brake_migration", "suffix_brake_migration",
+        "electric_braking_allocation",
         *display_order_options("brake_bias"),
     )
 
@@ -59,6 +60,7 @@ class Realtime(StatsMixin, ModernOverlay):
         self.dec_delta = max(int(wcfg["decimal_places_baseline_bias_delta"]), 0)
         self.dec_migration = max(int(wcfg["decimal_places_brake_migration"]), 0)
         self.sign = "%" if wcfg["show_percentage_sign"] else ""
+        self.suffix_migration = wcfg["suffix_brake_migration"]  # F: front
         stats = []
         if wcfg["show_brake_bias"]:
             sample = "88.88:88.88" if wcfg["show_front_and_rear"] else "88.88%"
@@ -66,7 +68,7 @@ class Realtime(StatsMixin, ModernOverlay):
         if wcfg["show_baseline_bias_delta"]:
             stats.append(Stat("delta", "Change", "+8.88"))
         if wcfg["show_brake_migration"]:
-            stats.append(Stat("migration", "Migration", "88.8F"))
+            stats.append(Stat("migration", "Migration", f"88.8{self.suffix_migration}"))
         stats = self.display_ordered(stats, names={
             "bias": "brake_bias", "delta": "baseline_bias_delta", "migration": "brake_migration",
         })
@@ -77,6 +79,11 @@ class Realtime(StatsMixin, ModernOverlay):
         self.migration = brake_migration(wcfg["electric_braking_allocation"])
 
     def post_update(self):
+        self.migration.send(-1)
+
+    def vehicle_reset(self):
+        """Baseline bias & migration pressure scale of the previous car not kept (followed car changed)"""
+        self.baseline = 0.0
         self.migration.send(-1)
 
     def paint_static(self, painter: QPainter):
@@ -103,11 +110,12 @@ class Realtime(StatsMixin, ModernOverlay):
                                          and api.read.vehicle.speed() < 0.1):
                     self.baseline = bias
                 delta = (bias - self.baseline) * 100
-                values.append(Value(f"{delta:+.{self.dec_delta}f}", theme.text_dim if not round(delta, 3) else theme.warning))
+                color = theme.text_dim if not round(delta, 3) else theme.warning
+                values.append(Value(signed(delta, self.dec_delta), color))
             elif key == "migration":
                 migration = api.read.brake.migration()
                 if migration < 0:
                     migration = self.migration.send(bias) * 100
-                values.append(Value(f"{migration:.{self.dec_migration}f}F", theme.text_dim))
+                values.append(Value(f"{migration:.{self.dec_migration}f}{self.suffix_migration}", theme.text_dim))
         state = tuple(values)
         self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

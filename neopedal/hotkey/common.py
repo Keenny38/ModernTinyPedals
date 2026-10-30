@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable, Mapping
 from itertools import chain
 
 from ..const_app import PLATFORM
-from .joystick import JOY_CODE_BASE, joystick_reader
+from .joystick import JOY_CODE_BASE, JoystickReader, joystick_reader
 from .keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
 KEY_DOWN = 0x8000  # GetAsyncKeyState most significant bit: key held down
@@ -66,7 +66,37 @@ def modifier_priority(key: str) -> int:
     return 0
 
 
-def get_key_state_function() -> Callable[[int], int]:
+class KeyState:
+    """'Get key state' function (called with a key code, 0 if not pressed): keyboard & mouse keys, game
+    controller buttons
+
+    Keyboard keys report held or pressed since the last call (short key tap seen). Controller buttons report
+    the state sampled at the call; with latch_controller_buttons, a button tapped and released between two
+    calls is reported once as well (hotkey thread, key capture). Controller devices are released with the object.
+    """
+
+    __slots__ = (
+        "latch_controller_buttons",
+        "_keyboard",
+        "_joystick",
+        "_modifiers",
+    )
+
+    def __init__(self, get_keyboard_state: Callable[[int], int], joystick: JoystickReader):
+        self.latch_controller_buttons = False
+        self._keyboard = get_keyboard_state
+        self._joystick = joystick
+        self._modifiers = frozenset(KEYMAP_MODIFIER.values())
+
+    def __call__(self, key_code: int) -> int:
+        if key_code >= JOY_CODE_BASE:
+            return self._joystick.pressed(key_code, self.latch_controller_buttons)
+        if key_code in self._modifiers:  # held only: a modifier released just before a key is not in combo
+            return self._keyboard(key_code) & KEY_DOWN
+        return self._keyboard(key_code)  # held or pressed since last check (short key tap)
+
+
+def get_key_state_function() -> KeyState:
     """Platform specific 'get key state' function, keyboard & mouse keys, game controller buttons"""
     get_keyboard_state: Callable[[int], int]
     if PLATFORM.WINDOWS and sys.platform == "win32":  # platform check also read by type checker
@@ -75,17 +105,7 @@ def get_key_state_function() -> Callable[[int], int]:
         get_keyboard_state = windll.user32.GetAsyncKeyState
     else:
         get_keyboard_state = _get_key_state_linux
-    get_joystick_state = joystick_reader().pressed  # devices released with function
-    modifier_codes = frozenset(KEYMAP_MODIFIER.values())
-
-    def get_key_state(key_code: int) -> int:
-        if key_code >= JOY_CODE_BASE:
-            return get_joystick_state(key_code)
-        if key_code in modifier_codes:  # held only: a modifier released just before a key is not in combo
-            return get_keyboard_state(key_code) & KEY_DOWN
-        return get_keyboard_state(key_code)  # held or pressed since last check (short key tap)
-
-    return get_key_state
+    return KeyState(get_keyboard_state, joystick_reader())
 
 
 def refresh_keystate(get_key_state: Callable[[int], int]) -> None:

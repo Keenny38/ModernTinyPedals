@@ -38,6 +38,16 @@ if TYPE_CHECKING:
     from ..template.widget_config_types import ElevationConfig
 
 
+def profile_x(distance: float, start: float, scale: float, width: float) -> float:
+    """Chart x of lap distance, on scale of profile nodes (start: first node distance, scale: x per meter), within
+    chart width (0 if not a number): car mark over profile & sector lines, as lap progress is not (first node past
+    start line, last node before it)"""
+    pos_x = (distance - start) * scale
+    if pos_x != pos_x:  # nan
+        return 0.0
+    return min(max(pos_x, 0.0), width)
+
+
 class Realtime(Overlay):
     """Draw widget"""
 
@@ -102,16 +112,17 @@ class Realtime(Overlay):
             self.pen_corner = QPen(self.wcfg["font_color_corner_numbers"])
 
         # Last data
-        self.last_modified = 0
+        self.last_modified: float | None = None  # None: nothing drawn yet
         self.track_map: TrackMap = NO_TRACK_MAP  # map drawn (distances & sectors of one map)
         self.veh_pos = 0
+        self.reading_text = ""  # elevation reading drawn
         self.map_scaled = None
         self.map_range = (0,10,0,10)
         self.map_scale = 1,1
         self.map_path = QPainterPath()
         self.map_corners: MapCorners | None = None  # official corners of recorded map (None: not placed yet)
 
-        self.update_elevation(-1)
+        self.update_elevation(NO_TRACK_MAP.lastModified)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -125,22 +136,31 @@ class Realtime(Overlay):
                 self.draw_marks(self.map_path)
                 self.update()
 
-        # Vehicle position
-        # Whole pixels: repainted only when mark moves (not on every tick)
-        progress = api.read.lap.progress()
-        if not 0 <= progress <= 1:  # also nan
-            progress = 0.0
-        temp_veh_pos = int(self.display_width * progress)
-        if self.veh_pos != temp_veh_pos:
+        # Vehicle position, on profile scale (map nodes from first node), else lap progress
+        # Whole pixels: repainted only when mark or reading changes (not on every tick)
+        if self.map_scaled:
+            temp_veh_pos = int(profile_x(api.read.lap.distance(), self.map_range[0], self.map_scale[0],
+                                         self.display_width))
+        else:
+            progress = api.read.lap.progress()
+            if not 0 <= progress <= 1:  # also nan
+                progress = 0.0
+            temp_veh_pos = int(self.display_width * progress)
+        reading = ""
+        if self.wcfg["show_elevation_reading"]:
+            reading = f"{self.unit_dist(api.read.vehicle.position_vertical()):.1f}{self.symbol_dist}"
+        if self.veh_pos != temp_veh_pos or self.reading_text != reading:
             self.veh_pos = temp_veh_pos
+            self.reading_text = reading
             self.update()
 
     # GUI update methods
     def update_elevation(self, data):
-        """Elevation map update"""
+        """Elevation map update (data of NO_TRACK_MAP: no map, widget creation)"""
         if self.last_modified != data:
             self.last_modified = data
-            self.track_map = minfo.mapping.trackMap if data != -1 else NO_TRACK_MAP  # taken once
+            # Taken once
+            self.track_map = minfo.mapping.trackMap if data != NO_TRACK_MAP.lastModified else NO_TRACK_MAP
             raw_data = self.track_map.elevations
             map_path = self.create_elevation_path(raw_data)
             self.map_path = map_path
@@ -177,7 +197,7 @@ class Realtime(Overlay):
             painter.drawText(
                 self.rect_text_elevation,
                 self.elevation_text_alignment,
-                f"{self.unit_dist(api.read.vehicle.position_vertical()):.1f}{self.symbol_dist}"
+                self.reading_text,
             )
         if self.wcfg["show_elevation_scale"]:
             # Format elevation scale (meter or feet per pixel)

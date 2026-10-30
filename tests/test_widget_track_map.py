@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QTimerEvent
 from PySide6.QtGui import QColor
 
-from neopedal.module_info import TrackMap, minfo
+from neopedal.module_info import NO_TRACK_MAP, TrackMap, minfo
 from neopedal.setting import cfg
 from tests.test_list_widgets import visible_pixels
 from tests.test_readers import lmu_api
@@ -196,7 +196,7 @@ def test_track_orientation_added_to_display_orientation(track, monkeypatch):
         minfo.mapping.orientation = 300.0  # edited in track info editor: map drawn again at once
         widget.timerEvent(QTimerEvent(0))
         assert widget.map_orient == pytest.approx(math.radians(330))
-        assert widget.map_changed(-1)  # no map: track orientation ignored
+        assert widget.map_changed(NO_TRACK_MAP.lastModified)  # no map: track orientation ignored
         assert widget.last_orientation == 0.0
     finally:
         widget.deleteLater()

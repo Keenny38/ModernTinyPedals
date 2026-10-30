@@ -131,6 +131,8 @@ def test_qml_heavy_parts_gone():
     backdrop = Path(qml_path("SetupBackdrop.qml")).read_text(encoding="utf-8")
     assert "asynchronous: true" in backdrop and "sourceSize.width" in backdrop and "mipmap" not in backdrop
     sessions = Path(qml_path("ResultsSessionList.qml")).read_text(encoding="utf-8")
-    # Spinner of the list header (TpCardHeader busy): turns only while the page is shown
+    # Spinner of the list header (TpCardHeader busy, shared TpSpinner): turns only while the page is shown
     header = Path(qml_path("TpCardHeader.qml")).read_text(encoding="utf-8")
-    assert "busy: backend.busy" in sessions and "running: visible && pageState.active" in header
+    spinner = Path(qml_path("TpSpinner.qml")).read_text(encoding="utf-8")
+    assert "busy: backend.busy" in sessions and "TpSpinner {" in header
+    assert "running: visible && pageState.active" in spinner

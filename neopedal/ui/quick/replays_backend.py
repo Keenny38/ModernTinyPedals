@@ -91,6 +91,7 @@ from .replays_common import (  # noqa: F401  (re-exported: replays_backend.size_
     JUMP,
     LAP_SEARCH_STEPS,
     LIVE_MS,
+    MAP_TRIES,
     MAX_GO_TO_LAP,
     MAX_PATH_SPEED,
     MENU,
@@ -253,6 +254,7 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
         self.notice_error = False
         self.notice_count = 0
         self.map_track: str | None = None  # track of map loaded, None if none
+        self._map_misses = 0  # answers without the track map asked (asked again, up to MAP_TRIES)
         self.map_center: list[tuple[float, float, float]] = []
         self.map_pit: list[tuple[float, float, float]] = []
         self.meters_per_pixel = 1.0
@@ -319,10 +321,13 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
         VertexStore.remove_prefix(self.prefix)
 
     def notify(self, text: str, error: bool = False):
-        """Message shown for a few seconds at the bottom of page"""
+        """Message shown for a few seconds at the bottom of page (toast of its TpDialogHost)"""
+        from ..toast import show_toast
+
         self.notice, self.notice_error = text, error
         self.notice_count += 1
         self.noticeChanged.emit()
+        show_toast(self._window, text, level="error" if error else "success")
 
     def save_settings(self):
         """Settings written once changes pause (number arrows held: one write)"""
@@ -437,7 +442,14 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
             self.replayTimeChanged.emit()
             self.update_timeline_end()
         if "map" in state:
-            self.set_map(state["track"], state["map"])
+            if state["map"] is not None:
+                self._map_misses = 0
+                self.set_map(state["track"], state["map"])
+            else:  # not answered (REST still loading, timeout): asked again, given up after MAP_TRIES answers
+                self._map_misses += 1
+                if self._map_misses >= MAP_TRIES:
+                    self._map_misses = 0
+                    self.set_map(state["track"], None)
         changed = "standings" in state and state["standings"] != self.standings
         if "standings" in state:  # drivers who left the session keep their car, not looked up again
             self.standings = state["standings"]
@@ -478,7 +490,7 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
             self.last_command = ""
             self.rewatching = False
             self.playing = ""
-            self.playbackChanged.emit()
+        self.playbackChanged.emit()  # replay open (playingReplay) or not
         if previous in (SESSION, REPLAY) and state == MENU:  # session ended: game saved its replay
             QTimer.singleShot(SESSION_END_DELAY_MS, self, self.ask_replays)  # context: never after page freed
         self.update_live_timer()
@@ -511,6 +523,7 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
             self.play_sent = None
             if not accepted:  # replay not opened: never taken as open by a later action (done without asking)
                 self.playing = ""
+            self.playbackChanged.emit()  # replay opened (playingReplay), or not
         if self.play_command is not None and self.play_command in self.sending:  # replay of action opening
             self.play_command = None
             if accepted:
@@ -598,7 +611,7 @@ class GameReplaysBackend(ReplaysList, ReplaysFolder, ReplaysPlayback, ReplaysInc
         if self.state not in (SESSION, REPLAY):
             return
         if not click_game_ui():
-            self.notify(tr("Game window not found: LMU must be running on this computer."), True)
+            self.notify(tr("Game window not found: LMU must be running on this computer"), True)
             return
         if self._shown:  # game shows or hides its HUD parts too: asked again once done
             QTimer.singleShot(700, self, self.refresh_state)  # context: never after page freed

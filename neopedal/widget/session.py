@@ -27,7 +27,7 @@ from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import player_race_laps
+from ._common import player_race_laps, system_clock_samples
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import SessionConfig
@@ -84,7 +84,7 @@ class Realtime(Overlay):
             text_system_clock = strftime(self.wcfg["system_clock_format"])
             self.bar_system_clock = self.set_rawtext(
                 text=text_system_clock,
-                width=font_m.width * len(text_system_clock) + bar_padx,
+                width=font_m.width * max(map(len, system_clock_samples(self.wcfg["system_clock_format"]))) + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_system_clock"],
@@ -100,7 +100,7 @@ class Realtime(Overlay):
             text_session_time = calc.sec2sessiontime(0)
             self.bar_session_time = self.set_rawtext(
                 text=text_session_time,
-                width=font_m.width * len(text_session_time) + bar_padx,
+                width=font_m.width * len(f"~{text_session_time}") + bar_padx,  # estimated time over 10 hours
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_session_time"],
@@ -177,19 +177,20 @@ class Realtime(Overlay):
         if target.last != data:
             target.last = data
             if offset:
-                text = f"~{calc.sec2countdown(max(data, 0)):.7}"
+                text = f"~{calc.sec2countdown(max(data, 0))}"
             else:
                 text = calc.sec2sessiontime(max(data + offset, 0))
             target.text = text
             target.update()
 
     def update_estimated_laps(self, target, data):
-        """Estimated remaining laps"""
-        if target.last != data:
-            target.last = data
+        """Estimated remaining laps, predicted extra laps (also changed while stopped)"""
+        extra_laps = minfo.vehicles.finishLapOffset if self.wcfg["show_predicted_extra_laps"] else 0
+        if target.last != (data, extra_laps):
+            target.last = (data, extra_laps)
             text_laps = f"{data:.3f}"
             if self.wcfg["show_predicted_extra_laps"]:
-                text_est = f"{self.prefix_estimated_laps}{text_laps:>5.5}({minfo.vehicles.finishLapOffset:+.0f})"
+                text_est = f"{self.prefix_estimated_laps}{text_laps:>5.5}({extra_laps:+.0f})"
             else:
                 text_est = f"{self.prefix_estimated_laps}{text_laps:>5.5}"
             target.text = text_est

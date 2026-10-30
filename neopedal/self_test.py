@@ -138,12 +138,37 @@ def check_vr_overlay() -> str:
     return "OpenXR layer & openvr loaded"
 
 
+def check_update_signature() -> str:
+    """Signed release manifest checked by the updater: Ed25519 bundled (else every update is refused),
+    release public keys valid, a signature of another key refused"""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+    from . import release_manifest
+
+    for key in release_manifest.RELEASE_PUBLIC_KEYS:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(key, validate=True))
+    data = release_manifest.build_manifest(
+        "owner/name", "v1.0.0", "1.0.0", {"NeoPedal-1.0.0-setup.zip": release_manifest.ManifestAsset("0" * 64, 1)})
+    other_key = Ed25519PrivateKey.generate()
+    signature = base64.b64encode(other_key.sign(data))
+    other_public = base64.b64encode(other_key.public_key().public_bytes_raw()).decode("ascii")
+    release_manifest.verify_manifest(data, signature, (other_public,))  # verification works
+    try:
+        release_manifest.verify_manifest(data, signature)
+    except release_manifest.ManifestError:
+        return f"{len(release_manifest.RELEASE_PUBLIC_KEYS)} release key(s), other signature refused"
+    raise RuntimeError("release manifest signed by another key accepted")
+
+
 CHECKS: tuple[tuple[str, Callable[[], str]], ...] = (
     ("Data files", check_data_files),
     ("Modules", check_modules),
     ("QML pages", check_qml_pages),
     ("Worker process", check_worker_process),
     ("VR overlay", check_vr_overlay),
+    ("Update signature", check_update_signature),
 )
 
 

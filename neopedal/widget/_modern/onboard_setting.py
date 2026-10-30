@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
-from .base import DASH, ModernOverlay, display_order_options
+from .._pedal_alert import ALERT_THEME_COLORS
+from .base import DASH, DESIGN_SCALE, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -53,18 +54,26 @@ class Realtime(StatsMixin, ModernOverlay):
 
     wcfg: OnboardSettingConfig
 
-    options = ("font_size", "layout", *(f"show_{key}" for key, _ in ITEMS), *display_order_options("onboard_setting"))
+    options = (
+        "font_size", "layout", "show_caption", *(f"show_{key}" for key, _ in ITEMS),
+        *(f"caption_text_{key}" for key, _ in ITEMS), *display_order_options("onboard_setting"),
+    )
 
     def design_unit(self) -> float:
-        return float(self.wcfg["font_size"]) * 0.62  # font size 25 by default
+        """Font size option sets tile value size (25 by default): unit as other overlays at default"""
+        return float(self.wcfg["font_size"]) * DESIGN_SCALE * 15 / 25
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         self.add_font("strong", 1.45, "bold")
-        stats = [Stat(key, label, "88", "strong") for key, label in ITEMS if self.wcfg[f"show_{key}"]]
+        wcfg = self.wcfg
+        stats = [Stat(key, self.user_text(f"caption_text_{key}", label), "88", "strong")
+                 for key, label in ITEMS if wcfg[f"show_{key}"]]
         stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
-        width, height = self.build_stats(stats, vertical=self.wcfg["layout"] == 0)
+        # Highlight while active: colors of pedal bar alerts (ABS blue, TC orange, as classic design)
+        self.active_colors = {key: getattr(self.theme, ALERT_THEME_COLORS[f"{key}_activation"]) for key in ("abs", "tc")}
+        width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)  # labels: show_caption
         self.set_size(width, height)
 
     def paint_static(self, painter: QPainter):
@@ -87,7 +96,7 @@ class Realtime(StatsMixin, ModernOverlay):
             if key in ("abs", "tc"):
                 level = switch.abs_level() if key == "abs" else switch.tc_level()
                 active = switch.abs_active() if key == "abs" else switch.tc_active()
-                color = theme.warning if key == "abs" else theme.accent
+                color = self.active_colors[key]
                 values.append(Value(DASH if level < 0 else f"{level}", color if active else None,
                                     theme.tint(color, 80) if active else None))
             else:

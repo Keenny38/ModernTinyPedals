@@ -70,7 +70,7 @@ TpPage {
                     Icon {
                         anchors.centerIn: parent
                         glyph: backend.enabled ? "" : ""  // view, car
-                        size: theme.em * 1.3
+                        size: theme.iconMd
                         fallback: page.spectated.found ? String(page.spectated.place) : "?"
                         color: page.spectated.found ? theme.accent : theme.dimText
                     }
@@ -84,6 +84,7 @@ TpPage {
                             : page.spectated.found ? i18n.tr("Spectating")
                             : page.spectated.slot >= 0 ? i18n.tr("Spectated driver is not in this session")
                             : i18n.tr("No driver spectated")
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontSmall
                         elide: Text.ElideRight
@@ -93,6 +94,7 @@ TpPage {
                         text: page.spectated.found ? page.spectated.name
                             : backend.enabled ? i18n.tr("Pick a driver in the list")
                             : i18n.tr("Your overlays show your own car")
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.pointSize: (page.spectated.found ? theme.fontLarge : theme.fontSubtitle)
                         font.weight: Font.DemiBold
@@ -101,7 +103,7 @@ TpPage {
                     Flow {
                         Layout.fillWidth: true
                         visible: page.spectated.found === true
-                        spacing: theme.em * 0.4
+                        spacing: theme.space3
                         Pill {
                             visible: (page.spectated.place || 0) > 0
                             text: "P" + page.spectated.place
@@ -119,6 +121,7 @@ TpPage {
                         }
                         Text {
                             text: page.spectated.vehicle || ""
+                            textFormat: Text.PlainText
                             visible: text !== ""
                             color: theme.dimText
                             height: Math.round(theme.em * 1.45)
@@ -126,6 +129,7 @@ TpPage {
                         }
                         Text {
                             text: (page.spectated.bestLap || "") !== "" ? i18n.tr("Best Lap") + " " + page.spectated.bestLap : ""
+                            textFormat: Text.PlainText
                             visible: text !== ""
                             color: theme.dimText
                             height: Math.round(theme.em * 1.45)
@@ -149,7 +153,7 @@ TpPage {
                 }
                 Row {
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: theme.em * 0.3
+                    spacing: theme.space2
                     visible: backend.enabled
                     TpButton {
                         glyph: ""  // chevron left
@@ -278,9 +282,9 @@ TpPage {
                 onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
             }
 
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
-                visible: drivers.count === 0
+                empty: drivers.count === 0
                 glyph: backend.driverCount === 0 ? "" : ""  // car, search
                 title: backend.driverCount === 0 ? i18n.tr("No driver in session") : i18n.tr("No driver matches the filters")
                 text: backend.driverCount === 0 ? i18n.tr("Drivers show here while you are in a session, game running.") : ""
@@ -292,11 +296,12 @@ TpPage {
         // Counts & hotkeys hint
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             Text {
                 text: backend.filtered
                     ? i18n.trm(backend.shownCount + " of " + backend.driverCount + " drivers shown")
                     : i18n.trm(backend.driverCount + " drivers")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.features: { "tnum": 1 }
             }
@@ -304,7 +309,7 @@ TpPage {
             Text {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
-                text: i18n.tr("Hotkeys can switch spectate mode & drivers (Hotkey page)")
+                text: i18n.tr("Hotkeys can switch spectate mode & drivers (Hotkeys page)")
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
@@ -321,4 +326,6 @@ TpPage {
                 search.text = backend.searchText
         }
     }
+
+    TpDialogHost {}
 }

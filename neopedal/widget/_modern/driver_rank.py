@@ -103,7 +103,7 @@ class Realtime(StatsMixin, ModernOverlay):
 
     def limits_value(self, points: float, limit: float) -> Value:
         theme = self.theme
-        if limit > 0 and points >= limit - 1:
+        if limit > 0 and points > 0 and points >= limit - 1:  # limit of 1 or less: not red at 0 point
             color = theme.negative
         else:
             color = theme.warning if points > 0 else theme.text_dim

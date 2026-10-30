@@ -88,7 +88,7 @@ def load_profiles(filename: str) -> dict[str, dict]:
             data = json.load(file)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:  # RecursionError: nested too deeply
         logger.error("USERDATA: invalid layout profile %s: %s", filename, error)
         return {}
     if not isinstance(data, dict):

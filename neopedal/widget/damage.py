@@ -29,7 +29,7 @@ from .. import calculation as calc
 from ..api_control import api
 from ..const_common import FLOAT_INF, WHEELS_ZERO
 from ._base import Overlay
-from ._common import tyre_punctured, warning_flash
+from ._common import impact_cone_position, tyre_punctured, warning_flash
 from ._painter import fill_rect
 
 if TYPE_CHECKING:
@@ -121,7 +121,9 @@ class Realtime(Overlay):
         self.damage_wheel: tuple[bool, ...] = (False,) * 4
         self.damage_tyre: tuple[bool, ...] = (False,) * 4
         self.damage_susp: tuple[float, ...] = WHEELS_ZERO
-        self.last_impact_time = None
+        self.last_impact_time = None  # last impact time from game
+        self.impact_cone_time = 0.0  # time of impact shown by cone (light impacts ignored)
+        self.impact_cone_start = 0  # pie start angle toward impact (1/16 degree)
         self.last_impact_expired = True
 
     def timerEvent(self, event):
@@ -134,13 +136,18 @@ class Realtime(Overlay):
 
             if self.last_impact_time != impact_time:
                 self.last_impact_time = impact_time
-                self.last_impact_expired = False
-                update_later = True
+                impact_position = impact_cone_position()
+                if impact_position is not None:
+                    raw_angle = calc.degrees(calc.oriyaw(*impact_position))
+                    self.impact_cone_time = impact_time
+                    self.impact_cone_start = round(16 * (raw_angle - 90 - self.impact_cone_angle * 0.5))
+                    self.last_impact_expired = False
+                    update_later = True
 
             # Impact time not reset on a new session while elapsed restarts: negative age = old impact
-            impact_age = api.read.timing.elapsed() - self.last_impact_time
+            impact_age = api.read.timing.elapsed() - self.impact_cone_time
             if not self.last_impact_expired and (
-                not self.last_impact_time
+                not self.impact_cone_time
                 or not 0 <= impact_age <= self.wcfg["last_impact_cone_duration"]):
                 self.last_impact_expired = True
                 update_later = True
@@ -189,6 +196,10 @@ class Realtime(Overlay):
         if update_later:
             self.update()
 
+    def vehicle_reset(self):
+        """Impact cone of previous car or session hidden"""
+        self.impact_cone_time = 0.0
+
     # GUI update methods
     def paintEvent(self, event):
         """Draw"""
@@ -231,10 +242,7 @@ class Realtime(Overlay):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self.brush_cone)
-        raw_angle = calc.degrees(calc.oriyaw(*api.read.vehicle.impact_position()))
-        start_angle = 16 * (raw_angle - 90 - self.impact_cone_angle * 0.5)
-        length_angle = 16 * self.impact_cone_angle
-        painter.drawPie(self.rect_impact_cone, start_angle, length_angle)
+        painter.drawPie(self.rect_impact_cone, self.impact_cone_start, round(16 * self.impact_cone_angle))
 
     def draw_readings(self, painter):
         """Draw body integrity readings"""

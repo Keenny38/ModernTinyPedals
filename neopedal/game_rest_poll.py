@@ -35,18 +35,37 @@ from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
 from .game_rest_cache import rest_cache
+from .log_handler import ErrorThrottle
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
-POLL_WORKERS = 2  # threads shared by background reads of pollers (game routes, driver ranks file)
+parse_errors = ErrorThrottle()  # parser of a route failing: warning with traceback once a minute, debug in between
+POLL_WORKERS = 2  # threads shared by background reads of game routes (a file lane apart, see FileRead)
 POLL_IDLE_SECONDS = 30.0  # poll thread left without read this long ends (started again when needed)
+
+
+class FileRead:
+    """Work reading a file (driver ranks storage file, up to 64 MB & a JSON parse): run on the file lane of the
+    poll worker, so a long read never delays the game route reads of overlays"""
+
+    __slots__ = ("work",)
+
+    def __init__(self, work: Callable[[], object]):
+        self.work = work
+
+    def __call__(self) -> object:
+        return self.work()
 
 
 class PollWorker:
     """Daemon threads (at most size) running background reads of pollers in turn, started when needed, idle ones
-    end after a while: no thread made per read. Never touches Qt (usable without app)."""
+    end after a while: no thread made per read. Never touches Qt (usable without app).
 
-    def __init__(self, size: int = POLL_WORKERS, name: str = "Background poll"):
+    Args:
+        file_lane: FileRead work submitted runs on a thread of its own (one), apart from route reads.
+    """
+
+    def __init__(self, size: int = POLL_WORKERS, name: str = "Background poll", file_lane: bool = False):
         self.size = size
         self.name = name
         self._lock = threading.Lock()
@@ -54,9 +73,13 @@ class PollWorker:
         self._queue: deque[Callable[[], object]] = deque()
         self._workers = 0
         self._idle = 0
+        self.files: PollWorker | None = PollWorker(1, f"{name} (files)") if file_lane else None
 
     def submit(self, work: Callable[[], object]):
-        """Run work on a poll thread (errors logged)"""
+        """Run work on a poll thread (errors logged), a FileRead on the file lane if there is one"""
+        if self.files is not None and isinstance(work, FileRead):
+            self.files.submit(work)
+            return
         with self._lock:
             self._queue.append(work)
             start = len(self._queue) > self._idle and self._workers < self.size
@@ -91,7 +114,7 @@ class PollWorker:
             del work
 
 
-poll_worker = PollWorker()
+poll_worker = PollWorker(file_lane=True)
 
 
 def fetch_route(route: str, max_age: float = 0.0) -> tuple[int, bytes]:
@@ -165,9 +188,14 @@ class RoutePoller(Generic[T]):
         digest = hash(body)  # cached by bytes: shared answer hashed once
         if digest == self._digest:  # same body: value unchanged
             return
+        self._digest = digest  # same body never decoded or parsed again, even when it fails (value kept)
         try:
             data = json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: nested too deeply
             return
-        self.value = self._parse(data)
-        self._digest = digest
+        try:
+            value = self._parse(data)
+        except Exception:  # unexpected game data: value kept, never a trace per poll
+            parse_errors.log(logger, "Game route %s: parse failed", self.route)
+            return
+        self.value = value

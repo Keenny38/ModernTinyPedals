@@ -17,15 +17,17 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-First launch setup wizard: language, game, units, themes, starting preset & overlays
+First launch setup wizard: language, game, units, themes, starting preset & overlays, streaming (optional)
 
 Qt Quick page (qml/SetupWizard.qml) in its own window, state in quick/setup_backend.py.
-Choices are applied only when finished (run_setup), never while browsing steps.
+Choices are applied only when finished (run_setup), never while browsing steps. Once finished, the Overlays page
+can open in Screen view (where overlays are placed) and overlays on screen can show a simulated race.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import suppress
 from typing import NamedTuple
 
@@ -92,6 +94,9 @@ class SetupChoices(NamedTuple):
     colorblind: bool = False  # colorblind safe overlay colors
     units: str = UNITS_KEEP  # unit system (UNIT_SYSTEMS), "" to keep preset units
     disabled: tuple[str, ...] = ()  # widgets to disable (starter widgets left unchecked)
+    stream: bool = False  # stream overlay server on (overlays as browser sources in streaming software)
+    open_screen_view: bool = False  # Overlays page shown in Screen view once finished
+    test_on_screen: bool = False  # overlays on screen show a simulated race once finished
 
 
 def apply_global_choices(choices: SetupChoices) -> str:
@@ -104,6 +109,10 @@ def apply_global_choices(choices: SetupChoices) -> str:
     style["overlay_theme"] = choices.overlay_theme
     style["enable_modern_font"] = choices.modern_font
     style["enable_colorblind_colors"] = choices.colorblind
+    if choices.stream:  # server started by the reload
+        cfg.user.config["stream_overlay"]["enable_stream_overlay"] = True
+    if choices.open_screen_view:
+        application["show_overlay_screen_view"] = True
     cfg.save(0, config_type=ConfigType.CONFIG)
     if choices.new_preset:
         filename = f"{choices.new_preset}{FileExt.JSON}"
@@ -135,23 +144,65 @@ def apply_preset_choices(choices: SetupChoices) -> list[str]:
     return enabled
 
 
-def run_setup(choices: SetupChoices):
-    """Apply all choices and reload"""
+def run_setup(choices: SetupChoices, done: Callable[[], object] | None = None):
+    """Apply all choices and reload, done called once overlays are running with them"""
     preset = apply_global_choices(choices)
     # Overlays created below with labels of chosen language (window rebuilt after, see retranslate)
     set_language(choices.language)
     if preset:
         cfg.set_next_to_load(preset)
         loader.reload(reload_preset=True)
-    loader.after_reload(lambda: finish_setup(choices))  # choices applied to new preset once loaded
+    loader.after_reload(lambda: finish_setup(choices, done))  # choices applied to new preset once loaded
 
 
-def finish_setup(choices: SetupChoices):
+def finish_setup(choices: SetupChoices, done: Callable[[], object] | None = None):
     """Apply preset choices to loaded preset and reload"""
     enabled = apply_preset_choices(choices)
     loader.reload(reload_preset=False)  # restart API with selected game, start widgets
     logger.info("SETUP: completed, enabled widgets: %s", ", ".join(enabled) or "none")
-    loader.after_reload(lambda: app_signal.refresh.emit(True))
+
+    def reloaded():
+        app_signal.refresh.emit(True)
+        if done is not None:
+            done()
+
+    loader.after_reload(reloaded)
+
+
+def show_overlays_page(window, screen_view: bool):
+    """Overlays page of main window shown (in Screen view: where each overlay is placed)"""
+    from .nav_rail import PAGE_INDEX
+
+    view = window.centralWidget() if hasattr(window, "centralWidget") else None
+    select_page = getattr(view, "select_page", None)
+    if not callable(select_page):
+        return
+    select_page(PAGE_INDEX["widget"])
+    if screen_view:
+        from .overlay_view import OverlayView
+        from .quick.overlay_backend import VIEW_SCREEN
+
+        page = window.findChild(OverlayView)
+        if page is not None:  # page built before: view of its own (setting read when built)
+            page.backend.setViewMode(VIEW_SCREEN)
+
+
+def test_overlays_on_screen(parent):
+    """Overlays on screen show a simulated race for a few seconds, how many told (none: why)"""
+    import shiboken6
+
+    from ..i18n import trm
+    from .overlay_test import TEST_SECONDS, overlay_test
+    from .toast import show_toast
+
+    shown = overlay_test().start()
+    if parent is None or not shiboken6.isValid(parent):
+        return
+    if shown:
+        show_toast(parent, trm(f"{shown} overlay(s) on screen show this situation for {TEST_SECONDS} s "
+                               "(saved values)"))
+    else:
+        show_toast(parent, tr("No overlay on screen now: enable overlays, unlock them or start the game"))
 
 
 class SetupWizard(QDialog):
@@ -194,14 +245,17 @@ class SetupWizard(QDialog):
         return self.backend.choices()
 
     def accept(self):
-        """Apply choices"""
+        """Apply choices, then the Overlays page shown & overlays tested on screen if chosen"""
         choices = self.choices()
         parent = self.parentWidget()
         super().accept()
-        run_setup(choices)
+        done = (lambda: test_overlays_on_screen(parent)) if choices.test_on_screen else None
+        run_setup(choices, done)
         if parent is not None:
             from .toast import show_toast
 
+            if choices.open_screen_view:
+                show_overlays_page(parent, True)
             show_toast(parent, tr("Setup complete. Overlays show once you are driving."))
 
     def reject(self):

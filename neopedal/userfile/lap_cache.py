@@ -39,10 +39,11 @@ import sys
 import threading
 import time
 from array import array
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 
+from ..validator import load_json_strict
 from . import atomic_replace, write_json
 from .telemetry_lap import EXACT_COLUMNS, Column, LapData, LapFile, column_type, load_lap, read_lap_info
 
@@ -57,6 +58,7 @@ _parsed_indexes: dict[str, tuple[tuple[int, int], dict]] = {}  # index path: fil
 _parsed_lock = threading.Lock()
 CACHE_VERSION = 3  # loaded lap processing or file format changed: cached laps read again from CSV
 CACHE_LIMIT = 600 * 1024 * 1024  # bytes kept, oldest used removed over it
+RECENT_SECONDS = 1800  # cache files used (opened, see read_cached_lap) this recently are never pruned: laps shown
 STALE_TEMP = 600  # seconds, older temporary files are left over from a crash (newer ones may be written now)
 ARRAYS_MAGIC = b"TPLA"  # arrays file: header & packed arrays
 ARRAYS_FORMAT = 1
@@ -72,7 +74,30 @@ EAGER_COLUMNS = (
 )
 MAX_HEADER = 16 * 1024 * 1024  # bytes, larger header: not an arrays file
 __all__ = ("EXACT_COLUMNS", "load_cached_lap", "prune_cache", "read_arrays_file", "remove_cached_lap",
-           "write_arrays_file")
+           "set_unreadable_listener", "write_arrays_file")
+_unreadable_listener: Callable[[str, str], None] | None = None  # told of lap columns lost (lap path, reason)
+
+
+def set_unreadable_listener(listener: Callable[[str, str], None] | None) -> None:
+    """Callback told (from any thread) when columns of a cached lap could not be read again (see
+    CachedColumns.read_from_lap): the lap viewer shows it in its status line, None: log only"""
+    global _unreadable_listener
+    _unreadable_listener = listener
+
+
+def remove_unreadable_listener(listener: Callable[[str, str], None]) -> None:
+    """Listener forgotten if it is the one set (page closed)"""
+    global _unreadable_listener
+    if _unreadable_listener is listener:
+        _unreadable_listener = None
+
+
+def columns_unreadable(lap_path: str, reason: str) -> None:
+    logger.warning("LAP CACHE: columns of %s not read again: %s", lap_path, reason)
+    listener = _unreadable_listener
+    if listener is not None:
+        with suppress(Exception):  # a listener failing never breaks the read
+            listener(lap_path, reason)
 
 
 def cache_file(folder: str, path: str) -> str:
@@ -86,19 +111,27 @@ def file_stamp(path: str) -> tuple[int, int]:
     return stat.st_size, stat.st_mtime_ns
 
 
-def write_arrays_file(target: str, values: dict, arrays: Mapping[str, array]) -> None:
-    """Write values (JSON) & packed arrays to file atomically (temporary file renamed), raises OSError"""
+def write_arrays_file(target: str, values: dict, arrays: Mapping[str, array]) -> dict[str, tuple[int, str, int]]:
+    """Write values (JSON) & packed arrays to file atomically (temporary file renamed), raises OSError
+
+    Returns where each array is in the file (name: offset, type code, count), as read_cached_lap reads them.
+    """
     names = list(arrays)
     header = json.dumps({"values": values, "arrays": [
         [name, arrays[name].typecode, len(arrays[name])] for name in names]}).encode("utf-8")
     parts = [ARRAYS_HEAD.pack(ARRAYS_MAGIC, ARRAYS_FORMAT, len(header)), header]
+    entries: dict[str, tuple[int, str, int]] = {}
+    offset = ARRAYS_HEAD.size + len(header)
     for name in names:
         values_array = arrays[name]
+        entries[name] = (offset, values_array.typecode, len(values_array))
+        offset += len(values_array) * values_array.itemsize
         if sys.byteorder != "little":
             values_array = array(values_array.typecode, values_array)
             values_array.byteswap()
         parts.append(values_array.tobytes())
     atomic_replace(target, b"".join(parts), fsync=False)  # cache: rebuilt if lost
+    return entries
 
 
 def read_arrays_file(path: str) -> tuple[dict, dict[str, array]] | None:
@@ -115,7 +148,7 @@ def read_arrays_file(path: str) -> tuple[dict, dict[str, array]] | None:
         return None
     offset = ARRAYS_HEAD.size + size
     try:
-        header = json.loads(data[ARRAYS_HEAD.size:offset].decode("utf-8"))
+        header = load_json_strict(data[ARRAYS_HEAD.size:offset].decode("utf-8"), allow_nan=True)
         values, entries = header["values"], header["arrays"]
         if not isinstance(values, dict) or not isinstance(entries, list):
             return None
@@ -149,7 +182,9 @@ class CachedColumns(Mapping[str, Column]):
 
     Missing columns are read under a lock (lap read by page & background threads), wheel columns 4 at a time
     (one file read per panel). Cache file changed or removed meanwhile (pruned, lap file changed): read again
-    from lap file. Pickled (worker process) with columns read so far, others read there from file.
+    from lap file; columns that cannot be read again (lap file gone, changed, unreadable) are dropped from the
+    columns (not contained, KeyError), never shown as zeros. Pickled (worker process) with columns read so far,
+    others read there from file.
     """
 
     __slots__ = ("_target", "_file", "_lap_path", "_entries", "_loaded", "_lock")
@@ -212,23 +247,36 @@ class CachedColumns(Mapping[str, Column]):
         self.read_from_lap(names)
 
     def read_from_lap(self, names: list[str]) -> None:
-        """Columns read from lap file (cache file gone), zeros if lap file changed meanwhile (other samples)"""
+        """Columns read from lap file (cache file gone); columns not read (lap file gone, unreadable, or changed
+        meanwhile: other samples) are dropped from the lap, so charts & calculations treat them as missing"""
+        reason = ""
         try:
             columns = load_lap(self._lap_path).columns
         except (OSError, ValueError) as error:
-            logger.warning("LAP CACHE: unable to read %s again: %s", self._lap_path, error)
+            reason = str(error)
             columns = {}
-        for name in self._entries:  # every missing column at once: lap file parsed once
+        lost = []
+        for name in list(self._entries):  # every missing column at once: lap file parsed once
             if name in self._loaded:
                 continue
             _, typecode, count = self._entries[name]
             values = columns.get(name)
-            self._loaded[name] = (array(typecode, values) if values is not None and len(values) == count
-                                  else array(typecode, bytes(count * array(typecode).itemsize)))
+            if values is not None and len(values) == count:
+                self._loaded[name] = array(typecode, values)
+            else:
+                del self._entries[name]
+                lost.append(name)
+        if lost:
+            columns_unreadable(self._lap_path, reason or f"lap file changed ({len(lost)} columns dropped)")
+            missing = [name for name in names if name in lost]
+            if missing:
+                raise KeyError(missing[0])
 
 
 def read_cached_lap(target: str, stamp: tuple[int, int], lap_path: str) -> LapData | None:
     """Lap of cache file if made from lap file of stamp (columns read when used, EAGER_COLUMNS now), else None"""
+    with suppress(OSError):
+        os.utime(target)  # recently used: kept when pruning (before stamp taken: lazy columns read from cache)
     try:
         with open(target, "rb") as file:
             stat = os.fstat(file.fileno())
@@ -238,7 +286,7 @@ def read_cached_lap(target: str, stamp: tuple[int, int], lap_path: str) -> LapDa
             magic, version, size = ARRAYS_HEAD.unpack(head)
             if magic != ARRAYS_MAGIC or version != ARRAYS_FORMAT or size > min(MAX_HEADER, stat.st_size):
                 return None
-            header = json.loads(file.read(size).decode("utf-8"))
+            header = load_json_strict(file.read(size).decode("utf-8"), allow_nan=True)
             values, listed = header["values"], header["arrays"]
             info = values.get("info")
             if (not isinstance(values, dict) or values.get("version") != CACHE_VERSION
@@ -257,10 +305,8 @@ def read_cached_lap(target: str, stamp: tuple[int, int], lap_path: str) -> LapDa
             columns = CachedColumns(target, (stat.st_size, stat.st_mtime_ns), lap_path, entries, {})
             eager = [name for name in EAGER_COLUMNS if name in entries]
             columns.read_columns(eager)
-    except (OSError, ValueError, TypeError, KeyError):  # UnicodeDecodeError & JSON errors are ValueError
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):  # UnicodeDecodeError & JSON errors: ValueError
         return None
-    with suppress(OSError):
-        os.utime(target)  # recently used: kept when pruning
     return LapData(values["name"], columns, info)
 
 
@@ -276,22 +322,28 @@ def load_cached_lap(folder: str, path: str) -> LapData:
         if lap is not None:
             return lap
     lap = load_lap(path)
-    if target and save_cached_lap(target, stamp, lap):
-        return read_cached_lap(target, stamp, path) or lap  # columns parsed now released, read again when used
+    if target:
+        cached = save_cached_lap(target, stamp, lap, path)
+        if cached is not None:
+            return cached  # EAGER_COLUMNS kept from the parse, others released & read from the file when used
     return lap
 
 
-def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData) -> bool:
-    """Write lap cache file atomically (laps loaded in threads), returns whether written"""
+def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData, lap_path: str = "") -> LapData | None:
+    """Write lap cache file atomically (laps loaded in threads), returns the lap reading its columns from the
+    file written (EAGER_COLUMNS kept in memory from the parse: nothing read back), None if not written"""
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        write_arrays_file(target, {"version": CACHE_VERSION, "stamp": list(stamp), "name": lap.name, "info": lap.info},
-                          {name: values if isinstance(values, array) and values.typecode == column_type(name)
-                           else array(column_type(name), values) for name, values in lap.columns.items()})
+        arrays = {name: values if isinstance(values, array) and values.typecode == column_type(name)
+                  else array(column_type(name), values) for name, values in lap.columns.items()}
+        entries = write_arrays_file(target, {"version": CACHE_VERSION, "stamp": list(stamp), "name": lap.name,
+                                             "info": lap.info}, arrays)
+        file = file_stamp(target)
     except (OSError, OverflowError, TypeError, ValueError) as error:
         logger.debug("LAP CACHE: unable to save %s: %s", target, error)
-        return False
-    return True
+        return None
+    loaded: dict[str, Column] = {name: arrays[name] for name in EAGER_COLUMNS if name in arrays}
+    return LapData(lap.name, CachedColumns(target, file, lap_path, entries, loaded), lap.info)
 
 
 FileStamp = tuple[int, int, float]  # lap file size, modification time (ns) & modification time (s)
@@ -322,7 +374,7 @@ def read_index(path: str) -> dict:
     if cached is not None and cached[0] == stamp:
         return cached[1]
     saved: Any = {}
-    with suppress(OSError, ValueError), open(path, encoding="utf-8") as file:
+    with suppress(OSError, ValueError, RecursionError), open(path, encoding="utf-8") as file:  # nested too deeply
         saved = json.load(file)
     saved = saved if isinstance(saved, dict) else {}  # damaged index ignored
     keep_parsed(path, stamp, saved)
@@ -417,13 +469,19 @@ def remove_cached_lap(folder: str, path: str) -> None:
         os.remove(cache_file(folder, path))
 
 
-def prune_cache(folder: str, limit: int = CACHE_LIMIT) -> int:
-    """Remove least recently used cache files over size limit, returns number removed"""
+def prune_cache(folder: str, limit: int = CACHE_LIMIT, keep: Collection[str] = (), recent: float = 0.0) -> int:
+    """Remove least recently used cache files over size limit, returns number removed
+
+    Never removed: cache files in keep (laps open in a page: their columns are read from the file when used, a
+    file removed makes the page parse the CSV again) and files used less than `recent` seconds ago (laps being
+    read by the worker process meanwhile, see RECENT_SECONDS; 0: size limit alone).
+    """
     root = os.path.join(folder, CACHE_FOLDER)
     try:
         entries = [entry for entry in os.scandir(root) if entry.is_file()]
     except OSError:
         return 0
+    kept = {os.path.normcase(os.path.abspath(path)) for path in keep}
     files = []
     for entry in entries:
         with suppress(OSError):
@@ -431,7 +489,8 @@ def prune_cache(folder: str, limit: int = CACHE_LIMIT) -> int:
             files.append((stat.st_mtime, stat.st_size, entry.path))
     files.sort(reverse=True)  # newest first
     total = removed = 0
-    stale = time.time() - STALE_TEMP
+    now = time.time()
+    stale = now - STALE_TEMP
     for modified, size, path in files:
         if path.endswith(".tmp"):
             if modified < stale:
@@ -440,7 +499,7 @@ def prune_cache(folder: str, limit: int = CACHE_LIMIT) -> int:
                     removed += 1
             continue
         total += size
-        if total > limit:
+        if total > limit and modified < now - recent and os.path.normcase(os.path.abspath(path)) not in kept:
             with suppress(OSError):
                 os.remove(path)
                 removed += 1

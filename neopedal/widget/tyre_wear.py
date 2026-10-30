@@ -66,44 +66,31 @@ class Realtime(WearSections):
             remaining, wear, live, flat_spot, laps, minutes, end = tyre_wear_data(
                 wheels, idx, laptime_pace, est_runlaps)
 
+            # Cells drawn again once their text or color changes (see show_wear)
             # Remaining tyre tread
             if show_remaining:
-                target = self.bars_remain[idx]
-                if target.last != remaining:  # drawn again once changed
-                    self.set_wear(target, remaining, self.bar_style_remain, remaining <= warn_remaining)
+                self.show_wear(self.bars_remain[idx], remaining, self.bar_style_remain, remaining <= warn_remaining)
 
             # Wear differences
             if show_wear_difference:
-                target = self.bars_diff[idx]
-                if target.last != wear:  # drawn again once changed
-                    self.set_wear(target, wear, self.bar_style_diff, wear > warn_wear)
+                self.show_wear(self.bars_diff[idx], wear, self.bar_style_diff, wear > warn_wear)
 
             # Live wear difference
             if show_live_wear_difference:
-                target = self.bars_live[idx]
-                if target.last != live:  # drawn again once changed
-                    self.set_wear(target, live, self.bar_style_live, live > warn_wear)
+                self.show_wear(self.bars_live[idx], live, self.bar_style_live, live > warn_wear)
 
             # Flat spot wear
             if show_flat_spot:
-                target = self.bars_lock[idx]
-                if target.last != flat_spot:  # drawn again once changed
-                    self.set_wear(target, flat_spot, self.bar_style_lock, flat_spot > warn_wear)
+                self.show_wear(self.bars_lock[idx], flat_spot, self.bar_style_lock, flat_spot > warn_wear)
 
             # Estimated lifespan in laps
             if show_lifespan_laps:
-                target = self.bars_laps[idx]
-                if target.last != laps:  # drawn again once changed
-                    self.set_wear(target, laps, self.bar_style_laps, laps <= warn_laps)
+                self.show_wear(self.bars_laps[idx], laps, self.bar_style_laps, laps <= warn_laps)
 
             # Estimated lifespan in minutes
             if show_lifespan_minutes:
-                target = self.bars_mins[idx]
-                if target.last != minutes:  # drawn again once changed
-                    self.set_wear(target, minutes, self.bar_style_mins, minutes <= warn_minutes)
+                self.show_wear(self.bars_mins[idx], minutes, self.bar_style_mins, minutes <= warn_minutes)
 
             # Estimated end stint remaining tyre tread
             if show_end_stint_remaining:
-                target = self.bars_end[idx]
-                if target.last != end:  # drawn again once changed
-                    self.set_wear(target, end, self.bar_style_end, end <= warn_remaining)
+                self.show_wear(self.bars_end[idx], end, self.bar_style_end, end <= warn_remaining)

@@ -41,8 +41,10 @@ from ...api_control import api
 from ...const_common import MAX_SECONDS
 from ...i18n import tr_overlay as tr
 from ...module_info import minfo
+from .._common import flash_lit
 from .._data import run_laps
 from ..flag import (
+    FLAG_GAP_GRACE,
     LIMITER_HIDDEN,
     LIMITER_OFF,
     LIMITER_OVER,
@@ -51,15 +53,19 @@ from ..flag import (
     PitLimiterWatch,
     PitTimer,
     TrafficTimer,
+    blue_flag_class,
     blue_flag_gap,
     heavy_damage,
     is_low_amount,
+    lap_text,
     on_last_lap,
     pending_penalty,
+    pit_lane_open,
     pit_speed_limit,
 )
-from .base import CENTER, DASH, ModernOverlay, display_order_options
+from .base import CENTER, DASH, ModernOverlay, display_order_options, signed
 from .draw import readable_on, rounded
+from .rows import class_style
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import FlagConfig
@@ -82,11 +88,6 @@ URGENCY = {key: rank for rank, key in enumerate((
     "blue_flag", "traffic", "damage", "low_fuel", "last_lap", "finish_state", "pit_timer", "pit_request",
     "scheduled_repairs",
 ))}
-# Items flashing when raised (speed limiter: only over pit speed limit or pit lane driven without it)
-ALERTS = frozenset((
-    "low_fuel", "yellow_flag", "blue_flag", "traffic", "sector_yellow_flags", "full_course_yellow", "penalty",
-    "last_lap", "damage",
-))
 
 # Value samples (chip width), captions are measured too
 VALUE_SAMPLES = ("888.88", "▲ 888m", "88.8s", "8.8 - 8.8", "Pits closed", "SG88", "PEN\u00d78", "88%")
@@ -117,8 +118,9 @@ class Chip(NamedTuple):
     caption: str
     value: str
     color: str  # theme token
-    alert: bool = False  # flashes when raised
+    alert: bool = False  # flashes when raised (speed limiter: only over pit speed limit or lane driven without it)
     flash: bool = False  # drawn flashing (colors swapped)
+    badge: QColor | None = None  # caption drawn as class badge on this class color (blue flag: class of car)
 
 
 class Item(NamedTuple):
@@ -168,7 +170,7 @@ class Realtime(ModernOverlay):
         self.captions = {
             "pit": self.user_text("pit_in_text", tr("Pit")),
             "pit_out": self.user_text("pit_out_text", tr("Pit time")),
-            "pit_closed": self.user_text("pit_closed_text", tr("Pit lane")),
+            "pit_closed": self.user_text("pit_closed_text", tr("Pit Lane")),
             "fuel": self.user_text("low_fuel_text", tr("Low fuel")),
             "energy": self.user_text("low_energy_text", tr("Low energy")),
             "limiter": self.user_text("speed_limiter_text", tr("Limiter")),
@@ -218,7 +220,8 @@ class Realtime(ModernOverlay):
         )
         self.limiter_watch = PitLimiterWatch()
         self.flash_seconds = max(float(wcfg["new_flag_flash_duration"]), 0.0) if wcfg["enable_new_flag_flash"] else 0.0
-        self.alert_since: dict[tuple[str, str], float] = {}  # (item, color) of alert shown -> time raised
+        # (item, color) of alert shown -> time raised, time last shown
+        self.alert_since: dict[tuple[str, str], tuple[float, float]] = {}
         self.clock = monotonic
         self.samples = tuple(self.sample_chip(key) for key in self.keys)
 
@@ -292,8 +295,14 @@ class Realtime(ModernOverlay):
                 self.shine(painter, slot, radius)
             inner = slot.adjusted(pad, 0, -pad, 0)
             caption_h = slot.height() * 0.4
-            self.draw_text(painter, QRectF(inner.left(), slot.top() + slot.height() * 0.06, inner.width(), caption_h),
-                           chip.caption, "label", theme.tint(text, CAPTION_ALPHA), CENTER)
+            caption = QRectF(inner.left(), slot.top() + slot.height() * 0.06, inner.width(), caption_h)
+            if chip.badge is not None:
+                width = min(self.text_width("label", chip.caption) + self.unit * 0.5, caption.width())
+                height = caption_h * 0.78
+                box = QRectF(caption.center().x() - width / 2, caption.center().y() - height / 2, width, height)
+                self.draw_badge(painter, box, chip.caption, chip.badge, "label")
+            else:
+                self.draw_text(painter, caption, chip.caption, "label", theme.tint(text, CAPTION_ALPHA), CENTER)
             self.draw_text(painter, QRectF(inner.left(), slot.top() + caption_h, inner.width(), slot.height() - caption_h),
                            chip.value, "strong", text, CENTER)
 
@@ -325,19 +334,20 @@ class Realtime(ModernOverlay):
         self.refresh(tuple(chips))
 
     def flashed(self, chips: list[Chip]) -> list[Chip]:
-        """Alerts raised less than flash duration ago (or changed color) flash, live overlay only"""
+        """Alerts raised less than flash duration ago (or changed color) flash, live overlay only; alert lost
+        FLAG_GAP_GRACE at most (game flag missing a moment) is the same alert, not raised again"""
         if not self.flash_seconds or not self.overlay_started:
             return chips
         now = self.clock()
-        last = self.alert_since
-        since = {}
+        since = {ident: times for ident, times in self.alert_since.items() if 0 <= now - times[1] <= FLAG_GAP_GRACE}
         result = []
         for chip in chips:
             if chip.alert:
                 ident = (chip.key, chip.color)
-                start = since[ident] = last.get(ident, now)
+                start = since.get(ident, (now, now))[0]
+                since[ident] = (start, now)
                 age = now - start
-                if age < self.flash_seconds and int(age / FLASH_PERIOD) % 2 == 0:
+                if age < self.flash_seconds and flash_lit(age, FLASH_PERIOD):
                     chip = chip._replace(flash=True)
             result.append(chip)
         self.alert_since = since
@@ -346,13 +356,14 @@ class Realtime(ModernOverlay):
     # Items
     def read_pit_timer(self, lap_etime: float, in_pits: bool, in_race: bool) -> Chip | None:
         if in_pits and api.read.vehicle.in_garage():
+            self.pit_timer.reset()  # pit lane time counted again from garage exit
             return None
         timer = self.pit_timer.update(in_pits, lap_etime)
         if timer == MAX_SECONDS:
             return None
         if timer < 0:  # left pit lane
             return Chip("pit_timer", self.captions["pit_out"], f"{-timer:.2f}", "surface_strong")
-        if api.read.session.pit_open():
+        if pit_lane_open():
             return Chip("pit_timer", self.captions["pit"], f"{timer:.2f}", "positive")
         return Chip("pit_timer", self.captions["pit_closed"], tr("Closed"), "negative")
 
@@ -389,7 +400,7 @@ class Realtime(ModernOverlay):
         speed = api.read.vehicle.speed()
         limit = pit_speed_limit()
         if wcfg["show_speed_limit_difference"] and limit:
-            return f"{self.unit_speed(speed - limit):+.{self.decimals_speed}f}"
+            return signed(self.unit_speed(speed - limit), self.decimals_speed)
         return f"{self.unit_speed(speed):.{self.decimals_speed}f}"
 
     def read_yellow_flag(self, lap_etime: float, in_pits: bool, in_race: bool) -> Chip | None:
@@ -409,16 +420,16 @@ class Realtime(ModernOverlay):
         seconds = self.blue_timer.update(in_race, lap_etime)
         if seconds == MAX_SECONDS:
             return None
-        class_name = minfo.vehicles.nearestBlueClass
-        class_style = self.cfg.user.classes.get(class_name)
-        if class_style is not None:
-            class_name = class_style["alias"]
+        class_name = blue_flag_class(self.cfg.user.classes)
         gap = blue_flag_gap() if self.wcfg["show_blue_flag_gap"] else MAX_SECONDS
         if gap == MAX_SECONDS:  # time under blue flag
             value = f"{seconds:.0f}s"
-        else:  # gap of car lapping
-            value = f"{gap:.1f}s" if gap < 9.95 else f"{gap:.0f}s"
-        return Chip("blue_flag", class_name or self.captions["blue"], value, "blue", True)
+        else:  # gap of car lapping: no unit, as time intervals of driver lists
+            value = f"{gap:.1f}" if gap < 9.95 else f"{gap:.0f}"
+        if not class_name:
+            return Chip("blue_flag", self.captions["blue"], value, "blue", True)
+        _, color = class_style(self.cfg, minfo.vehicles.nearestBlueClass, self.theme)  # badge as driver lists
+        return Chip("blue_flag", class_name, value, "blue", True, badge=color)
 
     def read_start_lights(self, lap_etime: float, in_pits: bool, in_race: bool) -> Chip | None:
         lights = self.green_timer.update(lap_etime)
@@ -439,7 +450,8 @@ class Realtime(ModernOverlay):
             return None
         laps = run_laps(minfo.fuel, minfo.energy)
         safe = calc.pit_in_countdown_laps(laps, api.read.lap.progress())
-        return Chip("pit_request", self.captions["pit_request"], f"{lap_text(safe)} - {lap_text(laps)}", "positive")
+        return Chip("pit_request", self.captions["pit_request"], f"{lap_text(safe, DASH)} - {lap_text(laps, DASH)}",
+                    "positive")
 
     def read_finish_state(self, lap_etime: float, in_pits: bool, in_race: bool) -> Chip | None:
         state = api.read.vehicle.finish_state()
@@ -489,10 +501,3 @@ class Realtime(ModernOverlay):
         percent = round(aero * 100)
         value = f"{percent}%" if percent >= 1 else tr("Heavy")  # aero damage unknown or none: body, wheel
         return Chip("damage", self.captions["damage"], value, "orange", True)
-
-
-def lap_text(laps: float) -> str:
-    """Laps, one decimal under 10"""
-    if not laps < 9999:  # also nan
-        return DASH
-    return f"{laps:.0f}" if laps > 9.94 else f"{laps:.1f}"

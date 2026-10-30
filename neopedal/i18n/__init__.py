@@ -31,6 +31,8 @@ import json
 import logging
 import os
 import re
+from re import _constants as _sre_constants  # type: ignore[attr-defined]
+from re import _parser as _sre_parser  # type: ignore[attr-defined]
 from types import MappingProxyType
 from typing import Any
 
@@ -53,11 +55,27 @@ LANGUAGE_PACK_FOLDER = "languages"
 MAX_PACK_SIZE = 5 * 1024 * 1024
 _valid_code = re.compile(r"^[a-z]{2,3}(_[A-Za-z]{2,4})?$")
 _packs: dict[str, dict] = {}
+# Message rules of a pack (community regex run on every dialog message): pattern length, rules, unbounded
+# repeats per pattern (each one multiplies backtracking on a long message)
+MAX_RULE_PATTERN = 1000
+MAX_RULES = 5000
+MAX_RULE_REPEATS = 8
+# HTML elements of Qt rich text & QML StyledText: a translation shown in a rich text dialog never gets one
+# (link, image...) that its English text does not have
+RICH_TEXT_TAGS = frozenset((
+    "a", "address", "b", "big", "blockquote", "body", "br", "center", "cite", "code", "dd", "del", "dfn", "div",
+    "dl", "dt", "em", "font", "h1", "h2", "h3", "h4", "h5", "h6", "head", "hr", "html", "i", "img", "kbd", "li",
+    "link", "meta", "nobr", "ol", "p", "pre", "qt", "s", "samp", "small", "span", "strong", "style", "sub", "sup",
+    "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr", "tt", "u", "ul", "var",
+))
+_tag_text = re.compile(r"<\s*/?\s*([A-Za-z][A-Za-z0-9]*)[^<>]*(?:>|(?=<)|$)")  # unclosed tag too
+_space = re.compile(r"\s+")
 
 _translation: dict[str, str] = {}
 _reverse: dict[str, str] = {}
 _qt_translators: list = []  # keep reference, translator is removed if garbage collected
 _message_rules: tuple = ()
+_message_literals: tuple = ()  # literal text each rule needs in a message, "" if unknown (see pattern_literal)
 _current_code = "en"
 _overlay: dict[str, str] = {}  # modern overlay design labels
 
@@ -96,7 +114,10 @@ def read_language_pack(filename: str) -> dict:
         content = file.read(MAX_PACK_SIZE + 1)
     if len(content) > MAX_PACK_SIZE:
         raise ValueError("file too large")
-    data = json.loads(content)
+    try:
+        data = json.loads(content)
+    except RecursionError as error:
+        raise ValueError("JSON data nested too deeply") from error
     if not isinstance(data, dict) or data.get("format") not in LANGUAGE_PACK_FORMATS:
         raise ValueError("not a language pack")
     name, code = data.get("name"), data.get("code")
@@ -107,23 +128,88 @@ def read_language_pack(filename: str) -> dict:
         values = data.get(section, {})
         if not isinstance(values, dict):
             raise ValueError(f"invalid {section} section")
-        # Untranslated (empty) entries fall back to English
-        pack[section] = {str(key): value for key, value in values.items() if isinstance(value, str) and value}
+        # Untranslated (empty) entries fall back to English, entries with markup their English text does not
+        # have are left out (option labels are keyed by option name: English label has no markup)
+        pack[section] = {
+            str(key): value for key, value in values.items()
+            if isinstance(value, str) and value and safe_markup(value, "" if section == "options" else str(key))
+        }
     messages = data.get("messages", [])
     if not isinstance(messages, list):
         raise ValueError("invalid messages section")
     rules = []
-    for rule in messages:
+    for rule in messages[:MAX_RULES]:
         if isinstance(rule, list) and len(rule) == 2 and all(isinstance(part, str) for part in rule) and rule[1]:
             # Bad replacement ("\9", "\g<x>") only raises at sub(), test it once here
             try:
+                reason = unsafe_pattern(rule[0]) or ("" if safe_markup(rule[1], rule[0]) else "markup not in pattern")
+                if reason:
+                    raise re.error(reason)
                 re.compile(rule[0], re.MULTILINE).sub(rule[1], "")
-            except (re.error, IndexError) as error:
+            except (re.error, IndexError, RecursionError, OverflowError) as error:
                 logger.warning("I18N: invalid message rule skipped in %s: %r (%s)", filename, rule, error)
                 continue
             rules.append((rule[0], rule[1]))
     pack["messages"] = tuple(rules)
     return pack
+
+
+def markup_tags(text: str) -> set[str]:
+    """Rich text tags of text (lower case, spaces collapsed: "<a href='x'>", "</b>"), unclosed tag too; text
+    between angle brackets that is no HTML element ("<date time>") left out"""
+    return {
+        _space.sub(" ", match[0].lower()) for match in _tag_text.finditer(text)
+        if match[1].lower() in RICH_TEXT_TAGS
+    }
+
+
+def safe_markup(translation: str, source: str) -> bool:
+    """Whether translation has only rich text tags of its source (English text or message rule pattern)"""
+    if "<" not in translation:
+        return True
+    return markup_tags(translation) <= markup_tags(source)
+
+
+def unsafe_pattern(pattern: str) -> str:
+    """Reason why a message rule pattern of a language pack could freeze the app (catastrophic backtracking),
+    empty if safe
+
+    Refused: too long, a repeat inside a repeat ("(a+)+", "(\\w*\\s)*"), alternatives inside a repeat
+    ("(a|ab)*"), more than MAX_RULE_REPEATS unbounded repeats. Raises re.error if not a valid pattern.
+    """
+    if len(pattern) > MAX_RULE_PATTERN:
+        return f"pattern longer than {MAX_RULE_PATTERN} characters"
+    repeats = 0
+    stack: list[tuple[Any, bool]] = [(_sre_parser.parse(pattern, re.MULTILINE), False)]  # (items, in a repeat)
+    while stack:
+        items, repeated = stack.pop()
+        for op, value in items:
+            if op in _REPEATS:
+                high, body = value[1], value[2]
+                if high > 1:
+                    if repeated:
+                        return "repeat inside a repeat"
+                    if high == _sre_constants.MAXREPEAT:
+                        repeats += 1
+                        if repeats > MAX_RULE_REPEATS:
+                            return f"more than {MAX_RULE_REPEATS} unbounded repeats"
+                stack.append((body, repeated or high > 1))
+            elif op == _sre_constants.BRANCH:
+                if repeated:
+                    return "alternatives inside a repeat"
+                stack.extend((branch, repeated) for branch in value[1])
+            elif op == _sre_constants.SUBPATTERN:
+                stack.append((value[-1], repeated))
+            elif op in (_sre_constants.ASSERT, _sre_constants.ASSERT_NOT):
+                stack.append((value[1], repeated))
+            elif op == _sre_constants.ATOMIC_GROUP:
+                stack.append((value, repeated))
+            elif op == _sre_constants.GROUPREF_EXISTS:
+                stack.extend((branch, repeated) for branch in value[1:] if branch is not None)
+    return ""
+
+
+_REPEATS = (_sre_constants.MAX_REPEAT, _sre_constants.MIN_REPEAT, _sre_constants.POSSESSIVE_REPEAT)
 
 
 def load_language_packs(*folders: str) -> list[str]:
@@ -187,7 +273,7 @@ def set_language(name: str) -> str:
 
 def _load_message_rules(code: str):
     """Compile message translation rules"""
-    global _message_rules
+    global _message_rules, _message_literals
     rules: tuple = ()
     if code == "fr":
         from .fr_messages import MESSAGE_RULES
@@ -198,7 +284,30 @@ def _load_message_rules(code: str):
     _message_rules = tuple(
         (re.compile(pattern, flags=re.MULTILINE), replacement) for pattern, replacement in rules
     )
+    _message_literals = tuple(pattern_literal(pattern) for pattern, _ in rules)
     _translate_message.cache_clear()
+
+
+def pattern_literal(pattern: str) -> str:
+    """Literal text every match of pattern holds (its leading literal characters, anchors skipped), "" if it
+    starts with anything else (alternatives, a class, a repeat, a flag...) or is case-insensitive
+
+    A message without the literal cannot match the rule: _translate_message skips it without running the regex.
+    """
+    try:
+        parsed = _sre_parser.parse(pattern, re.MULTILINE)
+    except re.error:
+        return ""
+    if parsed.state.flags & re.IGNORECASE:
+        return ""
+    chars = []
+    for op, value in parsed:
+        if op == _sre_constants.AT:  # ^, \A, \b: no text of their own
+            continue
+        if op != _sre_constants.LITERAL:
+            break
+        chars.append(chr(value))
+    return "".join(chars)
 
 
 def tr(text: str) -> str:
@@ -224,8 +333,11 @@ def tr_overlay(text: str) -> str:
 
 @functools.lru_cache(maxsize=4096)
 def _translate_message(text: str) -> str:
-    """Apply message rules (cached, cleared whenever rules change)"""
-    for pattern, replacement in _message_rules:
+    """Apply message rules (cached, cleared whenever rules change): a rule whose literal text (see
+    pattern_literal) is not in the message is skipped, its regex never run (hundreds of rules per message)"""
+    for (pattern, replacement), literal in zip(_message_rules, _message_literals):
+        if literal and literal not in text:
+            continue
         text = pattern.sub(replacement, text)
     return text
 

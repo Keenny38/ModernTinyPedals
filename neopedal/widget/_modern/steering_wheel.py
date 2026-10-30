@@ -105,7 +105,8 @@ class Realtime(ModernOverlay):
             steering_range: float = self.wcfg["manual_steering_range"]
         else:
             steering_range = api.read.inputs.steering_range_physical()
-        angle = round(api.read.inputs.steering_raw() * steering_range * 0.5, 1)
+        # Rounded to reading decimals (at least 0.1°: smooth wheel rotation)
+        angle = round(api.read.inputs.steering_raw() * steering_range * 0.5, max(self.decimals, 1))
         show_arc = self.show_rotation and (not self.stationary_only or api.read.vehicle.speed() < 1)
         # Repaint when drawn: rotation in device pixels at outer radius (arc), reading text
         self.refresh_keyed((angle, show_arc), (

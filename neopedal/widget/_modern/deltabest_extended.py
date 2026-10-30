@@ -32,8 +32,8 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...module_info import minfo
-from .._common import delta_shown, game_deltabest, lap_delta_shown
-from .base import DASH, ModernOverlay
+from .._common import delta_shown, game_deltabest, lap_delta_shown, lap_reference
+from .base import DASH, ModernOverlay, reference_accent
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -59,11 +59,11 @@ class Realtime(StatsMixin, ModernOverlay):
         self.decimals = max(int(wcfg["decimal_places"]), 1)
         self.delta_range = calc.decimal_strip(wcfg["delta_display_range"], self.decimals)
         self.freeze_duration = min(max(wcfg["freeze_duration"], 0), 30)
-        items = (
-            ("all_time_deltabest", "Best", theme.positive),
-            ("session_deltabest", "Session", theme.best),
-            ("stint_deltabest", "Stint", theme.orange),
-            ("deltalast", "Last", theme.text_dim),
+        items = (  # reference laps, same labels & accents as timing (session: personal best of session)
+            ("all_time_deltabest", "Best", reference_accent(theme, "best")),
+            ("session_deltabest", "Session PB", reference_accent(theme, "session_personal_best")),
+            ("stint_deltabest", "Stint", reference_accent(theme, "stint_best")),
+            ("deltalast", "Last", reference_accent(theme, "last")),
         )
         sample = "+88." + "8" * self.decimals
         stats = [Stat(key, label, sample, "strong", accent) for key, label, accent in items if wcfg[f"show_{key}"]]
@@ -88,8 +88,9 @@ class Realtime(StatsMixin, ModernOverlay):
             deltas = tuple(delta.lapTimeLast - last if lap_delta_shown(last) else None for last in self.last_laptimes)
             self.new_lap = True
         else:
-            if self.new_lap:
-                self.last_laptimes = [delta.lapTimeBest, delta.lapTimeSession, delta.lapTimeStint, delta.lapTimeLast]
+            if self.new_lap:  # references of lap under way, as live deltas (game delta: game best lap)
+                self.last_laptimes = [lap_reference("Best"), lap_reference("Session", self.game_delta),
+                                      lap_reference("Stint"), lap_reference("Last")]
                 self.new_lap = False
             session = game_deltabest(delta.deltaSession) if self.game_delta else delta.deltaSession
             deltas = tuple(
@@ -105,6 +106,6 @@ class Realtime(StatsMixin, ModernOverlay):
             if value is None:  # no reference lap, or no delta on this lap
                 values.append(Value(DASH, theme.text_dim))
                 continue
-            text = f"{calc.sym_max(value, self.delta_range):+.{self.decimals}f}"
+            text = f"{calc.sym_max(value, self.delta_range):+z.{self.decimals}f}"
             values.append(Value(text, theme.negative if value > 0 else theme.positive))
         self.refresh(tuple(values))

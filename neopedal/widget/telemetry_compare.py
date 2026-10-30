@@ -297,7 +297,7 @@ class TelemetryCompareMixin:
         delta = laptime - reference_time
         if abs(delta) > max(trace.lap_time * DELTA_LIMIT, 10.0):
             return None
-        return round(calc.sym_max(delta, delta_limit(self.decimals)), self.decimals)
+        return round(calc.sym_max(delta, delta_limit(self.decimals)), self.decimals) + 0.0  # never -0.0
 
     def reference_changed(self, trace: ReferenceTrace | None):
         """New reference lap: chart ranges, chart y of every reference value"""
@@ -424,7 +424,7 @@ class TelemetryCompareMixin:
     def delta_text(self, delta: float | None) -> str:
         if delta is None:
             return "-.--"
-        return f"{delta:+.{self.decimals}f}"
+        return f"{delta:+z.{self.decimals}f}"
 
     def speed_text(self, difference: int | None) -> str:
         if difference is None:

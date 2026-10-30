@@ -28,6 +28,7 @@ from types import MappingProxyType
 OVERLAY_LABELS = MappingProxyType({
     "Accel. loss": "Perte accél.",
     "Active": "Actif",
+    "App": "App",  # same word: listed so every label of modern design is accounted for
     "Battery": "Batterie",
     "Best": "Meilleur",
     "Bias": "Répart.",
@@ -39,7 +40,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Bump": "Compression",
     "Camber": "Carrossage",
     "Change": "Écart",
-    "Class": "Classe",
+    "Class": "Cat.",
     "Clock": "Heure",
     "Coast F": "Lâcher AV",
     "Coast R": "Lâcher AR",
@@ -51,13 +52,14 @@ OVERLAY_LABELS = MappingProxyType({
     "DF ratio": "Ratio appui",
     "DF rear": "Appui AR",
     "Deflection": "Déflexion",
+    "Delta": "Delta",  # same word
     "Diff": "Écart",
     "Drain": "Décharge",
     "Dynamic": "Dynamique",
     "Early": "Anticipé",
     "Elevation": "Altitude",
     "End": "Fin",
-    "End tread": "Gomme fin",
+    "End tread": "Épais. fin",
     "Energy": "Énergie",
     "Estimate": "Estimé",
     "Faster behind": "Plus rapide derrière",
@@ -79,6 +81,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Health": "État",
     "E/Lap": "É/tour",
     "DR/SR": "DR/SR",
+    "Badge": "Badge",
     "Field DR/SR": "DR/SR plateau",
     "SoF": "SoF",
     "Left": "Gauche",
@@ -126,7 +129,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Save": "Économie",
     "Scale": "Échelle",
     "Session": "Session",
-    "Session PB": "Record perso",
+    "Session PB": "Perso session",  # own best of session ("Best": own best of all time)
     "Slip": "Glisse",
     "Slip angle": "Angle de dérive",
     "Slip diff": "Écart dérive",
@@ -152,7 +155,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Track limits": "Limites piste",
     "Track time": "Heure piste",
     "Travel ratio": "Ratio course",
-    "Tread": "Gomme",
+    "Tread": "Épaisseur",
     "Turbo": "Turbo",
     "Tyre": "Pneu",
     "Tyre load": "Charge pneus",
@@ -209,7 +212,7 @@ OVERLAY_LABELS = MappingProxyType({
     "Ahead": "Devant",
     "Behind": "Derrière",
     "Blue flag": "Drapeau bleu",
-    "Class position": "Position classe",
+    "Class position": "Position catégorie",
     "Fair share": "Part égale",
     "Fastest lap": "Meilleur tour",
     "FL": "AVG",
@@ -279,4 +282,32 @@ OVERLAY_LABELS = MappingProxyType({
     "late": "tard",
     # Track map
     "Track map after one lap": "Carte après un tour",
+    # Driver table headers (Delta, Pos, +/-, L&C same in French)
+    "Int": "Interv.",
+    "TL": "LP",
+    # Relative finish order
+    "FUEL": "CARB",
+    "LAPS": "TOURS",
+    "NRG": "ÉNER",
+    "TIME": "TEMPS",
+    # Pace notes & track notes
+    "COMMENTS": "COMMENTAIRES",
+    "DEBUGGING": "DÉBOGAGE",
+    "NOT AVAILABLE": "INDISPONIBLE",
+    "PACE NOTES": "NOTES DE PILOTAGE",
+    "Pit Lane": "Voie des stands",
+    "TRACK NOTES": "NOTES DE PISTE",
+    # Friction circle & speedometer peak
+    "Max": "Max.",
+    # Wheel dimension axles
+    "F": "AV",
+    "R": "AR",
+    # Pedal bars (throttle, brake, clutch)
+    "T": "A",
+    "B": "F",
+    "C": "E",
+    # Onboard setting (brake migration, front & rear anti-roll bars)
+    "BM": "MIG",
+    "FARB": "BAR AV",
+    "RARB": "BAR AR",
 })

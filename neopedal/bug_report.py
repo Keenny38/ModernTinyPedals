@@ -19,18 +19,22 @@
 """
 Bug report: collect logs, settings & system info into one zip file
 
-Personal data is removed: user home folder in paths, access codes, repository names.
+Personal data is removed: user home folder in paths (8.3 short form too), access codes, repository
+names, LAN & IPv6 addresses (loopback kept), team driver names.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import platform
+import re
 import sys
 import zipfile
 from contextlib import suppress
+from functools import lru_cache
 from time import localtime, strftime
 from typing import Any, NamedTuple
 
@@ -44,15 +48,67 @@ from .setting import cfg
 logger = logging.getLogger(__name__)
 
 SECRET_KEYS = ("access_code", "access_token", "update_repository")
+PERSONAL_KEYS = ("input_driver_names",)  # names of team mates (race calculator)
 MAX_LOG_SIZE = 5 * 1024 * 1024
+_IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\.?\w)")  # sentence end dot allowed
+_IPV6 = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:%[\w-]+)?(?![\w:])(?!\.\w)")
+
+
+@lru_cache(maxsize=1)
+def home_variants() -> tuple[str, ...]:
+    """User home folder as found in text: long & 8.3 short form (C:\\Users\\STEPHA~1), \\ / & \\\\ separators"""
+    home = os.path.expanduser("~")
+    homes = {home, short_path(home)}
+    variants: set[str] = set()
+    for home in homes:
+        if len(home) > 3:
+            variants.update((home, home.replace("\\", "/"), home.replace("\\", "\\\\")))
+    return tuple(sorted(variants, key=len, reverse=True))  # longest first: never a part left
+
+
+def short_path(path: str) -> str:
+    """Windows 8.3 short form of path (same path if none or not Windows)"""
+    if sys.platform != "win32":
+        return path
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32")  # own prototypes, not shared ctypes.windll ones
+        get_short_path = kernel32.GetShortPathNameW
+        get_short_path.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+        get_short_path.restype = wintypes.DWORD
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_short_path(path, buffer, len(buffer))
+    except (AttributeError, OSError, ValueError):
+        return path
+    return buffer.value if 0 < length < len(buffer) else path
+
+
+def _redact_ip(match: re.Match) -> str:
+    """LAN (private, link local, shared) IPv4 & any IPv6 address replaced, loopback & unspecified kept"""
+    text = match[0]
+    try:
+        address = ipaddress.ip_address(text.split("%", 1)[0])
+    except ValueError:  # not an address (time 12:34:56, version 1.2.3.400)
+        return text
+    if address.is_loopback or address.is_unspecified:
+        return text
+    if address.version == 4 and address.is_global:  # public address: game servers, kept
+        return text
+    return "<ipv4>" if address.version == 4 else "<ipv6>"
 
 
 def redact_text(text: str) -> str:
-    """Remove user home folder and access code & token query values (logged URL) from text"""
-    home = os.path.expanduser("~")
-    if len(home) > 3:
-        for variant in {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}:
-            text = text.replace(variant, "~")
+    """Remove user home folder, LAN & IPv6 addresses, and access code & token query values (logged URL)
+    from text"""
+    flags = re.IGNORECASE if os.name == "nt" else 0  # Windows paths in any case (c:\users\...)
+    for variant in home_variants():
+        text = re.sub(re.escape(variant), "~", text, flags=flags)
+    if "." in text:
+        text = _IPV4.sub(_redact_ip, text)
+    if "::" in text or text.count(":") >= 7:
+        text = _IPV6.sub(_redact_ip, text)
     return redact_secret_query(text)
 
 
@@ -60,7 +116,7 @@ def redact_setting(data):
     """Copy of setting with secret values removed"""
     if isinstance(data, dict):
         return {
-            key: ("<removed>" if key in SECRET_KEYS and value else redact_setting(value))
+            key: ("<removed>" if key in SECRET_KEYS + PERSONAL_KEYS and value else redact_setting(value))
             for key, value in data.items()
         }
     if isinstance(data, list):  # copied too: snapshot written on another thread

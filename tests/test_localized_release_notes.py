@@ -79,7 +79,7 @@ def test_fetch_localized_summary(monkeypatch):
             return FakeResponse(FRENCH.encode())
         raise OSError("HTTP Error 404: Not Found")
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(update, "open_url", urlopen)
     summary = update.fetch_localized_summary("Keenny38/ModernTinyPedals", "v0.20.0", "fr")
     assert summary == "### Overlays\n\n- **Graphique de delta** ajouté."
     assert urls == ["https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/v0.20.0/CHANGELOG.fr.md"]
@@ -117,6 +117,7 @@ def test_update_check_fetches_notes_in_app_language(monkeypatch, language):
         return "## 99.0.0 (2099-01-02)\n\n### Overlays\n\n- **Graphique de delta** ajouté."
 
     monkeypatch.setattr(update, "request_latest_release", latest)
+    monkeypatch.setattr(update, "verified_release", lambda *args: None)  # signed manifest: test_signed_release.py
     monkeypatch.setattr(update, "fetch_changelog", fetch)
     monkeypatch.setattr(update, "current_language", lambda: language)
     checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
@@ -144,7 +145,8 @@ def test_update_check_state_kept_consistent_on_notes_error(monkeypatch):
         raise http.client.IncompleteRead(b"partial")
 
     monkeypatch.setattr(update, "request_latest_release", latest)
-    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(update, "verified_release", lambda *args: None)  # signed manifest: test_signed_release.py
+    monkeypatch.setattr(update, "open_url", urlopen)
     monkeypatch.setattr(update, "current_language", lambda: "fr")
     assert update.fetch_localized_summary("Keenny38/ModernTinyPedals", "v99.0.0", "fr") == ""
     checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
@@ -169,6 +171,7 @@ def test_no_update_fetches_nothing(monkeypatch):
         return release_response(tag="v0.0.1")
 
     monkeypatch.setattr(update, "request_latest_release", latest)
+    monkeypatch.setattr(update, "verified_release", lambda *args: None)  # signed manifest: test_signed_release.py
     monkeypatch.setattr(update, "fetch_localized_summary", lambda *args: pytest.fail("notes not shown"))
     monkeypatch.setattr(update, "current_language", lambda: "fr")
     checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")

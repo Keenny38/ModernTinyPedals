@@ -19,7 +19,7 @@
 """
 Wheel toe Widget, modern design
 
-Toe angle per wheel, total toe per axle in middle (toe out in orange, toe in in blue).
+Toe angle per wheel, total toe per axle in middle (positive total in orange, negative in blue).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class Realtime(QuadMixin, ModernOverlay):
     wcfg: WheelToeConfig
 
     options = (
-        "font_size", "enable_symmetric_toe_angle", "decimal_places_toe_angle", "toe_angle_smoothing_samples",
+        "font_size", "show_caption", "enable_symmetric_toe_angle", "decimal_places_toe_angle", "toe_angle_smoothing_samples",
         "show_total_toe_angle", "decimal_places_total_toe_angle", "total_toe_angle_smoothing_samples",
     )
 
@@ -80,12 +80,13 @@ class Realtime(QuadMixin, ModernOverlay):
             if symmetric and index % 2:
                 toe = -toe
             self.toes[index] = self.ema(self.toes[index], toe)
-            tiles.append(Tile((f"{self.toes[index]:+.{self.dec}f}",)))
+            tiles.append(Tile((f"{self.toes[index]:+z.{self.dec}f}",)))
         totals: tuple[str, ...] = ("", "")
         colors: tuple[QColor | None, ...] = (None, None)
         if self.show_total:
             self.totals[0] = self.ema_total(self.totals[0], wheels.frontToeAngleDifference)
             self.totals[1] = self.ema_total(self.totals[1], wheels.rearToeAngleDifference)
-            totals = tuple(f"{abs(value):.{self.dec_total}f}" for value in self.totals)
-            colors = tuple(theme.orange if value > 0 else theme.lap_behind for value in self.totals)
+            shown = tuple(round(value, self.dec_total) for value in self.totals)  # color from shown sign
+            totals = tuple(f"{abs(value):.{self.dec_total}f}" for value in shown)
+            colors = tuple(theme.orange if value > 0 else theme.lap_behind for value in shown)
         self.refresh((tuple(tiles), totals, colors))

@@ -310,18 +310,22 @@ def same_repr(strategy) -> str:
 
 def test_simulate_same_plans_as_before_split(golden_module):
     """Minimum driving times left out: they are given whole laps & their driver change since
-    (test_race_driver_minimums)"""
+    (test_race_driver_minimums). Maximum times adding up to less than the race left out: planned
+    without them since (test_bug_audit_2026_10_29_lap_race, no more one-lap stints)"""
     rng = random.Random(20261013)
     for _ in range(400):
         values = random_values(rng)
         values["driver_min_minutes"] = ()
         laps, stints = rng.randint(0, 250), rng.choice([0, 0, 1, rng.randint(2, 6)])
-        before = golden_module.simulate(golden_module.StrategyInput(**values), laps, stints)
-        after = fuel_strategy.simulate(fuel_strategy.StrategyInput(**values), laps, stints)
-        assert same_repr(after) == repr(before), (values, laps, stints)
-        before = golden_module.plan(golden_module.StrategyInput(**values))
-        after = fuel_strategy.plan(fuel_strategy.StrategyInput(**values))
-        assert same_repr(after) == repr(before), values
+        setup = fuel_strategy.StrategyInput(**values)
+        if not fuel_strategy.maximum_time_short(setup, laps):
+            before = golden_module.simulate(golden_module.StrategyInput(**values), laps, stints)
+            after = fuel_strategy.simulate(setup, laps, stints)
+            assert same_repr(after) == repr(before), (values, laps, stints)
+        if not fuel_strategy.maximum_time_short(setup, fuel_strategy.plan(setup).race_laps):
+            before = golden_module.plan(golden_module.StrategyInput(**values))
+            after = fuel_strategy.plan(setup)
+            assert same_repr(after) == repr(before), values
 
 
 def test_simulate_steps_small():

@@ -21,11 +21,14 @@ Launcher
 """
 
 import ctypes
+import errno
 import hashlib
 import logging
 import os
+import stat
 import sys
 import tempfile
+from contextlib import suppress
 from glob import glob
 from time import monotonic, sleep
 
@@ -37,7 +40,7 @@ from . import realtime_state, safe_mode, version_check
 from .const_app import APP_NAME, CONFIG_ID, DESKTOP_FILE_NAME, PLATFORM, RESTART_ENVIRONMENT, VERSION
 from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
-from .log_handler import BoundedLogStream, install_exception_hooks, set_logging_level
+from .log_handler import BoundedLogStream, install_exception_hooks, set_log_stream, set_logging_level
 from .setting import cfg
 from .userfile import settings_import_folders
 from .userfile.settings_import import apply_pending_import, log_import_report, read_request, record_message
@@ -60,9 +63,56 @@ def instance_lock_name() -> str:
 
 
 def instance_lock_file() -> str:
-    """Lock file (Linux), outside config folder (replaced by settings import while locked)"""
-    folder = os.getenv("XDG_RUNTIME_DIR") or tempfile.gettempdir()
-    return os.path.join(folder, f"{instance_lock_name()}.lock")
+    """Lock file (Linux), outside config folder (replaced by settings import while locked)
+
+    Raises:
+        OSError: no private lock folder.
+    """
+    return os.path.join(instance_lock_folder(), f"{instance_lock_name()}.lock")
+
+
+def instance_lock_folder() -> str:
+    """Folder of lock file (Linux), only user can write in it: another user can never create the lock file
+    first (app could not start) nor make it a link
+
+    XDG_RUNTIME_DIR (private by specification), else own folder in temporary folder (created private,
+    refused if made by another user or opened to others), else own folder in user cache folder.
+
+    Raises:
+        OSError: no private folder.
+    """
+    if sys.platform == "win32":  # mutex used instead
+        return tempfile.gettempdir()
+    runtime = os.getenv("XDG_RUNTIME_DIR")
+    if runtime and os.path.isabs(runtime) and os.path.isdir(runtime):
+        return runtime
+    uid = os.getuid()
+    candidates = (
+        os.path.join(tempfile.gettempdir(), f"{CONFIG_ID}-{uid}"),
+        os.path.join(os.getenv("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), CONFIG_ID),
+    )
+    error: OSError = OSError(errno.ENOENT, "no lock folder")
+    for folder in candidates:
+        try:
+            return private_folder(folder, uid)
+        except OSError as folder_error:
+            logger.warning("Instance lock folder %s refused: %s", folder, folder_error)
+            error = folder_error
+    raise error
+
+
+def private_folder(folder: str, uid: int) -> str:
+    """Folder created if missing (0700), raises OSError if not a folder (a link) owned by uid & closed to others"""
+    with suppress(FileExistsError):
+        os.makedirs(folder, mode=0o700)
+    info = os.lstat(folder)
+    if not stat.S_ISDIR(info.st_mode):
+        raise OSError(errno.ENOTDIR, "not a folder", folder)
+    if info.st_uid != uid:
+        raise OSError(errno.EPERM, "folder of another user", folder)
+    if info.st_mode & 0o077:
+        raise OSError(errno.EPERM, "folder opened to other users", folder)
+    return folder
 
 
 def lock_instance() -> bool:
@@ -92,7 +142,8 @@ def lock_instance() -> bool:
         return True
     import fcntl
 
-    descriptor = os.open(instance_lock_file(), os.O_RDWR | os.O_CREAT, 0o600)
+    # Never through a link
+    descriptor = os.open(instance_lock_file(), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -137,8 +188,8 @@ def other_instance_running() -> bool:
     import fcntl
 
     try:
-        descriptor = os.open(instance_lock_file(), os.O_RDWR)
-    except OSError:  # no lock file: never locked since system start
+        descriptor = os.open(instance_lock_file(), os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:  # no lock file: never locked since system start (or no private lock folder)
         return False
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -325,18 +376,22 @@ def check_safe_mode(flag: bool):
 
 def start_app(cli_args):
     """Init main window"""
+    # In-memory log first (no file): instance lock messages reach the log dialog & bug report. Log files
+    # only after the settings import: it replaces the config folder, which an open log file would block
+    set_log_stream(logger, log_stream)
     single_instance_check(bool(cli_args.single_instance))
     apply_settings_import()
     unset_environment()
-    set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
+    set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, None, cli_args.log_level)
     install_exception_hooks(logger)
     get_version()
     log_import_report()  # settings import, done before logging was set
     # load global config (language packs first, else a pack language is reset to English)
     load_ui_language_packs()
     cfg.load_global()
-    cfg.save(config_type=ConfigType.CONFIG)
-    cfg.save(config_type=ConfigType.SHORTCUTS)
+    # Written only if missing, repaired or migrated: an unchanged file is not rewritten at every start
+    cfg.save_loaded(ConfigType.CONFIG)
+    cfg.save_loaded(ConfigType.SHORTCUTS)
     set_environment()
     # Main GUI
     root = init_gui()

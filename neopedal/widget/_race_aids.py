@@ -24,6 +24,7 @@ tyre temperature trend): parts shared by classic & modern design
     HiddenPreview  widget drawn only while it has something to show, or while overlay is
                    unlocked (to place it)
     line_polygons  sparkline & chart geometry from samples (nan = no sample, line broken)
+    other_level    car on another road level than player (bridge, crossing), left out of spotter & radar
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ from ._common import FontMetrics
 CENTER = Qt.AlignmentFlag.AlignCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+LEVEL_HEIGHT = 3.0  # meters: height difference of close cars on one road at most (crest, banking)
+LEVEL_SLOPE = 0.5  # height difference per meter of distance of cars on one road at most (steeper than any track)
 
 
 def option_colors(wcfg: Mapping[str, Any], *keys: str) -> dict[str, QColor]:
@@ -52,6 +55,13 @@ def option_colors(wcfg: Mapping[str, Any], *keys: str) -> dict[str, QColor]:
 def finite(value: Any) -> bool:
     """Number that can be drawn (not nan, inf or missing)"""
     return isinstance(value, (int, float)) and isfinite(value)
+
+
+def other_level(car: Any) -> bool:
+    """Car on another road level than player (bridge above or under, crossing, pit lane tunnel): higher or lower
+    than any track slope or banking allows at its distance (vehicles module data set)"""
+    height = abs(car.relativeElevation)
+    return height > LEVEL_HEIGHT and height > car.relativeStraightDistance * LEVEL_SLOPE
 
 
 def sample_runs(values: Sequence[float]) -> list[tuple[int, int]]:

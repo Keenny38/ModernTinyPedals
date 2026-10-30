@@ -27,6 +27,7 @@ shown, game & files are read only while it is shown. Quick access entries & rele
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QUrl, Slot
@@ -154,17 +155,42 @@ def read_changelog_entries(filename: str) -> list[ChangelogEntry]:
         return []
 
 
+_changelog_cache: dict[tuple[str, str], tuple[tuple, list[ChangelogEntry]]] = {}  # (language, file): (times, entries)
+
+
+def _file_times(*filenames: str) -> tuple:
+    """Modification time & size of each file, 0 when missing (cache key: files read again once changed)"""
+    times = []
+    for filename in filenames:
+        try:
+            found = os.stat(filename)
+            times.append((found.st_mtime_ns, found.st_size))
+        except OSError:
+            times.append((0, 0))
+    return tuple(times)
+
+
 def local_changelog(language: str = "en", filename: str = CHANGELOG_FILE) -> list[ChangelogEntry]:
     """Changelog next to app, newest version first: section in language (CHANGELOG.<code>.md) when written,
-    else English (works offline, every version: release notes history)"""
+    else English (works offline, every version: release notes history)
+
+    Read once per language while the files are unchanged (What's New reads it twice when opened, the start of
+    the app once more): a copy of the cached list is returned.
+    """
     from ..update import localized_changelog_name
     from ..version_check import parse_version_string
 
+    translated = localized_changelog_name(language, filename) if language != "en" else ""
+    times = _file_times(filename, translated) if translated else _file_times(filename)
+    cached = _changelog_cache.get((language, filename))
+    if cached is not None and cached[0] == times:
+        return list(cached[1])
     sections = {entry.version: entry for entry in read_changelog_entries(filename)}
-    if language != "en":
-        sections.update((entry.version, entry) for entry in
-                        read_changelog_entries(localized_changelog_name(language, filename)))
-    return sorted(sections.values(), key=lambda entry: parse_version_string(entry.version), reverse=True)
+    if translated:
+        sections.update((entry.version, entry) for entry in read_changelog_entries(translated))
+    entries = sorted(sections.values(), key=lambda entry: parse_version_string(entry.version), reverse=True)
+    _changelog_cache[(language, filename)] = (times, entries)
+    return list(entries)
 
 
 def read_changelog(filename: str) -> list[tuple[str, str]]:
@@ -260,10 +286,16 @@ class HomeView(QWidget):
 
     def closeEvent(self, event):
         super().closeEvent(event)
-        if self.view is not None:  # QML gone before the backend it binds to
+        self.release_page()
+
+    def release_page(self):
+        """Page closed or released (see LazyPage.release): QML gone before the backend it binds to, then the
+        backend's jobs, timers & deferred work stopped"""
+        if self.view is not None:
             view, self.view = self.view, None
             view.setSource(QUrl())
             view.deleteLater()
+        self.backend.release()
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self, *_):

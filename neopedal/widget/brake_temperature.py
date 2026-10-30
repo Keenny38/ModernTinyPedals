@@ -62,7 +62,7 @@ class Realtime(Overlay):
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.leading_zero = min(max(self.wcfg["leading_zero"], 1), 3) + 0.0  # no decimal
         self.sign_text = "°" if self.wcfg["show_degree_sign"] else ""
-        text_width = 3 + len(self.sign_text) + (self.cfg.units["temperature_unit"] == "Fahrenheit")
+        text_width = 4 + len(self.sign_text)  # up to 1000 degrees and more (carbon brakes, Fahrenheit)
         self.off_brake_duration = max(self.wcfg["off_brake_duration"], 0)
 
         # Config units
@@ -144,6 +144,11 @@ class Realtime(Overlay):
                 bar_btavg.last = 0
                 bar_btavg.text = TEXT_NA
                 bar_btavg.update()
+
+    def vehicle_reset(self):
+        """Average & brake heatmap of the previous car not kept (followed car changed)"""
+        self.post_update()
+        self.last_in_pits = -1  # heatmap matched again to vehicle on next update
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

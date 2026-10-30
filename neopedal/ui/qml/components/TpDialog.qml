@@ -5,6 +5,7 @@ import QtQuick.Layouts
 // Modal box over the page: title, content, Cancel & accept buttons (always in that order). Fades & scales in.
 // Esc cancels (cancelled signal), a click outside too unless dismissOnOutside is false (dialogs with fields:
 // typed text is not lost by a click beside), Enter in a field of the content accepts (call accept()).
+// Opened without a field taking focus, the accept button has it (Cancel for danger): Enter answers at once.
 // showCancel false: one button (acceptText, "Close") for dialogs that only show something.
 TpPopup {
     id: dialog
@@ -30,6 +31,19 @@ TpPopup {
         acceptedNow = true
         close()
     }
+    // Focus in the content (field focused by the page when opened), else on the default button
+    function focusDefault() {
+        if (!opened)
+            return
+        var item = contentItem.Window.activeFocusItem
+        for (; item; item = item.parent) {
+            if (item === body)
+                return
+        }
+        var cancelFirst = showCancel && (danger || !acceptButton.enabled)
+        if (cancelFirst || acceptButton.enabled)
+            (cancelFirst ? cancelButton : acceptButton).forceActiveFocus(Qt.TabFocusReason)
+    }
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -38,13 +52,15 @@ TpPopup {
     focus: true
     property bool acceptedNow: false
     onAboutToShow: acceptedNow = false
+    onOpened: Qt.callLater(focusDefault)  // after the page focused a field of the content
     onClosed: if (!acceptedNow) cancelled()
 
     contentItem: ColumnLayout {
-        spacing: theme.em * 0.8
+        spacing: theme.space5
         Text {
             Layout.fillWidth: true
             text: dialog.title
+            textFormat: Text.PlainText
             visible: text !== ""
             color: theme.text
             wrapMode: Text.WordWrap
@@ -54,24 +70,30 @@ TpPopup {
         ColumnLayout {
             id: body
             Layout.fillWidth: true
-            spacing: theme.em * 0.5
+            spacing: theme.space3
         }
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: theme.em * 0.2
-            spacing: theme.em * 0.5
+            Layout.topMargin: theme.space1
+            spacing: theme.space3
             Item { Layout.fillWidth: true }
             TpButton {
+                id: cancelButton
                 visible: dialog.showCancel
                 text: dialog.cancelText
                 onClicked: dialog.close()
+                Keys.onReturnPressed: click()
+                Keys.onEnterPressed: click()
             }
             TpButton {
+                id: acceptButton
                 accent: true
                 danger: dialog.danger
                 text: dialog.acceptText
                 enabled: dialog.acceptEnabled
                 onClicked: dialog.accept()
+                Keys.onReturnPressed: click()
+                Keys.onEnterPressed: click()
             }
         }
     }

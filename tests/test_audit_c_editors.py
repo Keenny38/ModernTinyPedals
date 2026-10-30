@@ -4,16 +4,14 @@ track map marks, Rest API import in background, translated tables & messages"""
 import sys
 import threading
 import time
-from typing import cast
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
 from neopedal import i18n
 from neopedal.setting import cfg
-from neopedal.ui._common import BaseEditor, TableBatchReplace
-from neopedal.ui._option import ColorEdit
+from neopedal.ui._common import BaseEditor
 
 
 class Env:
@@ -71,47 +69,52 @@ def join_request_threads():
             thread.join(5)
 
 
-# --- Track notes editor (item 3)
+# --- Track notes editor (item 3), Qt Quick page since the UI/UX audit of 2026-10-29 (state in track_notes_backend)
 @pytest.fixture
-def notes_editor(env, monkeypatch):
+def notes_editor(env):
     from neopedal.ui import track_notes_editor
 
-    monkeypatch.setattr(track_notes_editor, "show_toast", lambda *args, **kwargs: None)
     editor = track_notes_editor.TrackNotesEditor(None)
     yield editor
     close_editor(editor)
 
 
+def first_key(editor) -> int:
+    return editor.backend.rows[0]["key"]
+
+
 def test_notes_save_error_on_close_keeps_editor_open(notes_editor, env, tmp_path, monkeypatch):
-    from neopedal.ui import track_notes_editor
+    from neopedal.ui.quick import track_notes_backend
 
     def read_only(**kwargs):
         raise PermissionError(13, "Permission denied")
 
-    notes_editor.create_pacenotes()
-    notes_editor.table_notes.item(0, 1).setText("R3")
+    backend = notes_editor.backend
+    backend.create("Pace Notes")
+    backend.setValue(first_key(notes_editor), "note", "R3")
     assert notes_editor.is_modified()
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Save))
-    monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
+    monkeypatch.setattr(track_notes_backend.QFileDialog, "getSaveFileName",
                         lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "NeoPedal Pace Notes (*.tppn)"))
-    monkeypatch.setattr(track_notes_editor, "save_notes_file", read_only)
+    monkeypatch.setattr(track_notes_backend, "save_notes_file", read_only)
     assert notes_editor.close() is False  # saving failed: treated as cancel
     assert len(env.warnings) == 1 and "Unable to save notes at:" in env.warnings[0]
     assert notes_editor.is_modified()
-    assert notes_editor.table_notes.item(0, 1).text() == "R3"  # notes kept
+    assert backend.rows[0]["note"] == "R3"  # notes kept
 
 
 def test_notes_save_error_from_button(notes_editor, env, tmp_path, monkeypatch):
-    from neopedal.ui import track_notes_editor
+    from neopedal.ui.quick import track_notes_backend
 
-    notes_editor.create_pacenotes()
-    notes_editor.table_notes.item(0, 1).setText("R3")
+    backend = notes_editor.backend
+    backend.create("Pace Notes")
+    backend.setValue(first_key(notes_editor), "note", "R3")
     target = tmp_path / "missing folder" / "Spa.tppn"  # folder does not exist
-    monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
+    monkeypatch.setattr(track_notes_backend.QFileDialog, "getSaveFileName",
                         lambda *args, **kwargs: (str(target), "NeoPedal Pace Notes (*.tppn)"))
-    notes_editor.saving()
+    assert not backend.save()
     assert env.warnings and notes_editor.is_modified()
-    monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
+    monkeypatch.setattr(track_notes_backend.QFileDialog, "getSaveFileName",
                         lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "NeoPedal Pace Notes (*.tppn)"))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Save))
     assert notes_editor.confirm_discard()  # saved this time
@@ -119,96 +122,54 @@ def test_notes_save_error_from_button(notes_editor, env, tmp_path, monkeypatch):
 
 
 def test_notes_metadata_edit_marks_modified(notes_editor):
-    from neopedal.ui.track_notes_editor import MetaDataEditor
-
-    notes_editor.create_pacenotes()
+    backend = notes_editor.backend
+    backend.create("Pace Notes")
     assert not notes_editor.is_modified()
-    notes_editor.open_metadata_dialog()
-    notes_editor.findChild(MetaDataEditor).saving()  # nothing changed
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # closed dialog deleted
+    backend.setMetadata(dict(backend.metadata))  # nothing changed
     assert not notes_editor.is_modified()
-    notes_editor.open_metadata_dialog()
-    dialog = notes_editor.findChild(MetaDataEditor)
-    dialog.option_metadata["AUTHOR"].setText("Steven")
-    dialog.saving()
-    assert notes_editor.notes_metadata["AUTHOR"] == "Steven"
+    backend.setMetadata({**backend.metadata, "AUTHOR": "Steven"})
+    assert backend.metadata["AUTHOR"] == "Steven"
     assert notes_editor.is_modified()
 
 
 def test_notes_delete_last_note_clears_map_marks(notes_editor):
-    trackmap = notes_editor.trackmap
+    backend = notes_editor.backend
+    trackmap = backend.trackMap
     trackmap.raw_coords = [(float(index), 0.0) for index in range(20)]
     trackmap.raw_dists = [(index * 10.0, 0.0) for index in range(20)]
-    trackmap.map_nodes = 20
     trackmap.map_length = 190.0
-    notes_editor.create_pacenotes()
-    notes_editor.table_notes.item(0, 0).setText("50")
-    assert len(trackmap.marked_coords) == 1
-    notes_editor.table_notes.selectRow(0)
-    notes_editor.delete_notes()
-    assert notes_editor.table_notes.rowCount() == 0
-    assert trackmap.marked_coords == [] and trackmap.marked_dists == set()
+    backend.create("Pace Notes")
+    backend.setValue(first_key(notes_editor), "distance", "50")
+    assert len(backend.marks) == 1
+    backend.setValue(first_key(notes_editor), "distance", "999")  # out of track: no mark
+    assert backend.marks == []
+    backend.setValue(first_key(notes_editor), "distance", "50")
+    backend.select(first_key(notes_editor), 0)
+    backend.deleteSelected()
+    assert backend.rowCount == 0 and backend.marks == []
 
 
 def test_notes_show_map_button_translated(notes_editor, french):
-    notes_editor.toggle_trackmap_panel(False)
-    assert notes_editor.button_showmap.text() == "Afficher la carte"
-    notes_editor.toggle_trackmap_panel(True)
-    assert notes_editor.button_showmap.text() == "Masquer la carte"
+    backend = notes_editor.backend
+    assert backend.mapShown
+    backend.toggleMap()
+    assert not backend.mapShown and i18n.tr("Show Map") == "Afficher la carte"
+    backend.toggleMap()
+    assert backend.mapShown and i18n.tr("Hide Map") == "Masquer la carte"
 
 
-# --- Track map widget (item 25, 29)
-@pytest.fixture
-def map_view(env):
-    from PySide6.QtWidgets import QWidget
+def test_map_menu_translated_without_key_lookup(notes_editor, french):
+    """Show menu of the notes map: translated texts, config keys carried by each entry (never found back from
+    the text with untr)"""
+    from neopedal.ui.quick.track_map_backend import OVERLAYS
 
-    from neopedal.ui.track_map_widget import MapView
-
-    parent = QWidget()
-    view = MapView(parent)
-    view.raw_coords = [(float(index), 0.0) for index in range(20)]
-    view.raw_dists = [(index * 10.0, 0.0) for index in range(20)]
-    view.map_nodes = 20
-    view.map_length = 190.0
-    yield view
-    parent.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-
-
-def test_map_marks_cleared_without_distance(map_view):
-    map_view.update_marked_coords({10.0, 50.0, 999.0})  # out of track ignored
-    assert len(map_view.marked_coords) == 2
-    map_view.update_marked_coords(set())
-    assert map_view.marked_coords == [] and map_view.marked_dists == set()
-
-
-class FakePainter:
-    def __init__(self):
-        self.texts = []
-
-    def drawText(self, rect, flags, text):
-        self.texts.append(text)
-
-
-def test_map_menu_and_info_translated(map_view, french, monkeypatch):
-    for key in ("show_map_info", "show_curve_info", "show_slope_info", "show_position_info"):
-        monkeypatch.setitem(map_view.ecfg, key, True)
-    menu = map_view.set_context_menu()
-    texts = [action.text() for action in menu.actions() if action.isCheckable()]
-    assert "Fond sombre" in texts and "Positions marquées" in texts
-    for text in texts:  # menu action dispatch finds config key back
-        assert "show_" + i18n.untr(text).replace(" ", "_").lower() in map_view.ecfg
-    painter = FakePainter()
-    map_view.draw_map_info(painter)
-    map_view.draw_curve_info(painter, 120.0, 30.0, 45.0, "Right Hairpin", "Short")
-    map_view.draw_slope_info(painter, 0.02, 1.1, 2.4, "Gentle")
-    map_view.draw_position_info(painter, 1.0, 2.0, 3.0, 4.0)
-    text = "\n".join(painter.texts)
-    for french_text in ("nœuds", "Courbe :", "Courte", "Rayon :", "Droite Épingle", "Angle :", "Pente :",
-                        "Douce", "Delta :", "nœud 1"):
-        assert french_text in text
-    for english_text in ("Curve:", "Radius:", "Slope:", "Delta:", "node", "Short", "Hairpin"):
-        assert english_text not in text
+    trackmap = notes_editor.backend.trackMap
+    entries = trackmap.overlayMenu
+    assert [entry["key"] for entry in entries] == [key for key, _ in OVERLAYS]
+    assert all(entry["key"] in trackmap.ecfg for entry in entries)
+    assert [entry["text"] for entry in entries] == [i18n.tr(text) for _, text in OVERLAYS]
+    assert sum(entry["text"] != text for entry, (_, text) in zip(entries, OVERLAYS)) >= len(OVERLAYS) - 1  # French
+    assert i18n.tr("Marked Coordinates") == "Positions marquées"
 
 
 # --- Heatmap editor (item 12)
@@ -221,130 +182,124 @@ def heatmap_editor(env):
     close_editor(editor)
 
 
-def combo_texts(combo) -> list[str]:
-    return [combo.itemText(index) for index in range(combo.count())]
-
-
-def create_preset(editor, name: str, mode: str = ""):
-    from neopedal.ui.heatmap_editor import CreateHeatmapPreset
-
-    dialog = CreateHeatmapPreset(editor, "test", mode)
-    dialog.preset_entry.setText(name)
-    dialog.creating()
-    dialog.deleteLater()
+def set_cell(editor, row: int, column: int, text: str) -> bool:
+    backend = editor.backend
+    return backend.setCell(backend.keys[row], column, text)
 
 
 def test_heatmap_switch_preset_not_modified(heatmap_editor):
+    backend = heatmap_editor.backend
     assert not heatmap_editor.is_modified()
-    heatmap_editor.heatmap_list.setCurrentIndex(1)
-    assert heatmap_editor.selected_heatmap_key == heatmap_editor.heatmap_list.itemText(1)
-    heatmap_editor.heatmap_list.setCurrentIndex(0)
+    assert backend.selectPreset(1)
+    assert backend.selected_key == backend.presetNames[1] and backend.presetIndex == 1
+    assert backend.selectPreset(0)
     assert not heatmap_editor.is_modified()
 
 
 def test_heatmap_new_name_checked_against_unsaved_presets(heatmap_editor, env):
-    from neopedal.ui._common import FloatTableItem, table_item
-
-    create_preset(heatmap_editor, "custom")
-    assert heatmap_editor.selected_heatmap_key == "custom" and heatmap_editor.is_modified()
-    heatmap_editor.add_temperature()
-    table_item(heatmap_editor.table_heatmap, 1, 0).setText("55")
-    create_preset(heatmap_editor, "custom")  # not saved yet, but exists
+    backend = heatmap_editor.backend
+    assert backend.checkPresetName("") and backend.checkPresetName("bad name")  # letters, digits & _ only
+    backend.createPreset("custom", False)
+    assert backend.selected_key == "custom" and heatmap_editor.is_modified()
+    backend.addRow()
+    assert set_cell(heatmap_editor, 1, 0, "55")
+    assert backend.checkPresetName("custom") == "Preset already exists."  # not saved yet, but exists
+    backend.createPreset("custom", False)
     assert env.warnings == ["Preset already exists."]
-    assert combo_texts(heatmap_editor.heatmap_list).count("custom") == 1
-    assert table_item(heatmap_editor.table_heatmap, 1, 0, FloatTableItem).value() == 55  # edits kept
-    heatmap_editor.delete_heatmap()  # no other "custom" entry left behind
-    assert "custom" not in combo_texts(heatmap_editor.heatmap_list)
-    assert "custom" not in heatmap_editor.heatmap_temp
+    assert backend.presetNames.count("custom") == 1
+    assert backend.rows[1][0] == 55  # edits kept
+    backend.deletePreset()  # no other "custom" entry left behind
+    assert "custom" not in backend.presetNames
+    assert "custom" not in backend.heatmap_temp
 
 
 def test_heatmap_copy_includes_table_edits(heatmap_editor):
-    source = heatmap_editor.selected_heatmap_key
-    heatmap_editor.table_heatmap.item(1, 0).setText("45")
-    create_preset(heatmap_editor, "copied", "duplicate")
-    assert heatmap_editor.selected_heatmap_key == "copied"
-    assert "45.0" in heatmap_editor.heatmap_temp["copied"]
-    assert "45.0" in heatmap_editor.heatmap_temp[source]
+    backend = heatmap_editor.backend
+    source = backend.selected_key
+    assert set_cell(heatmap_editor, 1, 0, "45")
+    backend.createPreset("copied", True)
+    assert backend.selected_key == "copied"
+    assert "45.0" in backend.heatmap_temp["copied"]
+    assert "45.0" in backend.heatmap_temp[source]
     heatmap_editor.applying()
     assert "45.0" in cfg.user.heatmap["copied"]
 
 
-def test_heatmap_duplicate_temperature_refused(heatmap_editor, env, monkeypatch):
-    accepted = []
-    monkeypatch.setattr(heatmap_editor, "accept", lambda: accepted.append(True))
-    table = heatmap_editor.table_heatmap
-    source = heatmap_editor.selected_heatmap_key
-    rows = table.rowCount()
-    table.item(1, 0).setText(table.item(2, 0).text())
-    heatmap_editor.saving()
-    assert not accepted and "heatmap" not in env.saved
+def test_heatmap_duplicate_temperature_refused(heatmap_editor, env):
+    backend = heatmap_editor.backend
+    source = backend.selected_key
+    rows = len(backend.rows)
+    assert set_cell(heatmap_editor, 1, 0, backend.display(0, backend.rows[2][0]))
+    assert backend.model.rows[1]["marks"][0] == "error"  # shown at once
+    assert not backend.save()
+    assert "heatmap" not in env.saved
     assert env.warnings[-1].startswith("Temperature <b>") and "listed more than once" in env.warnings[-1]
-    heatmap_editor.heatmap_list.setCurrentIndex(1)  # cannot leave preset either
-    assert heatmap_editor.selected_heatmap_key == source == heatmap_editor.heatmap_list.currentText()
-    assert table.rowCount() == rows and len(env.warnings) == 2
-    heatmap_editor.open_copy_dialog()
-    assert len(env.warnings) == 3
-    table.item(1, 0).setText("1")
-    heatmap_editor.saving()
-    assert accepted and len(cfg.user.heatmap[source]) == rows
+    assert not backend.selectPreset(1)  # cannot leave preset either
+    assert backend.selected_key == source and backend.presetIndex == 0
+    assert len(backend.rows) == rows and len(env.warnings) == 2
+    backend.createPreset("copied", True)
+    assert len(env.warnings) == 3 and "copied" not in backend.heatmap_temp
+    assert set_cell(heatmap_editor, 1, 0, "1")
+    assert backend.save()
+    assert len(cfg.user.heatmap[source]) == rows
 
 
 def test_heatmap_invalid_color_refused(heatmap_editor, env):
-    source = heatmap_editor.selected_heatmap_key
+    backend = heatmap_editor.backend
+    source = backend.selected_key
+    assert not set_cell(heatmap_editor, 0, 1, "#12")  # refused while typing
+    backend.rows[0][1] = "#12"  # invalid color of a file edited by hand
+    backend.refresh()
+    assert backend.model.rows[0]["marks"][1] == "error"
     saved_colors = dict(cfg.user.heatmap[source])
-    color_edit = cast(ColorEdit, heatmap_editor.table_heatmap.cellWidget(0, 1))
-    color_edit.setText("#12")
     heatmap_editor.applying()
     assert "heatmap" not in env.saved and cfg.user.heatmap[source] == saved_colors
     assert env.warnings[-1].startswith("Invalid color <b>#12</b>")
-    color_edit.setText("#123")
+    assert set_cell(heatmap_editor, 0, 1, "#123")
     heatmap_editor.applying()
     assert "heatmap" in env.saved and "#123" in cfg.user.heatmap[source].values()
 
 
 # --- Duplicate names & colors (item 12, 22)
 EDITORS = {
-    "brakes": ("brake_editor", "BrakeEditor", "table_brakes",
-               lambda editor, row, name: editor.add_brake_entry(row, name, 0)),
-    "brands": ("vehicle_brand_editor", "VehicleBrandEditor", "table_brands",
-               lambda editor, row, name: editor.add_vehicle_entry(row, name, "Brand")),
-    "classes": ("vehicle_class_editor", "VehicleClassEditor", "table_classes",
-                lambda editor, row, name: editor.add_vehicle_entry(row, name, "NAME", "#FFFFFF")),
-    "compounds": ("tyre_compound_editor", "TyreCompoundEditor", "table_compounds",
-                  lambda editor, row, name: editor.add_compound_entry(row, name)),
-    "tracks": ("track_info_editor", "TrackInfoEditor", "table_tracks",
-               lambda editor, row, name: editor.add_track_entry(row, name, {})),
+    "brakes": ("brake_editor", "BrakeEditor"),
+    "brands": ("vehicle_brand_editor", "VehicleBrandEditor"),
+    "classes": ("vehicle_class_editor", "VehicleClassEditor"),
+    "compounds": ("tyre_compound_editor", "TyreCompoundEditor"),
+    "tracks": ("track_info_editor", "TrackInfoEditor"),
 }
 
 
 def build_editor(config_type: str):
     import importlib
 
-    module_name, class_name, table_name, add_row = EDITORS[config_type]
+    module_name, class_name = EDITORS[config_type]
     module = importlib.import_module(f"neopedal.ui.{module_name}")
     editor = getattr(module, class_name)(None)
-    return editor, getattr(editor, table_name), add_row
+    return editor, editor.backend
+
+
+def add_row(backend, name: str):
+    backend.append_rows([backend.new_row(name)])
 
 
 @pytest.mark.parametrize("config_type", list(EDITORS))
-def test_duplicate_name_refused(config_type, env, monkeypatch):
-    editor, table, add_row = build_editor(config_type)
+def test_duplicate_name_refused(config_type, env):
+    editor, backend = build_editor(config_type)
     try:
-        accepted = []
-        monkeypatch.setattr(editor, "accept", lambda: accepted.append(True))
         saved_data = dict(getattr(cfg.user, config_type))
-        add_row(editor, 0, "Duplicated")
-        add_row(editor, 1, "Duplicated")
-        rows = table.rowCount()
+        add_row(backend, "Duplicated")
+        add_row(backend, "Duplicated")
+        rows = len(backend.rows)
         editor.saving()
-        assert not accepted and config_type not in env.saved
+        assert config_type not in env.saved and editor.is_modified()
         assert env.warnings == ["<b>Duplicated</b> is listed more than once.<br><br>"
                                 "Each name can only be listed once, rename or delete duplicate rows."]
-        assert getattr(cfg.user, config_type) == saved_data and table.rowCount() == rows
-        assert table.currentRow() == 1  # duplicate row shown
-        table.item(1, 0).setText("Renamed")
+        assert getattr(cfg.user, config_type) == saved_data and len(backend.rows) == rows
+        assert backend.currentIndex == rows - 1  # duplicate row shown
+        assert backend.setCell(backend.keys[-1], 0, "Renamed")
         editor.saving()
-        assert accepted and config_type in env.saved
+        assert config_type in env.saved and not editor.is_modified()
         assert {"Duplicated", "Renamed"} <= set(getattr(cfg.user, config_type))
     finally:
         close_editor(editor)
@@ -352,18 +307,17 @@ def test_duplicate_name_refused(config_type, env, monkeypatch):
 
 @pytest.mark.parametrize("config_type", ["classes", "compounds"])
 def test_invalid_color_refused(config_type, env):
-    editor, table, add_row = build_editor(config_type)
+    editor, backend = build_editor(config_type)
     try:
-        add_row(editor, 0, "Colored")
-        color_edit = cast(ColorEdit, table.cellWidget(0, 2))
-        color_edit.setText("#12")
+        add_row(backend, "Colored")
+        key = backend.keys[-1]
+        assert not backend.checkCell(2, "#12") and not backend.setCell(key, 2, "#12")
+        assert not backend.setCell(key, 2, "")
+        backend.rows[-1][2] = "#12"  # from a file edited by hand
         editor.applying()
         assert config_type not in env.saved and "Colored" not in getattr(cfg.user, config_type)
         assert env.warnings[-1].startswith("Invalid color <b>#12</b> for <b>Colored</b>.")
-        color_edit.setText("")
-        editor.applying()
-        assert config_type not in env.saved and len(env.warnings) == 2
-        color_edit.setText("#80112233")
+        assert backend.setCell(key, 2, "#80112233")
         editor.applying()
         assert getattr(cfg.user, config_type)["Colored"]["color"] == "#80112233"
     finally:
@@ -371,13 +325,13 @@ def test_invalid_color_refused(config_type, env):
 
 
 def test_brand_import_refused_with_duplicate_names(env):
-    editor, table, add_row = build_editor("brands")
+    editor, backend = build_editor("brands")
     try:
-        add_row(editor, 0, "Duplicated")
-        add_row(editor, 1, "Duplicated")
-        rows = table.rowCount()
-        editor.parse_brand_data([{"desc": "Porsche 963 #6", "manufacturer": "Porsche"}])
-        assert table.rowCount() == rows and "listed more than once" in env.warnings[-1]
+        add_row(backend, "Duplicated")
+        add_row(backend, "Duplicated")
+        rows = len(backend.rows)
+        backend.import_vehicles([{"desc": "Porsche 963 #6", "manufacturer": "Porsche"}])
+        assert len(backend.rows) == rows and "listed more than once" in env.warnings[-1]
     finally:
         close_editor(editor)
 
@@ -387,7 +341,6 @@ def test_brand_import_refused_with_duplicate_names(env):
 def brand_editor(env, monkeypatch):
     from neopedal.ui import vehicle_brand_editor
 
-    monkeypatch.setattr(vehicle_brand_editor, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.user, "brands", {"Ferrari 296 #51": "Ferrari"}, raising=False)
     editor = vehicle_brand_editor.VehicleBrandEditor(None)
     yield editor
@@ -407,16 +360,15 @@ def test_brand_restapi_import_in_background(brand_editor, env, monkeypatch):
         answer.wait(5)
         return [{"desc": "Porsche 963 #6", "manufacturer": "Porsche"}]
 
+    backend = brand_editor.backend
     monkeypatch.setattr(vehicle_brand_editor, "request_vehicle_data", slow_game)
-    brand_editor.import_from_lmu()  # returns at once, game still answering
-    assert not brand_editor.button_import.isEnabled()
-    assert brand_editor.cursor().shape() == Qt.CursorShape.BusyCursor
-    brand_editor.import_from_lmu()  # one request at a time
+    backend.importFrom(0)  # returns at once, game still answering
+    assert backend.busy  # Import disabled
+    backend.importFrom(1)  # one request at a time
     answer.set()
-    assert wait_until(brand_editor.button_import.isEnabled)
+    assert wait_until(lambda: not backend.busy)
     assert requested == ["/rest/race/car"]
-    assert brand_editor.cursor().shape() != Qt.CursorShape.BusyCursor
-    assert brand_editor.table_brands.rowCount() == 2 and brand_editor.is_modified()
+    assert len(backend.rows) == 2 and brand_editor.is_modified()
     assert not env.warnings
 
 
@@ -427,20 +379,20 @@ def test_brand_restapi_unreachable_warns(brand_editor, env, monkeypatch):
         raise OSError("refused")
 
     monkeypatch.setattr(vehicle_brand_editor, "resolve_hostname", refused)
-    brand_editor.import_from_lmu()
+    brand_editor.backend.importFrom(0)
     assert wait_until(lambda: env.warnings)
     assert env.warnings == ["Unable to import vehicle data from LMU Rest API.<br><br>"
                             "Make sure game is running and try again."]
-    assert brand_editor.button_import.isEnabled() and brand_editor.table_brands.rowCount() == 1
+    assert not brand_editor.backend.busy and len(brand_editor.backend.rows) == 1
 
 
 def test_brand_restapi_invalid_answer_warns(brand_editor, env, monkeypatch):
     from neopedal.ui import vehicle_brand_editor
 
     monkeypatch.setattr(vehicle_brand_editor, "request_vehicle_data", lambda *args: [{"other": 1}])
-    brand_editor.import_from_rf2()
+    brand_editor.backend.importFrom(2)  # rFactor 2
     assert wait_until(lambda: env.warnings)
-    assert "RF2 Rest API" in env.warnings[0] and brand_editor.table_brands.rowCount() == 1
+    assert "RF2 Rest API" in env.warnings[0] and len(brand_editor.backend.rows) == 1
 
 
 def test_brand_restapi_answer_after_editor_closed(env, monkeypatch):
@@ -456,7 +408,7 @@ def test_brand_restapi_answer_after_editor_closed(env, monkeypatch):
 
     monkeypatch.setattr(vehicle_brand_editor, "request_vehicle_data", slow_game)
     editor = vehicle_brand_editor.VehicleBrandEditor(None)
-    editor.import_from_lmu()
+    editor.backend.importFrom(0)
     close_editor(editor)  # deleted while game still answering
     answer.set()
     assert answered.wait(5)
@@ -466,57 +418,46 @@ def test_brand_restapi_answer_after_editor_closed(env, monkeypatch):
 
 
 # --- Translated tables, titles & messages (item 29)
-@pytest.mark.parametrize("module_name, class_name, table_name, header_name", [
-    ("brake_editor", "BrakeEditor", "table_brakes", "HEADER_BRAKES"),
-    ("heatmap_editor", "HeatmapEditor", "table_heatmap", "HEADER_HEATMAP"),
-    ("track_info_editor", "TrackInfoEditor", "table_tracks", "HEADER_TRACKS"),
-    ("tyre_compound_editor", "TyreCompoundEditor", "table_compounds", "HEADER_COMPOUNDS"),
-    ("vehicle_brand_editor", "VehicleBrandEditor", "table_brands", "HEADER_BRANDS"),
-    ("vehicle_class_editor", "VehicleClassEditor", "table_classes", "HEADER_CLASSES"),
+@pytest.mark.parametrize("module_name, class_name, headers", [
+    ("brake_editor", "BrakeEditor", ["Nom du frein", "Épaisseur de rupture (mm)", "Nom de la heatmap"]),
+    ("heatmap_editor", "HeatmapEditor", ["Température (°C)", "Couleur"]),
+    ("track_info_editor", "TrackInfoEditor", [
+        "Nom du circuit", "Entrée des stands (m)", "Sortie des stands (m)", "Vitesse dans les stands (km/h)",
+        "Radar de vitesse (m)", "Orientation de la carte (°)", "Lever du soleil", "Coucher du soleil",
+        "Preset principal"]),
+    ("tyre_compound_editor", "TyreCompoundEditor", ["Nom de la gomme", "Symbole", "Couleur", "Nom de la heatmap"]),
+    ("vehicle_brand_editor", "VehicleBrandEditor", ["Nom du véhicule", "Marque"]),
+    ("vehicle_class_editor", "VehicleClassEditor", ["Nom de la catégorie", "Alias", "Couleur"]),
 ])
-def test_table_headers_translated(module_name, class_name, table_name, header_name, env, french):
+def test_table_headers_translated(module_name, class_name, headers, env, french):
     import importlib
-
-    from neopedal.i18n.fr import TRANSLATION
 
     module = importlib.import_module(f"neopedal.ui.{module_name}")
     editor = getattr(module, class_name)(None)
     try:
-        table = getattr(editor, table_name)
-        header = getattr(module, header_name)
-        labels = [table.horizontalHeaderItem(index).text() for index in range(table.columnCount())]
-        assert labels == [TRANSLATION[name] for name in header]
+        assert [column["header"] for column in editor.backend.columns] == headers
     finally:
         close_editor(editor)
 
 
-def test_batch_replace_with_translated_column(env, french):
+def test_replace_in_translated_column(env, french):
     from neopedal.ui.tyre_compound_editor import TyreCompoundEditor
 
     editor = TyreCompoundEditor(None)
     try:
-        editor.add_compound_entry(0, "Medium", "M")
-        editor.open_replace_dialog()
-        dialog = editor.findChild(TableBatchReplace)
-        assert dialog.column_selector.currentText() == "Symbole"
-        dialog.search_selector.setCurrentText("M")
-        dialog.replace_entry.setText("D")
-        dialog.replacing()
-        assert editor.table_compounds.item(0, 1).text() == "D"
-        dialog.close()
+        backend = editor.backend
+        assert backend.replaceColumns == [{"index": 1, "header": "Symbole"}]
+        backend.append_rows([["Medium", "M", "#FFFF00", "HEATMAP_DEFAULT_TYRE"]])
+        assert backend.replace(1, "M", "D", True, True) >= 1
+        assert backend.rows[-1][1] == "D"
     finally:
         close_editor(editor)
 
 
-def test_heatmap_dialog_titles_translated(heatmap_editor, french):
-    from neopedal.ui.heatmap_editor import CreateHeatmapPreset
-
-    heatmap_editor.open_create_dialog()
-    heatmap_editor.open_copy_dialog()
-    titles = {dialog.windowTitle() for dialog in heatmap_editor.findChildren(CreateHeatmapPreset)}
-    assert titles == {"Créer une heatmap", "Dupliquer la heatmap"}
-    for dialog in heatmap_editor.findChildren(CreateHeatmapPreset):
-        dialog.reject()
+def test_heatmap_preset_texts_translated(heatmap_editor, french):
+    assert i18n.tr("Create Heatmap Preset") == "Créer une heatmap"
+    assert i18n.tr("Duplicate Heatmap Preset") == "Dupliquer la heatmap"
+    assert heatmap_editor.backend.checkPresetName("x y") == "Nom de preset invalide."
 
 
 @pytest.mark.parametrize("message, translated", [

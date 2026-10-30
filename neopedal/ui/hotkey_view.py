@@ -17,421 +17,82 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Hotkey list view
+Hotkeys page: global hotkey switch, key bindings by section (search, assigned only), key capture in a dialog
+
+Qt Quick page (qml/config/Hotkeys.qml), state, key capture & actions in quick/hotkey_backend.py. The QML page is
+created when first shown.
 """
 
-import os
-from collections.abc import Callable
-from contextlib import suppress
-from typing import Any, cast
+from __future__ import annotations
 
-from PySide6.QtCore import QBasicTimer, QEvent, Qt, Slot
-from PySide6.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QDialogButtonBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import QUrl, Slot
+from PySide6.QtQuickWidgets import QQuickWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from .. import app_signal
-from ..const_app import PLATFORM
-from ..const_file import ConfigType, FileExt
-from ..hotkey.common import (
-    format_hotkey_name,
-    get_key_state_function,
-    held_controller_buttons,
-    held_modifiers,
-    refresh_keystate,
-    set_hotkey,
-)
-from ..hotkey_control import kctrl
-from ..i18n import tr, trm
-from ..i18n.options import option_label
-from ..setting import cfg
-from ..template.setting_shortcuts import (
-    SHORTCUTS_GENERAL,
-    SHORTCUTS_MODULE,
-    SHORTCUTS_PRESET,
-    SHORTCUTS_WIDGET,
-)
-from ._common import BaseDialog, UIScaler, confirm_action
-
-# Key events kept from app while capturing a key (shortcut override accepted: no app shortcut run)
-CAPTURED_KEY_EVENTS = frozenset((QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress, QEvent.Type.KeyRelease))
+from .quick.hotkey_backend import HotkeyBackend
 
 
 class HotkeyList(QWidget):
-    """Hotkey list view"""
+    """Hotkeys page"""
 
     def __init__(self, parent):
-        """Initialize hotkey list setting"""
         super().__init__(parent)
-        self.last_enabled = None
+        self.backend = HotkeyBackend(self, self.window)
+        self.backend.notice.connect(self.show_notice)
+        self.view: QQuickWidget | None = None  # see ensure_view
+        self._creating = False
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
 
-        # List box
-        self.listbox_hotkey = QListWidget(self)
-        self.listbox_hotkey.setAlternatingRowColors(True)
-        self.create_list()
+    def ensure_view(self) -> QQuickWidget | None:
+        """QML page, created on first use"""
+        if self.view is None and not self._creating:
+            from .quick import create_quick_view
 
-        # Button
-        self.button_reset = QPushButton(tr("Clear All"))
-        self.button_reset.clicked.connect(self.reset_hotkey)
-
-        self.button_toggle = QPushButton("")
-        self.button_toggle.setCheckable(True)
-        self.button_toggle.toggled.connect(self.toggle_hotkey)
-
-        # Layout
-        layout_main = QVBoxLayout()
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(self.button_reset)
-        layout_button.addStretch(1)
-        layout_button.addWidget(self.button_toggle)
-        layout_main.addWidget(self.listbox_hotkey)
-        layout_main.addLayout(layout_button)
-        margin = UIScaler.pixel(6)
-        layout_main.setContentsMargins(margin, margin, margin, margin)
-        self.setLayout(layout_main)
-
-    @Slot(bool)  # type: ignore[operator]
-    def refresh(self):
-        """Refresh hotkey list"""
-        enabled = cfg.application["enable_global_hotkey"]
-        # Update button state only if changed
-        if self.last_enabled != enabled:
-            self.last_enabled = enabled
-            self.set_enable_state(enabled)
-
-        # Refresh option name
-        if enabled:
-            self.refresh_preset_name()
-
-    def refresh_preset_name(self):
-        """Refresh preset name"""
-        listbox_hotkey = self.listbox_hotkey
-        for item in self.options_preset:
-            item_config = listbox_hotkey.itemWidget(item)
-            option_name = cast(Any, item_config).option_name
-            preset_name = cfg.user.shortcuts[option_name]["preset"]
-            # Verify if file exists
-            if not preset_name:
-                preset_name = "-"
-            elif not os.path.exists(f"{cfg.path.settings}{preset_name}{FileExt.JSON}"):
-                preset_name = "-"
-                cfg.user.shortcuts[option_name]["preset"] = ""
-                cfg.save(config_type=ConfigType.SHORTCUTS)
-            # Update name
-            item.setText(f"{option_label(option_name)}: {preset_name}")
-
-    def set_enable_state(self, enabled: bool):
-        """Set enable state"""
-        # Shown state only: toggle signal saves setting & reloads hotkeys (user click)
-        blocked = self.button_toggle.blockSignals(True)
-        self.button_toggle.setChecked(enabled)
-        self.button_toggle.blockSignals(blocked)
-        self.button_toggle.setText(tr("Enabled") if enabled else tr("Disabled"))
-        self.button_reset.setDisabled(not enabled)
-        self.listbox_hotkey.setDisabled(not enabled)
-
-    def toggle_hotkey(self, checked: bool):
-        """Toggle hotkey mode"""
-        cfg.application["enable_global_hotkey"] = checked
-        cfg.save(config_type=ConfigType.CONFIG)
-        kctrl.reload()
-        app_signal.refresh.emit(True)
-
-    def add_hotkey_category(self, name: str):
-        """Add hotkey category header"""
-        item = QListWidgetItem()
-        label = QLabel(trm(f"{tr(name)} Keybinding"), self.listbox_hotkey)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.listbox_hotkey.addItem(item)
-        self.listbox_hotkey.setItemWidget(item, label)
-
-    def add_hotkey_item(self, option_name: str, display_name: str) -> QListWidgetItem:
-        """Add hotkey item"""
-        item = QListWidgetItem()
-        item.setText(option_label(display_name))
-        module_item = HotkeyConfigItem(self, option_name)
-        self.listbox_hotkey.addItem(item)
-        self.listbox_hotkey.setItemWidget(item, module_item)
-        return item
-
-    def create_list(self):
-        """Create hotkey option list"""
-        self.add_hotkey_category("General")
-        for option_name in SHORTCUTS_GENERAL:
-            self.add_hotkey_item(option_name, option_name)
-
-        self.add_hotkey_category("Preset")
-        self.options_preset = []
-        for option_name in SHORTCUTS_PRESET:
-            self.options_preset.append(self.add_hotkey_item(option_name, option_name))
-
-        self.add_hotkey_category("Overlays")
-        for option_name in SHORTCUTS_WIDGET:
-            self.add_hotkey_item(option_name, option_name.replace("widget_", ""))
-
-        self.add_hotkey_category("Module")
-        for option_name in SHORTCUTS_MODULE:
-            self.add_hotkey_item(option_name, option_name.replace("module_", ""))
-
-        self.listbox_hotkey.setCurrentRow(0)
-
-    def reset_hotkey(self):
-        """Reset hotkey"""
-        msg_text = "Clear all key bindings?<br><br>This cannot be undone!"
-        if confirm_action(self, tr("Confirm"), trm(msg_text), tr("Clear All"), danger=True):
-            # Clear all shortcuts
-            for options in cfg.user.shortcuts.values():
-                options["bind"] = ""
-            cfg.save(0, config_type=ConfigType.SHORTCUTS)
-            self.reload_items()
-            # Reload
-            kctrl.reload()
-
-    def reload_items(self):
-        """Key binding buttons read again (cleared)"""
-        listbox_hotkey = self.listbox_hotkey
-        for row_index in range(listbox_hotkey.count()):
-            item = listbox_hotkey.itemWidget(listbox_hotkey.item(row_index))
-            if isinstance(item, HotkeyConfigItem):
-                item.reload_hotkey()
-
-
-class HotkeyConfigItem(QWidget):
-    """Hotkey configuration item"""
-
-    def __init__(self, parent, option_name: str):
-        super().__init__(parent)
-        self._parent = parent
-        self.option_name = option_name
-        self.hotkey_name = ""
-
-        self.button_config = QPushButton("")
-        self.button_config.setCheckable(True)
-        self.button_config.clicked.connect(self.open_config_dialog)
-
-        self.reload_hotkey()
-
-        layout_item = QHBoxLayout()
-        layout_item.setContentsMargins(0, 0, 0, 0)
-        layout_item.addStretch(1)
-        layout_item.setSpacing(0)
-        layout_item.addWidget(self.button_config)
-        self.setLayout(layout_item)
-
-    def open_config_dialog(self):
-        """Config dialog (hotkeys disabled while it shows, see ConfigHotkey.showEvent)"""
-        self.button_config.setChecked(False)
-        _dialog = ConfigHotkey(
-            self._parent,
-            option_name=self.option_name,
-            hotkey_name=self.hotkey_name,
-            reload_func=self.reload_hotkey,
-        )
-        _dialog.open()
-
-    def reload_hotkey(self):
-        """Reload button state"""
-        if cfg.application["enable_global_hotkey"]:
-            kctrl.enable()  # re-enable after config
-        self.hotkey_name = cfg.user.shortcuts[self.option_name]["bind"]
-        display_name = format_hotkey_name(self.hotkey_name, tr("None"))
-        self.button_config.setText(f" {display_name} " if len(display_name) < 2 else display_name)
-        self.button_config.setChecked(self.hotkey_name != "")
-
-
-class ConfigHotkey(BaseDialog):
-    """Configure hotkey dialog"""
-
-    EMBED_FROM_PAGE = True  # page too when opened from a page (restore backup...)
-
-    def __init__(self, parent, option_name: str, hotkey_name: str, reload_func: Callable):
-        super().__init__(parent)
-        self.setWindowTitle(trm(f"Key Binding - {option_label(option_name)}"))
-
-        self.option_name = option_name
-        self.hotkey_name = hotkey_name
-        self.temp_hotkey = hotkey_name
-        self.reloading = reload_func
-
-        # Layout
-        layout_main = QVBoxLayout()
-
-        # Entry box
-        self.hotkey_entry = QLineEdit()
-        self.hotkey_entry.setReadOnly(True)
-        self.hotkey_entry.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout_main.addWidget(self.hotkey_entry)
-
-        # Preset selector
-        if self.option_name in SHORTCUTS_PRESET:
-            self.preset_selector = QComboBox()
-            self.preset_selector.addItem(tr("Select a preset ..."))
-            self.preset_selector.addItems(cfg.preset_files())
-            self.preset_selector.setCurrentText(cfg.user.shortcuts[self.option_name]["preset"])
-            self.preset_selector.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            layout_main.addWidget(self.preset_selector)
-
-        # Button
-        button_clear = QPushButton(tr("Clear"))
-        button_clear.clicked.connect(self.reset)
-
-        button_confirm = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        button_confirm.accepted.connect(self.saving)
-        button_confirm.rejected.connect(self.reject)
-
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_clear)
-        layout_button.addWidget(button_confirm)
-        layout_main.addLayout(layout_button)
-
-        self.setLayout(layout_main)
-        self.setMinimumWidth(UIScaler.size(21))
-        self.setFixedHeight(self.sizeHint().height())
-
-        # Set update timer
-        self._update_timer = QBasicTimer()
-        # Timer is not unregistered if widget is deleted by parent while Python object lives on
-        self.destroyed.connect(self._update_timer.stop)
-
-        # Platform specific
-        self.get_key_state = get_key_state_function()
-        refresh_keystate(self.get_key_state)
-        # Controller buttons held at start (switch, rotary) never taken as pressed until released
-        self.held_buttons = held_controller_buttons(self.get_key_state)
-
-        if PLATFORM.WINDOWS:
-            self.text_placeholder = tr("Press a key, key combination, mouse or controller button")
-        else:  # keyboard not read on Linux
-            self.text_placeholder = tr("Press a controller button (keyboard not supported on Linux)")
-        self.update_text(format_hotkey_name(hotkey_name, self.text_placeholder, delimiter=" + "))
-        self._update_timer.start(200, self)
-
-    def timerEvent(self, event):
-        """Monitor key & button press"""
-        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
-            return
-        get_key_state = self.get_key_state
-        held_buttons = self.held_buttons = {_code for _code in self.held_buttons if get_key_state(_code)}
-        key_combo = set_hotkey(lambda code: 0 if code in held_buttons else get_key_state(code))
-        if key_combo:
-            self.temp_hotkey = "+".join(_key for _key in key_combo if _key)
-            self.update_text(format_hotkey_name(self.temp_hotkey, delimiter=" + "))
-            return
-        # Modifiers held alone shown while waiting for the key, ex. "Ctrl + Shift + ..."
-        modifiers = held_modifiers(get_key_state)
-        if modifiers:
-            self.update_text(f"{format_hotkey_name('+'.join(modifiers), delimiter=' + ')} + ...")
-        else:
-            self.update_text(format_hotkey_name(self.temp_hotkey, self.text_placeholder, delimiter=" + "))
-
-    def reset(self):
-        """Reset hotkey"""
-        # Reset key
-        self.temp_hotkey = ""
-        self.update_text(self.text_placeholder)
-        # Reset preset
-        if self.option_name in SHORTCUTS_PRESET:
-            self.preset_selector.setCurrentIndex(0)
-
-    def update_text(self, text: str):
-        """Update entry text"""
-        self.hotkey_entry.setText(text)
-
-    def saving(self):
-        """Saving hotkey"""
-        save = False
-        # Key check
-        if self.temp_hotkey != self.hotkey_name:
-            if self.check_duplicates(self.temp_hotkey):
-                return
-            cfg.user.shortcuts[self.option_name]["bind"] = self.temp_hotkey
-            save = True
-        # Preset check
-        if self.option_name in SHORTCUTS_PRESET:
-            if self.preset_selector.currentIndex() > 0:
-                preset_name = self.preset_selector.currentText()
-            else:
-                preset_name = ""
-            cfg.user.shortcuts[self.option_name]["preset"] = preset_name
-            save = True
-        if save:
-            cfg.save(0, config_type=ConfigType.SHORTCUTS)
-            app_signal.refresh.emit(True)
-        self.close()
-
-    def check_duplicates(self, temp_hotkey: str) -> bool:
-        """Check for duplicated hotkeys - True if duplicates"""
-        if temp_hotkey == "":  # ignore empty
-            return False
-        for option_name, options in cfg.user.shortcuts.items():
-            if options["bind"] != temp_hotkey:
-                continue
-            msg_text = (
-                f"<b>{format_hotkey_name(temp_hotkey)}</b> already used for """
-                f"<b>{option_label(option_name)}</b>.<br><br>"
-                "Are you sure to assign the same key anyway?"
-            )
-            return not confirm_action(self, tr("Confirm"), trm(msg_text), tr("Assign Anyway"))
-        return False
-
-    def reject(self):
-        """Reject(ESC)"""
-        self.close()
-
-    def capturing_keys(self) -> bool:
-        """Keys pressed in app go to key capture: shown in active window, no message box or popup over it"""
-        return (
-            self.isVisible()
-            and QApplication.activeModalWidget() is None
-            and QApplication.activePopupWidget() is None
-            and QApplication.activeWindow() is self.window()
-        )
-
-    def eventFilter(self, watched, event):
-        """App shortcuts & keys off while capturing (Ctrl+K, Ctrl+1, Ctrl+S, Alt menu, Enter, Space...),
-        so any key combination can be bound; Esc still closes"""
-        if (event.type() in CAPTURED_KEY_EVENTS and event.key() != Qt.Key.Key_Escape
-                and self.capturing_keys()):
-            event.accept()
-            return True
-        return False
-
-    def filter_app_keys(self, enabled: bool):
-        """Key events of whole app go through eventFilter (or no longer)"""
-        app = QApplication.instance()
-        if app is None:
-            return
-        if enabled:
-            app.installEventFilter(self)
-        else:
-            app.removeEventFilter(self)
+            self._creating = True  # page shown again while QML loads: one page only
+            try:
+                view = create_quick_view(self, "Hotkeys.qml", {"backend": self.backend}, samples=0)
+            finally:
+                self._creating = False
+            view.setAcceptDrops(False)  # preset & plugin files dropped go to main window
+            self._layout.addWidget(view)
+            view.show()  # child added to a shown page is not shown by itself
+            self.setFocusProxy(view)
+            self.view = view
+        return self.view
 
     def showEvent(self, event):
-        """Global hotkeys off while capturing a key (pressed keys would run their commands)"""
+        self.ensure_view()
+        self.backend.page_shown()
         super().showEvent(event)
-        kctrl.disable()
-        self.filter_app_keys(True)
 
     def hideEvent(self, event):
-        """Global hotkeys back on as soon as key capture stops showing (page left open behind)"""
+        self.backend.page_hidden()  # key capture left open: global hotkeys back on
         super().hideEvent(event)
-        self.filter_app_keys(False)
-        kctrl.enable()  # only if enabled in setting
 
     def closeEvent(self, event):
-        """Close dialog"""
-        self.filter_app_keys(False)
-        self._update_timer.stop()
-        with suppress(RuntimeError):  # hotkey page it came from replaced meanwhile (language change)
-            self.reloading()
-        self.__dict__.clear()
+        super().closeEvent(event)
+        self.release_page()
+
+    def release_page(self):
+        """Page closed or released (see LazyPage.release): QML gone before the backend it binds to, then the
+        backend released (key capture closed)"""
+        if self.view is not None:
+            view, self.view = self.view, None
+            view.setSource(QUrl())
+            view.deleteLater()
+        self.backend.release()
+
+    @Slot(str, bool)
+    def show_notice(self, text: str, undoable: bool):
+        """Toast of the page (TpDialogHost), Undo of the last clear"""
+        from ..i18n import tr
+        from .toast import show_toast
+
+        show_toast(self, text, action_text=tr("Undo") if undoable else "",
+                   action=self.backend.undo if undoable else None)
+
+    @Slot(bool)  # type: ignore[operator]
+    def refresh(self, *_):
+        """Global hotkey switch, bindings or presets changed elsewhere: rows read again (once shown if hidden)"""
+        self.backend.refresh()

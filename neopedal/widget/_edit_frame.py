@@ -55,7 +55,10 @@ def scale_widget_setting(setting: dict, factor: float, widget_name: str = "") ->
     for key, value in setting.items():
         if not is_scaled_option(widget_name, key, value):
             continue
-        new_value = max(round(value * factor), 1) if isinstance(value, int) else round(value * factor, 3)
+        if isinstance(value, int):  # 0 hides a part (bar, mark): kept, never turned into a 1 pixel one
+            new_value = max(round(value * factor), 1) if value > 0 else value
+        else:
+            new_value = round(value * factor, 3)
         if new_value != value:
             changed[key] = new_value
     setting.update(changed)

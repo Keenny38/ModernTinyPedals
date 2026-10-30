@@ -31,7 +31,7 @@ from PySide6.QtGui import QPainter
 
 from ... import units
 from ...api_control import api
-from .._data import TemperatureRates, rate_text, temperature_text
+from .._data import TemperatureRates, rate_text, shown_temperature, temperature_text
 from .base import DASH, STEADY, ModernOverlay
 from .quad import QuadMixin, Section, Tile, heat_color
 from .wheels import TyreCompounds
@@ -48,7 +48,7 @@ class Realtime(QuadMixin, ModernOverlay):
     options = (
         "font_size", "show_degree_sign", "leading_zero", "enable_heatmap_auto_matching", "heatmap_name",
         "enable_heatmap_from_optimal_temperature", "show_rate_of_change", "rate_of_change_interval",
-        "rate_of_change_smoothing_samples", "show_tyre_compound",
+        "rate_of_change_smoothing_samples", "show_tyre_compound", "show_compound_color_by_type",
     )
 
     def __init__(self, config, widget_name):
@@ -58,8 +58,10 @@ class Realtime(QuadMixin, ModernOverlay):
         self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0  # temperature difference
         self.sign = "°" if wcfg["show_degree_sign"] else ""
         self.leading_zero = min(max(int(wcfg["leading_zero"]), 1), 3)
+        # Compound badges in compound color, else all on one neutral color (symbols only)
         self.compounds = TyreCompounds(
             wcfg["enable_heatmap_auto_matching"], wcfg["heatmap_name"], wcfg["enable_heatmap_from_optimal_temperature"],
+            None if wcfg["show_compound_color_by_type"] else self.theme.surface_raised,
         )
         self.add_font("tiny", 0.5, "bold", caps=True)  # left & right compound badges
         self.show_compound = wcfg["show_tyre_compound"]
@@ -72,6 +74,11 @@ class Realtime(QuadMixin, ModernOverlay):
 
     def post_update(self):
         """Rate of change restarts from next reading (no rate against stale temperature)"""
+        self.reset_rates()
+
+    def vehicle_reset(self):
+        """Compounds read again, rate of change restarts (no rate against previous car temperature)"""
+        self.compounds.reset()
         self.reset_rates()
 
     def reset_rates(self):
@@ -97,7 +104,7 @@ class Realtime(QuadMixin, ModernOverlay):
         theme = self.theme
         tiles = []
         for index in range(4):
-            temp = round(temps[index])
+            temp = shown_temperature(temps[index], self.temp_scale)
             text = temperature_text(temp, self.unit_temp, self.leading_zero, self.sign, DASH)
             sub = ""
             sub_color = None

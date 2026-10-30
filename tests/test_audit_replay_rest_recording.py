@@ -160,13 +160,11 @@ def test_export_rebuilds_rest_snapshots(tmp_path):
 # --- Replay window: recording kept while replay file loads
 def test_open_file_keeps_recording_until_loaded(replay_view, tmp_path, monkeypatch):  # noqa: F811
     from neopedal.replay import replay
-    from neopedal.ui import replay_view as module
 
     state = {"recording": True}
     stopped = []
     monkeypatch.setattr(type(replay), "recording", property(lambda self: state["recording"]))
     monkeypatch.setattr(replay, "stop_recording", lambda: stopped.append(replay.active))
-    monkeypatch.setattr(module.QMessageBox, "warning", lambda *args: None)
     bad = tmp_path / "bad.tpreplay"
     bad.write_bytes(b"not a replay")
     replay_view.open_file(str(bad))

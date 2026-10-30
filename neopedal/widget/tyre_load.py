@@ -30,6 +30,10 @@ from ._painter import WheelGaugeBar
 if TYPE_CHECKING:
     from ..template.widget_config_types import TyreLoadConfig
 
+# Share of total load (percent) filling a gauge, both designs: even load (25%) fills half, load transfer readable
+# both ways; a tyre carrying more fills it all
+FULL_GAUGE_RATIO = 50
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -59,7 +63,7 @@ class Realtime(Overlay):
         pady = round(font_m.capital * self.wcfg["bar_padding_vertical"])
         bar_width = max(self.wcfg["bar_width"], 20)
         bar_height = int(font_m.capital + pady * 2)
-        self.threshold_lowload = self.wcfg["low_load_threshold"]
+        self.threshold_lowload = self.wcfg["low_load_threshold"]  # percent with load ratio shown, else Newtons
 
         # Caption
         if self.wcfg["show_caption"]:
@@ -97,6 +101,7 @@ class Realtime(Overlay):
                 bar_height=bar_height,
                 offset_y=font_m.voffset,
                 decimals=self.wcfg["decimal_places"],
+                display_range=FULL_GAUGE_RATIO,
                 input_color=self.wcfg["highlight_color"],
                 fg_color=self.wcfg["font_color"],
                 bg_color=self.wcfg["background_color"],
@@ -124,8 +129,10 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_tload(self, target, data, ratio):
-        """Tyre load & ratio"""
-        if target.last != data:
+        """Tyre load & ratio, repainted on visible change only (text, bar length & low load color)"""
+        ratio = min(ratio, FULL_GAUGE_RATIO)
+        low_load = data <= self.threshold_lowload
+        if target.changed(data, round(ratio * target.width_scale) * 2 + low_load):  # bar pixels & color as one key
             target.last = data
-            target.bg_color = self.tload_color[data <= self.threshold_lowload]
+            target.bg_color = self.tload_color[low_load]
             target.update_input(ratio)

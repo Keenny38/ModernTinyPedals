@@ -26,6 +26,7 @@ from pit lane or garage, in pit lane before start line).
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from .. import calculation as calc
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 # Reference laps: (option key, delta source of delta module, speed delta attribute, modern label)
 REFERENCES = (
     ("all_time_best", "Best", "speedDeltaBest", "Best"),
-    ("session_best", "Session", "speedDeltaSession", "Session"),
+    ("session_best", "Session", "speedDeltaSession", "Session PB"),  # personal best of session
     ("stint_best", "Stint", "speedDeltaStint", "Stint"),
     ("last_lap", "Last", "speedDeltaLast", "Last"),
 )
@@ -54,7 +55,8 @@ def display_range(value: float, decimals: int) -> float:
 
 class SpeedDeltas:
     """Speed difference to each reference lap in speed unit (+ faster), smoothed (exponential moving average of
-    samples updates, 1: none), None if not shown (smoothing starts again once shown)"""
+    samples updates, 1: none), None if not shown or unknown at this lap distance (smoothing starts again once
+    shown)"""
 
     def __init__(self, unit_speed, samples: int):
         self.unit_speed = unit_speed
@@ -65,10 +67,11 @@ class SpeedDeltas:
         delta = minfo.delta
         smoothed = self.smoothed
         for key, source, attribute, _ in REFERENCES:
-            if not delta_shown(source):
+            value = getattr(delta, attribute)
+            if not (delta_shown(source) and isfinite(value)):  # nan: reference speed unknown here
                 smoothed[key] = None
                 continue
-            value = self.unit_speed(getattr(delta, attribute))
+            value = self.unit_speed(value)
             last = smoothed[key]
             smoothed[key] = value if last is None else self.ema(last, value)
         return dict(smoothed)
@@ -119,7 +122,7 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg[f"font_color_{key}"],
                 bg_color=self.wcfg[f"background_color_{key}"],
-                last=0,
+                last=None,  # dash drawn: first difference shown even if 0
             )
             self.set_primary_orient(target=bar, column=self.wcfg[f"display_order_{key}"])
             self.bars[key] = bar
@@ -140,6 +143,6 @@ class Realtime(Overlay):
             if data is None:  # no reference lap, or no comparison on this lap
                 text = f"{'-':>{self.max_padding}}"
             else:
-                text = f"{data:>+{self.max_padding}.{self.decimals}f}"
+                text = f"{data:>+z{self.max_padding}.{self.decimals}f}"
             target.text = f"{prefix}{text}{self.unit_text}"
             target.update()

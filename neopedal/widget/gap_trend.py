@@ -36,6 +36,7 @@ from ..api_control import api
 from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import player_vehicle
 from ._race_aids import LEFT, ClassicCells, finite, line_polygons, option_colors, scale_y, value_range
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ class GapSeries:
         self.samples: deque[tuple[float, int]] = deque(maxlen=max(laps, 2))
 
     def add(self, gap: float, car: int):
-        """Gap at end of lap (nan if not a time gap), car slot id (-1 if no car)"""
+        """Gap at end of lap (nan if not a time gap, or lap through pit lane), car slot id (-1 if no car)"""
         self.samples.append((gap if finite(gap) else nan, car))
 
     def clear(self):
@@ -108,7 +109,9 @@ class GapTrendMixin:
         self.show_rate = bool(wcfg["show_closing_rate"])
         self.show_chart = bool(wcfg["show_trend_chart"])
         self.series = (GapSeries(self.laps), GapSeries(self.laps))
-        self.last_lap = -1
+        self.last_lap = -1  # -1: none read yet (first lap seen partly, its gap not recorded)
+        self.last_session: Any = None  # session stamp (length & type) of last_lap
+        self.pitted = [False, False]  # player or car ahead / behind in pit lane during lap: gap not comparable
         self.version = 0  # changed when history changes
 
     def nearby_cars(self) -> tuple[tuple[Any, int], tuple[Any, int]]:
@@ -146,17 +149,32 @@ class GapTrendMixin:
         return (gap_ahead, ahead), (gap_behind, behind)
 
     def read_gaps(self) -> tuple[GapRow, GapRow]:
-        """Current gaps, history updated at end of each lap"""
+        """Current gaps, history updated at end of each lap
+
+        Gap of a lap through pit lane (stop of player or of other car) left out (nan): trend restarts after
+        it, instead of a stop counted as gap change per lap for number_of_laps laps.
+        """
         nearby = self.nearby_cars()
         lap = api.read.lap.completed_laps()
-        if lap != self.last_lap:
-            if lap == self.last_lap + 1:
-                for series, (gap, index) in zip(self.series, nearby):
-                    series.add(time_gap(gap) if index >= 0 else nan, car_id(index))
-            elif lap < self.last_lap:  # new session
+        session = api.read.session.identifier()[0]
+        cars = minfo.vehicles.dataSet
+        player_pit = bool(player_vehicle().inPit)
+        in_pit = [player_pit or (0 <= index < len(cars) and bool(cars[index].inPit)) for _, index in nearby]
+        self.pitted = [pitted or now for pitted, now in zip(self.pitted, in_pit)]
+        if lap != self.last_lap or session != self.last_session:
+            if session != self.last_session or lap < self.last_lap:  # new session: none of old one kept
                 for series in self.series:
                     series.clear()
+            elif lap == self.last_lap + 1:
+                for slot, (series, (gap, index)) in enumerate(zip(self.series, nearby)):
+                    comparable = index >= 0 and not self.pitted[slot]
+                    series.add(time_gap(gap) if comparable else nan, car_id(index))
+            elif self.last_lap >= 0:  # laps missed: trend restarts
+                for series, (_, index) in zip(self.series, nearby):
+                    series.add(nan, car_id(index))
             self.last_lap = lap
+            self.last_session = session
+            self.pitted = in_pit  # pit lane at line counts for both laps
             self.version += 1
         rows = []
         for slot, (series, (gap, index)) in enumerate(zip(self.series, nearby)):
@@ -166,7 +184,7 @@ class GapTrendMixin:
                 label="Ahead" if ahead else "Behind",
                 name=minfo.vehicles.dataSet[index].driverName if index >= 0 and self.show_name else "",
                 gap=self.gap_text(gap) if index >= 0 else DASH,
-                rate=f"{max(min(rate, 99.99), -99.99):+.2f}" if finite(rate) else DASH,
+                rate=f"{max(min(rate, 99.99), -99.99):+z.2f}" if finite(rate) else DASH,
                 meaning=rate_meaning(rate, ahead),
             ))
         return rows[0], rows[1]
@@ -239,21 +257,23 @@ class Realtime(GapTrendMixin, ClassicCells, Overlay):
         wcfg = self.wcfg
         gap = 2
         row_h = round(font_m.height * 1.2)
-        columns = [("label", self.text_cell_width(8), "")]
+        self.labels = (tr("Ahead"), tr("Behind"))
+        # Columns fit header & widest value (gap of decimal_places: 999.9, rate: +99.99)
+        gap_chars = max(6, len(f"{GAP_LIMIT:.{self.decimals}f}"), len(tr("Gap")))
+        columns = [("label", self.text_cell_width(max(8, *(len(label) for label in self.labels))), "")]
         if self.show_name:
             columns.append(("name", self.text_cell_width(12), ""))
-        columns.append(("gap", self.text_cell_width(6), "Gap"))
+        columns.append(("gap", self.text_cell_width(gap_chars), "Gap"))
         if self.show_rate:
-            columns.append(("rate", self.text_cell_width(6), "Per lap"))
+            columns.append(("rate", self.text_cell_width(max(6, len(tr("Per lap")))), "Per lap"))
         if self.show_chart:
-            columns.append(("chart", self.text_cell_width(10), "Trend"))
+            columns.append(("chart", self.text_cell_width(max(10, len(tr("Trend")))), "Trend"))
         left = 0.0
         self.cells: dict[str, tuple[QRectF, ...]] = {}  # key: header, ahead row, behind row
         for key, width, _ in columns:
             self.cells[key] = tuple(QRectF(left, (row_h + gap) * row, width, row_h) for row in range(3))
             left += width + gap
         self.headers = tuple((self.cells[key][0], tr(label)) for key, _, label in columns if label)
-        self.labels = (tr("Ahead"), tr("Behind"))
         self.colors = option_colors(
             wcfg, "font_color_caption", "background_color_caption", "font_color_gap", "background_color_gap",
             "font_color_gaining", "font_color_losing", "background_color_chart", "chart_line_color",

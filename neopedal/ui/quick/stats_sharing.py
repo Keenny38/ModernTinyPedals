@@ -23,13 +23,14 @@ Driver stats viewer part (StatsSharing, mixin of DriverStatsBackend): Exports (t
 from __future__ import annotations
 
 import csv
+import html
 import logging
 import os
 from functools import partial
 
 from PySide6.QtCore import Property, QLocale, QStandardPaths, QUrl, Slot
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog
 
 from ... import calculation as calc
 from ...const_app import VERSION
@@ -40,6 +41,7 @@ from ...userfile import pb_code
 from ...userfile.driver_history import SessionRecord, best_lap_date
 from ...userfile.pb_code import SharedBest
 from ..lap_viewer import number_text, signed
+from . import dialogs
 from .formatting import format_date
 from .stats_card import CardData, draw_card
 from .stats_common import (
@@ -84,7 +86,7 @@ class StatsSharing(StatsHost):
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         extension = "json" if kind == "json" else "csv"
         default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Session History')}.{extension}")
-        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export Session History..."), default,
+        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export Session History…"), default,
                                                   "JSON (*.json)" if extension == "json" else "CSV (*.csv)")
         if filename and self.write_history(filename, extension):
             self.toast_exported(filename)
@@ -166,7 +168,7 @@ class StatsSharing(StatsHost):
     def importFriend(self):
         """Compare with a friend's exported session history (JSON)"""
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-        filename, _ = QFileDialog.getOpenFileName(self._window, tr("Compare With a Friend's Stats..."),
+        filename, _ = QFileDialog.getOpenFileName(self._window, tr("Compare With a Friend's Stats…"),
                                                   folder or os.path.expanduser("~"), "JSON (*.json)")
         if filename:
             self.load_friend_file(filename, chosen=True)
@@ -218,8 +220,8 @@ class StatsSharing(StatsHost):
             return
         name = strip_invalid_char(self.selected_stats_key or tr("All Tracks"))
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-        default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Driver Stats Viewer')}.csv")
-        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export CSV..."), default, "CSV (*.csv)")
+        default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Driver Stats')}.csv")
+        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export CSV…"), default, "CSV (*.csv)")
         if filename and self.write_csv(filename, raw=raw):
             self.toast_exported(filename)
 
@@ -286,10 +288,10 @@ class StatsSharing(StatsHost):
         """Share code of selected vehicle personal best copied (paste it in a chat)"""
         shared = self.shared_best()
         if shared is None:
-            self.warning(tr("No personal best for this vehicle yet."))
+            self.warning(tr("No personal best for this car yet."))
             return
         QGuiApplication.clipboard().setText(pb_code.encode(shared, VERSION))
-        self.toast(tr("Personal best code copied: paste it in a chat."))
+        self.toast(tr("Personal best code copied: paste it in a chat"))
 
     @Slot()
     def pastePbCode(self):
@@ -298,18 +300,21 @@ class StatsSharing(StatsHost):
         if shared is not None:
             self.compare_shared(shared)
             return
-        from .._common import TextInputDialog
+        self.ask_pb_code("")
 
-        def accept(text: str) -> bool:
-            found = pb_code.decode(text)
+    def ask_pb_code(self, text: str):
+        """Personal best code asked (in the page); none found: told, then asked again with the text"""
+        def accept(typed: str) -> bool:
+            found = pb_code.decode(typed)
             if found is None:
-                self.warning(tr("No personal best code found in this text."))
-                return False
+                dialogs.alert(self._window, tr("Error"), tr("No personal best code found in this text."), "warning",
+                              lambda: self.ask_pb_code(typed))
+                return True
             self.compare_shared(found)
             return True
 
-        TextInputDialog(self._window, tr("Compare a Personal Best Code..."),
-                        tr("Personal best code (NP1:pb:...):"), accept, "").open()
+        dialogs.ask_text(self._window, tr("Compare a Personal Best Code…"), tr("Personal best code (NP1:pb:…):"),
+                         accept, text)
 
     def own_vehicle(self, shared: SharedBest) -> tuple[str, str, float]:
         """Your track key, vehicle & personal best of the class of a shared one ("", "", 0 if never driven)"""
@@ -329,27 +334,29 @@ class StatsSharing(StatsHost):
         who = shared.driver or tr("Shared personal best")
         when = f" ({format_date(shared.time)})" if shared.time else ""
         version = f" · v{shared.game_version}" if shared.game_version else ""
-        lines = [f"<b>{who}</b>: {calc.sec2laptime_full(shared.laptime)}{when}",
-                 f"{shared.track} · {shared.vehicle}{version}"]
+        lines = [f"<b>{html.escape(who)}</b>: {calc.sec2laptime_full(shared.laptime)}{when}",
+                 f"{html.escape(shared.track)} · {html.escape(shared.vehicle)}{version}"]
         track, vehicle, best = self.own_vehicle(shared)
         if not vehicle:
             lines.append(tr("You have no lap time on this track & class yet."))
-            QMessageBox.information(self._window, tr("Personal Best Code"), "<br>".join(lines))
+            dialogs.alert(self._window, tr("Personal Best Code"), "<br>".join(lines), "info")
             return
         if best:
             gap = best - shared.laptime
-            lines.append(trm(f"You: {calc.sec2laptime_full(best)} ({vehicle}), gap {signed(gap, 3)} s"))
+            lines.append(trm(f"You: {calc.sec2laptime_full(best)} ({html.escape(vehicle)}), gap {signed(gap, 3)} s"))
         if best and best <= shared.laptime + 0.0005:
             lines.append(tr("You are faster."))
-            QMessageBox.information(self._window, tr("Personal Best Code"), "<br>".join(lines))
+            dialogs.alert(self._window, tr("Personal Best Code"), "<br>".join(lines), "info")
             return
         lines.append("")
-        lines.append(trm(f"Set {calc.sec2laptime_full(shared.laptime)} as your goal for {vehicle}?"))
-        if self.confirm("<br>".join(lines)):
+        lines.append(trm(f"Set {calc.sec2laptime_full(shared.laptime)} as your goal for {html.escape(vehicle)}?"))
+        def set_goal():
             self.set_goal(f"{track}|{vehicle}", shared.laptime)
-            if track != self.selected_stats_key:
+            if track in self.stats_temp and track != self.selected_stats_key:
                 self.selectTrack(track)
             self.selectRow(vehicle)
+
+        self.ask("<br>".join(lines), set_goal, tr("Set Goal"))
 
     def card_data(self) -> CardData | None:
         """Personal best card of selected vehicle, None if no personal best"""
@@ -375,12 +382,12 @@ class StatsSharing(StatsHost):
         """Picture of selected vehicle personal best saved (PNG)"""
         data = self.card_data()
         if data is None:
-            self.warning(tr("No personal best for this vehicle yet."))
+            self.warning(tr("No personal best for this car yet."))
             return
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
         name = strip_invalid_char(f"{data.track} - {data.vehicle} - {tr('Personal Best')}")
         default = os.path.join(folder or os.path.expanduser("~"), f"{name}.png")
-        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Save Personal Best Card..."), default,
+        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Save Personal Best Card…"), default,
                                                   "PNG (*.png)")
         if not filename:
             return
@@ -394,10 +401,10 @@ class StatsSharing(StatsHost):
         """Picture of selected vehicle personal best copied (paste it in a chat)"""
         data = self.card_data()
         if data is None:
-            self.warning(tr("No personal best for this vehicle yet."))
+            self.warning(tr("No personal best for this car yet."))
             return
         QGuiApplication.clipboard().setImage(draw_card(data))
-        self.toast(tr("Personal best card copied: paste it in a chat."))
+        self.toast(tr("Personal best card copied: paste it in a chat"))
 
     def toast(self, text: str):
         from ..toast import show_toast

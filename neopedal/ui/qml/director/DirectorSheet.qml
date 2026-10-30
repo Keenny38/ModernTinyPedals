@@ -21,7 +21,8 @@ Rectangle {
     border.color: live.onAir ? theme.loss : theme.border
 
     // Sector & lap marks besides colors (colorblind): ◆ best of class, ● personal best
-    function mark(tone) { return tone === "fastest" ? "◆ " : tone === "gain" ? "● " : "" }
+    // Record mark right of the time, as every page (TpLapTime): ◆ best of class first, ● personal best
+    function mark(tone) { return tone === "fastest" ? " ◆" : tone === "gain" ? " ●" : "" }
 
     component Stat: ColumnLayout {
         id: stat
@@ -35,6 +36,7 @@ Rectangle {
         Text {
             Layout.fillWidth: true
             text: parent.label
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontCaption
             elide: Text.ElideRight
@@ -50,7 +52,8 @@ Rectangle {
         Text {
             visible: stat.badges.length === 0
             Layout.fillWidth: true
-            text: parent.value !== "" ? parent.value : "-"
+            text: parent.value !== "" ? parent.value : "—"
+            textFormat: Text.PlainText
             color: parent.valueColor
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
@@ -76,7 +79,7 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 TpClassStrip {
                     Layout.fillHeight: false
                     Layout.preferredHeight: Math.round(theme.em * 2.4)
@@ -102,6 +105,7 @@ Rectangle {
                     Text {
                         Layout.fillWidth: true
                         text: (sheetCard.car.number ? "#" + sheetCard.car.number + "  " : "") + (sheetCard.car.driver || "")
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.weight: Font.Bold
                         font.pointSize: theme.fontSubtitle
@@ -110,6 +114,7 @@ Rectangle {
                     Text {
                         Layout.fillWidth: true
                         text: [sheetCard.car.team, sheetCard.car.vehicle].filter(function(part) { return part }).join(" · ")
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontCaption
                         elide: Text.ElideRight
@@ -138,7 +143,7 @@ Rectangle {
                     onClicked: sheetCard.expanded = !sheetCard.expanded
                 }
                 TpButton {
-                    glyph: ""  // close
+                    glyph: theme.glyphs.close
                     fallback: "✕"
                     flat: true
                     size: "sm"
@@ -149,7 +154,7 @@ Rectangle {
             RowLayout {
                 visible: sheetCard.expanded
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 Stat {
                     label: i18n.tr("Class")
                     value: sheetCard.live.classPosition ? "P" + sheetCard.live.classPosition + " " + sheetCard.car.carClass
@@ -163,16 +168,16 @@ Rectangle {
             RowLayout {
                 visible: sheetCard.expanded
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 Stat { label: i18n.tr("Ahead"); value: sheetCard.live.intervalAhead || ""; valueColor: theme.text }
-                Stat { label: i18n.tr("Behind"); value: sheetCard.live.intervalBehind ? sheetCard.live.intervalBehind.replace("+", "-") : "" }
+                Stat { label: i18n.tr("Behind"); value: sheetCard.live.intervalBehind ? sheetCard.live.intervalBehind.replace("+", "−") : "" }
                 Stat { label: i18n.tr("Best"); value: sheetCard.live.best || "" }
                 Stat { label: i18n.tr("Last"); value: sheetCard.live.last || "" }
             }
             RowLayout {
                 visible: sheetCard.expanded
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 Stat { label: i18n.tr("Pit Stops"); value: sheetCard.live.pits !== undefined ? String(sheetCard.live.pits) : "" }
                 Stat {
                     label: i18n.tr("Contacts")
@@ -194,7 +199,7 @@ Rectangle {
             RowLayout {
                 visible: sheetCard.expanded
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 Repeater {
                     model: 3  // cells kept, texts & colors change as sectors complete
                     delegate: Stat {
@@ -202,7 +207,7 @@ Rectangle {
                         readonly property var sector: (sheetCard.live.sectors || [])[index]
                         visible: sector !== undefined
                         label: "S" + (index + 1)
-                        value: sector !== undefined ? sheetCard.mark(sector.tone) + sector.text : ""
+                        value: sector !== undefined ? sector.text + sheetCard.mark(sector.tone) : ""
                         valueColor: sector === undefined || sector.tone === "" ? theme.text : theme.tone(sector.tone)
                     }
                 }
@@ -219,6 +224,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: sheetCard.expanded && (sheetCard.live.energy || "") !== ""
                 text: i18n.tr("Energy") + "  " + (sheetCard.live.energy || "")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
@@ -228,6 +234,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: sheetCard.expanded && (sheetCard.car.history || "") !== ""
                 text: i18n.tr("History") + "  " + (sheetCard.car.history || "")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 wrapMode: Text.WordWrap
@@ -238,6 +245,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: sheetCard.expanded && (sheetCard.car.headToHead || "") !== ""
                 text: i18n.tr("Head to head") + "  " + (sheetCard.car.headToHead || "")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight

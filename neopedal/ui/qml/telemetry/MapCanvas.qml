@@ -15,7 +15,7 @@ Item {
     property real maxX: 1
     property real maxY: 1
     property bool flipY: true  // game coordinates: y up on screen
-    property real margin: theme.em * 1.2
+    property real margin: theme.space6
     property real maxZoom: 60
     property real zoom: 1  // shown view, eased toward target view
     property real panX: 0
@@ -262,6 +262,7 @@ Item {
             anchors.bottomMargin: theme.space1
             text: (canvas.feet ? (scaleBar.value >= 2640 ? (scaleBar.value / 5280) + " mi" : scaleBar.value + " ft")
                    : (scaleBar.value >= 1000 ? (scaleBar.value / 1000) + " km" : scaleBar.value + " m")).replace(".", theme.decimalPoint)
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontCaption
         }

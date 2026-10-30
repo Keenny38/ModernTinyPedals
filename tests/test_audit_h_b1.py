@@ -1,12 +1,10 @@
 """Audit h, lot b1: dead code removed & duplicates shared, same behaviour: date texts of pages (one helper per
 format), race calculator inputs of config template, option editor texts, table editors (table & button row)"""
 
-import sys
 import time
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QDate, QEvent
-from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QMessageBox, QPushButton
+from PySide6.QtCore import QDate, QLocale
 
 from neopedal.setting import cfg
 from neopedal.ui._common import BaseEditor
@@ -17,15 +15,20 @@ STAMP = time.mktime((2025, 10, 9, 18, 5, 7, 0, 0, -1))  # local time
 
 
 # --- Date texts
-def test_fixed_date_formats_same_text_as_before():
+def test_fixed_date_formats_same_text_as_before(monkeypatch):
     from neopedal.ui.quick import formatting as fm
 
     local = time.localtime(STAMP)
     assert fm.iso_minutes(STAMP) == time.strftime("%Y-%m-%d %H:%M", local) == "2025-10-09 18:05"
     assert fm.iso_day(STAMP) == "2025-10-09"
     assert fm.file_stamp(STAMP) == "2025-10-09 18-05-07"
+    monkeypatch.setattr(fm, "date_locale", lambda: QLocale("fr_FR"))  # day & month in language format
     assert fm.day_month(STAMP) == "09/10"
     assert fm.day_month_minutes(STAMP) == "09/10 18:05"
+    monkeypatch.setattr(fm, "date_locale", lambda: QLocale("en_US"))
+    assert fm.day_month(STAMP) == "10/9" and fm.day_month_minutes(STAMP) == "10/9 18:05"
+    monkeypatch.setattr(fm, "date_locale", lambda: QLocale("sv_SE"))  # year first: left out with its separator
+    assert fm.day_month(STAMP) == "10-09"
     assert fm.day_month_year_minutes(STAMP) == "09/10/2025 18:05"
     assert fm.clock_minutes(STAMP) == "18:05"
     assert fm.clock_seconds(STAMP) == "18:05:07"
@@ -39,7 +42,7 @@ def test_language_date_formats_kept(monkeypatch):
     from neopedal.ui.quick import formatting as fm
 
     monkeypatch.setattr(fm, "current_language", lambda: "en")
-    assert fm.format_date(0) == "-"
+    assert fm.format_date(0) == "—"  # missing value of every page
     assert fm.date_text(0) == ""
     assert fm.day_text(0, QDate.currentDate()) == "Unknown Date"
     noon = time.mktime((*time.localtime()[:3], 12, 0, 0, 0, 0, -1))
@@ -60,9 +63,10 @@ def test_pages_use_shared_date_helpers():
 
 
 def test_lap_labels_date_unchanged(monkeypatch):
-    """Lap viewer session title & lap label: day/month (& time), nothing without a lap date"""
+    """Lap viewer session title & lap label: day & month (& time) in language format, nothing without a lap date"""
     from neopedal.ui.quick import formatting
 
+    monkeypatch.setattr(formatting, "date_locale", lambda: QLocale("fr_FR"))
     assert formatting.day_month_minutes(STAMP) == time.strftime("%d/%m %H:%M", time.localtime(STAMP))
     assert formatting.day_month(STAMP) == time.strftime("%d/%m", time.localtime(STAMP))
 
@@ -102,91 +106,22 @@ def test_option_value_texts_shared():
     assert option_kinds.choice_values(OptionKind(KIND_CHOICE, ("A", "B"))) == ("A", "B")
 
 
-# --- Table editors
-@pytest.fixture
-def editor_env(ui_env, monkeypatch):
-    monkeypatch.setattr(BaseEditor, "confirm_operation", lambda self, *args, **kwargs: True)
-    monkeypatch.setattr(BaseEditor, "reloading", staticmethod(lambda *args, **kwargs: None))
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
-    slot_errors = []
-    monkeypatch.setattr(sys, "excepthook", lambda *exc_info: slot_errors.append(exc_info[1]))
-    yield ui_env
-    assert not slot_errors
-
-
-def button_texts(editor) -> list[str]:
-    layout = editor.layout()
-    row = next(layout.itemAt(index).layout() for index in reversed(range(layout.count()))
-               if isinstance(layout.itemAt(index).layout(), QHBoxLayout))
-    return [row.itemAt(index).widget().text() for index in range(row.count())
-            if isinstance(row.itemAt(index).widget(), QPushButton)]
-
-
-def fixed_widths(table) -> dict[int, int]:
-    header = table.horizontalHeader()
-    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
-    assert table.verticalHeader().sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
-    return {column: table.columnWidth(column) for column in range(table.columnCount())
-            if header.sectionResizeMode(column) == QHeaderView.ResizeMode.Fixed}
-
-
-TAIL = ["Reset", "Undo", "Redo", "Apply", "Save", "Close"]
-EDITORS = (
-    ("brake_editor", "BrakeEditor", "table_brakes", ["Add", "Sort", "Delete"], {1: 7, 2: 12}),
-    ("track_info_editor", "TrackInfoEditor", "table_tracks", ["Add", "Sort", "Delete"], None),
-    ("vehicle_class_editor", "VehicleClassEditor", "table_classes", ["Add", "Sort", "Delete"], {2: 7}),
-    ("tyre_compound_editor", "TyreCompoundEditor", "table_compounds", ["Add", "Sort", "Delete", "Replace"],
-     {1: 5, 2: 7, 3: 12}),
-    ("vehicle_brand_editor", "VehicleBrandEditor", "table_brands",
-     ["Import from", "Add", "Sort", "Delete", "Replace"], {}),
-)
-
-
-@pytest.mark.parametrize("module_name, class_name, table_name, leading, widths", EDITORS)
-def test_table_editor_layout_unchanged(editor_env, module_name, class_name, table_name, leading, widths):
+# --- Table editors: one QML table editor page since the UI/UX audit of 2026-10-29 (QWidget table & button row
+# helpers removed), see tests/test_ui_audit_2026_10_29_editors.py
+@pytest.mark.parametrize("module_name, class_name", [
+    ("brake_editor", "BrakeEditor"), ("track_info_editor", "TrackInfoEditor"),
+    ("vehicle_class_editor", "VehicleClassEditor"), ("tyre_compound_editor", "TyreCompoundEditor"),
+    ("vehicle_brand_editor", "VehicleBrandEditor"), ("heatmap_editor", "HeatmapEditor"),
+])
+def test_table_editors_share_one_page(module_name, class_name):
     import importlib
 
-    from neopedal.ui import UIScaler
+    from neopedal.ui.quick.table_editor_host import TableEditorPage
 
     module = importlib.import_module(f"neopedal.ui.{module_name}")
-    editor = getattr(module, class_name)(None)
-    try:
-        assert button_texts(editor) == leading + TAIL
-        table = getattr(editor, table_name)
-        headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
-        assert headers and all(headers)
-        if widths is None:  # tracks: every column but name fixed, orientation & clock columns narrower
-            widths = {column: 5 if 5 <= column <= 7 else 8 for column in range(1, table.columnCount())}
-        assert fixed_widths(table) == {column: UIScaler.size(width) for column, width in widths.items()}
-        assert table.verticalHeader().isHidden() == (class_name == "VehicleClassEditor")
-    finally:
-        editor.set_unmodified()
-        editor.close()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-
-
-def test_editor_buttons_actions(editor_env, monkeypatch):
-    """Apply, Reset & Save buttons run the editor's actions, Close closes"""
-    from neopedal.ui.brake_editor import BrakeEditor
-
-    calls = []
-    monkeypatch.setattr(BrakeEditor, "applying", lambda self: calls.append("apply"))
-    monkeypatch.setattr(BrakeEditor, "reset_setting", lambda self: calls.append("reset"))
-    monkeypatch.setattr(BrakeEditor, "saving", lambda self: calls.append("save"))
-    cfg.user.brakes = {}
-    editor = BrakeEditor(None)
-    try:
-        layout = editor.layout()
-        row = layout.itemAt(layout.count() - 1).layout()
-        buttons = {row.itemAt(index).widget().text(): row.itemAt(index).widget() for index in range(row.count())
-                   if isinstance(row.itemAt(index).widget(), QPushButton)}
-        for text in ("Apply", "Reset", "Save"):
-            buttons[text].click()
-        assert calls == ["apply", "reset", "save"]
-    finally:
-        editor.set_unmodified()
-        editor.close()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert issubclass(getattr(module, class_name), TableEditorPage)
+    for name in ("editor_table", "editor_buttons", "enable_table_undo", "replace_table_data", "new_name_increment"):
+        assert not hasattr(BaseEditor, name)
 
 
 def test_removed_dead_code_gone():

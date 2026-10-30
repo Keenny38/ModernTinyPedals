@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
-from ..const_common import TEXT_NA
+from ..const_common import TEXT_NA, TEXT_PLACEHOLDER
 from ..module_info import minfo
 from ._base import Overlay
 
@@ -263,22 +263,21 @@ class Realtime(Overlay):
         """Steering angle"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.0f}°"
+            target.text = f"{data:+z.0f}°"
             target.update()
 
     def update_wheel_angle(self, target, data):
         """Wheel angle"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.1f}°"
+            target.text = f"{data:+z.1f}°"
             target.update()
 
     def update_steering_ratio(self, target, data):
         """Steering ratio"""
         if target.last != data:
             target.last = data
-            text_ratio = f"{abs(data):.2f}"
-            target.text = f"{text_ratio:.4}:1"
+            target.text = f"{data:.1f}:1" if data else TEXT_PLACEHOLDER
             target.update()
 
     def update_ackermann_percentage(self, target, data):
@@ -287,7 +286,7 @@ class Realtime(Overlay):
             target.last = data
             if abs(data) > 9.99:
                 data = 0.0
-            target.text = f"{data:+.0%}"
+            target.text = f"{data:+z.0%}"
             target.update()
 
     def update_slip_angle_difference(self, target, data):
@@ -300,7 +299,7 @@ class Realtime(Overlay):
                 color_index = 1
             else:
                 color_index = 0
-            target.text = f"{data:+.1f}°"
+            target.text = f"{data:+z.1f}°"
             target.fg, target.bg = self.bar_style_diff_slip_angle[color_index]
             target.update()
 
@@ -310,7 +309,7 @@ class Realtime(Overlay):
             target.last = data
             if self.wcfg["show_inverted_yaw_rate_sign"]:
                 data = -data
-            target.text = f"{calc.degrees(data):+.0f}°/s"
+            target.text = f"{calc.degrees(data):+z.0f}°/s"
             target.update()
 
     def update_turning_radius(self, target, data):
@@ -318,5 +317,5 @@ class Realtime(Overlay):
         if target.last != data:
             target.last = data
             radius = calc.sym_max(self.unit_dist(data * 0.001), 9999)
-            target.text = f"{radius:+.0f}{self.symbol_dist}"
+            target.text = f"{radius:+z.0f}{self.symbol_dist}"
             target.update()

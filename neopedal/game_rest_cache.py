@@ -145,9 +145,19 @@ class GameRestCache:
             entry = self._routes.get((address, route))
             if entry is None:
                 if len(self._routes) >= MAX_ROUTES:
-                    self._routes.clear()
+                    self._prune_locked(now)
+                    if len(self._routes) >= MAX_ROUTES:
+                        self._evict_locked()
                 entry = self._routes[(address, route)] = _Route()
             return entry
+
+    def _evict_locked(self) -> None:
+        """Oldest answered route without request in progress dropped (a pending route keeps its waiters & answer
+        sharing: dropping it would start a second identical request)"""
+        idle = [(entry.answer.time if entry.answer is not None else 0.0, key)
+                for key, entry in self._routes.items() if entry.pending is None]
+        if idle:
+            del self._routes[min(idle)[1]]
 
     def fresh(self, route: str, max_age: float = DEFAULT_MAX_AGE, address: Address | None = None) -> Answer | None:
         """Kept answer not older than max_age, None if none (never asks)"""
@@ -217,7 +227,7 @@ class GameRestCache:
             return None
         try:
             return json.loads(answer.body)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: nested too deeply
             return None
 
     def forget(self, route: str | None = None) -> None:

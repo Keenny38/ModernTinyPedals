@@ -22,7 +22,9 @@ Setting file function
 
 from __future__ import annotations
 
+import errno
 import filecmp
+import io
 import json
 import logging
 import os
@@ -34,10 +36,16 @@ from time import localtime, monotonic, sleep, strftime, time
 
 from ..const_file import FileExt
 from ..setting_validator import PresetValidator
-from . import atomic_write, encode_text
+from . import REPLACE_ATTEMPTS, REPLACE_RETRY_DELAY, atomic_write, encode_text
 
 logger = logging.getLogger(__name__)
 
+# Seconds a file locked for a moment (antivirus, cloud sync) is retried at load: at start nothing is shown
+# yet, at reload the GUI thread waits (every overlay frozen), see is_transient_access_error
+ACCESS_TIMEOUT = 2.0
+RELOAD_ACCESS_TIMEOUT = 0.3
+TRANSIENT_WINERRORS = (5, 32, 33)  # access denied, sharing violation, lock violation
+TRANSIENT_ERRNOS = (errno.EACCES, errno.EBUSY, errno.ETXTBSY)
 
 _stamp_lock = threading.Lock()
 _last_stamp_us = 0  # last backup timestamp (microseconds), see set_backup_timestamp
@@ -106,9 +114,26 @@ def notices_ready() -> None:
         app_signal.error.emit(message)
 
 
+def notify_save_failed(filename: str) -> None:
+    """Tell user a file could not be saved (every attempt failed): changes are only in memory"""
+    _show_notice(
+        f"{filename} could not be saved (file locked by another program, or disk error?): "
+        "your changes are kept in memory and saved again with the next change."
+    )
+
+
 def is_unreadable_file(filename: str, filepath: str) -> bool:
     """Check if file could not be read at load, so must not be saved over"""
     return _file_key(f"{filepath}{filename}") in _unreadable_files
+
+
+def is_transient_access_error(error: OSError) -> bool:
+    """File held by another program for a moment (antivirus scan, cloud sync, lock): worth a retry,
+    unlike a permanent error (a folder in place of the file, invalid path, I/O error)"""
+    winerror = getattr(error, "winerror", None)
+    if winerror:  # None or 0 when not raised by Windows itself
+        return winerror in TRANSIENT_WINERRORS
+    return error.errno in TRANSIENT_ERRNOS
 
 
 def set_backup_timestamp(prefix: str = FileExt.BACKUP, timestamp: bool = True) -> str:
@@ -139,55 +164,84 @@ def copy_setting(dict_user: dict) -> dict:
     return dict_user.copy()
 
 
-def load_setting_json_file(
+def _retry_access(error: OSError, access_deadline: float) -> bool:
+    """Whether a failed read is tried again (file held for a moment, deadline not passed), after a short wait"""
+    if not is_transient_access_error(error) or monotonic() >= access_deadline:
+        return False
+    sleep(0.05)
+    return True
+
+
+def read_setting_json_file(
     filename: str, filepath: str, dict_def: dict, file_info: str = "user preset",
-    validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, access_timeout: float = 2.0,
-) -> dict:
+    validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, access_timeout: float = ACCESS_TIMEOUT,
+) -> tuple[dict, bool]:
     """Load setting json file & verify
 
-    A file that cannot be accessed (locked, no permission) is retried up to access_timeout
-    seconds, then defaults are used without saving them over the file this session.
+    A file held by another program (antivirus, cloud sync) is retried up to access_timeout seconds; then,
+    as for any other access error, defaults are used without saving them over the file this session.
     A corrupted file (invalid JSON or values) is never read again: kept as backup, defaults used at once.
+
+    Returns:
+        Setting, and whether saving it would change the file: missing, corrupted, repaired or migrated
+        by the validator (a file saved as it is not rewritten at start).
     """
     filename_source = f"{filepath}{filename}"
     access_deadline = monotonic() + access_timeout
     while True:
         try:
             with open(filename_source, encoding="utf-8-sig") as jsonfile:  # BOM of Notepad, PowerShell
-                setting_user = json.load(jsonfile)
+                text = jsonfile.read()  # kept: compared with the setting as it would be saved
+            setting_user = json.load(io.StringIO(text))
             # Verify & assign setting
             setting_user = validator(setting_user, dict_def)
             _unreadable_files.discard(_file_key(filename_source))
             _notified_files.discard(_file_key(filename_source))
+            changed = setting_json_text(setting_user) != text  # as saved (indent, key order, values)
             break
         except FileNotFoundError:
             logger.info("USERDATA: %s not found, fall back to default", filename)
             setting_user = copy_setting(dict_def)
+            changed = True
             break
-        except OSError:  # locked, not corrupted: retry longer, never overwrite
-            if monotonic() < access_deadline:
-                sleep(0.05)
+        except OSError as error:  # locked, not corrupted: retry for a while, never overwrite
+            if _retry_access(error, access_deadline):
                 continue
             logger.error("USERDATA: %s not accessible, fall back to default (file kept, not saved)", filename, exc_info=True)
             _unreadable_files.add(_file_key(filename_source))
             setting_user = copy_setting(dict_def)
+            changed = False
             break
         # corrupted (RecursionError: nested too deep, never a crash at start): same result if read again
         except (AttributeError, IndexError, KeyError, RecursionError, TypeError, ValueError):
             logger.error("USERDATA: %s failed loading, fall back to default", filename, exc_info=True)
             create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
             setting_user = copy_setting(dict_def)
+            changed = True
             break
 
     logger.info("USERDATA: %s loaded (%s)", filename, file_info)
-    return setting_user
+    return setting_user, changed
 
 
-def load_style_json_file(
-    filename: str, filepath: str, dict_def: dict, file_info: str = "style preset",
-    validator: Callable[[dict], bool] | None = None, access_timeout: float = 2.0,
+def load_setting_json_file(
+    filename: str, filepath: str, dict_def: dict, file_info: str = "user preset",
+    validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, access_timeout: float = ACCESS_TIMEOUT,
 ) -> dict:
-    """Load style json file & verify (optional), see load_setting_json_file for locked & corrupted file"""
+    """Load setting json file & verify, see read_setting_json_file"""
+    return read_setting_json_file(filename, filepath, dict_def, file_info, validator, access_timeout)[0]
+
+
+def read_style_json_file(
+    filename: str, filepath: str, dict_def: dict, file_info: str = "style preset",
+    validator: Callable[[dict], bool] | None = None, access_timeout: float = ACCESS_TIMEOUT,
+) -> tuple[dict, bool]:
+    """Load style json file & verify (optional), see read_setting_json_file for locked & corrupted file
+
+    Returns:
+        Style, and whether it must be saved (file missing, corrupted or updated by validator): caller
+        saves it (queued save with backup & verification, or save_json_file at once).
+    """
     filename_source = f"{filepath}{filename}"
     msg_text = "loaded"
     access_deadline = monotonic() + access_timeout
@@ -209,9 +263,8 @@ def load_style_json_file(
             style_user = copy_setting(dict_def)
             msg_text = "updated"
             break
-        except OSError:  # locked, not corrupted: retry longer, never overwrite
-            if monotonic() < access_deadline:
-                sleep(0.05)
+        except OSError as error:  # locked, not corrupted: retry for a while, never overwrite
+            if _retry_access(error, access_deadline):
                 continue
             logger.error("USERDATA: %s not accessible, fall back to default (file kept, not saved)", filename, exc_info=True)
             _unreadable_files.add(_file_key(filename_source))
@@ -226,10 +279,21 @@ def load_style_json_file(
             msg_text = "updated"
             break
 
-    if msg_text == "updated":
-        save_json_file(style_user, filename, filepath)
-
     logger.info("USERDATA: %s %s (%s)", filename, msg_text, file_info)
+    return style_user, msg_text == "updated"
+
+
+def load_style_json_file(
+    filename: str, filepath: str, dict_def: dict, file_info: str = "style preset",
+    validator: Callable[[dict], bool] | None = None, access_timeout: float = ACCESS_TIMEOUT,
+) -> dict:
+    """Load style json file & verify (optional), saved at once if missing or updated (start, no GUI yet)
+
+    Setting.load_styles reads with read_style_json_file and queues the save instead (reload on GUI thread).
+    """
+    style_user, changed = read_style_json_file(filename, filepath, dict_def, file_info, validator, access_timeout)
+    if changed:
+        save_json_file(style_user, filename, filepath)
     return style_user
 
 
@@ -303,7 +367,18 @@ def create_backup_file(
     filename_backup = f"{filepath}{filename}{extension}"
     backup_existed = os.path.exists(filename_backup)
     try:
-        if not copy_and_verify_file(filename_source, filename_backup):
+        # Source held by antivirus or cloud sync for a moment: retried as replace_retry does, a failed
+        # backup aborts the save (data stays queued, see Setting.__saving)
+        copied = False
+        for attempt in range(1, REPLACE_ATTEMPTS + 1):
+            try:
+                copied = copy_and_verify_file(filename_source, filename_backup)
+                break
+            except PermissionError:
+                if attempt >= REPLACE_ATTEMPTS:
+                    raise
+                sleep(REPLACE_RETRY_DELAY * attempt)
+        if not copied:
             raise FileNotFoundError
         if show_log:
             logger.info("USERDATA: backup saved %s", filename_backup)
@@ -415,10 +490,18 @@ def _save_with_backup(
     backup_extension: str,
 ) -> bool:
     """Save & verify json file, file backed up first (backup_extension) if exists, see save_and_verify_json_file"""
-    file_found = os.path.exists(f"{filepath}{filename}")
+    filename_source = f"{filepath}{filename}"
+    file_found = os.path.exists(filename_source)
     # Create backup: abort saving if backup failed; skip backup and create new if not exist
     if not file_found:
         logger.info("USERDATA: %s not found, create new", filename)
+    elif _file_holds(filename_source, encode_text(text)):
+        # Same bytes already on disk (start, preset loaded again): one read instead of backup, write with
+        # fsync & read back. Modified time still set: the preset loaded last is the most recent one (start)
+        with suppress(OSError):
+            os.utime(filename_source)
+        logger.info("USERDATA: %s unchanged, not written", filename)
+        return True
     elif not create_backup_file(filename, filepath, backup_extension):
         logger.info("USERDATA: %s saving abort", filename)
         return False
@@ -452,6 +535,15 @@ def _save_with_backup(
         attempts,
     )
     return attempts > 0
+
+
+def _file_holds(filename_source: str, data: bytes) -> bool:
+    """Whether file holds exactly data (False if it cannot be read: saved as usual)"""
+    try:
+        with open(filename_source, "rb") as file:
+            return file.read() == data
+    except OSError:
+        return False
 
 
 def create_versioned_backup(

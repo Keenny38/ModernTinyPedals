@@ -29,6 +29,12 @@ Local HTTP server, disabled by default, only listens on 127.0.0.1:
 
 The required header prevents web pages opened in browser from triggering commands,
 as browsers cannot send custom header to other site without CORS approval.
+Optional access token (enable_access_token, off by default): header value must then be the token, for commands
+and the stream (stream also accepts ?token=, browsers cannot set WebSocket headers), so other programs or other
+Windows users of this computer cannot run commands nor read telemetry.
+Without a token, commands with an app-wide effect (quit or restart the app, restart or switch the API, load a
+preset: TOKEN_REQUIRED_COMMANDS) are refused with 403 "token required": any local process could otherwise close
+the app or change its preset mid-race. Overlay, module, spectate & director commands stay available.
 Host header is also verified, to block DNS rebinding (malicious domain resolved to 127.0.0.1).
 WebSocket is not covered by CORS, so /stream also rejects browser pages from other origins,
 and "null" origin (sandboxed frame of any web site, page opened from a local file): only pages
@@ -39,12 +45,15 @@ http(s)://localhost or 127.0.0.1) and clients without Origin can read telemetry.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
+import hmac
 import io
 import ipaddress
 import json
 import logging
 import re
+import secrets
 import select
 import socket
 import socketserver
@@ -62,8 +71,11 @@ from PySide6.QtCore import QTimer
 
 from . import app_signal
 from .const_app import LEGACY_NAME
+from .const_file import ConfigType
+from .http_limits import DeadlineReader
 from .log_handler import ErrorThrottle
 from .setting import cfg
+from .validator import load_json_strict
 
 logger = logging.getLogger(__name__)
 snapshot_errors = ErrorThrottle()  # stream pushes snapshots every 100 ms: warning once a minute
@@ -77,10 +89,16 @@ WS_OP_CLOSE = 0x8
 WS_OP_PING = 0x9
 WS_OP_PONG = 0xA
 SERVE_POLL_INTERVAL = 0.5  # s, server loop stop check (waited by a worker thread on stop, never by the GUI)
-STOP_WAIT_SECONDS = SERVE_POLL_INTERVAL + 1.0  # new server on the port of one still stopping waits this at most
+STOP_WAIT_SECONDS = SERVE_POLL_INTERVAL + 1.0  # stop(wait=True) & wait_servers_stopped wait this at most
+# New server on the port of one still stopping (GUI: address or HTTPS setting changed) waits this at most for the
+# previous socket to close (milliseconds: stop wakes the serving loop at once), then is tried again by BindRetry
+CLOSING_WAIT_SECONDS = 0.5
+CLOSING_RETRY_MS = 100  # previous server of the port still closing: listening tried again this soon (no report)
+SHUTDOWN_WAKE_SECONDS = 0.05  # serving loop woken again this often until shutdown() returns
 STREAM_INTERVAL = 100  # ms, default push interval
 STREAM_KEEPALIVE = 2.0  # s, same telemetry sent again at most this often (full data stream: unchanged data held)
 STREAM_INTERVAL_RANGE = (20, 5000)
+SNAPSHOT_TICK_MS = STREAM_INTERVAL_RANGE[0]  # telemetry snapshot & its JSON shared by stream clients within a tick
 # Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
 # until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
 BIND_RETRY_MS = 5000
@@ -90,6 +108,20 @@ MAX_CONNECTIONS = 64
 MAX_CONNECTIONS_PER_ADDRESS = 16
 REQUEST_SECONDS = 10  # request (line, headers, body) received in this time once started, or connection closed
 MAX_POST_BODY = 65536  # bytes of command request body read (ignored), more never read
+TOKEN_BYTES = 18  # random bytes of a generated access token (24 characters)
+MIN_TOKEN_LENGTH = 16  # shorter access token in config replaced by a generated one
+# Commands run only with an access token (see module doc): app closed or restarted, API restarted or switched,
+# preset loaded (preset_1..10 shortcuts too, see token_required)
+TOKEN_REQUIRED_COMMANDS = frozenset((
+    "quit_application", "restart_application", "restart_api", "select_next_api", "select_previous_api",
+    "reload_preset", "load_next_preset", "load_previous_preset",
+))
+TOKEN_REQUIRED_PREFIX = "preset_"
+
+
+def token_required(name: str) -> bool:
+    """Command refused without an access token (app-wide effect)"""
+    return name in TOKEN_REQUIRED_COMMANDS or name.startswith(TOKEN_REQUIRED_PREFIX)
 
 
 def is_loopback(address: str) -> bool:
@@ -98,6 +130,13 @@ def is_loopback(address: str) -> bool:
         return ipaddress.ip_address(address).is_loopback
     except ValueError:
         return False
+
+
+class PortClosing(OSError):
+    """Previous server of the port still closing its socket: listening tried again soon (BindRetry), no report"""
+
+    def __init__(self, port: int):
+        super().__init__(errno.EADDRINUSE, f"port {port} still closing")
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
@@ -111,6 +150,10 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
     server_close() only closes the listening socket: stop() also ends open (keep-alive, streaming)
     connections, and sets this server's own stopping event (a new server never clears it).
+
+    A server made on the port of one still stopping (same port turned off & on again by the GUI) waits for its
+    socket to close for CLOSING_WAIT_SECONDS at most (milliseconds: shutdown() wakes the serving loop at once
+    instead of waiting its poll interval), then raises PortClosing: BindRetry tries again soon, nothing reported.
     """
 
     daemon_threads = True
@@ -143,10 +186,12 @@ class LocalHTTPServer(ThreadingHTTPServer):
         self.closed = threading.Event()  # listening socket & connections closed (set by stop's worker thread)
         self._connections: dict[socket.socket, str] = {}  # open connection: client address
         self._connections_lock = threading.Lock()
+        port = self.port_of(server_address)
         with LocalHTTPServer._closing_lock:
-            closing = LocalHTTPServer._closing.get(self.port_of(server_address))
-        if closing is not None:  # same port turned off & on again: previous server's socket closed first
-            closing.wait(STOP_WAIT_SECONDS)
+            closing = LocalHTTPServer._closing.get(port)
+        # Same port turned off & on again: previous server's socket closed first (GUI thread never held long)
+        if closing is not None and not closing.wait(CLOSING_WAIT_SECONDS):
+            raise PortClosing(port)
         super().__init__(server_address, *args, **kwargs)
 
     @staticmethod
@@ -160,7 +205,9 @@ class LocalHTTPServer(ThreadingHTTPServer):
         """Accept connection if under limits (refused connection closed by caller)"""
         address = str(client_address[0])
         with self._connections_lock:
-            if len(self._connections) >= self.max_connections:
+            if self.stopping.is_set():  # stopping: never a new client (nor the wake connection of shutdown)
+                refused = "stopping"
+            elif len(self._connections) >= self.max_connections:
                 refused = "server"
             elif not is_loopback(address) and sum(
                     1 for client in self._connections.values() if client == address
@@ -169,13 +216,34 @@ class LocalHTTPServer(ThreadingHTTPServer):
             else:
                 self._connections[request] = address
                 return True
-        logger.debug("%s: connection from %s refused (%s connection limit)", type(self).__name__, address, refused)
+        logger.debug("%s: connection from %s refused (%s)", type(self).__name__, address,
+                     refused if refused == "stopping" else f"{refused} connection limit")
         return False
 
     def shutdown_request(self, request):
         with self._connections_lock:
             self._connections.pop(request, None)
         super().shutdown_request(request)
+
+    def shutdown(self):
+        """End the serving loop now: BaseServer.shutdown only sets a flag the loop checks after its select wakes
+        (up to poll_interval later), so a loopback connection to the listening socket wakes it at once. The
+        connection is never served: the flag is checked before accepting, and verify_request refuses connections
+        once stopping is set (stop() sets it before calling this).
+        """
+        finish = super().shutdown
+        waiter = threading.Thread(target=finish, daemon=True, name=f"{type(self).__name__} shutdown")
+        waiter.start()
+        while waiter.is_alive():
+            self.__wake_serving()
+            waiter.join(SHUTDOWN_WAKE_SECONDS)
+
+    def __wake_serving(self):
+        host, port = self.server_address[:2]
+        if host in ("", "0.0.0.0"):
+            host = "127.0.0.1"
+        with suppress(OSError, ValueError):  # socket closed already, port not reachable: loop wakes by itself
+            socket.create_connection((str(host), int(port)), timeout=SHUTDOWN_WAKE_SECONDS).close()
 
     def close_connections(self):
         """Shut down open client connections (handler threads see connection closed)"""
@@ -225,39 +293,20 @@ def wait_servers_stopped(timeout: float = STOP_WAIT_SECONDS) -> bool:
     return all(event.wait(max(deadline - monotonic(), 0)) for event in events)
 
 
-class DeadlineReader(socket.SocketIO):
-    """Socket reader, reads fail (TimeoutError) once deadline passed (each read also bounded by socket timeout)"""
-
-    def __init__(self, sock: socket.socket):
-        super().__init__(sock, "rb")
-        self.deadline: float | None = None  # monotonic time, None: socket timeout only
-
-    def readinto(self, buffer):
-        deadline = self.deadline
-        if deadline is None:
-            return super().readinto(buffer)
-        remaining = deadline - monotonic()
-        if remaining <= 0:
-            raise TimeoutError("request not received in time")
-        sock = self._sock  # type: ignore[attr-defined]
-        timeout = sock.gettimeout()
-        if timeout is not None and timeout <= remaining:
-            return super().readinto(buffer)
-        sock.settimeout(remaining)
-        try:
-            return super().readinto(buffer)
-        finally:
-            sock.settimeout(timeout)
-
-
 class BoundedRequestHandler(BaseHTTPRequestHandler):
     """Request handler, a started request (line, headers, body) received within REQUEST_SECONDS
 
     Socket timeout alone lets a client sending a byte now and then hold a connection forever (slowloris).
     Waiting for next request of a kept connection (keep-alive) only bounded by socket timeout.
+    Server header never tells the Python version.
     """
 
     request_seconds: float = REQUEST_SECONDS
+    server_version = "NeoPedal"
+    sys_version = ""
+
+    def version_string(self) -> str:
+        return self.server_version
 
     def setup(self):
         super().setup()
@@ -301,17 +350,28 @@ class BindRetry:
         return self._failed is not None
 
     def failed(self, address: tuple[str, int], error: Exception):
-        """Bind failed: report (once for this address), try again later if port may become available"""
+        """Bind failed: report (once for this address), try again later if port may become available
+
+        Previous server of the port still closing (PortClosing): tried again at once (CLOSING_RETRY_MS), not
+        reported (normal while a setting changes), nor remembered as a failure.
+        """
+        if isinstance(error, PortClosing):
+            logger.debug("%s: port %s still closing, listening tried again soon", self.name.upper(), address[1])
+            self._schedule(CLOSING_RETRY_MS)
+            return
         if self._failed != address:
             self._failed = address
             logger.error("%s: unable to listen on %s:%s (%s)", self.name.upper(), *address, error)
             app_signal.error.emit(f"{self.name}: port {address[1]} unavailable ({bind_error_text(error)}).")
         if isinstance(error, OSError):  # OverflowError (port out of range) never changes
-            if self._timer is None:
-                self._timer = QTimer()
-                self._timer.setSingleShot(True)
-                self._timer.timeout.connect(self._start)
-            self._timer.start(BIND_RETRY_MS)
+            self._schedule(BIND_RETRY_MS)
+
+    def _schedule(self, delay_ms: int):
+        if self._timer is None:
+            self._timer = QTimer()
+            self._timer.setSingleShot(True)
+            self._timer.timeout.connect(self._start)
+        self._timer.start(delay_ms)
 
     def listening(self):
         """Listening: nothing tried again, next failure reported, status shown again if listening after failure"""
@@ -349,11 +409,56 @@ def bind_error_text(error: Exception) -> str:
     return getattr(error, "strerror", None) or str(error)
 
 
-def is_allowed_host(host: str | None, port: int) -> bool:
-    """Check request Host header, only local host names are allowed (DNS rebinding protection)"""
+# Host header: name or IPv4 address, or [IPv6 address], optional port (no user info, no path)
+HOST_HEADER = re.compile(r"(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9._-]+)(?::([0-9]{1,5}))?")
+LOOPBACK_NAMES = frozenset(("localhost", "127.0.0.1"))
+
+
+def own_host_names() -> frozenset[str]:
+    """Names of this computer a LAN device can open a page with (computer name, its .local mDNS name), lower case
+
+    Never a DNS lookup (socket.gethostname only): called on the GUI thread.
+    """
+    names: set[str] = set()
+    try:
+        name = socket.gethostname().strip().lower().rstrip(".")
+    except (OSError, UnicodeError):
+        return frozenset()
+    if name:
+        short = name.split(".", 1)[0]
+        names.update((name, short, f"{short}.local"))
+    return frozenset(names)
+
+
+def is_allowed_host(host: str | None, port: int, lan: bool = False, names: Collection[str] = ()) -> bool:
+    """Check request Host header (DNS rebinding protection): a malicious domain resolved to this computer is refused
+
+    Allowed: localhost & loopback addresses; with LAN access, also any IP address (DNS rebinding needs a domain
+    name) and names of this computer (names, see own_host_names). Port, if given, must be the server port.
+
+    Args:
+        lan: server reachable from the local network.
+        names: own host names allowed with LAN access (lower case).
+    """
     if not host:
         return False
-    return host.strip().lower() in {f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost"}
+    match = HOST_HEADER.fullmatch(host.strip())
+    if match is None:
+        return False
+    name, port_text = match.group(1).lower(), match.group(2)
+    if port_text is not None and int(port_text) != port:
+        return False
+    if name.startswith("["):
+        name = name[1:-1]
+    else:
+        name = name.rstrip(".")  # "localhost." is the same name
+    if name in LOOPBACK_NAMES:
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        return lan and name in names
+    return address.is_loopback or lan
 
 
 # Local servers of the app whose pages may read the stream: setting section, port option
@@ -443,19 +548,54 @@ def read_exact(sock: socket.socket, size: int) -> bytes:
     return data
 
 
-def read_websocket_frame(sock: socket.socket) -> tuple[int, bytes]:
+class FrameSource:
+    """Client bytes of a WebSocket: those the request reader buffered past the upgrade request first (a client
+    sending its first frames without waiting for the 101 answer), then the socket"""
+
+    __slots__ = ("sock", "buffered")
+
+    def __init__(self, sock: socket.socket, buffered: bytes = b""):
+        self.sock = sock
+        self.buffered = buffered
+
+    def ready(self, timeout: float) -> bool:
+        """Frame bytes available (buffered, or readable on the socket within timeout seconds)"""
+        if self.buffered:
+            return True
+        readable, _, _ = select.select([self.sock], [], [], max(timeout, 0.0))
+        return bool(readable)
+
+    def read_exact(self, size: int) -> bytes:
+        """Read exactly size bytes, raise ConnectionError if closed"""
+        data, self.buffered = self.buffered[:size], self.buffered[size:]
+        if len(data) < size:
+            data += read_exact(self.sock, size - len(data))
+        return data
+
+
+def unmask(data: bytes, mask: bytes) -> bytes:
+    """Client payload unmasked (XOR with the 4 byte mask): whole-integer XOR, no Python loop per byte"""
+    size = len(data)
+    if not size:
+        return data
+    key = (mask * (size // 4 + 1))[:size]
+    return (int.from_bytes(data, "big") ^ int.from_bytes(key, "big")).to_bytes(size, "big")
+
+
+def read_websocket_frame(source: socket.socket | FrameSource) -> tuple[int, bytes]:
     """Read one client frame (masked), return opcode & payload"""
-    first, second = read_exact(sock, 2)
+    if not isinstance(source, FrameSource):
+        source = FrameSource(source)
+    first, second = source.read_exact(2)
     size = second & 0x7F
     if size == 126:
-        size = struct.unpack("!H", read_exact(sock, 2))[0]
+        size = struct.unpack("!H", source.read_exact(2))[0]
     elif size == 127:
-        size = struct.unpack("!Q", read_exact(sock, 8))[0]
+        size = struct.unpack("!Q", source.read_exact(8))[0]
     if size > 65536:
         raise ConnectionError("frame too large")
-    mask = read_exact(sock, 4) if second & 0x80 else bytes(4)
-    payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(read_exact(sock, size)))
-    return first & 0x0F, payload
+    mask = source.read_exact(4) if second & 0x80 else bytes(4)
+    return first & 0x0F, unmask(source.read_exact(size), mask)
 
 
 def stream_interval(path: str) -> float:
@@ -487,20 +627,27 @@ class StreamOptions:
         changes = query.get("changes", ["0"])[0].lower() in ("1", "true", "yes")
         return cls(fields, changes)
 
-    def update(self, message: bytes) -> None:
-        """Update options from client JSON message, ignore invalid message"""
+    def update(self, message: bytes) -> bool:
+        """Update options from client JSON message, ignore invalid message (also nested too deeply)
+
+        Returns:
+            True if options were updated (data sent at once).
+        """
         try:
-            data = json.loads(message)
-        except ValueError:
-            return
+            data = load_json_strict(message)
+        except ValueError:  # UnicodeDecodeError & RecursionError too
+            return False
         if not isinstance(data, dict):
-            return
+            return False
         if "fields" in data:
             fields = data["fields"]
-            self.fields = {str(name) for name in fields} if isinstance(fields, list) and fields else None
+            # Names only: str() of a nested list could recurse too deeply
+            names = {name for name in fields if isinstance(name, str)} if isinstance(fields, list) else set()
+            self.fields = names or None
         if "changes" in data:
             self.changes = bool(data["changes"])
         self.last = {}  # send full data after change
+        return True
 
     def payload(self, data: dict) -> dict | None:
         """Data to send, None if nothing changed (changes only)"""
@@ -520,14 +667,57 @@ def default_snapshot() -> dict:
     return telemetry_snapshot()
 
 
+class SnapshotCache:
+    """Telemetry snapshot (~40 API reads) & its JSON shared by every stream client within a tick (SNAPSHOT_TICK_MS):
+    N clients cost one snapshot & one encoding per tick, not N. Snapshot errors never break a stream."""
+
+    __slots__ = ("_lock", "_key", "_data", "_encoded")
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._key: tuple | None = None  # (snapshot function, tick)
+        self._data: dict = {}
+        self._encoded: bytes | None = None
+
+    def data(self, snapshot: Callable[[], dict], now: float) -> dict:
+        """Snapshot of the tick of now (monotonic seconds), shared: never modified by callers"""
+        key = (snapshot, int(now * 1000) // SNAPSHOT_TICK_MS)
+        with self._lock:
+            if key == self._key:
+                return self._data
+        try:
+            data = snapshot()
+        except Exception:  # never break stream on bad telemetry
+            snapshot_errors.log(logger, "REMOTE CONTROL: snapshot error")
+            data = {"active": False}
+        with self._lock:
+            if key != self._key:  # two clients computed the same tick at once: either one kept
+                self._key, self._data, self._encoded = key, data, None
+            return self._data
+
+    def encoded(self, data: dict) -> bytes:
+        """JSON of data, encoded once per tick if data is the shared snapshot"""
+        with self._lock:
+            if data is self._data and self._encoded is not None:
+                return self._encoded
+        encoded = json.dumps(data).encode("utf-8")
+        with self._lock:
+            if data is self._data:
+                self._encoded = encoded
+        return encoded
+
+
+snapshot_cache = SnapshotCache()
+
+
 class CommandHandler(BoundedRequestHandler):
     """Command request handler"""
 
-    server_version = "NeoPedal"
     timeout = 15  # idle client releases its thread
     stream_timeout = 5  # WebSocket send timeout, server can stop a stream to a stalled client
     commands: dict[str, Callable] = {}
     snapshot: Callable[[], dict] = staticmethod(default_snapshot)
+    token = ""  # access token required in X-NeoPedal header, "" if not required (header only needed)
 
     def check_host(self) -> bool:
         """Verify Host header, send 403 if not allowed"""
@@ -536,13 +726,28 @@ class CommandHandler(BoundedRequestHandler):
         self.send_json(403, {"error": "host not allowed"})
         return False
 
+    def header_value(self) -> str | None:
+        """Value of X-NeoPedal (or legacy) header, None if not sent"""
+        value = self.headers.get(REQUIRED_HEADER)
+        return value if value is not None else self.headers.get(LEGACY_HEADER)
+
+    def token_ok(self, value: str | None) -> bool:
+        """Header (or query) value matches access token, any value if no token required"""
+        if value is None:
+            return False
+        token = self.token
+        if not token:
+            return True
+        return hmac.compare_digest(value.strip().encode("utf-8"), token.encode("utf-8"))
+
     def do_GET(self):
         """List commands"""
         if not self.check_host():
             return
         route = urlsplit(self.path).path.rstrip("/")
         if route == "/commands":
-            self.send_json(200, {"commands": sorted(self.commands)})
+            names = sorted(self.commands)
+            self.send_json(200, {"commands": names, "token_required": [name for name in names if token_required(name)]})
         elif route == "/stream":
             self.stream()
         else:
@@ -568,13 +773,22 @@ class CommandHandler(BoundedRequestHandler):
         if not route.startswith("/command/"):
             self.send_json(404, {"error": "not found"})
             return
-        if self.headers.get(REQUIRED_HEADER) is None and self.headers.get(LEGACY_HEADER) is None:
+        value = self.header_value()
+        if value is None:
             self.send_json(403, {"error": f"missing {REQUIRED_HEADER} header"})
+            return
+        if not self.token_ok(value):
+            self.send_json(403, {"error": f"invalid access token in {REQUIRED_HEADER} header"})
             return
         name = unquote(route[len("/command/"):]).strip("/")
         command = self.commands.get(name)
         if command is None:
             self.send_json(404, {"error": f"unknown command: {name}"})
+            return
+        if not self.token and token_required(name):  # app-wide effect: never for any local process
+            logger.warning("REMOTE CONTROL: %s refused, access token required (Remote control settings)", name)
+            self.send_json(403, {"error": "token required", "command": name,
+                                 "detail": "enable the access token in Remote control settings to run this command"})
             return
         app_signal.hotkey.emit(command)  # run in main (GUI) thread
         logger.info("REMOTE CONTROL: %s", name)
@@ -589,6 +803,13 @@ class CommandHandler(BoundedRequestHandler):
         if not is_allowed_origin(self.headers.get("Origin")):
             self.send_json(403, {"error": "origin not allowed"})
             return
+        if self.token:  # header, or query of a browser page (WebSocket of browsers sends no custom header)
+            value = self.header_value()
+            if value is None:
+                value = parse_qs(urlsplit(self.path).query).get("token", [None])[0]
+            if not self.token_ok(value):
+                self.send_json(403, {"error": "invalid access token"})
+                return
         self.protocol_version = "HTTP/1.1"  # WebSocket clients require 1.1 status line
         self.send_response(101)
         self.send_header("Upgrade", "websocket")
@@ -600,40 +821,75 @@ class CommandHandler(BoundedRequestHandler):
         interval = stream_interval(self.path)
         options = StreamOptions.from_path(self.path)
         sock = self.connection
+        source = FrameSource(sock, self.buffered_input())  # frames sent before the 101 answer never lost
         sock.settimeout(self.stream_timeout)  # client not reading: sendall times out (OSError), never blocks
         # Event of this server: a server started again (reload, port changed) never revives an old stream
         stopping: threading.Event = getattr(self.server, "stopping", None) or threading.Event()
         logger.info("REMOTE CONTROL: stream client connected (%sms)", round(interval * 1000))
         last_sent = b""  # full data stream: same message held, sent again every STREAM_KEEPALIVE (game closed)
         sent_at = 0.0
+        snapshot = self.snapshot
         try:
+            # Frames sent with the upgrade request (options message): applied before the first data
+            if self.read_client_frames(source, options, monotonic()) == WS_OP_CLOSE:
+                return
             while not stopping.is_set():
-                try:
-                    data = self.snapshot()
-                except Exception:  # never break stream on bad telemetry
-                    snapshot_errors.log(logger, "REMOTE CONTROL: snapshot error")
-                    data = {"active": False}
+                now = monotonic()
+                data = snapshot_cache.data(snapshot, now)  # shared by every client of this tick
                 message = options.payload(data)
                 if message is not None:
-                    encoded = json.dumps(message).encode("utf-8")
-                    now = monotonic()
+                    encoded = snapshot_cache.encoded(message) if message is data else json.dumps(message).encode()
                     if options.changes or encoded != last_sent or now - sent_at >= STREAM_KEEPALIVE:
                         sock.sendall(websocket_frame(encoded))
                         last_sent, sent_at = encoded, now
-                readable, _, _ = select.select([sock], [], [], interval)
-                if readable:
-                    opcode, payload = read_websocket_frame(sock)
-                    if opcode == WS_OP_TEXT:
-                        options.update(payload)
-                        last_sent = b""  # data sent at once after an options message
-                    elif opcode == WS_OP_CLOSE:
-                        sock.sendall(websocket_frame(payload[:2], WS_OP_CLOSE))
-                        break
-                    if opcode == WS_OP_PING:
-                        sock.sendall(websocket_frame(payload, WS_OP_PONG))
+                # Client frames read until the next send is due: a chatty client never makes the loop spin
+                received = self.read_client_frames(source, options, now + interval)
+                if received == WS_OP_CLOSE:
+                    return
+                if received == WS_OP_TEXT:
+                    last_sent = b""  # data sent at once after an options message
         except (OSError, ValueError):
             pass  # client gone (ConnectionError is an OSError)
-        logger.info("REMOTE CONTROL: stream client disconnected")
+        finally:
+            logger.info("REMOTE CONTROL: stream client disconnected")
+
+    def read_client_frames(self, source: FrameSource, options: StreamOptions, until: float) -> int | None:
+        """Client frames read & answered until monotonic time until (pings answered, options applied)
+
+        Returns:
+            WS_OP_CLOSE once the client closed (close answered), WS_OP_TEXT once options changed (read stops,
+            data is sent at once), None when until passed.
+        """
+        while True:
+            remaining = until - monotonic()
+            if (remaining <= 0 and not source.buffered) or not source.ready(remaining):
+                return None  # until passed (buffered bytes of frames already received are read anyway)
+            opcode, payload = read_websocket_frame(source)
+            if opcode == WS_OP_TEXT:
+                if options.update(payload):
+                    return WS_OP_TEXT
+            elif opcode == WS_OP_CLOSE:
+                self.connection.sendall(websocket_frame(payload[:2], WS_OP_CLOSE))
+                return WS_OP_CLOSE
+            elif opcode == WS_OP_PING:
+                self.connection.sendall(websocket_frame(payload, WS_OP_PONG))
+        return None
+
+    def buffered_input(self) -> bytes:
+        """Bytes the request reader buffered past the request (frames of a client not waiting for the 101 answer):
+        read without waiting (socket made non blocking for the check), reads of the stream never bounded by the
+        request deadline"""
+        self._reader.deadline = None
+        sock = self.connection
+        timeout = sock.gettimeout()
+        sock.settimeout(0.0)
+        try:
+            buffered = self.rfile.peek(1)  # type: ignore[attr-defined]  # whole buffer, b"" if empty (no wait)
+            return self.rfile.read(len(buffered)) if buffered else b""
+        except (OSError, ValueError):
+            return b""
+        finally:
+            sock.settimeout(timeout)
 
     def send_json(self, status: int, data: dict):
         """Send json response"""
@@ -641,13 +897,15 @@ class CommandHandler(BoundedRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
     def log_message(self, format, *args):
         """Silence default stderr access log"""
         if logger.isEnabledFor(logging.DEBUG):  # every request: no formatting while not logged
-            logger.debug("REMOTE CONTROL: %s", format % args)
+            logger.debug("REMOTE CONTROL: %s", redact_secret_query(format % args))  # stream ?token=
 
 
 class CommandServer:
@@ -665,11 +923,31 @@ class CommandServer:
     def running(self) -> bool:
         return self._server is not None
 
+    @staticmethod
+    def access_token() -> str:
+        """Access token required in X-NeoPedal header, "" if not required (enable_access_token off)
+
+        Generated & saved when missing or shorter than MIN_TOKEN_LENGTH.
+        """
+        setting = cfg.user.config["remote_control"]
+        if not setting.get("enable_access_token", False):
+            return ""
+        token = str(setting.get("access_token", "")).strip()
+        if len(token) < MIN_TOKEN_LENGTH:
+            if token:
+                logger.warning("REMOTE CONTROL: access token shorter than %s characters replaced by a new one",
+                               MIN_TOKEN_LENGTH)
+            token = secrets.token_urlsafe(TOKEN_BYTES)
+            setting["access_token"] = token
+            cfg.save(config_type=ConfigType.CONFIG)
+        return token
+
     def enable(self):
         """Start server if enabled in setting, stop it if not (server kept if port unchanged)
 
         Server kept across reload: a server stopped then started again can find its port still held
         by connections it accepted (Windows), and connected stream clients would be dropped.
+        Access token applied to the running server (streams already connected kept).
         """
         setting = cfg.user.config["remote_control"]
         if not setting["enable_remote_control"]:
@@ -679,6 +957,7 @@ class CommandServer:
         if self._server is not None and self._port != port:
             self.disable()
         CommandHandler.commands = available_commands()
+        CommandHandler.token = self.access_token()
         if self._server is not None:
             return
         try:

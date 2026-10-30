@@ -165,13 +165,35 @@ def session_info(result: SessionResult, player_names: tuple[str, ...] = ()) -> S
         player._replace(laps=(), swaps=()) if player is not None else None, player_names)
 
 
+class CarResult(NamedTuple):
+    """Car of a race with laps (results file), for the race histories of the drivers (Broadcast Director):
+    drivers of the car (entry driver & swaps), class, class position, finished"""
+
+    drivers: tuple[str, ...]
+    car_class: str
+    class_position: int
+    finished: bool
+
+
+def race_cars(result: SessionResult) -> tuple[CarResult, ...] | None:
+    """Cars of a race session with laps completed, None for other sessions (no laps apart: tiny)"""
+    if result.kind != "Race" or result.most_laps <= 0:
+        return None
+    return tuple(
+        CarResult(tuple(dict.fromkeys(name for name in (entry.name, *(swap.driver for swap in entry.swaps)) if name)),
+                  entry.car_class, entry.class_position, entry.status == rf.FINISHED or entry.finish_time > 0)
+        for entry in result.entries)
+
+
 class ParsedFile(NamedTuple):
-    """Results file read: list info (None if not a results file) & player session (None if player not in it)"""
+    """Results file read: list info (None if not a results file), player session (None if player not in it) &
+    cars of a race (None if not a race) for the race histories of the drivers"""
 
     stamp: FileStamp
     names: tuple[str, ...]  # player names the file was read with
     info: SessionInfo | None
     summary: ResultSummary | None
+    cars: tuple[CarResult, ...] | None = None
 
 
 class ScanResult(NamedTuple):
@@ -305,7 +327,8 @@ def parse_file(path: str, stamp: FileStamp, names: tuple[str, ...]
     now: locked or being written, read again next time)"""
     try:
         result = rf.read_results(path, names, keep=False)  # bulk scan: page keeps the newest itself
-        parsed = ParsedFile(stamp, names, session_info(result, names), summarize(result, stamp.modified, names))
+        parsed = ParsedFile(stamp, names, session_info(result, names), summarize(result, stamp.modified, names),
+                            race_cars(result))
     except OSError as error:  # being written or locked
         logger.debug("RESULTS INDEX: %s not read: %s", path, error)
         return ParsedFile(stamp, names, None, None), None, False
@@ -415,6 +438,12 @@ def forget_summaries() -> None:
     with _files_lock:
         _files.clear()
         _generation += 1
+
+
+def kept_file(path: str) -> ParsedFile | None:
+    """Results file as the last scan parsed it (other readers reuse it instead of parsing again), None if not kept"""
+    with _files_lock:
+        return _files.get(path)
 
 
 def kept_files() -> int:

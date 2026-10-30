@@ -77,7 +77,7 @@ def read_profile(game_root: str) -> PlayerProfile | None:
     try:
         with open(path, encoding="utf-8", errors="replace") as file:
             settings = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return None
     if not isinstance(settings, dict):
         return None

@@ -123,7 +123,7 @@ class Realtime(WindMixin, Overlay):
         area_size = max(int(self.wcfg["display_size"] / 2) * 2, 10)
         area_margin = min(max(self.wcfg["display_margin"], 0), int(area_size / 4))
         self.area_center = area_center = area_size * 0.5
-        self.decimals = max(int(self.wcfg["decimal_places"]), 0)
+        self.decimals = min(max(int(self.wcfg["decimal_places"]), 0), 2)  # same limit as modern design
         self.setup_wind()
 
         # Config units

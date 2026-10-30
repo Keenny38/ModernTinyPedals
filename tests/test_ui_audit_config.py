@@ -19,7 +19,7 @@ from neopedal.ui.quick import qml_path
 
 ZONE_QML = (
     "Settings", "SettingRow", "OptionFinder", "OptionResultRow", "Presets", "PresetRow", "PresetDetails", "Modules",
-    "ModuleCard", "SetupWizard", "SetupBackdrop", "SetupCard", "SetupDiff", "SetupGame", "SetupHeading", "SetupLook",
+    "ModuleCard", "SetupWizard", "SetupBackdrop", "SetupCard", "SetupGame", "SetupHeading", "SetupLook",
     "SetupOverlays", "SetupReady", "SetupStep", "SetupUnits", "SetupWelcome",
 )
 
@@ -82,13 +82,15 @@ def test_zone_pages_use_tokens_and_components(name):
 def test_shared_components_used():
     assert "TpChip {" in qml_text("OptionFinder") and "OverlayChip" not in qml_text("OptionFinder")
     assert "TpNotice {" in qml_text("Modules") and "component Notice" not in qml_text("Modules")
-    assert qml_text("PresetDetails").count("TpTag {") == 2
+    assert qml_text("PresetDetails").count("TpChip {") == 2 and "TpTag" not in qml_text("PresetDetails")  # S5: tags are chips
     for name in ("OptionResultRow", "PresetRow", "ModuleCard"):
         assert "FocusRing { target: surface" in qml_text(name)
         assert "TpIconTile {" in qml_text(name)
-    assert "TpDialog {" in qml_text("SetupDiff") and "showCancel: false" in qml_text("SetupDiff")
+    assert "TpDialog {" in qml_text("CarSetupDiff") and "showCancel: false" in qml_text("CarSetupDiff")
     assert "dismissOnOutside: false" in qml_text("Presets")  # typed preset name never lost by a click beside
-    assert "showRange: true" in qml_text("SettingRow")  # allowed values of numbers told
+    # Settings & Overlay Options rows share one editor: allowed values of numbers told
+    assert "showRange: true" in qml_text("TpOptionEditor")
+    assert "TpOptionEditor {" in qml_text("SettingRow") and "TpOptionEditor {" in qml_text("OverlayOptionRow")
     for name in ("OptionFinder", "Presets", "Modules"):
         assert "search.routeTyped(event)" in qml_text(name) and "charCodeAt" not in qml_text(name)
 

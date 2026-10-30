@@ -20,15 +20,17 @@
 Modules page: data modules as cards (what each computes, state, overlays depending on it), search & filter
 
 Qt Quick page (qml/Modules.qml), state & actions in quick/module_backend.py. The QML page is created
-when first shown. sort_key lives here (imported by many pages): this module imports nothing heavy.
+when first shown. sort_key & highlight live here (imported by many pages): this module imports nothing heavy.
 """
 
 from __future__ import annotations
 
+import html
+import re
 import unicodedata
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import QUrl, Slot
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
@@ -41,6 +43,27 @@ def sort_key(text: str) -> str:
     """Alphabetical sort key in any language: ignore case & accents (é = e)"""
     decomposed = unicodedata.normalize("NFKD", text.casefold())
     return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def highlight(text: str, words: tuple[str, ...]) -> str:
+    """Label as rich text, searched words in bold (case & accent folded match): option searches of every page"""
+    folded = sort_key(text)
+    if len(folded) != len(text) or not words:  # folding changed length: no safe mapping
+        return html.escape(text)
+    marks = [False] * len(text)
+    for word in words:
+        for match in re.finditer(re.escape(word), folded):
+            for index in range(match.start(), match.end()):
+                marks[index] = True
+    parts, bold = [], False
+    for char, mark in zip(text, marks):
+        if mark != bold:
+            parts.append("<b>" if mark else "</b>")
+            bold = mark
+        parts.append(html.escape(char))
+    if bold:
+        parts.append("</b>")
+    return "".join(parts)
 
 
 class ModuleList(QWidget):
@@ -59,7 +82,7 @@ class ModuleList(QWidget):
         self.module_control = module_control
         self.backend = ModuleBackend(
             self, module_control, widget_control or wctrl, self.open_config, self.confirm, self.show_log,
-            self.reset_data,
+            self.reset_data, self.ask,
         )
         self.view: QQuickWidget | None = None  # see ensure_view
         self._creating = False
@@ -93,42 +116,42 @@ class ModuleList(QWidget):
         self.backend.page_hidden()  # app refresh signals no longer read every module & overlay while hidden
         super().hideEvent(event)
 
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        self.release_page()
+
+    def release_page(self):
+        """Page closed or released (see LazyPage.release): QML gone before the backend it binds to, then the
+        backend's jobs, timers & deferred work stopped"""
+        if self.view is not None:
+            view, self.view = self.view, None
+            view.setSource(QUrl())
+            view.deleteLater()
+        self.backend.release()
+
     @Slot(bool)  # type: ignore[operator]
     def refresh(self, *_):
         """Setting, preset or module state changed elsewhere (hotkey, tray, other page): once shown if hidden"""
         self.backend.settings_changed()
 
     def open_config(self, name: str):
-        from functools import partial
+        """Module options: Settings page at the module category (saving restarts the module)"""
+        from .app_settings import open_app_settings
 
-        from ..const_file import ConfigType
-        from ..setting import cfg
-        from .config import UserConfig
-
-        _dialog = UserConfig(
-            parent=self,
-            key_name=name,
-            preset_name=cfg.filename.setting,
-            config_type=ConfigType.MODULE,
-            user_setting=cfg.user.setting,
-            default_setting=cfg.default.setting,
-            reload_func=partial(self.reload_module, name),
-        )
-        _dialog.open()
-
-    def reload_module(self, name: str):
-        """Config saved: module restarted, its card updated (page may be gone after language change)"""
-        import shiboken6
-
-        self.module_control.reload(name)
-        if shiboken6.isValid(self):
-            self.backend.refresh()
+        open_app_settings(self, name)
 
     def confirm(self, text: str) -> bool:
         from ..i18n import tr
         from ._common import confirm_action
 
         return confirm_action(self, tr("Confirm"), text, tr("Confirm"))
+
+    def ask(self, text: str, on_result):
+        """Confirmation over the page (QML dialog of its TpDialogHost), answer by callback"""
+        from ..i18n import tr
+        from .quick.dialogs import confirm
+
+        confirm(self, tr("Confirm"), text, tr("Confirm"), on_result)
 
     def show_log(self):
         from .log_info import LogInfo

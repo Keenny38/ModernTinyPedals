@@ -1,0 +1,5 @@
+# Release manifest signing (tools/sign_release.py, release job of the Build and Release workflow, on Linux),
+# held at the runtime version of requirements-lock.txt. Hash-pinned lock (installed with --require-hashes),
+# regenerate after changing this file or requirements-lock.txt:
+#   uv pip compile --generate-hashes --python-version 3.13 --python-platform linux -c requirements-lock.txt requirements-sign.txt -o requirements-sign-lock.txt
+cryptography

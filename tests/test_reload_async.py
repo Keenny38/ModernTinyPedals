@@ -148,6 +148,8 @@ def reloader(ui_env, monkeypatch):
     monkeypatch.setattr(type(cfg), "load_user", lambda self: calls.append("cfg.load_user"))
     monkeypatch.setattr(loader, "_reload", loader.ReloadState())
     monkeypatch.setattr(loader, "_gc_frozen", False)
+    # Pending writers of pages opened by earlier tests (Director followed cars: cfg.save) left out: reload steps only
+    monkeypatch.setattr(loader, "_pending_writers", [])
     yield SimpleNamespace(calls=calls, mctrl=controls["mctrl"])
     loader.cancel_reload()
 

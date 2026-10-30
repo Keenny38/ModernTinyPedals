@@ -367,7 +367,7 @@ def test_update_download_is_a_job(updates, monkeypatch, messages):  # noqa: F811
         progress(5, 10)
         return "Setup.exe"
 
-    def installed(path, error):
+    def installed(path, error, signer=None):
         seen["installed"] = (threading.current_thread(), path, error)
         updates.busy = False
 

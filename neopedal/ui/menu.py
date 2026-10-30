@@ -20,17 +20,19 @@
 Menu
 """
 
+import html
 import os
 import sys
+from contextlib import suppress
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QActionGroup, QDesktopServices, QKeySequence
+from PySide6.QtGui import QActionGroup, QDesktopServices, QFontMetrics, QKeySequence
 from PySide6.QtWidgets import QMenu, QMessageBox
 
 from .. import app_signal, loader
 from ..api_control import api
 from ..const_app import PLATFORM, URL_FAQ, URL_USER_GUIDE
-from ..const_file import ConfigType
+from ..const_file import ConfigType, FileExt
 from ..i18n import tr, trm
 from ..i18n.options import option_label
 from ..module_control import mctrl
@@ -38,7 +40,10 @@ from ..overlay_control import octrl
 from ..setting import cfg
 from ..userfile.tls_cert import fingerprint as certificate_fingerprint
 from .toast import show_toast
-from .tools_view import TOOL_SECTIONS, open_tool
+from .tools_view import LISTED_TOOL_SECTIONS, open_tool
+
+TRAY_PRESET_CHARS = 48  # loaded preset name in tray menu: whole, cut in the middle past this many characters
+TRAY_PRESETS = 30  # presets listed in tray menu (newest first)
 
 
 # Define menu command
@@ -73,25 +78,11 @@ def open_config_application(parent, section: str = "application"):
 
 
 def open_preset_config(parent, name: str):
-    """Settings kept in the loaded preset: "units", "font" (global font override) or "api" (API options)"""
-    from .config import FontConfig, UserConfig  # dialogs imported when opened (startup time & memory)
+    """Settings kept in the loaded preset: "units", "font" (global font override), "api" (API options) or
+    another section (module...): category of the Settings page"""
+    from .app_settings import open_app_settings
 
-    if name == "font":
-        FontConfig(parent=parent, user_setting=cfg.user.setting, reload_func=menu_reload_only).open()
-        return
-    if name == "api":
-        key_name, reload_func = cfg.api_key, menu_restart_api
-    else:
-        key_name, reload_func = "units", menu_reload_only
-    UserConfig(
-        parent=parent,
-        key_name=key_name,
-        preset_name=cfg.filename.setting,
-        config_type=ConfigType.SETTING,
-        user_setting=cfg.user.setting,
-        default_setting=cfg.default.setting,
-        reload_func=reload_func,
-    ).open()
+    return open_app_settings(parent, name)
 
 
 class OverlayMenu(QMenu):
@@ -105,11 +96,15 @@ class OverlayMenu(QMenu):
             loaded_preset_font.setBold(True)
             self.loaded_preset = self.addAction("")
             self.loaded_preset.setFont(loaded_preset_font)
+            self.loaded_preset.setToolTip(tr("Open Presets page"))
             self.loaded_preset.triggered.connect(self.open_preset_tab)
             self.aboutToShow.connect(self.refresh_preset_name)
+            # Presets: switch preset from the tray (listed when shown)
+            self.menu_presets = self.addMenu(tr("Presets"))
+            self.menu_presets.aboutToShow.connect(self.refresh_presets)
             self.addSeparator()
 
-            app_config = self.addAction(tr("Config"))
+            app_config = self.addAction(tr("Open NeoPedal"))
             app_config.triggered.connect(parent.show_app)
             self.addSeparator()
 
@@ -159,11 +154,28 @@ class OverlayMenu(QMenu):
         self.overlay_vr.setChecked(cfg.overlay["vr_compatibility"])
 
     def refresh_preset_name(self):
-        """Refresh preset name"""
-        loaded_preset = cfg.filename.setting[:-5]
-        if len(loaded_preset) > 16:
-            loaded_preset = f"{loaded_preset[:16]}..."
-        self.loaded_preset.setText(loaded_preset)
+        """Loaded preset name, whole (cut in the middle only when very long)"""
+        loaded_preset = cfg.filename.setting.removesuffix(FileExt.JSON)
+        metrics = QFontMetrics(self.loaded_preset.font())
+        width = metrics.averageCharWidth() * TRAY_PRESET_CHARS
+        self.loaded_preset.setText(metrics.elidedText(loaded_preset, Qt.TextElideMode.ElideMiddle, width))
+
+    def refresh_presets(self):
+        """Presets submenu: every preset (newest first), loaded one checked, choosing one loads it"""
+        from .command_palette import load_preset, preset_names
+
+        menu = self.menu_presets
+        menu.clear()
+        loaded = cfg.filename.setting.removesuffix(FileExt.JSON)
+        group = QActionGroup(menu)
+        for name in preset_names()[:TRAY_PRESETS]:
+            action = menu.addAction(name.replace("&", "&&"))
+            action.setCheckable(True)
+            action.setChecked(name == loaded)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, preset=name: load_preset(preset))
+        if menu.isEmpty():
+            menu.addAction(tr("No preset found")).setEnabled(False)
 
     def open_preset_tab(self):
         """Open preset tab"""
@@ -320,11 +332,12 @@ class ConfigMenu(QMenu):
         super().__init__(title, parent)
         self._parent = parent
 
-        config_page = self.addAction(tr("All Settings"))
+        config_page = self.addAction(tr("Open Settings"))
         config_page.setShortcut(QKeySequence("Ctrl+,"))
         config_page.triggered.connect(lambda: open_config_application(self._parent, ""))
-        find_option = self.addAction(tr("Find Option..."))
-        find_option.setShortcut(QKeySequence.StandardKey.Find)
+        # Ctrl+F finds in the shown page, Ctrl+Shift+F any option
+        find_option = self.addAction(tr("Find Option…"))
+        find_option.setShortcut(QKeySequence("Ctrl+Shift+F"))
         find_option.triggered.connect(self.open_option_finder)
         self.addSeparator()
 
@@ -353,7 +366,7 @@ class ConfigMenu(QMenu):
         config_web = self.addAction(tr("Web Dashboard"))
         config_web.triggered.connect(self.open_config_web_dashboard)
 
-        show_web = self.addAction(tr("Web Dashboard Address..."))
+        show_web = self.addAction(tr("Web Dashboard Address…"))
         show_web.triggered.connect(self.show_web_dashboard_address)
 
         config_vr = self.addAction(tr("VR Overlay (Experimental)"))
@@ -369,7 +382,7 @@ class ConfigMenu(QMenu):
             _folder.triggered.connect(lambda checked=True, p=path_name: self.open_folder(checked, p))
 
         # Global settings of another copy of the app (older version, other computer): applied after restart
-        import_settings = self.addAction(tr("Import Settings..."))
+        import_settings = self.addAction(tr("Import Settings…"))
         import_settings.triggered.connect(self.import_settings)
 
     def import_settings(self):
@@ -382,7 +395,9 @@ class ConfigMenu(QMenu):
         """Open folder in file manager"""
         filepath = getattr(cfg.path, path_name)
         error = False
-        if PLATFORM.WINDOWS:
+        if not os.path.isdir(filepath):  # missing, or a file (path set to a program: never run)
+            error = True
+        elif PLATFORM.WINDOWS:
             try:
                 filepath = filepath.replace("/", "\\")
                 if sys.platform == "win32":  # platform check also read by type checker
@@ -395,7 +410,7 @@ class ConfigMenu(QMenu):
             QMessageBox.warning(
                 self._parent,
                 tr("Error"),
-                trm(f"Cannot open folder:<br><b>{filepath}</b>"),
+                trm(f"Cannot open folder:<br><b>{html.escape(filepath)}</b>"),
             )
 
     def open_option_finder(self):
@@ -430,27 +445,38 @@ class ConfigMenu(QMenu):
         if not cfg.user.config["web_dashboard"]["enable_web_dashboard"]:
             QMessageBox.information(
                 self._parent, tr("Web Dashboard"),
-                tr("Web dashboard is disabled. Enable it from Config menu, Web Dashboard."),
+                tr("Web dashboard is disabled. Turn it on in Settings > Web Dashboard."),
             )
             return
         webdashboard = loader.webdashboard  # imported once used (http.server, ssl)
-        links = "<br>".join(f"<a href='{url}'>{url}</a>" for url in webdashboard.urls(wait=True))
         message = QMessageBox(self._parent)
         message.setWindowTitle(tr("Web Dashboard"))
         message.setTextFormat(Qt.TextFormat.RichText)
         message.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        text = trm(
-            f"Open one of these addresses in a browser:<br><br>{links}<br><br>"
-            f"Access code: <b>{webdashboard.access_code()}</b>"
-        )
         fingerprint = certificate_fingerprint(cfg.path.config) if webdashboard.use_https() else ""
-        if fingerprint:
-            text += "<br><br>" + trm(
-                "The browser warns once about this self-signed certificate. "
-                f"Accept it only if its SHA-256 fingerprint is:<br><code>{fingerprint}</code>"
+
+        def show_addresses():
+            # Addresses known now (never waits for the host name lookup, up to a second on a slow DNS or VPN):
+            # the dialog is updated once the lookup running in background finds other ones (app_signal.addresses)
+            links = "<br>".join(f"<a href='{url}'>{url}</a>" for url in webdashboard.urls(wait=False))
+            text = trm(
+                f"Open one of these addresses in a browser:<br><br>{links}<br><br>"
+                f"Access code: <b>{webdashboard.access_code()}</b>"
             )
-        message.setText(text)
-        message.exec()
+            if fingerprint:
+                text += "<br><br>" + trm(
+                    "The browser warns once about this self-signed certificate. "
+                    f"Accept it only if its SHA-256 fingerprint is:<br><code>{fingerprint}</code>"
+                )
+            message.setText(text)
+
+        show_addresses()
+        app_signal.addresses.connect(show_addresses)
+        try:
+            message.exec()
+        finally:
+            with suppress(RuntimeError, TypeError):
+                app_signal.addresses.disconnect(show_addresses)
 
     def open_config_overlay_style(self):
         """Config global overlay style"""
@@ -575,17 +601,38 @@ class APIMenu(QMenu):
 
 
 class ToolsMenu(QMenu):
-    """Tools menu, same entries as tools page"""
+    """Tools menu: Pages submenu (pages left out of the navigation bar), then same entries as tools page"""
 
     def __init__(self, title, parent):
         super().__init__(title, parent)
         self._parent = parent
-        for index, (_, tools) in enumerate(TOOL_SECTIONS):
-            if index:
-                self.addSeparator()
+        self.menu_pages = self.addMenu(tr("Pages"))
+        self.menu_pages.aboutToShow.connect(self.refresh_pages)
+        self.refresh_pages()
+        for _, tools in LISTED_TOOL_SECTIONS:
+            self.addSeparator()
             for label, _, dialog_path in tools:
                 action = self.addAction(tr(label))
                 action.triggered.connect(lambda _=False, path=dialog_path: open_tool(path, self._parent))
+
+    def refresh_pages(self):
+        """Pages not in the navigation bar (reachable from here, the More menu & the command palette)"""
+        from .nav_rail import NAV_PAGES, current_rail_items, page_name
+
+        menu = self.menu_pages
+        menu.clear()
+        shown = set(current_rail_items())
+        for index, (key, *_) in enumerate(NAV_PAGES):
+            if key not in shown:
+                menu.addAction(page_name(index)).triggered.connect(lambda _=False, page=index: self.select_page(page))
+        if menu.isEmpty():
+            menu.addAction(tr("Every page is in the navigation bar")).setEnabled(False)
+
+    def select_page(self, index: int):
+        view = self._parent.centralWidget()
+        select = getattr(view, "select_page", None)
+        if callable(select):
+            select(index)
 
 
 class WindowMenu(QMenu):
@@ -668,17 +715,22 @@ class HelpMenu(QMenu):
         app_guide = self.addAction(tr("User Guide"))
         app_guide.triggered.connect(self.open_user_guide)
 
+        app_page_help = self.addAction(tr("Help for This Page"))
+        app_page_help.triggered.connect(self.open_page_help)
+
         app_faq = self.addAction(tr("Frequently Asked Questions"))
         app_faq.triggered.connect(self.open_faq)
+
+        # Shortcut shown only (window shortcut runs it: one registered sequence, never ambiguous)
+        app_keys = self.addAction(f"{tr('Keyboard Shortcuts')}\tCtrl+/")
+        app_keys.triggered.connect(self.show_shortcuts)
+        self.addSeparator()
 
         app_log = self.addAction(tr("Show Log"))
         app_log.triggered.connect(self.show_log)
 
-        app_report = self.addAction(tr("Create Bug Report..."))
+        app_report = self.addAction(tr("Create Bug Report…"))
         app_report.triggered.connect(self.show_bug_report)
-
-        app_perf = self.addAction(tr("Widget Performance"))
-        app_perf.triggered.connect(self.show_performance)
 
         app_wizard = self.addAction(tr("Setup Wizard"))
         app_wizard.triggered.connect(self.show_setup_wizard)
@@ -686,6 +738,9 @@ class HelpMenu(QMenu):
 
         app_update = self.addAction(tr("Check for Updates"))
         app_update.triggered.connect(self.show_update)
+
+        app_notes = self.addAction(tr("What's New"))
+        app_notes.triggered.connect(self.show_whats_new)
         self.addSeparator()
 
         app_about = self.addAction(tr("About"))
@@ -705,12 +760,26 @@ class HelpMenu(QMenu):
         _dialog = SetupWizard(self._parent)
         _dialog.open()
 
-    def show_performance(self):
-        """Show widget performance"""
-        from .perf_view import PerformanceView
+    def show_shortcuts(self):
+        """Keyboard shortcuts sheet"""
+        open_shortcuts = getattr(self._parent, "open_shortcuts", None)
+        if callable(open_shortcuts):
+            open_shortcuts()
 
-        _dialog = PerformanceView(self._parent)
-        _dialog.show()
+    def show_whats_new(self):
+        """What's new in running version"""
+        from .release_notes import running_version_dialog
+
+        running_version_dialog(self._parent).open()
+
+    def open_page_help(self):
+        """User guide page of the shown page"""
+        view = self._parent.centralWidget()
+        open_help = getattr(view, "open_page_help", None)
+        if callable(open_help):
+            open_help()
+        else:
+            self.open_user_guide()
 
     def show_bug_report(self):
         """Create bug report"""

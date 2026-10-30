@@ -144,7 +144,8 @@ def test_untrusted_plugin_not_executed(tmp_path):
 def test_code_change_revokes_trust(tmp_path, trust_file):
     make_plugin(tmp_path, "gauge", "Realtime = object")
     assert is_trusted("plugin_gauge", str(tmp_path))
-    assert json.loads(trust_file.read_text(encoding="utf-8"))["plugin_gauge"] == plugin_digest(str(tmp_path / "gauge"))
+    stored = json.loads(trust_file.read_text(encoding="utf-8"))["plugin_gauge"]
+    assert stored == plugin_loader.DIGEST_PREFIX + plugin_digest(str(tmp_path / "gauge"))
     (tmp_path / "gauge" / "helper.py").write_text("x = 1", encoding="utf-8")  # extra module counts too
     assert not is_trusted("plugin_gauge", str(tmp_path))
     trust_plugin("plugin_gauge", str(tmp_path))
@@ -158,8 +159,10 @@ def test_digest_ignores_line_endings_and_cache(tmp_path):
     (tmp_path / "crlf" / "widget.py").write_bytes(b"a = 1\r\nRealtime = object\r\n")
     (tmp_path / "crlf" / "__pycache__").mkdir()
     (tmp_path / "crlf" / "__pycache__" / "junk.py").write_text("x", encoding="utf-8")
-    (tmp_path / "crlf" / "setting.json").write_text("{}", encoding="utf-8")  # not code
+    (tmp_path / "crlf" / "widget.pyc").write_bytes(b"compiled")  # removed before loading, never run
     assert plugin_digest(str(tmp_path / "crlf")) == digest
+    (tmp_path / "crlf" / "setting.json").write_text("{}", encoding="utf-8")  # every file counts
+    assert plugin_digest(str(tmp_path / "crlf")) != digest
 
 
 def test_invalid_trust_file(tmp_path, trust_file):

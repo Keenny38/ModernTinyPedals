@@ -43,7 +43,7 @@ class Realtime(QuadMixin, ModernOverlay):
     wcfg: WheelCamberConfig
 
     options = (
-        "font_size", "decimal_places_camber", "camber_smoothing_samples", "positive_camber_threshold",
+        "font_size", "show_caption", "decimal_places_camber", "camber_smoothing_samples", "positive_camber_threshold",
         "show_camber_difference", "decimal_places_camber_difference", "camber_difference_smoothing_samples",
     )
 
@@ -77,11 +77,12 @@ class Realtime(QuadMixin, ModernOverlay):
         tiles = []
         for index, camber in enumerate(wheels.camberAngle):
             self.cambers[index] = self.ema(self.cambers[index], camber)
-            positive = self.cambers[index] >= self.wcfg["positive_camber_threshold"]
-            tiles.append(Tile((f"{self.cambers[index]:+.{self.dec}f}",), colors=(theme.warning if positive else None,)))
+            shown = round(self.cambers[index], self.dec)  # color from shown value, as classic design
+            positive = shown >= self.wcfg["positive_camber_threshold"]
+            tiles.append(Tile((f"{shown:+z.{self.dec}f}",), colors=(theme.warning if positive else None,)))
         diffs: tuple[str, ...] = ("", "")
         if self.show_diff:
             self.diffs[0] = self.ema_diff(self.diffs[0], wheels.frontCamberAngleDifference)
             self.diffs[1] = self.ema_diff(self.diffs[1], wheels.rearCamberAngleDifference)
-            diffs = tuple(f"{value:+.{self.dec_diff}f}" for value in self.diffs)
+            diffs = tuple(f"{value:+z.{self.dec_diff}f}" for value in self.diffs)
         self.refresh((tuple(tiles), diffs))

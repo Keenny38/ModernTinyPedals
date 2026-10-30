@@ -33,8 +33,9 @@ import weakref
 from collections.abc import Mapping
 
 from PySide6.QtCore import Property, QEvent, QObject, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication, QPalette, QSurfaceFormat
-from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlIncubationController
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QGuiApplication, QPalette, QSurfaceFormat
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy
+from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlIncubationController, QQmlNetworkAccessManagerFactory
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
@@ -42,8 +43,8 @@ from shiboken6 import isValid
 from ...i18n import tr, trm
 from ...regex_pattern import COMMON_TYRE_COMPOUNDS
 from ...template.setting_compounds import COMPOUND_COLORS, COMPOUND_SYMBOLS, compound_letter
-from ...template.setting_status_colors import STATUS_COLORS
-from .. import UIScaler, colorblind_state, set_colorblind  # noqa: F401  # set_colorblind: tests & pages
+from ...template.setting_status_colors import COLORBLIND_STATUS_COLORS, STATUS_COLORS
+from .. import UIScaler, colorblind_state, legacy_style, set_colorblind  # noqa: F401  # set_colorblind: tests & pages
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,8 @@ QML_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # and one folder per zone (home, config, overlays, director, telemetry, analysis)
 QML_COMPONENTS = os.path.join(QML_FOLDER, "components")
 _QML_INDEX: dict[str, dict[str, str]] = {}
-QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "int": "int", "QString": "string"}  # Theme property types
+QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "int": "int", "QString": "string",
+             "QVariantMap": "var"}  # Theme property types
 _registered = False
 
 # Design tokens of QML pages (theme.fontSmall, theme.radiusMd...): pages use these, not their own numbers
@@ -64,9 +66,9 @@ FONT_SCALE = {
     "fontSmall": 0.85,  # secondary text, details
     "fontLabel": 0.9,
     "fontSubtitle": 1.1,  # card & section titles
-    "fontHeading": 1.25,  # dialog & panel titles
+    "fontHeading": 1.25,  # page, dialog & panel titles
     "fontLarge": 1.4,
-    "fontTitle": 1.5,  # page titles, key figures
+    "fontTitle": 1.5,  # key figures, status headlines
     "fontDisplay": 1.75,
 }
 # Corner radius: factor of em
@@ -89,26 +91,65 @@ SIZE_SCALE = {
     "rowCompact": 2.1,  # dense tables, menus
     "row": 2.8,  # lists
     "rowTall": 3.4,  # lists with two text lines
+    "headerHeight": 1.9,  # column header row of tables
+}
+# Icon (glyph) sizes: factor of em
+ICON_SCALE = {
+    "iconXs": 0.7,  # inside chips, tags, menu checks & chevrons
+    "iconSm": 0.85,  # beside small texts, in rows & tiles
+    "iconMd": 1.05,  # default (Icon, buttons)
+    "iconLg": 1.6,  # compact empty states, section badges
+    "iconHero": 2.6,  # empty states, drop zones, page badges
 }
 # Animation durations (ms), 0 when Windows animations are off
 MOTION = {"motionFast": 120, "motionBase": 180, "motionSlow": 250}
 # Tint alpha (color over a surface): named levels of theme.tint(color, level)
-TINT_LEVELS = {"subtle": 0.1, "selected": 0.18, "strong": 0.28}
+TINT_LEVELS = {"subtle": 0.1, "selected": 0.18, "strong": 0.28,
+               "outline": 0.5,  # border of a tinted chip or notice
+               "stripe": 0.03}  # odd rows of dense tables (theme.text tint)
 TINT_SELECTED_LIGHT = 0.12  # selected rows of light themes (dim text stays 4.5:1 on them)
 INK_DARK = "#111111"  # text on light fills
 # Colorblind safe status colors (Okabe-Ito like overlays: green -> blue, red -> vermillion, purple -> reddish
 # purple), (on dark background, on light background): app pages follow the overlay style option
-COLORBLIND_STATUS = {
-    "gain": ("#56B4E9", "#0067A8"),
-    "loss": ("#F08A50", "#B04A00"),
-    "warning": ("#E6A100", "#8F5F00"),
-    "purple": ("#E08AC0", "#A33D80"),
-}
+COLORBLIND_STATUS = COLORBLIND_STATUS_COLORS  # one source with overlays & stream pages (setting_status_colors)
 # Overlay preview stage (always dark: overlays are drawn for a game screen)
 STAGE_COLORS = {"stageTop": "#2B313A", "stageBottom": "#14171C", "stageText": "#AEB5BF"}
+STAGE_INK = "#FFFFFF"  # icons & texts drawn over an overlay preview
+STAGE_SCRIM = (0, 0, 0, 0.45)  # backdrop of buttons & badges over an overlay preview (r, g, b, alpha)
 # Session kind colors: race, qualifying, practice (theme color names), others dim
 SESSION_TONES = {"R": "warning", "RACE": "warning", "Q": "purple", "QUALIFY": "purple", "P": "accent",
                  "PRACTICE": "accent"}
+# Surfaces (elevation): share of white (dark themes) or text color (light themes) mixed into the card color
+SURFACE_LIFT = {"card": 0.035, "flyout": 0.05, "hover": 0.04, "sunken": 0.05}
+SUNKEN_DARK = 130  # darker() factor of sunken surfaces (fields, segmented tracks) on dark themes
+# Drop shadow strength (TpShadow) per theme kind, Legacy themes flatter
+SHADOW_OPACITY = {"dark": 0.55, "light": 0.22}
+LEGACY_RADIUS = 0.5  # Legacy themes: corners half as round (classic look)
+LEGACY_SHADOW = 0.6
+# Display face of titles & key figures (named instance of the variable font of Windows 11), else the app font
+DISPLAY_FONT_FAMILIES = ("Segoe UI Variable Display",)
+WINDOWS_VARIABLE_FONT = "SegUIVar.ttf"  # Segoe UI Variable file (Windows 11), in the Windows fonts folder
+DISPLAY_STYLE = "Semibold Display"  # its named instance for titles
+# Delays (ms): hover before a hover-only action shows, flash of a corrected value or a short feedback
+DELAYS = {"hoverIntentDelay": 450, "flashDuration": 2500,
+          "pulseDuration": 700}  # each half of a status pulse (TpPulseDot, TpTally, loading placeholders)
+# Chip heights: tags & count badges (Pill, TpCountBadge), filter chips (TpChip): factor of em
+CHIP_SCALE = {"chipHeight": 1.45, "chipHeightSm": 1.25, "chipFilterHeight": 2.0, "chipFilterHeightSm": 1.7}
+# Chart lines: share of text color (dark themes, light themes): grid lines & ticks, axes & zero lines
+CHART_ALPHA = {"chartGrid": (0.07, 0.09), "chartAxis": (0.12, 0.16)}
+# Glyph of each action (Segoe Fluent Icons / MDL2 Assets), one per action on every page: theme.glyphs.openFolder.
+# Delete (to trash, irreversible) is not remove (out of a list, a filter, a selection: the item stays elsewhere).
+GLYPHS = {
+    "add": "\ue710", "remove": "\ue711", "close": "\ue711", "delete": "\ue74d", "copy": "\ue8c8",
+    "undo": "\ue7a7", "restore": "\ue7a7", "reset": "\ue777", "refresh": "\ue72c",
+    "openFolder": "\ue8da", "browse": "\ue838", "openFile": "\ue8e5", "import": "\ue8e5", "export": "\uede1",
+    "share": "\ue72d", "openExternal": "\ue8a7", "edit": "\ue70f", "more": "\ue712",
+    "favorite": "\ue734", "favoriteOn": "\ue735",  # outline: add to favorites, filled: is a favorite
+    "lock": "\ue72e", "unlock": "\ue785",  # state shown (locked: lock), the button tip tells the action
+}
+# Shadow of flyouts (TpShadow): blur reach & downward offset, factor of em. Letter spacing of overline texts (and
+# capitals of column headers), of codes read out character by character (access code)
+EFFECT_SCALE = {"shadowExtent": 0.9, "shadowOffset": 0.2, "letterSpacingOverline": 0.04, "letterSpacingCode": 0.15}
 
 
 def qml_path(qml_name: str) -> str:
@@ -154,15 +195,17 @@ def ink_on(color: QColor) -> QColor:
     return QColor(INK_DARK if luma > 0.6 else "white")
 
 
+def luminance(color: QColor) -> float:
+    """WCAG relative luminance of a color (0 black to 1 white)"""
+    channels = [
+        value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+        for value in (color.redF(), color.greenF(), color.blueF())
+    ]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
 def contrast_ratio(first: QColor, second: QColor) -> float:
     """WCAG contrast ratio of two colors"""
-    def luminance(color: QColor) -> float:
-        channels = [
-            value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
-            for value in (color.redF(), color.greenF(), color.blueF())
-        ]
-        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-
     high, low = sorted((luminance(first), luminance(second)), reverse=True)
     return (high + 0.05) / (low + 0.05)
 
@@ -213,6 +256,27 @@ def system_animations() -> bool:
 
 
 _ANIMATIONS: list[bool] = []  # system setting, read once by the first Theme
+_DISPLAY_FONT: list[tuple[str, str]] = []  # found once
+
+
+def display_font() -> tuple[str, str]:
+    """(family, style name) of titles & key figures: first installed DISPLAY_FONT_FAMILIES face, else the Display
+    instance of the Windows 11 variable font, else the app font ("" style name: weight of each text applies)
+
+    The FreeType font engine of the app (main.set_environment: less memory) lists no "Segoe UI Variable" family:
+    its file is then loaded once (about 1 MB) and its "Semibold Display" instance picked by style name.
+    """
+    if not _DISPLAY_FONT:
+        families = set(QFontDatabase.families())
+        font = next(((name, "") for name in DISPLAY_FONT_FAMILIES if name in families), None)
+        variable = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", WINDOWS_VARIABLE_FONT)
+        if font is None and sys.platform == "win32" and os.path.isfile(variable):
+            index = QFontDatabase.addApplicationFont(variable)
+            loaded = QFontDatabase.applicationFontFamilies(index) if index >= 0 else []
+            if loaded and DISPLAY_STYLE in QFontDatabase.styles(loaded[0]):
+                font = (loaded[0], DISPLAY_STYLE)
+        _DISPLAY_FONT.append(font or (QApplication.font().family(), ""))
+    return _DISPLAY_FONT[0]
 
 
 def _font_token(name: str) -> Property:
@@ -229,6 +293,16 @@ def _motion_token(name: str) -> Property:
 
 def _stage_token(name: str) -> Property:
     return Property(QColor, lambda self: QColor(STAGE_COLORS[name]), constant=True, doc=f"Preview stage color {name}")
+
+
+def _radius_token(name: str, notify: Signal) -> Property:
+    """Corner radius: half as round on Legacy themes (changes with the theme)"""
+    return Property(float, lambda self: UIScaler.FONT_PIXEL_SCALED * RADIUS_SCALE[name] * (
+        LEGACY_RADIUS if legacy_style() else 1), notify=notify, doc=f"Corner radius {name}")
+
+
+def _delay_token(name: str) -> Property:
+    return Property(int, lambda self: DELAYS[name], constant=True, doc=f"Delay (ms) {name}")
 
 
 def register_types():
@@ -451,11 +525,118 @@ class Theme(QObject):
         """Session kind color: race, qualifying, practice ("R" / "RACE"...), dim text for others"""
         return QColor(getattr(self, SESSION_TONES.get(str(code).upper(), "dimText")))
 
+    # Surfaces & strokes (elevation): page < card < flyout (dark themes lighter as they rise, light themes white
+    # cards & flyouts on a gray page, shadows tell flyouts), sunken fields & tracks, hovered clickable cards
+    def _lift(self, surface: QColor, share: str) -> QColor:
+        """Surface raised (dark themes: toward white) or tinted (light themes: toward text) by a SURFACE_LIFT share"""
+        toward = QColor("white") if self._is_dark() else self._color(QPalette.ColorRole.Text)
+        return blended(toward, surface, SURFACE_LIFT[share])
+
+    def _surface_card(self) -> QColor:
+        window, base = self._color(QPalette.ColorRole.Window), self._color(QPalette.ColorRole.Base)
+        if self._is_dark() and luminance(base) <= luminance(window):  # Legacy Dark: base darker than the page
+            return self._lift(window, "card")
+        return base
+
+    @Property(QColor, notify=changed)
+    def surfacePage(self) -> QColor:
+        """Page background"""
+        return self._color(QPalette.ColorRole.Window)
+
+    @Property(QColor, notify=changed)
+    def surfaceCard(self) -> QColor:
+        """Cards, panels & tiles: above the page (lighter on dark themes, white on light themes)"""
+        return self._surface_card()
+
+    @Property(QColor, notify=changed)
+    def surfaceFlyout(self) -> QColor:
+        """Popups, menus, toasts & tooltips: above cards (with TpShadow)"""
+        card = self._surface_card()
+        return self._lift(card, "flyout") if self._is_dark() else card
+
+    @Property(QColor, notify=changed)
+    def surfaceSunken(self) -> QColor:
+        """Text & number fields, segmented control tracks, pressed clickable cards: below cards"""
+        card = self._surface_card()
+        return card.darker(SUNKEN_DARK) if self._is_dark() else self._lift(card, "sunken")
+
+    @Property(QColor, notify=changed)
+    def surfaceHover(self) -> QColor:
+        """Hovered clickable card (accent stays for selection & the main action)"""
+        return self._lift(self._surface_card(), "hover")
+
+    def _stroke_subtle(self) -> QColor:
+        mid = self._color(QPalette.ColorRole.Mid)
+        if legacy_style():  # classic look: firmer outlines
+            return mid.lighter(115) if self._is_dark() else mid.darker(112)
+        return self._surface_card().lighter(135) if self._is_dark() else mid
+
+    @Property(QColor, notify=changed)
+    def strokeSubtle(self) -> QColor:
+        """Border of cards, list rows, dividers"""
+        return self._stroke_subtle()
+
+    @Property(QColor, notify=changed)
+    def strokeStrong(self) -> QColor:
+        """Border of a hovered control, outlines that must show (3:1 kind of use)"""
+        mid = self._color(QPalette.ColorRole.Mid)
+        if self._is_dark():
+            return mid.lighter(150 if legacy_style() else 125)
+        return mid.darker(135 if legacy_style() else 118)
+
     @Property(QColor, notify=changed)
     def cardBorder(self) -> QColor:
-        """Border of cards & list rows (lighter than base on dark themes)"""
-        base = self._color(QPalette.ColorRole.Base)
-        return base.lighter(135) if self._is_dark() else self._color(QPalette.ColorRole.Mid)
+        """Border of cards & list rows (same as strokeSubtle)"""
+        return self._stroke_subtle()
+
+    @Property(QColor, notify=changed)
+    def scrim(self) -> QColor:
+        """Page dimmed under a modal popup"""
+        return QColor.fromRgbF(0, 0, 0, 0.45 if self._is_dark() else 0.25)
+
+    @Property(float, notify=changed)
+    def shadowOpacity(self) -> float:
+        """Strength of flyout shadows (TpShadow): stronger on dark themes, flatter on Legacy themes"""
+        strength = SHADOW_OPACITY["dark" if self._is_dark() else "light"]
+        return strength * LEGACY_SHADOW if legacy_style() else strength
+
+    @Property(QColor, notify=changed)
+    def accentHover(self) -> QColor:
+        """accentFill hovered (white text keeps 4.5:1)"""
+        return fill_for_white_text(self._color(QPalette.ColorRole.Highlight)).darker(107)
+
+    @Property(QColor, notify=changed)
+    def accentPressed(self) -> QColor:
+        return fill_for_white_text(self._color(QPalette.ColorRole.Highlight)).darker(115)
+
+    @Property(QColor, notify=changed)
+    def lossHover(self) -> QColor:
+        """lossFill hovered (danger buttons)"""
+        return fill_for_white_text(self._role("loss")).darker(107)
+
+    @Property(QColor, notify=changed)
+    def lossPressed(self) -> QColor:
+        return fill_for_white_text(self._role("loss")).darker(115)
+
+    @Property(QColor, constant=True)
+    def accentInk(self) -> QColor:
+        """Text & icons on accentFill, lossFill & their hover / pressed shades"""
+        return QColor("white")
+
+    @Property(QColor, notify=changed)
+    def headerTint(self) -> QColor:
+        """Icon of card & popup headers: accent, plain dim on Legacy themes"""
+        return self._color(QPalette.ColorRole.PlaceholderText if legacy_style() else QPalette.ColorRole.Highlight)
+
+    @Property(bool, notify=changed)
+    def legacy(self) -> bool:
+        """Legacy (classic) theme: smaller corners, firmer strokes, plain headers, flatter shadows"""
+        return legacy_style()
+
+    @Slot(QColor, result=QColor)
+    def tintInk(self, color: QColor) -> QColor:
+        """Text in a tint of its color (Pill, badges): lighter on dark themes, darker on light ones"""
+        return color.lighter(135) if self._is_dark() else color.darker(125)
 
     @Property(QColor, notify=changed)
     def plotBase(self) -> QColor:
@@ -467,6 +648,27 @@ class Theme(QObject):
     def plotBorder(self) -> QColor:
         base = self._color(QPalette.ColorRole.Base)
         return base.lighter(130) if self._is_dark() else self._color(QPalette.ColorRole.Mid)
+
+    def _chart_line(self, name: str) -> QColor:
+        color = QColor(self._color(QPalette.ColorRole.Text))
+        color.setAlphaF(CHART_ALPHA[name][0 if self._is_dark() else 1])
+        return color
+
+    @Property(QColor, notify=changed)
+    def chartGrid(self) -> QColor:
+        """Chart grid lines & ticks (text color, faint)"""
+        return self._chart_line("chartGrid")
+
+    @Property(QColor, notify=changed)
+    def chartAxis(self) -> QColor:
+        """Chart axes & zero lines: a step above the grid"""
+        return self._chart_line("chartAxis")
+
+    @Property(QColor, notify=changed)
+    def mapRoad(self) -> QColor:
+        """Track surface of maps (between its edges): lighter than the base on dark themes, darker on light ones"""
+        base = self._color(QPalette.ColorRole.Base)
+        return base.lighter(150) if self._is_dark() else base.darker(108)
 
     @Property(float, constant=True)
     def em(self) -> float:
@@ -514,11 +716,11 @@ class Theme(QObject):
     fontLarge = _font_token("fontLarge")
     fontTitle = _font_token("fontTitle")
     fontDisplay = _font_token("fontDisplay")
-    radiusXs = _size_token(RADIUS_SCALE, "radiusXs")
-    radiusSm = _size_token(RADIUS_SCALE, "radiusSm")
-    radiusMd = _size_token(RADIUS_SCALE, "radiusMd")
-    radiusLg = _size_token(RADIUS_SCALE, "radiusLg")
-    radiusXl = _size_token(RADIUS_SCALE, "radiusXl")
+    radiusXs = _radius_token("radiusXs", changed)
+    radiusSm = _radius_token("radiusSm", changed)
+    radiusMd = _radius_token("radiusMd", changed)
+    radiusLg = _radius_token("radiusLg", changed)
+    radiusXl = _radius_token("radiusXl", changed)
     bpCompact = _size_token(BREAKPOINTS, "bpCompact")
     bpNarrow = _size_token(BREAKPOINTS, "bpNarrow")
     bpWide = _size_token(BREAKPOINTS, "bpWide")
@@ -547,9 +749,41 @@ class Theme(QObject):
     rowCompact = _size_token(SIZE_SCALE, "rowCompact")
     row = _size_token(SIZE_SCALE, "row")
     rowTall = _size_token(SIZE_SCALE, "rowTall")
+    headerHeight = _size_token(SIZE_SCALE, "headerHeight")
+    iconXs = _size_token(ICON_SCALE, "iconXs")
+    iconSm = _size_token(ICON_SCALE, "iconSm")
+    iconMd = _size_token(ICON_SCALE, "iconMd")
+    iconLg = _size_token(ICON_SCALE, "iconLg")
+    iconHero = _size_token(ICON_SCALE, "iconHero")
     stageTop = _stage_token("stageTop")
     stageBottom = _stage_token("stageBottom")
     stageText = _stage_token("stageText")
+    stageInk = Property(QColor, lambda self: QColor(STAGE_INK), constant=True, doc="Icons & texts over an overlay preview")
+    stageScrim = Property(QColor, lambda self: QColor.fromRgbF(*STAGE_SCRIM), constant=True,
+                          doc="Backdrop of buttons & badges over an overlay preview")
+    hoverIntentDelay = _delay_token("hoverIntentDelay")
+    flashDuration = _delay_token("flashDuration")
+    pulseDuration = _delay_token("pulseDuration")
+    chipHeight = _size_token(CHIP_SCALE, "chipHeight")
+    chipHeightSm = _size_token(CHIP_SCALE, "chipHeightSm")
+    chipFilterHeight = _size_token(CHIP_SCALE, "chipFilterHeight")
+    chipFilterHeightSm = _size_token(CHIP_SCALE, "chipFilterHeightSm")
+    glyphs = Property(dict, lambda self: dict(GLYPHS), constant=True,
+                      doc="Glyph of each action (theme.glyphs.openFolder): one icon per action on every page")
+    shadowExtent = _size_token(EFFECT_SCALE, "shadowExtent")
+    shadowOffset = _size_token(EFFECT_SCALE, "shadowOffset")
+    letterSpacingOverline = _size_token(EFFECT_SCALE, "letterSpacingOverline")
+    letterSpacingCode = _size_token(EFFECT_SCALE, "letterSpacingCode")
+
+    @Property(str, constant=True)
+    def displayFont(self) -> str:
+        """Family of titles & key figures (TpText display / title roles): Segoe UI Variable Display, else app font"""
+        return display_font()[0]
+
+    @Property(str, constant=True)
+    def displayStyle(self) -> str:
+        """Style name with displayFont ("Semibold Display" of the variable font file), "" when weight applies"""
+        return display_font()[1]
 
 
 # Semantic color names sent by backends (tone strings) -> Theme property
@@ -561,7 +795,7 @@ _TONE_NAMES = {
 
 
 # Theme slots in JavaScript (same results as Theme.compound / compoundLetter / inkOn / rowColor / tint / dimOn /
-# tone / sessionColor, no Python call per binding)
+# tone / sessionColor / tintInk, no Python call per binding)
 _THEME_FUNCTIONS_QML = """    readonly property var compoundColors: (%s)
     readonly property var compoundLetters: (%s)
     readonly property var compoundPatterns: (%s)
@@ -638,6 +872,9 @@ _THEME_FUNCTIONS_QML = """    readonly property var compoundColors: (%s)
         if (!c || c.r === undefined)
             return "white"
         return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 0.6 ? "%s" : "white"
+    }
+    function tintInk(color) {
+        return dark ? Qt.lighter(color, 1.35) : Qt.darker(color, 1.25)
     }"""
 
 
@@ -860,6 +1097,114 @@ def install_incubator(view: QQuickWidget) -> Incubator | None:
     return Incubator(view)
 
 
+# Network & links of pages: texts of pages come from the game (names chosen by other online players), results files,
+# shared laps & downloaded sheets. Texts are plain text (tests/test_security_qml_text.py), these are the second line.
+class OfflineNetworkFactory(QQmlNetworkAccessManagerFactory):
+    """Network of QML pages: none. A rich text <img src="http://..."> (or an Image, an XMLHttpRequest) loads
+    nothing from any host: no IP address leaked to a server, no tracking. Pages show local files & image providers
+    only (game pictures are downloaded by Python, then shown from the cache folder).
+
+    Not a QQmlAbstractUrlInterceptor: rich text images do not go through it, and a Python one is called from the
+    QML loader thread while the main thread waits in setSource holding the interpreter lock (deadlock). create is
+    called once per engine thread: a plain QNetworkAccessManager (C++ requests, no Python call per request) with a
+    proxy without host, every request fails at once.
+    """
+
+    def create(self, parent: QObject) -> QNetworkAccessManager:  # type: ignore[override]  # PySide6 stub name
+        manager = QNetworkAccessManager(parent)
+        manager.setProxy(QNetworkProxy(QNetworkProxy.ProxyType.HttpProxy, "", 0))
+        return manager
+
+
+_OFFLINE_NETWORK = OfflineNetworkFactory()  # engines keep a plain pointer: lives as long as the app
+
+# Shared tooltip of an engine (ToolTip.text of every item): made at once, its text set as plain text. The Basic
+# style tooltip text is AutoText: a name starting with a tag would be rich text (images loaded, lines hidden).
+# Tooltips with markup of escaped values are TpToolTip objects with textFormat: Text.StyledText.
+_PLAIN_TOOLTIP_QML = b"""import QtQuick
+import QtQuick.Controls.Basic
+Item {
+    property bool plain: false
+    Component.onCompleted: {
+        var label = ToolTip.toolTip ? ToolTip.toolTip.contentItem : null
+        if (label && label.textFormat !== undefined) {
+            label.textFormat = Text.PlainText
+            plain = true
+        }
+    }
+}
+"""
+
+
+def plain_tooltips(engine: QQmlEngine) -> bool:
+    """Shared tooltip of engine shows plain text (before loading pages), False if it could not be set"""
+    component = QQmlComponent(engine)
+    component.setData(_PLAIN_TOOLTIP_QML, QUrl("plain_tooltips.qml"))
+    probe = component.create() if component.isReady() else None
+    if probe is None:
+        logger.error("QML: plain tooltips: %s", component.errorString())
+        return False
+    done = bool(probe.property("plain"))
+    probe.deleteLater()  # tooltip itself belongs to the engine
+    if not done:
+        logger.error("QML: plain tooltips: shared tooltip has no text item")
+    return done
+
+
+# Shared tooltip in app look (flyout surface, shadow, theme text): its background made from TpToolTipBackground in the
+# context of a probe kept with the page (bindings to theme live as long as the page)
+_STYLED_TOOLTIP_QML = """import QtQuick
+import QtQuick.Controls.Basic
+import "%s"
+Item {
+    id: probe
+    property bool styled: false
+    Component { id: look; TpToolTipBackground {} }
+    Component.onCompleted: {
+        var tip = ToolTip.toolTip
+        if (!tip)
+            return
+        // Owned by the probe (an item: no "not placed in the scene" warning, never collected), shown by the tooltip
+        tip.background = look.createObject(probe)
+        if (tip.contentItem && tip.contentItem.color !== undefined)
+            tip.contentItem.color = Qt.binding(function() { return theme.text })
+        styled = tip.background !== null
+    }
+}
+"""
+
+
+def style_tooltips(engine: QQmlEngine, owner: QObject) -> bool:
+    """Shared tooltip of engine drawn in app look (after the theme context property is set), False if not styled"""
+    component = QQmlComponent(engine)
+    component.setData((_STYLED_TOOLTIP_QML % QUrl.fromLocalFile(QML_COMPONENTS).toString()).encode(),
+                      QUrl("styled_tooltips.qml"))
+    probe = component.create() if component.isReady() else None
+    if probe is None:
+        logger.error("QML: styled tooltips: %s", component.errorString())
+        return False
+    probe.setParent(owner)  # kept with the page: the tooltip background binds through its context
+    return bool(probe.property("styled"))
+
+
+def secure_engine(engine: QQmlEngine) -> None:
+    """Every QML page engine: no network, shared tooltip in plain text (set before loading a page)"""
+    engine.setNetworkAccessManagerFactory(_OFFLINE_NETWORK)
+    plain_tooltips(engine)
+
+
+def open_web_link(link: str, schemes: tuple[str, ...] = ("https",)) -> bool:
+    """Open link of a page in the browser, only a web address of schemes (https by default)
+
+    Links of rich texts may come from downloaded text (community sheet, changelog): never file:, search-ms:,
+    ms-settings: or another scheme Windows hands to a program. False if not opened.
+    """
+    url = QUrl(link.strip(), QUrl.ParsingMode.StrictMode)
+    if not url.isValid() or url.scheme().lower() not in schemes or not url.host():
+        return False
+    return QDesktopServices.openUrl(url)
+
+
 def create_quick_view(
     parent: QWidget,
     qml_name: str,
@@ -883,14 +1228,19 @@ def create_quick_view(
     view.engine().addImportPath(QML_FOLDER)
     root_context = view.rootContext()
     engine = view.engine()
+    secure_engine(engine)  # before any page item is made
     theme = theme_copy(engine, Theme(view))
     # Context properties (not required properties / singletons): they only block qmlsc / AOT compiled
     # bindings, and QML files are not compiled ahead of time (loaded from ui/qml, no qmlcachegen step in
     # build_pyinstaller.py): bindings run in the same JIT either way. Set once, before setSource. Child
     # QML files read backend / theme / i18n / pageState by name through the context chain.
-    shared = {"theme": theme, "i18n": translator_copy(engine, Translator(view)), "pageState": PageState(view)}
+    from .dialogs import DialogBridge
+
+    shared = {"theme": theme, "i18n": translator_copy(engine, Translator(view)), "pageState": PageState(view),
+              "dialogs": DialogBridge(view)}
     for name, value in {**shared, **context}.items():
         root_context.setContextProperty(name, value)
+    style_tooltips(engine, view)  # after theme: the tooltip background binds to it
     from .preview_provider import install_provider
     install_provider(engine)  # overlay pictures (image://overlaypreview/), registered before loading
     install_incubator(view)  # asynchronous loaders really asynchronous, set before loading

@@ -5,7 +5,7 @@ import os
 import time
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QMessageBox
 
@@ -50,7 +50,6 @@ def page(ui_env, warnings, monkeypatch):
 
     for name in ("race.json", "practice.json"):
         write_preset(name)
-    monkeypatch.setattr(preset_view, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.filename, "setting", "default.json")
     cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": ""}}
     cfg.user.tracks = {"Spa": {"preset": ""}}
@@ -103,18 +102,17 @@ def test_delete_locked_file_warns(page, warnings, monkeypatch):
 
 
 # Backups
-def backup_dialog(*backups: tuple[str, str]):
-    from neopedal.ui import preset_management
-
+def backups_panel(page, *backups: tuple[str, str]):
     for name, text in backups:
         with open(f"{cfg.path.settings}{name}", "w", encoding="utf-8") as file:
             file.write(text)
-    dialog = preset_management.RestoreBackup(None)
-    rows = {dialog.listbox_backup.item(row).text(): row for row in range(dialog.listbox_backup.count())}
-    return dialog, rows
+    toasts = []
+    page.backend.toastShown.connect(lambda text, error, undo: toasts.append((text, error)))
+    page.backend.backups.refresh()
+    return page.backend.backups, toasts
 
 
-def test_backup_delete_and_style_restore_errors_warn(ui_env, warnings, monkeypatch):
+def test_backup_delete_and_style_restore_errors_told(page, monkeypatch):
     from neopedal.ui import preset_management
 
     def locked(*args):
@@ -122,59 +120,43 @@ def test_backup_delete_and_style_restore_errors_warn(ui_env, warnings, monkeypat
 
     preset_backup = "race.json.backup-2026-10-03-12-00-00-000000"
     style_backup = "brakes.json.backup-2026-10-03-12-00-00-000000"
-    dialog, rows = backup_dialog((preset_backup, "{}"), (style_backup, "{}"))
+    backups, toasts = backups_panel(page, (preset_backup, "{}"), (style_backup, "{}"))
     reloaded = []
     app_signal.reload.connect(reloaded.append)
     try:
         monkeypatch.setattr(preset_management.os, "remove", locked)
-        dialog.listbox_backup.setCurrentRow(rows[preset_backup])
-        dialog.delete()
-        assert len(warnings) == 1 and exists(preset_backup)
+        backups.remove(preset_backup)
+        assert len(toasts) == 1 and toasts[0][1] and exists(preset_backup)  # error toast
         monkeypatch.setattr(preset_management.shutil, "move", locked)
-        dialog.listbox_backup.setCurrentRow(rows[style_backup])
-        dialog.restore()
-        assert len(warnings) == 2 and exists(style_backup) and not reloaded
+        assert backups.prepareRestore(style_backup) == "style"  # page asks first
+        backups.restoreStyle(style_backup)
+        assert len(toasts) == 2 and "used by another program" in toasts[1][0] and exists(style_backup)
+        assert not reloaded
     finally:
         app_signal.reload.disconnect(reloaded.append)
-        dialog.close()
-        flush()
 
 
-def test_backup_list_colors_follow_window_theme(ui_env, warnings):
-    from neopedal.ui import STATUS_COLORS
-
-    dialog, _ = backup_dialog(
+def test_backup_rows_marked_unreadable_and_style(page):
+    backups, _ = backups_panel(
+        page,
         ("race.json.backup-2026-10-03-12-00-00-000000", "broken"),
         ("brakes.json.backup-2026-10-03-12-00-00-000000", "{}"),
     )
-    try:
-        for theme, window in (("Dark", "#202020"), ("Light", "#F4F5F8")):
-            palette = QPalette(dialog.listbox_backup.palette())
-            palette.setColor(QPalette.ColorRole.Window, QColor(window))
-            dialog.listbox_backup.setPalette(palette)
-            dialog.refresh()  # colors read again
-            deadline = time.monotonic() + 5
-            while dialog.is_checking() and time.monotonic() < deadline:  # files checked in background
-                QCoreApplication.processEvents()
-            colors = {
-                dialog.listbox_backup.item(row).text(): dialog.listbox_backup.item(row).foreground().color().name()
-                for row in range(dialog.listbox_backup.count())
-            }
-            assert colors["race.json.backup-2026-10-03-12-00-00-000000"] == STATUS_COLORS[theme]["danger"].lower()
-            assert colors["brakes.json.backup-2026-10-03-12-00-00-000000"] == STATUS_COLORS[theme]["info"].lower()
-    finally:
-        dialog.close()
-        flush()
+    deadline = time.monotonic() + 5
+    while backups.checking and time.monotonic() < deadline:  # files checked in background
+        QCoreApplication.processEvents()
+    rows = {row["key"]: row for row in backups.model.rows}
+    assert rows["race.json.backup-2026-10-03-12-00-00-000000"]["status"] == "invalid"
+    assert rows["brakes.json.backup-2026-10-03-12-00-00-000000"]["status"] == "valid"
+    assert rows["brakes.json.backup-2026-10-03-12-00-00-000000"]["style"]
+    assert not rows["race.json.backup-2026-10-03-12-00-00-000000"]["style"]
 
 
 # Rename
-def create(mode: str = "", source: str = "", name: str = "", title: str = "Test"):
-    from neopedal.ui.preset_management import CreatePreset
+def create(mode: str = "", source: str = "", name: str = "") -> str:
+    from neopedal.ui.preset_management import apply_preset_name
 
-    dialog = CreatePreset(None, title=title, mode=mode, source_filename=source)
-    dialog.preset_entry.setText(name)
-    dialog.create_preset()
-    return dialog
+    return apply_preset_name(name, mode, source)
 
 
 def test_rename_preset_by_case_only(ui_env, warnings, monkeypatch):
@@ -185,77 +167,28 @@ def test_rename_preset_by_case_only(ui_env, warnings, monkeypatch):
     reloaded = []
     app_signal.reload.connect(reloaded.append)
     try:
-        create(mode="rename", source="race.json", name="Race")
-        assert not warnings
+        assert create(mode="rename", source="race.json", name="Race") == ""
         assert exists("Race.json") and not exists("race.json")
         assert cfg.user.tracks["Spa"]["preset"] == "Race"  # references follow new name
         assert cfg._setting_to_load == "Race.json" and reloaded  # loaded preset follows new name
-        create(mode="rename", source="Race.json", name="OTHER")  # other preset, any case: refused
-        assert warnings and exists("Race.json") and exists("other.json")
-        create(mode="rename", source="Race.json", name="Race")  # same name: refused
-        assert len(warnings) == 2
+        # other preset, any case: refused
+        assert create(mode="rename", source="Race.json", name="OTHER") == "Preset already exists."
+        assert exists("Race.json") and exists("other.json")
+        assert create(mode="rename", source="Race.json", name="Race") == "Preset already exists."  # same name
     finally:
         app_signal.reload.disconnect(reloaded.append)
         cfg.set_next_to_load("")
         flush()
 
 
-# Preset comparison
-def test_preset_compare_save_keeps_changes_made_meanwhile(ui_env, warnings, monkeypatch):
-    from neopedal.ui import preset_compare
-
-    monkeypatch.setattr(cfg.filename, "setting", "default.json")
-    other = {section: dict(options) for section, options in cfg.user.setting.items()}
-    other["speedometer"]["font_size"] = 99
-    other["speedometer"]["update_interval"] = 123
-    write_preset("other.json", other)
-    reloads = []
-    monkeypatch.setattr(preset_compare.loader, "reload", lambda **kwargs: reloads.append(kwargs))
-    flush()
-    dialog = preset_compare.PresetCompare(None, preset_a="default.json", preset_b="other.json")
-    try:
-        deadline = time.monotonic() + 5
-        while dialog.is_loading() and time.monotonic() < deadline:  # other preset read in background
-            QCoreApplication.processEvents()
-        rows = [dialog.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(dialog.table.rowCount())]
-        dialog.table.selectRow(rows.index(("speedometer", "font_size")))
-        dialog.copy_selected(to_a=True)  # to loaded preset
-        dialog.table.clearSelection()
-        rows = [dialog.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(dialog.table.rowCount())]
-        dialog.table.selectRow(rows.index(("speedometer", "update_interval")))
-        dialog.copy_selected(to_a=False)  # to other preset file
-        # Changed after page opened: widget moved in loaded preset, other preset edited elsewhere
-        cfg.user.setting["speedometer"]["position_x"] = 777
-        cfg.user.setting["speedometer"]["opacity"] = 0.42
-        other["speedometer"]["font_size"] = 55
-        write_preset("other.json", other)
-        dialog.saving()
-        assert cfg.user.setting["speedometer"]["font_size"] == 99  # copied value
-        assert cfg.user.setting["speedometer"]["position_x"] == 777  # kept
-        assert cfg.user.setting["speedometer"]["opacity"] == 0.42  # kept
-        assert "setting" in ui_env and reloads == [{"reload_preset": True}]
-        with open(f"{cfg.path.settings}other.json", encoding="utf-8") as file:
-            saved = json.load(file)["speedometer"]
-        assert saved["update_interval"] == cfg.user.setting["speedometer"]["update_interval"]  # copied value
-        assert saved["font_size"] == 55  # kept
-        assert not dialog.is_modified() and not dialog.edits
-    finally:
-        dialog.set_unmodified()
-        dialog.close()
-        flush()
+# Preset comparison: compare panel of the Presets page (tests/test_ui_audit_2026_10_29_config_presets.py)
 
 
 # Translations
 def test_french_preset_dialog_titles(page, french):
-    """Titles of preset name box (Presets page) & name dialog (restore backup) translated"""
-    from neopedal.ui.preset_management import CreatePreset
-
-    titles = [i18n.tr(text) for text in ("Create new default preset", "Duplicate Preset", "Rename Preset")]
-    assert all(title != english for title, english in zip(
-        titles, ("Create new default preset", "Duplicate Preset", "Rename Preset"), strict=True))
-    dialog = CreatePreset(None, title=titles[1], mode="duplicate", source_filename="race.json")
-    assert dialog.windowTitle() == titles[1]
-    dialog.close()
+    """Titles of preset name box (Presets page: new, duplicate, rename, restore backup) translated"""
+    titles = ("Create new default preset", "Duplicate Preset", "Rename Preset", "Restore Backup")
+    assert all(i18n.tr(title) != title for title in titles)
     assert page.backend.nameError("", "", "race") == i18n.tr("Preset already exists.") != "Preset already exists."
     flush()
 
@@ -268,8 +201,7 @@ def test_french_preset_access_error(ui_env, warnings, monkeypatch, french):
 
     write_preset("race.json")
     monkeypatch.setattr(preset_management.os, "rename", locked)
-    create(mode="rename", source="race.json", name="other")
-    assert warnings[0][1].startswith("Impossible d'accéder au fichier du preset")
+    assert create(mode="rename", source="race.json", name="other").startswith("Impossible d'accéder au fichier du preset")
     flush()
 
 
@@ -319,7 +251,7 @@ def test_french_plugin_trust_prompt(ui_env, monkeypatch, french, tmp_path):
         manager.table.selectRow(0)  # plugin of this test
         manager.trust_selected()
         title, message = asked[0]
-        assert title == "Faire confiance..."
+        assert title == "Approuver le plugin…"
         assert "accès complet à votre ordinateur" in message and "vous faites confiance à son auteur" in message
         assert "Fichiers de code :" in message and "SHA-256 : <code>" in message
         for english in ("Python code", "Only trust", "Code files", "Trust this plugin", "requires trusting"):

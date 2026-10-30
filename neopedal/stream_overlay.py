@@ -61,7 +61,7 @@ import sys
 import threading
 import time
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from html import escape
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -80,9 +80,10 @@ from .process import results_file as rf
 from .process import results_text as rt
 from .setting import cfg
 from .stream_director import MAX_LAYOUT_BODY, PlacementStore
-from .template.setting_status_colors import status_css
+from .template.setting_status_colors import colorblind_style, status_css
 from .userfile.custom_image import brand_logo_file
 from .userfile.game_images import images
+from .validator import load_json_strict
 
 logger = logging.getLogger(__name__)
 request_errors = ErrorThrottle()  # frames asked many times a second: warning once a minute
@@ -531,23 +532,46 @@ class FrameStore:
 
 # Race results (server threads)
 class ResultsCache:
-    """Last session results of a kind, file read again only when changed"""
+    """Last session results of a kind, file read again only when changed
+
+    Asked every few seconds by each results source: folders are listed & candidate files stat'ed again only once
+    a results folder changed (modified time, size) or the file found changed, and the results page data (texts in
+    app language, logos) is built once per result.
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[tuple, rf.SessionResult]] = {}  # kind: (file key, result)
         self._skipped: set[tuple] = set()  # file keys of sessions without lap (not read again)
+        self._folders_key: tuple | None = None  # (folder, stamp) of each results folder when last listed
+        self._paths: list[str] = []  # results files of every folder, newest name first
+        # kind: ((language, images version), result, page data)
+        self._snapshots: dict[str, tuple[tuple, rf.SessionResult, dict]] = {}
 
-    def latest(self, kind: str) -> rf.SessionResult | None:
-        codes = RESULT_KINDS.get(kind, RESULT_KINDS["race"])
+    def _scan(self) -> list[str]:
+        """Results files of every folder, newest first (listed again once a folder changed)"""
         folders = rf.results_folders(rf.chosen_results_folder(cfg.path.config))
+        key = tuple((folder, rf.settled_stamp(folder)) for folder in folders)
+        with self._lock:
+            if key == self._folders_key and all(stamp is not None for _, stamp in key):
+                return self._paths
         paths: list[str] = []
         for folder in folders:
             paths.extend(rf.results_files(folder))
         paths.sort(key=os.path.basename, reverse=True)  # names start with date
+        with self._lock:
+            self._folders_key, self._paths = key, paths
+        return paths
+
+    def latest(self, kind: str) -> rf.SessionResult | None:
+        codes = RESULT_KINDS.get(kind, RESULT_KINDS["race"])
+        paths = self._scan()
+        with self._lock:
+            cached = self._cache.get(kind)
+        if cached is not None and self._still_latest(cached[0], codes, paths):
+            return cached[1]
         for path in paths[:RESULTS_SCANNED]:
-            stem = os.path.splitext(os.path.basename(path))[0].rstrip("0123456789")
-            if not stem or stem[-1] not in codes:
+            if _result_code(path) not in codes:
                 continue
             try:
                 stat = os.stat(path)
@@ -578,6 +602,48 @@ class ResultsCache:
                 self._cache[kind] = (key, result)
             return result
         return None
+
+    def _still_latest(self, key: tuple, codes: Collection[str], paths: list[str]) -> bool:
+        """Result found before still the latest of its kind: its file unchanged, every newer file of the kind
+        known without lap (those few files stat'ed, not RESULTS_SCANNED of them)"""
+        path = key[0]
+        candidates = paths[:RESULTS_SCANNED]
+        if path not in candidates:
+            return False
+        with self._lock:
+            skipped = set(self._skipped)
+        for candidate in candidates[:candidates.index(path) + 1]:
+            if _result_code(candidate) not in codes:
+                continue
+            try:
+                stat = os.stat(candidate)
+            except OSError:
+                return False
+            candidate_key = (candidate, stat.st_size, stat.st_mtime)
+            if candidate == path:
+                return candidate_key == key
+            if candidate_key not in skipped:  # newer file not seen yet, or written again
+                return False
+        return False
+
+    def snapshot(self, kind: str, result: rf.SessionResult, build: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        """Results page data of result (built by build once per result, language & game pictures), shared: never
+        modified by callers"""
+        key = (current_language(), images.version)
+        with self._lock:
+            cached = self._snapshots.get(kind)
+            if cached is not None and cached[0] == key and cached[1] is result:
+                return cached[2]
+        data = build()
+        with self._lock:
+            self._snapshots[kind] = (key, result, data)
+        return data
+
+
+def _result_code(path: str) -> str:
+    """Session kind letter of a results file name ("R" of "2026_09_21_20_00_00-12R1.xml"), "" if none"""
+    stem = os.path.splitext(os.path.basename(path))[0].rstrip("0123456789")
+    return stem[-1] if stem else ""
 
 
 RESULTS_LABELS = {
@@ -627,11 +693,16 @@ def brand_picture(entry: rf.Entry) -> str:
 
 
 def results_snapshot(cache: ResultsCache, kind: str) -> dict[str, Any]:
-    """Last session results for results page (texts in app language)"""
-    labels = {key: tr(text) for key, text in RESULTS_LABELS.items()}
+    """Last session results for results page (texts in app language), shared: never modified by callers"""
     result = cache.latest(kind)
     if result is None:
-        return {"available": False, "labels": labels}
+        return {"available": False, "labels": {key: tr(text) for key, text in RESULTS_LABELS.items()}}
+    return cache.snapshot(kind, result, lambda: _results_data(result))
+
+
+def _results_data(result: rf.SessionResult) -> dict[str, Any]:
+    """Results page data of result (built once per result, see ResultsCache.snapshot)"""
+    labels = {key: tr(text) for key, text in RESULTS_LABELS.items()}
     entries = result.entries
     leaders: dict[str, rf.Entry] = {}
     fastest: dict[str, float] = {}
@@ -729,7 +800,8 @@ class StreamHandler(BoundedRequestHandler):
         elif path == "/director":  # broadcast graphics of the Broadcast Director page
             from .stream_director import director_html
 
-            self.send_html(director_html(page_language(), tr("Broadcast Director")))
+            self.send_html(director_html(page_language(), tr("Broadcast Director"),
+                                         colorblind_style(cfg.user.config.get("overlay_style"))))
         elif path in ("/api/director", "/api/director/live"):
             from .stream_director import answer, answer_live, demo_answer, preset_of
 
@@ -806,13 +878,13 @@ class StreamHandler(BoundedRequestHandler):
                     return
                 placements = save_layout(body, preset)
             elif url.path == "/api/layout":
-                data = json.loads(body.decode("utf-8")) if body.strip() else {}
+                data = load_json_strict(body.decode("utf-8")) if body.strip() else {}
                 placements = stream_layout.set(layout_section(query.get("crop", [""])[0]), data)
                 self.store.bump()
             else:
                 self.send_body(404, b'{"ok":false}', "application/json")
                 return
-        except (UnicodeDecodeError, ValueError):
+        except (UnicodeDecodeError, ValueError, RecursionError):  # invalid, nested too deeply (also in places)
             self.send_body(400, b'{"ok":false}', "application/json")
             return
         logger.info("STREAM OVERLAY: layout saved (%s, %d places)", url.path, len(placements))
@@ -1065,7 +1137,7 @@ def results_html() -> str:
     return (RESULTS_HTML
             .replace("@@lang@@", escape(page_language()))
             .replace("@@title@@", escape(tr("Race Results")))
-            .replace("@@status@@", status_css()))
+            .replace("@@status@@", status_css(colorblind=colorblind_style(cfg.user.config.get("overlay_style")))))
 
 
 # One overlay or whole layout: images of frames bundle drawn on a canvas (transparent page).

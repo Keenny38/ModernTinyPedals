@@ -69,15 +69,15 @@ Item {
         id: surface
         anchors.fill: parent
         anchors.margins: Math.round(theme.em * 0.3)
-        radius: theme.radiusXl
-        // Hovered: lighter in every state (enabled cards too)
-        readonly property color hoverBase: theme.dark ? Qt.lighter(theme.base, 1.12) : Qt.darker(theme.base, 1.02)
-        color: card.active ? Qt.tint(area.containsMouse ? hoverBase : theme.base, theme.tint(theme.accent, area.containsMouse ? 0.09 : 0.06))
-             : area.containsMouse ? hoverBase
-             : theme.base
+        radius: theme.radiusLg
+        // Hovered: hover surface in every state (enabled cards too)
+        color: card.active ? Qt.tint(area.containsMouse ? theme.surfaceHover : theme.surfaceCard,
+                                     theme.tint(theme.accent, "subtle"))
+             : area.containsMouse ? theme.surfaceHover
+             : theme.surfaceCard
         border.width: card.active || card.needed ? 1.5 : 1
         border.color: card.needed || card.failed || card.active ? card.edge
-                    : area.containsMouse ? Qt.lighter(theme.border, 1.3)
+                    : area.containsMouse ? theme.strokeStrong
                     : theme.cardBorder
         Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
         Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
@@ -103,7 +103,7 @@ Item {
             id: tile
             x: card.pad
             y: card.pad
-            size: Math.round(theme.em * 2.7)
+            size: Math.round(theme.iconHero)
             glyph: card.glyph
             fallbackText: card.label
             tint: card.edge
@@ -114,32 +114,36 @@ Item {
         Column {
             id: heading
             anchors.left: tile.right
-            anchors.leftMargin: theme.em * 0.6
+            anchors.leftMargin: theme.space4
             anchors.right: controls.left
-            anchors.rightMargin: theme.em * 0.4
+            anchors.rightMargin: theme.space3
             anchors.verticalCenter: tile.verticalCenter
             spacing: 3
             Text {
                 id: nameText
                 width: parent.width
                 text: card.label
+                textFormat: Text.PlainText
                 color: theme.text
                 font.pointSize: theme.fontSubtitle
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
             Row {
-                spacing: theme.em * 0.4
+                spacing: theme.space3
                 Pill {
                     text: card.failed ? i18n.tr("Error") : card.running ? i18n.tr("Running") : i18n.tr("Disabled")
                     glyph: card.failed ? "" : card.running ? "" : ""  // warning, check mark
-                    tint: card.failed ? theme.loss : card.running ? theme.gain : theme.dimText
+                    tint: card.failed ? theme.lossFill : card.running ? theme.gain : theme.dimText
+                    solid: card.failed  // error badge as the overlays' (filled, warning icon)
+                    fallback: card.failed ? "!" : ""
                     tip: card.failed ? i18n.tr("Module could not start, see log (Help menu)") : ""
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: card.interval > 0
                     text: card.interval + " ms"
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
@@ -162,17 +166,17 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: card.pad - theme.em * 0.2
             anchors.verticalCenter: tile.verticalCenter
-            spacing: theme.em * 0.2
+            spacing: theme.space1
             TpButton {
                 flat: true
                 glyph: ""  // settings
                 fallback: "⚙"
-                tip: i18n.tr("Config")
+                tip: i18n.tr("Options…")
                 size: "sm"
                 focusPolicy: Qt.NoFocus  // card keys: Enter opens settings (no Tab stop per card)
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: backend.openConfig(card.key)
-                Accessible.name: i18n.tr("Config")
+                Accessible.name: i18n.tr("Options…")
             }
             TpSwitch {
                 checkable: false  // follows model: switched by backend
@@ -199,8 +203,9 @@ Item {
             anchors.top: tile.bottom
             anchors.leftMargin: card.pad
             anchors.rightMargin: card.pad
-            anchors.topMargin: theme.em * 0.6
+            anchors.topMargin: theme.space4
             text: card.description
+            textFormat: Text.PlainText
             color: theme.dimText
             wrapMode: Text.WordWrap
             maximumLineCount: 2
@@ -226,14 +231,14 @@ Item {
             anchors.leftMargin: card.pad
             anchors.rightMargin: card.pad
             anchors.bottomMargin: card.pad - theme.em * 0.15
-            spacing: theme.em * 0.4
+            spacing: theme.space3
             visible: usersLabel.text !== ""
             readonly property bool warn: card.needed || card.needs.length > 0
             Icon {
                 anchors.verticalCenter: parent.verticalCenter
                 glyph: usersRow.warn ? "" : ""  // warning, layers
                 fallback: usersRow.warn ? "!" : ""
-                size: theme.em * 0.85
+                size: theme.iconSm
                 color: usersRow.warn ? theme.warning : theme.dimText
             }
             Text {
@@ -241,6 +246,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, usersRow.width - theme.em * 1.3)
                 text: card.usersText()
+                textFormat: Text.PlainText
                 color: usersRow.warn ? theme.warning : theme.dimText
                 font.pointSize: theme.fontSmall
                 font.weight: usersRow.warn ? Font.DemiBold : Font.Normal

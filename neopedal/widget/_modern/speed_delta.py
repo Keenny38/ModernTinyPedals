@@ -33,7 +33,7 @@ from PySide6.QtGui import QPainter
 from ... import calculation as calc
 from ... import units
 from ..speed_delta import REFERENCES, SpeedDeltas, display_range
-from .base import DASH, ModernOverlay
+from .base import DASH, ModernOverlay, reference_accent
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -64,8 +64,10 @@ class Realtime(StatsMixin, ModernOverlay):
         self.speeds = SpeedDeltas(units.set_unit_speed(self.cfg.units["speed_unit"]),
                                   wcfg["speed_delta_smoothing_samples"])
         self.symbol = units.set_symbol_speed(self.cfg.units["speed_unit"]) if wcfg["show_speed_unit"] else ""
-        accents = {"all_time_best": theme.positive, "session_best": theme.best, "stint_best": theme.orange,
-                   "last_lap": theme.text_dim}
+        # Reference laps, same accents as timing (session: personal best of session)
+        accents = {key: reference_accent(theme, kind) for key, kind in (
+            ("all_time_best", "best"), ("session_best", "session_personal_best"), ("stint_best", "stint_best"),
+            ("last_lap", "last"))}
         sample = "+88" + ("." + "8" * self.decimals if self.decimals else "")
         stats = [Stat(key, label, sample, "strong", accents[key], sub_sample=self.symbol)
                  for key, _, _, label in REFERENCES if wcfg[f"show_{key}"]]
@@ -95,5 +97,5 @@ class Realtime(StatsMixin, ModernOverlay):
                 color = theme.text
             else:
                 color = theme.positive if value > 0 else theme.negative
-            values.append(Value(f"{value:+.{self.decimals}f}", color, sub=self.symbol, sub_color=theme.text_muted))
+            values.append(Value(f"{value:+z.{self.decimals}f}", color, sub=self.symbol, sub_color=theme.text_muted))
         self.refresh(tuple(values))

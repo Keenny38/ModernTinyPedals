@@ -21,17 +21,20 @@ Race history of every driver from the race results files of the game, for the Br
 
 Races (results files of race sessions) read once in background, again only when changed: starts, wins &
 podiums in class, best class finish on a track, last races, and races two drivers ran together (who finished
-ahead). Team cars count for every driver of the car (driver swaps). No Qt.
+ahead). Team cars count for every driver of the car (driver swaps). A file the results index (Results & Driver
+Stats pages) already parsed is not parsed again; the tables (a record per driver & race) stay for the next
+opening of the Broadcast Director page. No Qt.
 """
 
 from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import NamedTuple
 
 from . import results_file as rf
+from . import results_index as ri
 
 RACE_CODE = "R"
 MAX_FILES = 2000  # newest race files read
@@ -73,12 +76,26 @@ def same_track(first: str, second: str) -> bool:
     return bool(a and b) and (a == b or a in b or b in a)
 
 
+def race_records(path: str, time: float, track: str, cars: Iterable[ri.CarResult]) -> dict[str, RaceRecord]:
+    """Race of every driver (key) of the cars of a race"""
+    cars = tuple(cars)
+    counts: dict[str, int] = {}
+    for car in cars:
+        counts[car.car_class] = counts.get(car.car_class, 0) + 1
+    records: dict[str, RaceRecord] = {}
+    for car in cars:
+        record = RaceRecord(path, time, track, car.car_class, car.class_position, car.finished, counts[car.car_class])
+        for name in car.drivers:
+            records[fold(name)] = record
+    return records
+
+
 class DriverHistory:
     """Races of every driver (thread safe: scan in a worker thread, read from the page)"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._files: dict[str, tuple[tuple[int, float], dict[str, RaceRecord]]] = {}  # path: stamp, driver key
+        self._files: dict[str, tuple[ri.FileStamp, dict[str, RaceRecord]]] = {}  # path: stamp, driver key
         self._drivers: dict[str, list[RaceRecord]] = {}
         self._generation = 0  # cleared while a scan runs: its tables dropped
         self.version = 0
@@ -89,14 +106,12 @@ class DriverHistory:
         with self._lock:
             known = dict(self._files)
             generation = self._generation
-        files: dict[str, tuple[tuple[int, float], dict[str, RaceRecord]]] = {}
+        files: dict[str, tuple[ri.FileStamp, dict[str, RaceRecord]]] = {}
         changed = False
         for path in paths:
-            try:
-                stat = os.stat(path)
-            except OSError:
+            stamp = ri.file_stamp(path)
+            if stamp is None:
                 continue
-            stamp = (stat.st_size, stat.st_mtime)
             cached = known.get(path)
             if cached is not None and cached[0] == stamp:
                 files[path] = cached
@@ -122,25 +137,19 @@ class DriverHistory:
 
     @staticmethod
     def read(path: str) -> dict[str, RaceRecord]:
-        """Race of every driver of a file, empty if not readable (being written: read again once changed)"""
+        """Race of every driver of a file, empty if not a race or not readable (being written: read again once
+        changed); the cars the results index kept for the file (Results & Driver Stats pages) spare the parse"""
+        parsed = ri.kept_file(path)
+        if parsed is not None and parsed.stamp == ri.file_stamp(path):
+            if parsed.info is None or parsed.cars is None:  # not a results file, or not a race
+                return {}
+            return race_records(path, parsed.info.time, parsed.info.track, parsed.cars)
         try:
             result = rf.read_results(path, keep=False)  # bulk scan: only records kept
         except (OSError, ValueError):
             return {}
-        if result.kind != "Race" or result.most_laps <= 0:
-            return {}
-        counts: dict[str, int] = {}
-        for entry in result.entries:
-            counts[entry.car_class] = counts.get(entry.car_class, 0) + 1
-        records: dict[str, RaceRecord] = {}
-        for entry in result.entries:
-            record = RaceRecord(path, result.time, result.track, entry.car_class, entry.class_position,
-                                entry.status.upper() == "FINISHED" or entry.finish_time > 0,
-                                counts[entry.car_class])
-            for name in {entry.name, *(swap.driver for swap in entry.swaps)}:
-                if name:
-                    records[fold(name)] = record
-        return records
+        cars = ri.race_cars(result)
+        return race_records(path, result.time, result.track, cars) if cars is not None else {}
 
     def records(self, driver: str) -> list[RaceRecord]:
         with self._lock:
@@ -177,7 +186,8 @@ class DriverHistory:
         return ahead, behind
 
     def clear(self) -> None:
-        """Tables released (Broadcast Director page closed), read again on next scan"""
+        """Tables dropped (tests, memory release), files read again on next scan: the Broadcast Director page keeps
+        them when closed (a record per driver & race, far cheaper than parsing every race file again once opened)"""
         with self._lock:
             self._generation += 1
             self._files = {}

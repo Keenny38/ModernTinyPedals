@@ -61,8 +61,10 @@ def test_shared_components_instead_of_local_copies():
     for name in ("OverlayCard", "OverlayListRow", "SpectateRow"):
         assert "FocusRing { target: surface" in qml(name), name
     for name in ("StreamOverlays", "BroadcastDirector"):
-        toast = blocks(qml(name), "TpToast {")[0]
-        assert "duration:" not in toast, name  # reading time from text length
+        text = qml(name)
+        assert "TpToast {" in text or "TpDialogHost {}" in text, name  # own toast, or the page's host toast
+        for toast in blocks(text, "TpToast {"):
+            assert "duration:" not in toast, name  # reading time from text length
 
 
 def test_icon_buttons_readable_without_icon_font():
@@ -92,11 +94,11 @@ def test_kinds_told_by_shape_not_color_alone():
     assert "radius: marker.wall ? Math.max(1, width * 0.15) : width / 2" in incidents  # wall square
     assert 'fallback: row.wall ? "■" : "●"' in incidents
     for name in ("DirectorLaps", "DirectorSheet"):
-        assert '"◆ "' in qml(name), name  # best of class
+        assert '" ◆"' in qml(name), name  # best of class, right of the time
     from neopedal.ui.quick.director_timing import timing_cell  # timing cells made in Python
 
     row = {"best": "1:30.000", "bestTone": "fastest", "last": "1:31.000", "lastTone": ""}
-    assert timing_cell(row, "best") == {"text": "◆ 1:30.000", "tone": "fastest"}  # best of class
+    assert timing_cell(row, "best") == {"text": "1:30.000 ◆", "tone": "fastest"}  # best of class, mark after
     assert timing_cell(row, "last") == {"text": "1:31.000", "tone": ""}  # plain: no mark
     assert 'toneName === "fastest" ? 0.5' in qml("DirectorCars")  # sector bar heights
     assert '"◉" : row.yellow ? "⚠"' in qml("DirectorTiming")  # on air / yellow marks
@@ -107,7 +109,7 @@ def test_keyboard_reaches_rows_cameras_and_chips():
     desk = qml("DirectorDesk")
     camera = blocks(desk, "component CameraButton: AbstractButton {")[0]
     assert "focusPolicy: Qt.TabFocus" in camera and "Keys.onShortcutOverride" in camera
-    assert "text: story.index + 1" in desk  # suggestion numbers (keys 1 to 6)
+    assert "text: story.hotkey" in desk  # suggestion numbers (keys 1 to 6), kept while the story is listed
     for name, list_id in (("DirectorCars", "carList"), ("DirectorDesk", "suggestionList"), ("DirectorTiming", "timingList")):
         text = qml(name)
         view = text[text.index(f'objectName: "{list_id}"'):]
@@ -209,8 +211,10 @@ def test_overlays_page_chips_and_rows_load_without_warnings(qml_warnings, page):
     page.show()
     pump(0.2)
     root = page.view.rootObject()
-    chips = [item for item in items_of(root) if "TpChip" in item.metaObject().className()]
+    # Category chips (TpChip, or the page's CategoryChip built on it): category & its count, keyboard reachable
+    chips = [item for item in items_of(root) if "Chip" in item.metaObject().className() and item.isVisible()]
     assert chips and all(chip.property("focusPolicy") == Qt.FocusPolicy.TabFocus for chip in chips)
+    assert all(chip.property("text") and chip.property("count") is not None for chip in chips)
     page.backend.setGridView(False)
     pump(0.2)
     page.backend.setGridView(True)
@@ -218,12 +222,13 @@ def test_overlays_page_chips_and_rows_load_without_warnings(qml_warnings, page):
     assert not qml_warnings, qml_warnings
 
 
-@pytest.mark.parametrize("name", ["OverlayOptions"])
+@pytest.mark.parametrize("name", ["OverlayOptions", "Settings"])
 def test_discard_keeps_undo_a_few_seconds(name):
-    text = qml(name)
-    bar = text[text.index("id: bar"):]
+    """Pages use the shared unsaved changes bar (TpPendingBar): after Discard it stays a few seconds with Undo"""
+    assert "TpPendingBar {" in qml(name)
+    bar = qml("TpPendingBar")
     assert "undoGrace.running" in bar and "interval: 6000" in bar and 'i18n.tr("Changes discarded")' in bar
-    assert "visible: shown || heightAnim.running" in bar  # no hidden buttons in Tab order
+    assert "visible: shown || heightAnimation.running" in bar  # no hidden buttons in Tab order
 
 
 # --- Spectate & Overlay Options pages

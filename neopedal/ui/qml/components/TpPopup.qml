@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// Popup surface in app look: rounded raised background, fades & scales in, page dimmed when modal.
+// Popup surface in app look: flyout surface with a soft shadow (TpShadow), fades & scales in, page dimmed (scrim)
+// when modal.
 // Base of TpDialog and of the pages' own popups (settings, pickers, help). dismissOnOutside false: only Esc
 // (or the popup's own buttons) closes it, for popups holding typed input.
 //   TpPopup { parent: Overlay.overlay; anchors.centerIn: parent; modal: true; width: ...; Column { ... } }
@@ -20,13 +21,14 @@ Popup {
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: theme.motionFast }
     }
     Overlay.modal: Rectangle {
-        color: Qt.rgba(0, 0, 0, theme.dark ? 0.45 : 0.25)
+        color: theme.scrim
         Behavior on opacity { NumberAnimation { duration: theme.motionFast } }
     }
     background: Rectangle {
-        radius: theme.radiusXl
-        color: theme.dark ? Qt.lighter(theme.base, 1.12) : theme.base
+        radius: theme.radiusLg
+        color: theme.surfaceFlyout
         border.width: 1
-        border.color: theme.border
+        border.color: theme.strokeSubtle
+        TpShadow {}
     }
 }

@@ -41,11 +41,11 @@ from collections.abc import Collection, Mapping
 from contextlib import suppress
 from typing import Any, NamedTuple
 
-from .. import regex_pattern as rxp
 from ..const_common import VERSION_NA
 from ..validator import load_json_strict
 from . import replace_retry
 from .preset_package import MAX_MANIFEST_SIZE, read_entry
+from .private_option import is_private
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,6 @@ PACKAGE_VERSION = 1
 FOLDER = "overlays"
 POSITION_KEYS = ("position_x", "position_y")
 NOT_SHARED = frozenset(("enable",))  # receiver's overlay state kept
-PRIVATE_OPTION = re.compile(f"{rxp.CFG_USER_PATH}|{rxp.CFG_USER_IMAGE}|file_name")
 MAX_OVERLAY_SIZE = 1024 * 1024  # one overlay file: a few KB
 MAX_ENTRIES = 1000
 MAX_POSITION = 100_000
@@ -70,11 +69,6 @@ class OverlayPackage(NamedTuple):
     unknown: list[str]  # overlays not available in this version
     skipped: int  # options left out (unknown or wrong type)
     left_out: tuple[str, ...] = ()  # "overlay: option (reason)" of each option left out (English)
-
-
-def is_private(key: str) -> bool:
-    """Option pointing to a local file or folder"""
-    return bool(PRIVATE_OPTION.search(key))
 
 
 def is_shared(key: str) -> bool:

@@ -27,6 +27,7 @@ updated from it; module threads keep writing game data, read again by overlays o
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import ExitStack
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -45,6 +46,7 @@ class OverlayTest(QObject):
     def __init__(self):
         super().__init__()
         self._stack: ExitStack | None = None
+        self._patch: Callable[[], None] | None = None  # points widget modules loaded during test to the session
         self._ticks = QTimer(self)
         self._ticks.setInterval(UPDATE_MS)
         self._ticks.timeout.connect(self._update)
@@ -64,7 +66,7 @@ class OverlayTest(QObject):
         self.stop(refresh=False)
         session = DemoSession(cfg.user.setting["standings"], scenario)
         stack = ExitStack()
-        stack.enter_context(demo_globals(session))
+        self._patch = stack.enter_context(demo_globals(session))
         self._stack = stack
         self._update()
         self._ticks.start()
@@ -79,15 +81,18 @@ class OverlayTest(QObject):
         self._ticks.stop()
         self._end.stop()
         stack, self._stack = self._stack, None
+        self._patch = None
         stack.close()
         if refresh:
             self._update()
         self.changed.emit()
 
-    @staticmethod
-    def _update():
+    def _update(self):
         from ..demo_data import update_once
 
+        if self._patch is not None:
+            # Overlay turned on during the test (its module imported then) reads the simulated session too
+            self._patch()
         for widget in overlays():
             try:
                 update_once(widget)

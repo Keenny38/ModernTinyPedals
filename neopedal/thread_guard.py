@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from time import monotonic, sleep
 
 from . import app_signal
@@ -93,6 +93,8 @@ def run_supervised(
     stop_event: threading.Event,
     max_restarts: int = 3,
     restart_delay: float = 1.0,
+    retry_delays: Sequence[float] = (),
+    on_error: Callable[[], None] | None = None,
 ) -> bool:
     """Run target in current thread, restart it after unexpected error
 
@@ -102,11 +104,16 @@ def run_supervised(
         stop_event: stop event, restart is canceled once set.
         max_restarts: maximum restart attempts after error, budget reset after a healthy run.
         restart_delay: delay (seconds) before restart.
+        retry_delays: once the restart budget is spent, keep restarting after these growing delays (last one
+            repeated) instead of giving up, until stop event is set: a game data acquisition loop recovers
+            on its own from a run of torn reads (user notified once per crash loop).
+        on_error: called after every crash, before the delay (state shown while waiting, e.g. paused).
 
     Returns:
-        True if target exited normally, False if stopped after errors.
+        True if target exited normally, False if stopped after errors (or stop event set while restarting).
     """
     attempt = 0
+    retries = 0  # restarts past the budget (retry_delays)
     while True:
         started = monotonic()
         try:
@@ -114,13 +121,30 @@ def run_supervised(
             return True
         except Exception:
             if monotonic() - started >= HEALTHY_RUN:
-                attempt = 0  # sporadic error after a healthy run, not a crash loop
-            logger.exception("ERROR: %s crashed (%s/%s)", name, attempt + 1, max_restarts + 1)
-        if attempt >= max_restarts or stop_event.wait(restart_delay):
+                attempt = retries = 0  # sporadic error after a healthy run, not a crash loop
+            if attempt < max_restarts or not retry_delays:
+                logger.exception("ERROR: %s crashed (%s/%s)", name, attempt + 1, max_restarts + 1)
+            else:
+                logger.exception("ERROR: %s crashed again (retry %s)", name, retries + 1)
+        if on_error is not None:
+            on_error()
+        if attempt < max_restarts:
+            if stop_event.wait(restart_delay):
+                break
+            attempt += 1
+            logger.warning("ERROR: restarting %s", name)
+            app_signal.error.emit(f"{name} crashed and was restarted, see log for details.")
+            continue
+        if not retry_delays:
             break
-        attempt += 1
-        logger.warning("ERROR: restarting %s", name)
-        app_signal.error.emit(f"{name} crashed and was restarted, see log for details.")
+        delay = retry_delays[min(retries, len(retry_delays) - 1)]
+        if retries == 0:
+            logger.error("ERROR: %s keeps crashing, restarted again after growing delays", name)
+            app_signal.error.emit(f"{name} keeps crashing, restarted again in {delay:g}s, see log for details.")
+        retries += 1
+        if stop_event.wait(delay):
+            break
+        logger.warning("ERROR: restarting %s (retry %s after %gs)", name, retries, delay)
     if not stop_event.is_set():
         logger.error("ERROR: %s stopped after repeated errors", name)
         app_signal.error.emit(f"{name} stopped after repeated errors, see log for details.")

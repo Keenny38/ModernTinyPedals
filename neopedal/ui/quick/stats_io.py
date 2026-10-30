@@ -62,6 +62,8 @@ from .stats_common import (
     LAP_FOLDERS_KEPT,
     Cell,
     lap_matches_vehicle,
+    list_lap_folders,
+    sector_file_times,
 )
 from .stint_analysis import (
     read_laps,
@@ -121,11 +123,13 @@ def read_history() -> HistoryData:
 
 class StatsFiles(NamedTuple):
     """Stats file (checked, None if invalid), session history (None if unchanged), files modified times when
-    read"""
+    read, sector best files & recorded laps folders listed (table made without disk access)"""
 
     stats: dict | None
     history: HistoryData | None
     times: tuple[float, float]
+    sector_times: dict[str, float]  # track & class name: modified time of its sector best file
+    lap_folders: tuple[int, dict[str, int]]  # telemetry folder stamp, folder name: stamp (see list_lap_folders)
 
 
 def stats_file_times() -> tuple[float, float]:
@@ -152,9 +156,10 @@ def read_stats_files(history_stamp: tuple[int, int]) -> StatsFiles:
     stats_user = load_stats_json_file(filepath=cfg.path.config)
     if stats_user is not None:
         stats_user = validate_stats_file(stats_user)
+    sector_times, lap_folders = sector_file_times(), list_lap_folders()
     if history_file_stamp() == history_stamp:  # stats saved every lap, history at end of each stint only
-        return StatsFiles(stats_user, None, times)
-    return StatsFiles(stats_user, read_history(), times)
+        return StatsFiles(stats_user, None, times, sector_times, lap_folders)
+    return StatsFiles(stats_user, read_history(), times, sector_times, lap_folders)
 
 
 def run_holding_lock(work: Callable[..., Any], *args, finished: threading.Event | None = None) -> Any:
@@ -316,6 +321,8 @@ class StatsHost(_HostBase):
         _dirty: bool
         _hidden_since: float
         _theory_cache: dict[str, tuple[float, float]]
+        _sector_times: dict[str, float]
+        _lap_folders: tuple[int, dict[str, int]]
         _edits_undo: list[StatsEdit]
         _edits_redo: list[StatsEdit]
         _file_times: tuple[float, float]
@@ -342,6 +349,8 @@ class StatsHost(_HostBase):
         _activity: dict
         _activity_key: tuple
         _recent: list[dict]
+        _weekly: dict
+        _weekly_key: tuple
         results: list[ri.ResultSummary]
         profile: PlayerProfile | None
         _matcher: ri.SessionMatcher
@@ -399,8 +408,17 @@ class StatsHost(_HostBase):
         rivalsChanged: Signal
         tableFilterChanged: Signal
         upcomingChanged: Signal
+        weeklyChanged: Signal
+        def weekly_card(self) -> dict: ...
+        def goals(self) -> dict[str, float]: ...
+        def lap_folder_of(self, track: str, vehicle: str) -> str: ...
+        def open_laps(self, track: str, vehicle: str) -> bool: ...
+        def openResults(self, path: str): ...
+        def openSession(self, track: str, vehicle: str): ...
+        @staticmethod
+        def classification() -> str: ...
         def check_goals(self): ...
-        def confirm(self, message: str) -> bool: ...
+        def ask(self, message: str, on_yes: Callable[[], object], action_text: str = ""): ...
         def set_goal(self, key: str, laptime: float): ...
         def latest_version(self) -> str: ...
         def load_upcoming(self, force: bool = False): ...

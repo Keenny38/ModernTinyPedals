@@ -76,10 +76,14 @@ def _rounded_path(x: float, y: float, width: float, height: float, radius: float
 
 def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     """Fill rect, with rounded corner & depth shading if enabled in overlay style"""
-    radius = min(rect.width(), rect.height()) * OverlayStyle.corner_scale
-    depth = OverlayStyle.depth_effects and min(rect.width(), rect.height()) >= _DEPTH_MIN_SIZE
+    size = min(rect.width(), rect.height())
+    if size < 0:  # drawn right to left or bottom to top (bar of a negative value): filled as normalized rect
+        rect = rect.normalized()
+        size = min(rect.width(), rect.height())
+    radius = size * OverlayStyle.corner_scale
+    depth = OverlayStyle.depth_effects and size >= _DEPTH_MIN_SIZE
     if radius < 1 and not depth:
-        painter.fillRect(rect, color)
+        painter.fillRect(rect, as_color(color))
         return
     rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
     if not rgba >> 24:  # fully transparent: no panel to round or shade
@@ -263,14 +267,14 @@ _background_seen: OrderedDict[tuple, None] = OrderedDict()
 def _fill_rect_direct(painter: QPainter, rect: QRectF, color, radius: float, depth: bool) -> None:
     """Fill rect without cache"""
     if radius < 1:
-        painter.fillRect(rect, color)
+        painter.fillRect(rect, as_color(color))
         if depth:
             _fill_depth(painter, rect, None)
         return
     path = _rounded_path(rect.x(), rect.y(), rect.width(), rect.height(), radius)
     antialiased = painter.testRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    painter.fillPath(path, QColor(color))
+    painter.fillPath(path, _qcolor(color) if isinstance(color, str) else QColor(color))
     if depth:
         _fill_depth(painter, rect, path)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, antialiased)
@@ -280,6 +284,18 @@ def _fill_rect_direct(painter: QPainter, rect: QRectF, color, radius: float, dep
 def _color_rgba(color: str) -> int:
     """Color name or hex to rgba integer"""
     return QColor(color).rgba()
+
+
+@lru_cache(maxsize=256)
+def _qcolor(color: str) -> QColor:
+    """Color name or hex as QColor, parsed once: cell colors are strings (option values), a flat style fill
+    would parse one on every paint of every cell. Shared instance, never changed by callers."""
+    return QColor(color)
+
+
+def as_color(color: Any) -> Any:
+    """Color string as cached QColor, other colors (QColor, Qt.GlobalColor) as given"""
+    return _qcolor(color) if isinstance(color, str) else color
 
 
 def _background_pixmap(width: int, height: int, radius: float, depth: bool, rgba: int, ratio: float) -> QPixmap:
@@ -338,12 +354,13 @@ def chip_radius(rect: QRectF) -> float:
 def fill_chip(painter: QPainter, rect: QRectF, color) -> None:
     """Fill rect as a capsule, for small chip-like elements"""
     radius = chip_radius(rect)
+    qcolor = _qcolor(color) if isinstance(color, str) else QColor(color)
     if radius < 0.5:
-        painter.fillRect(rect, QColor(color))
+        painter.fillRect(rect, qcolor)
         return
     path = QPainterPath()
     path.addRoundedRect(rect, radius, radius)
-    painter.fillPath(path, QColor(color))
+    painter.fillPath(path, qcolor)
 
 
 def fill_chip_gradient(painter: QPainter, rect: QRectF, color) -> None:
@@ -478,6 +495,16 @@ class WheelGaugeBar(QWidget):
         self.pen = QPen()
         self.pen.setColor(fg_color)
         self.setFixedSize(bar_width, bar_height)
+        self.shown: tuple | None = None
+
+    def changed(self, value: float, style: int = 0) -> bool:
+        """Whether shown text, bar length (whole pixels) or style (color index) changed, keep them if so
+        (repaint only on visible change, not on every new raw reading)"""
+        shown = (f"{value:z.{self.decimals}f}", round(value * self.width_scale, 0), style)  # ndigits: NaN, inf kept
+        if self.shown == shown:
+            return False
+        self.shown = shown
+        return True
 
     def update_input(self, input_value: float):
         """Update input value"""
@@ -507,11 +534,11 @@ class WheelGaugeBar(QWidget):
         fill_rect(painter, self.rect_bg, self.bg_color)
         fill_rect(painter, self.rect_input, self.input_color)
         if self.mark_color:
-            painter.fillRect(self.rect_mark, self.mark_color)
+            painter.fillRect(self.rect_mark, _qcolor(self.mark_color))
         if self.maxrange_color:
-            painter.fillRect(self.rect_max, self.maxrange_color)
+            painter.fillRect(self.rect_max, _qcolor(self.maxrange_color))
         painter.setPen(self.pen)
-        painter.drawText(self.rect_text, self.align, f"{self.last:.{self.decimals}f}")
+        painter.drawText(self.rect_text, self.align, f"{self.last:z.{self.decimals}f}")  # never -0
 
 
 class PedalInputBar(QWidget):
@@ -594,7 +621,7 @@ class PedalInputBar(QWidget):
         fill_rect(painter, self.rect_raw, input_color)
         fill_rect(painter, self.rect_filtered, input_color)
         if self.is_maxed:  # force feedback clipping color, else bar color (alert while flashing)
-            painter.fillRect(self.rect_max, self.max_color if self.rect_max is self.rect_pedal else input_color)
+            painter.fillRect(self.rect_max, as_color(self.max_color if self.rect_max is self.rect_pedal else input_color))
         if self.show_reading:
             painter.setPen(self.pen)
             painter.drawText(self.rect_text, Qt.AlignmentFlag.AlignCenter, f"{self.input_reading:.0f}")
@@ -702,9 +729,9 @@ class FuelLevelBar(QWidget):
         fill_rect(painter, self.rect_bar, self.bg_color)
         fill_rect(painter, self.rect_input, self.input_color)
         if self.show_start_mark:
-            painter.fillRect(self.rect_start, self.start_mark_color)
+            painter.fillRect(self.rect_start, as_color(self.start_mark_color))
         if self.show_refill_mark:
-            painter.fillRect(self.rect_refuel, self.refill_mark_color)
+            painter.fillRect(self.rect_refuel, as_color(self.refill_mark_color))
 
 
 class GearGaugeBar(QWidget):
@@ -863,7 +890,7 @@ class RawText(QWidget):
         """Background kept as pixmap while color, size & style do not change (skips style lookups)"""
         bg = self.bg
         if not OverlayStyle.corner_scale and not OverlayStyle.depth_effects:  # flat style
-            painter.fillRect(0, 0, self._width, self._height, bg)
+            painter.fillRect(0, 0, self._width, self._height, as_color(bg))
             return
         ratio = self.devicePixelRatioF()  # changes when moved to a screen of another scale
         key = (bg, self._width, self._height, OverlayStyle.corner_scale, OverlayStyle.depth_effects, ratio)

@@ -24,7 +24,7 @@ ALLOWED_COMPUTING: dict[str, int] = {
     "lap_conditions.py": 1,
     "lap_corners.py": 2,
     "lap_dashboard.py": 1,
-    "overlay_backend.py": 3,
+    "overlay_backend.py": 1,
     "overlay_options_backend.py": 4,
     "preset_backend.py": 2,
     "race_backend.py": 7,
@@ -42,7 +42,10 @@ BACKEND_PARTS.update({f"replays_{part}.py": "replays_backend.py"
                       for part in ("list", "folder", "playback", "incidents", "standings", "map")})
 # Notify signals covering more than MAX_SHARED_NOTIFY properties: values changed together (theme, options of a page)
 ALLOWED_SHARED: dict[tuple[str, str], int] = {
-    ("__init__.py", "changed"): 30,  # theme & translator copies: changed only by a theme or language switch
+    # Theme tokens (palette, status & series colors, surfaces, strokes, shadow, legacy look, chart & map colors) of
+    # the one Theme object: changed together, only by a theme or colorblind switch; pages read the QML theme copy
+    # (theme_copy), which this signal refreshes
+    ("__init__.py", "changed"): 48,
     ("director_backend.py", "settingsChanged"): 8,
     ("lap_backend.py", "chartChanged"): 11,
     ("lap_backend.py", "mapChanged"): 9,
@@ -52,7 +55,6 @@ ALLOWED_SHARED: dict[tuple[str, str], int] = {
     ("overlay_options_backend.py", "previewChanged"): 9,
     ("overlay_options_backend.py", "stateChanged"): 8,
     ("results_backend.py", "selectionChanged"): 7,
-    ("settings_backend.py", "stateChanged"): 7,
     ("stream_backend.py", "serverChanged"): 9,
     ("track_map_backend.py", "mapChanged"): 7,
 }

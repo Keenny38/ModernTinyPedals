@@ -78,7 +78,6 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_front_to_rear_distribution"],
                 bg_color=self.wcfg["background_color_front_to_rear_distribution"],
-                last=0,
             )
             self.set_primary_orient(
                 target=self.bar_distf,
@@ -95,7 +94,6 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_left_to_right_distribution"],
                 bg_color=self.wcfg["background_color_left_to_right_distribution"],
-                last=0,
             )
             self.set_primary_orient(
                 target=self.bar_distl,
@@ -112,7 +110,6 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_cross_weight"],
                 bg_color=self.wcfg["background_color_cross_weight"],
-                last=0,
             )
             self.set_primary_orient(
                 target=self.bar_cross,
@@ -120,30 +117,32 @@ class Realtime(Overlay):
             )
 
         self.calc_ema_ratio = calc.ema_filter(self.wcfg["smoothing_samples"])
+        self.ema_front = self.ema_left = self.ema_cross = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Front to rear distribution
         if self.wcfg["show_front_to_rear_distribution"]:
-            ema_front = self.calc_ema_ratio(self.bar_distf.last, minfo.wheels.frontWeightRatio)
-            self.update_dist(self.bar_distf, ema_front, self.prefix_distf)
+            self.ema_front = self.calc_ema_ratio(self.ema_front, minfo.wheels.frontWeightRatio)
+            self.update_dist(self.bar_distf, self.ema_front, self.prefix_distf)
 
         # Left to right distribution
         if self.wcfg["show_left_to_right_distribution"]:
-            ema_left = self.calc_ema_ratio(self.bar_distl.last, minfo.wheels.leftWeightRatio)
-            self.update_dist(self.bar_distl, ema_left, self.prefix_distl)
+            self.ema_left = self.calc_ema_ratio(self.ema_left, minfo.wheels.leftWeightRatio)
+            self.update_dist(self.bar_distl, self.ema_left, self.prefix_distl)
 
         # Cross weight
         if self.wcfg["show_cross_weight"]:
-            ema_cross = self.calc_ema_ratio(self.bar_cross.last, minfo.wheels.crossWeightRatio)
-            self.update_dist(self.bar_cross, ema_cross, self.prefix_cross)
+            self.ema_cross = self.calc_ema_ratio(self.ema_cross, minfo.wheels.crossWeightRatio)
+            self.update_dist(self.bar_cross, self.ema_cross, self.prefix_cross)
 
     # GUI update methods
     def update_dist(self, target, data, prefix):
-        """Weight distribution ratio"""
-        if target.last != data:
-            target.last = data
-            target.text = self.format_dist(data * 100, prefix)
+        """Weight distribution ratio, repainted on text change only"""
+        text = self.format_dist(data * 100, prefix)
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
     def format_dist(self, angle, prefix):

@@ -34,6 +34,7 @@ from ..api_control import api
 from ..context import AppContext, app_context
 from ..setting import Setting
 from ..thread_guard import STOP_TIMEOUT, run_supervised
+from ..userfile.data_saver import SYNC_SAVE_TIMEOUT, wait_data_saver
 
 logger = logging.getLogger(__name__)
 # Function
@@ -55,14 +56,18 @@ IDLE_WAIT = 5.0
 
 
 class DerivedUpdates:
-    """Delta module position updates followed by modules with WAKE_ON_DERIVED (fuel, notes)
+    """Updates of a module followed by other modules instead of game data
 
+    derived_updates: delta module position updates followed by modules with WAKE_ON_DERIVED (fuel, notes).
     While delta module updates (active), these modules wake once per delta update only (after delta position
     is set for the new sample), not also on the game data notification just before it (computed twice).
+    vehicles_updates: scoring passes of vehicles module (ScoringSnapshot, standings data) followed by modules
+    with WAKE_ON_VEHICLES (relative), woken once the pass is published, not by the game notification both
+    modules get at once (snapshot still of the previous sample then, scoring read again).
 
     Attributes:
-        active: delta module updating every new sample (else derived modules follow game data).
-        sequence: number of delta updates, changes only on new delta update.
+        active: publishing module updating every new sample (else followers follow game data).
+        sequence: number of updates published, changes only on new update.
     """
 
     __slots__ = ("active", "sequence", "_lock", "_events")
@@ -85,13 +90,13 @@ class DerivedUpdates:
             self._events = tuple(_event for _event in self._events if _event is not event)
 
     def publish(self) -> None:
-        """Delta module updated for a new sample"""
+        """Publishing module updated for a new sample"""
         self.sequence += 1
         for event in self._events:
             event.set()
 
     def set_active(self, active: bool) -> None:
-        """Delta module started or stopped updating every sample, derived modules woken to follow"""
+        """Publishing module started or stopped updating every sample, followers woken to follow"""
         if self.active != active:
             self.active = active
             for event in self._events:
@@ -99,6 +104,7 @@ class DerivedUpdates:
 
 
 derived_updates = DerivedUpdates()
+vehicles_updates = DerivedUpdates()
 
 
 def data_stamp() -> tuple:
@@ -184,10 +190,13 @@ class DataModule:
     Attributes:
         discard: data not saved yet is discarded when module stops (data reset), else saved.
         WAKE_ON_DERIVED: also woken by delta module position update (module stamp includes it).
+        WAKE_ON_VEHICLES: woken by vehicles module scoring pass (see vehicles_updates) while it runs,
+            instead of game data.
         STOP_TIMEOUT: longest wait for update thread to finish its stop work (saving), seconds.
     """
 
     WAKE_ON_DERIVED = False
+    WAKE_ON_VEHICLES = False
     STOP_TIMEOUT = STOP_TIMEOUT
     __slots__ = (
         "module_name",
@@ -225,7 +234,8 @@ class DataModule:
         self._done = threading.Event()  # set once update thread finished
         self._done.set()
         self._wake = threading.Event()  # set on new game data (connector notification) or stop
-        self._wake_derived = threading.Event()  # set on delta module update or stop (WAKE_ON_DERIVED)
+        # Set on delta module update (WAKE_ON_DERIVED) or vehicles module scoring pass (WAKE_ON_VEHICLES), or stop
+        self._wake_derived = threading.Event()
         self._wake_state = threading.Event()  # set on activity state change or stop (idle module)
         self._next_update = 0.0  # monotonic time of earliest next update (update interval kept)
         self.active_interval = max(
@@ -291,7 +301,8 @@ class DataModule:
         waits for new data first (up to longest data wait, DATA_MAX_WAIT), then only for the rest of
         update interval if data came early: woken once per sample, never more often than update interval.
         Modules following delta module position (WAKE_ON_DERIVED) wait for delta module update instead,
-        while it updates every sample (see DerivedUpdates). Else same as fixed interval polling.
+        while it updates every sample (see DerivedUpdates), those following vehicles module (WAKE_ON_VEHICLES)
+        for its scoring pass. Else same as fixed interval polling.
         Interval WAIT_STATE_CHANGE (idle module, nothing pending): waits for activity state change instead,
         at most IDLE_WAIT seconds (state changes made without notification, such as replay state).
         """
@@ -300,6 +311,8 @@ class DataModule:
             return self._event.is_set()
         if self.WAKE_ON_DERIVED and derived_updates.active and interval < self._max_wait:
             wake = self._wake_derived
+        elif self.WAKE_ON_VEHICLES and vehicles_updates.active and interval < self._max_wait:
+            wake = self._wake_derived  # set by vehicles module publish (subscribed in __tasks)
         elif interval >= self._max_wait or not notifier.available:
             return self._event.wait(interval)
         else:
@@ -332,13 +345,20 @@ class DataModule:
         notifier.subscribe(self._wake, self.WAKE_ON_DERIVED)
         if self.WAKE_ON_DERIVED:
             derived_updates.subscribe(self._wake_derived)
+        if self.WAKE_ON_VEHICLES:
+            vehicles_updates.subscribe(self._wake_derived)
         realtime_state.subscribe(self._wake_state)
         try:
             run_supervised(self.update_data, self.module_name.replace("_", " "), self._event)
         finally:
             notifier.unsubscribe(self._wake)
             derived_updates.unsubscribe(self._wake_derived)
+            vehicles_updates.unsubscribe(self._wake_derived)
             realtime_state.unsubscribe(self._wake_state)
+            # Files queued for saving written before module reports stopped: restarted module reads them back,
+            # quit & restart wait for modules (nothing to wait for unless a save is pending)
+            if not wait_data_saver(SYNC_SAVE_TIMEOUT):
+                logger.warning("%s: data saving not finished", self.module_name)
             # Always mark closed, as module control waits for it before reload or quit
             self.closed = True
             self._done.set()

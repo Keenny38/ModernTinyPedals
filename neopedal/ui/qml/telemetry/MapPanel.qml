@@ -106,19 +106,19 @@ Item {
             layer.samples: 4
             GpuShape {
                 key: root.view.edge || ""
-                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
+                color: theme.tint(theme.text, "strong")
                 revision: replays.mapRevision
                 transform: Matrix4x4 { matrix: canvas.matrix }
             }
             GpuShape {
                 key: root.view.road || ""
-                color: theme.dark ? Qt.lighter(theme.base, 1.6) : Qt.darker(theme.base, 1.1)
+                color: theme.mapRoad
                 revision: replays.mapRevision
                 transform: Matrix4x4 { matrix: canvas.matrix }
             }
             GpuShape {
                 key: root.view.pit || ""
-                color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.35)
+                color: theme.tint(theme.warning, "strong")
                 revision: replays.mapRevision
                 transform: Matrix4x4 { matrix: canvas.matrix }
             }
@@ -215,6 +215,7 @@ Item {
                     Text {  // number readable on the class color (dark on light colors, white on dark ones)
                         anchors.centerIn: parent
                         text: car.number
+                        textFormat: Text.PlainText
                         color: theme.inkOn(car.color)
                         font.pointSize: theme.fontMicro
                         font.weight: Font.Bold
@@ -241,7 +242,7 @@ Item {
             compact: true
             loading: !root.loaded && replays.inSession
             empty: !root.loaded && !replays.inSession
-            loadingText: i18n.tr("Asking game...")
+            loadingText: i18n.tr("Asking game…")
             glyph: ""  // map pin
             text: i18n.tr("Track map shows once a session or a replay is loaded in the game.")
         }

@@ -40,13 +40,20 @@ from ...fuel_strategy import (
     Variant,
     race_result,
 )
-from ...i18n import tr, trm
+from ...i18n import localized, tr, trm
 from ...module_info import StintDataSet
+from ...process.results_text import MINUS, MISSING, number_text, signed_text
 from ...race_live import PitExit, Rival
 from .race_model import DRIVER_COLORS, RAIN_COLOR, SAFETY_CAR_COLOR, duration_text, laps_text
 
 PLAN_COLUMNS = ("stop", "lap", "window", "time", "fuel", "energy", "tyres", "driver", "seconds")
-DASH = "-"
+DASH = MISSING  # value not known yet (same em dash on every page)
+
+
+def trm_number(text: str) -> str:
+    """Message with decimal numbers written with a dot (message rules match them so): translated, then decimal
+    separator of app language & typeset minus sign"""
+    return localized(trm(text)).replace("(-", f"({MINUS}").replace(" -", f" {MINUS}")
 
 
 def consumption_details(output_type: str, tank_capacity: float, consumption: float, amount_start: float,
@@ -74,13 +81,13 @@ def consumption_details(output_type: str, tank_capacity: float, consumption: flo
     stint_runlaps = calc.end_stint_laps(usable, consumption)
     stint_runmins = calc.end_stint_minutes(stint_runlaps, laptime)
     return {
-        "total_needed": f"{total_need_frac:.2f} ≈ {total_need_full:g}",
-        "end_stint": f"{end_stint_fuel:.2f}",
-        "pit_stops": f"{estimate_pit_counts:.2f} ≈ {pits}",
-        "total_laps": f"{total_runlaps:.2f}",
-        "total_minutes": f"{total_runmins:.2f}",
-        "stint_laps": f"{stint_runlaps:.2f}",
-        "stint_minutes": f"{stint_runmins:.2f}",
+        "total_needed": f"{number_text(total_need_frac, 2)} ≈ {total_need_full:g}",
+        "end_stint": f"{number_text(end_stint_fuel, 2)}",
+        "pit_stops": f"{number_text(estimate_pit_counts, 2)} ≈ {pits}",
+        "total_laps": f"{number_text(total_runlaps, 2)}",
+        "total_minutes": f"{number_text(total_runmins, 2)}",
+        "stint_laps": f"{number_text(stint_runlaps, 2)}",
+        "stint_minutes": f"{number_text(stint_runmins, 2)}",
     }, stint_runlaps
 
 
@@ -120,8 +127,8 @@ def tyre_life(start_tread: float, wear_lap: float, minimum_tread: float, stint_l
     lifespan_mins = calc.wear_lifespan_in_mins(usable_tread, wear_lap, laptime)
     lifespan_stints = lifespan_laps / stint_laps if stint_laps else 0
     return {
-        "laps": f"{lifespan_laps:.2f}", "minutes": f"{lifespan_mins:.2f}",
-        "stints": f"{lifespan_stints:.2f}" if stint_laps else DASH, "wearStint": f"{wear_stint:.2f} %",
+        "laps": f"{number_text(lifespan_laps, 2)}", "minutes": f"{number_text(lifespan_mins, 2)}",
+        "stints": f"{number_text(lifespan_stints, 2)}" if stint_laps else DASH, "wearStint": f"{number_text(wear_stint, 2)} %",
         "stintsWarning": 0 < lifespan_stints < 1, "wearWarning": wear_stint >= usable_tread,
     }
 
@@ -152,15 +159,15 @@ def key_figures(strategy: Strategy, setup: StrategyInput, symbol: str, is_gallon
     stint = tile("stint", tr("Max Stint"), tip=tr("Longest stint, whole laps"))
     refill = tile("refill", tr("Refill per Stop"))
     tyre = tile("tyres", tr("Tyres"), f"{tyres['used']} / {tyres['maximum']}",
-                trm(f"{tyres['changes']} change(s) · {tyres['time']:+.1f} s"),
+                trm_number(f"{tyres['changes']} change(s) · {tyres['time']:+.1f} s"),
                 tr("Tyres used by the tyre plan / maximum allowed"), warning=tyres["stock"] > tyres["maximum"])
     tiles = [fuel, energy, pits, stint, refill, tyre]
     if not strategy.ready:
         pits["warning"] = strategy.impossible
         return tiles
     fuel_full = ceil(strategy.fuel_needed * 10) / 10 if is_gallon else ceil(strategy.fuel_needed)
-    fuel.update(value=f"{fuel_full:g} {symbol}", detail=f"{strategy.fuel_needed:.2f} {symbol}")
-    energy.update(value=f"{ceil(strategy.energy_needed):g} %", detail=f"{strategy.energy_needed:.2f} %")
+    fuel.update(value=f"{fuel_full:g} {symbol}", detail=f"{number_text(strategy.fuel_needed, 2)} {symbol}")
+    energy.update(value=f"{ceil(strategy.energy_needed):g} %", detail=f"{number_text(strategy.energy_needed, 2)} %")
     stops = len(strategy.stops)
     limit = {
         "energy": tr("limited by energy"), "stint": tr("limited by stint length"),
@@ -172,15 +179,15 @@ def key_figures(strategy: Strategy, setup: StrategyInput, symbol: str, is_gallon
     pits.update(value=f"{stops}", detail=detail, warning=not strategy.feasible)
     stint.update(value=laps_text(strategy.max_stint), detail=f"≈ {max(strategy.stint_seconds, default=0) / 60:.0f} min")
     if not has_fuel:  # energy only car
-        refill.update(value=f"{strategy.average_energy if stops else strategy.energy_load:.1f} %",
+        refill.update(value=f"{number_text(strategy.average_energy if stops else strategy.energy_load, 1)} %",
                       detail="" if stops else tr("No stop needed"),
                       title=tr("Refill per Stop") if stops else tr("Fuel to Load"))
     elif stops:
-        refill.update(value=f"{strategy.average_fuel:.1f} {symbol}",
-                      detail=f"{strategy.average_energy:.1f} %" if has_energy else "")
+        refill.update(value=f"{number_text(strategy.average_fuel, 1)} {symbol}",
+                      detail=f"{number_text(strategy.average_energy, 1)} %" if has_energy else "")
     else:  # no stop: what to load at start
-        refill.update(value=f"{strategy.fuel_load:.1f} {symbol}", title=tr("Fuel to Load"),
-                      detail=f"{strategy.energy_load:.1f} %" if has_energy else tr("No stop needed"))
+        refill.update(value=f"{number_text(strategy.fuel_load, 1)} {symbol}", title=tr("Fuel to Load"),
+                      detail=f"{number_text(strategy.energy_load, 1)} %" if has_energy else tr("No stop needed"))
     return tiles
 
 
@@ -240,15 +247,16 @@ PLAN_TIPS = {
 
 
 def plan_rows(strategy: Strategy, has_energy: bool, time_text: Callable[[float], str],
-              clock_offset: float) -> list[tuple[str, ...]]:
-    """Pit stop plan rows (columns of PLAN_COLUMNS): start load (or now), then every stop"""
+              clock_offset: float, driver_name: Callable[[int], str] = str) -> list[tuple[str, ...]]:
+    """Pit stop plan rows (columns of PLAN_COLUMNS): start load (or now), then every stop (driver_name:
+    name of driver number, number when not named)"""
     if not strategy.ready:
         return []
     live = strategy.first_lap > 0
     rows: list[tuple[str, ...]] = [(
         tr("Now") if live else tr("Start"), str(strategy.first_lap), "", time_text(clock_offset),
-        f"{strategy.fuel_load:.1f}", f"{strategy.energy_load:.1f}" if has_energy else DASH, "",
-        str(strategy.driver_of(0)), "")]
+        f"{number_text(strategy.fuel_load, 1)}", f"{number_text(strategy.energy_load, 1)}" if has_energy else DASH, "",
+        driver_name(strategy.driver_of(0)), "")]
     counts = strategy.tyre_changes
     for index, stop in enumerate(strategy.stops):
         tyres = (f"{tr('Change')} ({counts[index]})" if index < len(counts) else tr("Change")) if stop.tyres else ""
@@ -256,8 +264,8 @@ def plan_rows(strategy: Strategy, has_energy: bool, time_text: Callable[[float],
         mark = {"sc": " SC", "rain": f" {tr('Wet')}", "dry": f" {tr('Dry')}"}.get(
             stop.reason, " SC" if stop.safety_car else "")
         number = str(strategy.stops_done + index + 1) + mark
-        rows.append((number, str(stop.lap), window, time_text(stop.clock), f"{stop.fuel:.1f}",
-                     f"{stop.energy:.1f}" if has_energy else DASH, tyres, str(stop.driver), f"{stop.seconds:.1f}"))
+        rows.append((number, str(stop.lap), window, time_text(stop.clock), f"{number_text(stop.fuel, 1)}",
+                     f"{number_text(stop.energy, 1)}" if has_energy else DASH, tyres, driver_name(stop.driver), f"{number_text(stop.seconds, 1)}"))
     return rows
 
 
@@ -280,28 +288,29 @@ def plan_title(strategy: Strategy) -> str:
 def plan_footer(strategy: Strategy) -> str:
     tyre_seconds = sum(stop.tyre_seconds for stop in strategy.stops)
     return trm(f"{strategy.pit_seconds:.0f} s in the pits") + (
-        f" · {tr('Tyres')} {tyre_seconds:.1f} s" if tyre_seconds else "")
+        f" · {tr('Tyres')} {number_text(tyre_seconds, 1)} s" if tyre_seconds else "")
 
 
 def plan_text(strategy: Strategy, symbol: str, has_energy: bool, drivers: int,
-              time_text: Callable[[float], str]) -> str:
-    """Pit stop plan as plain text (clipboard)"""
+              time_text: Callable[[float], str], driver_label: Callable[[int], str] | None = None) -> str:
+    """Pit stop plan as plain text (clipboard), driver_label: name of driver number (else "Driver N")"""
+    label = driver_label or default_driver_label
     lines = [
         plan_title(strategy),
-        f"{tr('Now') if strategy.first_lap else tr('Start')}: {strategy.fuel_load:.1f} {symbol}"
-        + (f" · {strategy.energy_load:.1f} %" if has_energy else ""),
+        f"{tr('Now') if strategy.first_lap else tr('Start')}: {number_text(strategy.fuel_load, 1)} {symbol}"
+        + (f" · {number_text(strategy.energy_load, 1)} %" if has_energy else ""),
     ]
     counts = strategy.tyre_changes
     for index, stop in enumerate(strategy.stops):
         line = (f"{tr('Stop')} {strategy.stops_done + index + 1} · {tr('Lap')} {stop.lap}"
-                f" · {time_text(stop.clock)} · +{stop.fuel:.1f} {symbol}")
+                f" · {time_text(stop.clock)} · +{number_text(stop.fuel, 1)} {symbol}")
         if has_energy:
-            line += f" · +{stop.energy:.1f} %"
+            line += f" · +{number_text(stop.energy, 1)} %"
         if stop.tyres:
             line += f" · {tr('Tyres')}" + (f" ({counts[index]})" if index < len(counts) else "")
         if drivers > 1:
-            line += f" · {tr('Driver')} {stop.driver}"
-        line += f" · {stop.seconds:.1f} s"
+            line += f" · {label(stop.driver)}"
+        line += f" · {number_text(stop.seconds, 1)} s"
         if index < len(strategy.windows):
             line += f" · {tr('Window')} {strategy.windows[index][0]}-{strategy.windows[index][1]}"
         lines.append(line)
@@ -310,9 +319,15 @@ def plan_text(strategy: Strategy, symbol: str, has_energy: bool, drivers: int,
 
 
 # Strategy timeline
-def timeline(strategy: Strategy, drivers: int, symbol: str, time_text: Callable[[float], str]) -> dict:
+def default_driver_label(number: int) -> str:
+    return f"{tr('Driver')} {number}"
+
+
+def timeline(strategy: Strategy, drivers: int, symbol: str, time_text: Callable[[float], str],
+             driver_label: Callable[[int], str] | None = None) -> dict:
     """Race laps left to right (fractions of the plan), one block per stint (driver color when
     drivers take turns), stops with their details, safety car & rain bands"""
+    label = driver_label or default_driver_label
     if not strategy.ready:
         return {"ready": False, "first": 0, "last": 0, "stints": [], "stops": [], "bands": []}
     total = strategy.race_laps
@@ -327,9 +342,9 @@ def timeline(strategy: Strategy, drivers: int, symbol: str, time_text: Callable[
         seconds = strategy.stint_seconds[index] if index < len(strategy.stint_seconds) else 0.0
         driver = strategy.driver_of(index) if drivers > 1 else 0
         tip = [f"<b>{tr('Stint')} {strategy.stops_done + index + 1}</b> · {tr('Laps')} {first}-{last}",
-               f"{laps_text(last - first + 1)} · {seconds / 60:.1f} min"]
+               f"{laps_text(last - first + 1)} · {number_text(seconds / 60, 1)} min"]
         if driver:
-            tip.append(f"{tr('Driver')} {driver}")
+            tip.append(escape(label(driver)))
         stints.append({
             "start": position(first - 1), "end": position(last), "laps": last - first + 1,
             "color": DRIVER_COLORS[(driver - 1) % len(DRIVER_COLORS)] if driver else "", "tip": "<br>".join(tip),
@@ -338,16 +353,16 @@ def timeline(strategy: Strategy, drivers: int, symbol: str, time_text: Callable[
     for index, stop in enumerate(strategy.stops):
         tip = [f"<b>{tr('Stop')} {strategy.stops_done + index + 1}</b> · {tr('Lap')} {stop.lap}",
                f"{tr('Time')} {time_text(stop.clock)}",
-               f"+{stop.fuel:.1f} {symbol}" + (f" · +{stop.energy:.1f} %" if stop.energy else "")]
+               f"+{number_text(stop.fuel, 1)} {symbol}" + (f" · +{number_text(stop.energy, 1)} %" if stop.energy else "")]
         if index < len(strategy.windows):
             tip.append(f"{tr('Pit Window')} {strategy.windows[index][0]}-{strategy.windows[index][1]}")
         if stop.tyres:
             tip.append(tr("Tyres"))
         if drivers > 1:
-            tip.append(f"{tr('Driver')} {stop.driver}")
+            tip.append(escape(label(stop.driver)))
         if stop.safety_car:
             tip.append(tr("Under safety car"))
-        tip.append(f"{stop.seconds:.1f} s")
+        tip.append(f"{number_text(stop.seconds, 1)} s")
         stops.append({"pos": position(stop.lap), "lap": stop.lap, "tyres": stop.tyres, "tip": "<br>".join(tip)})
     bands = []
     sc_first, sc_laps = strategy.safety_car
@@ -395,9 +410,9 @@ def saving_texts(strategy: Strategy, plan_setup: StrategyInput, setup: StrategyI
     def consumption_text(fuel: float, energy: float) -> str:
         parts = []
         if setup.fuel_per_lap > 0:
-            parts.append(trm(f"{fuel:.3f} {symbol} per lap ({fuel - setup.fuel_per_lap:+.3f})"))
+            parts.append(trm_number(f"{fuel:.3f} {symbol} per lap ({fuel - setup.fuel_per_lap:+.3f})"))
         if has_energy:
-            parts.append(trm(f"{energy:.3f} % per lap ({energy - setup.energy_per_lap:+.3f})"))
+            parts.append(trm_number(f"{energy:.3f} % per lap ({energy - setup.energy_per_lap:+.3f})"))
         return " · ".join(parts)
 
     if target is None:
@@ -411,9 +426,9 @@ def saving_texts(strategy: Strategy, plan_setup: StrategyInput, setup: StrategyI
             if saving.race_laps != strategy.race_laps:
                 gain = f"{saving.race_laps - strategy.race_laps:+d} {tr('laps')}"
             else:
-                gain = f"{saving.race_seconds - strategy.race_seconds:+.1f} s"
+                gain = f"{signed_text(saving.race_seconds - strategy.race_seconds, 1)} s"
             worth = race_result(saving) < race_result(strategy)
-            one_less += (f"<br>{tr('Saving Cost')}: +{cost:.2f} s/{tr('lap')} · {tr('Race')} {gain} · "
+            one_less += (f"<br>{tr('Saving Cost')}: +{number_text(cost, 2)} s/{tr('lap')} · {tr('Race')} {gain} · "
                          + (tr("worth it") if worth else tr("not worth it")))
     aimed_text = ""
     if aimed is not None:
@@ -422,8 +437,8 @@ def saving_texts(strategy: Strategy, plan_setup: StrategyInput, setup: StrategyI
                       + trm(f"{len(aimed_strategy.stops)} stop(s) with this target"))
     return {
         "oneLess": one_less, "target": aimed_text,
-        "oneLessFuel": f"{target.fuel:.3f}" if target and strategy.ready else DASH,
-        "oneLessEnergy": f"{target.energy:.3f}" if target and has_energy else DASH,
+        "oneLessFuel": f"{number_text(target.fuel, 3)}" if target and strategy.ready else DASH,
+        "oneLessEnergy": f"{number_text(target.energy, 3)}" if target and has_energy else DASH,
     }
 
 
@@ -440,11 +455,11 @@ def comparison(variants: Sequence[Variant], has_energy: bool, symbol: str) -> di
         if strategy.race_laps != best.strategy.race_laps:
             gap = f"{strategy.race_laps - best.strategy.race_laps:+d} {tr('laps')}"
         else:
-            gap = f"{strategy.race_seconds - best.strategy.race_seconds:+.1f} s"
+            gap = f"{signed_text(strategy.race_seconds - best.strategy.race_seconds, 1)} s"
         name = f"{variant.stops}" + (f" ({tr('now')})" if variant.current else "")
         rows.append([
-            name, f"{variant.fuel:.3f}", f"{variant.energy:.3f}" if has_energy else DASH,
-            f"{variant.lap_cost:+.2f} s" if variant.lap_cost else DASH,
+            name, f"{number_text(variant.fuel, 3)}", f"{number_text(variant.energy, 3)}" if has_energy else DASH,
+            f"{signed_text(variant.lap_cost, 2)} s" if variant.lap_cost else DASH,
             f"{strategy.pit_seconds:.0f} s", str(strategy.race_laps),
             duration_text(strategy.race_seconds), gap if variant is not best else DASH,
         ])
@@ -461,7 +476,7 @@ def safety_car_risk_view(risk: SafetyCarRisk | None, enabled: bool = True) -> di
     for index, window in enumerate(risk.windows, 1):  # gain: time the choice shown wins over the other
         rows.append([f"{index} ({window.first}-{window.last})",
                      tr("Stop under it") if window.gain > 0.05 else tr("Stay out"),
-                     f"{abs(window.gain):.1f} s" if abs(window.gain) > 0.05 else DASH, str(window.stops)])
+                     f"{number_text(abs(window.gain), 1)} s" if abs(window.gain) > 0.05 else DASH, str(window.stops)])
     text = trm(f"{risk.chance * 100:.0f} % chance of a safety car at least") + " · " + trm(
         f"one stop saved in {risk.fewer_stops * 100:.0f} % of the race")
     return {"visible": True, "columns": columns, "rows": rows, "text": text}
@@ -482,10 +497,10 @@ def compound_comparison(plans: Sequence[CompoundPlan], selected: str = "") -> di
         if strategy.race_laps != best.strategy.race_laps:
             gap = f"{strategy.race_laps - best.strategy.race_laps:+d} {tr('laps')}"
         else:
-            gap = f"{strategy.race_seconds - best.strategy.race_seconds:+.1f} s"
+            gap = f"{signed_text(strategy.race_seconds - best.strategy.race_seconds, 1)} s"
         name = item.compound + (f" ({tr('selected')})" if item.compound == selected else "")
         rows.append([
-            name, f"{item.pace:+.2f} s" if item.pace else DASH, str(len(strategy.stops)),
+            name, f"{signed_text(item.pace, 2)} s" if item.pace else DASH, str(len(strategy.stops)),
             str(len(strategy.tyre_stops)), f"{strategy.pit_seconds:.0f} s", str(strategy.race_laps),
             duration_text(strategy.race_seconds), gap if item is not best else DASH,
         ])
@@ -508,20 +523,22 @@ def scenario_text(kind: str, strategy: Strategy, without: Strategy | None) -> st
         for stop in strategy.stops:
             if stop.reason in ("rain", "dry"):
                 name = tr("Wet tyres at lap") if stop.reason == "rain" else tr("Slicks at lap")
-                parts.append(f"{name} {stop.lap} ({stop.seconds:.1f} s)")
+                parts.append(f"{name} {stop.lap} ({number_text(stop.seconds, 1)} s)")
         return "<br>".join(parts)
     parts = [f"{tr('Without safety car')}: {len(without.stops)} {tr('stop(s)')}, {without.race_laps} {tr('laps')}",
              f"{tr('With safety car')}: {stops:+d} {tr('stop(s)')}, {laps:+d} {tr('laps')}"]
     sc_stop = next((stop for stop in strategy.stops if stop.safety_car), None)
     if sc_stop is not None:
-        parts.append(f"{tr('Stop under safety car at lap')} {sc_stop.lap} ({sc_stop.seconds:.1f} s)")
+        parts.append(f"{tr('Stop under safety car at lap')} {sc_stop.lap} ({number_text(sc_stop.seconds, 1)} s)")
     if not strategy.safety_car[1]:
         parts.append(tr("Safety car after the finish: no effect"))
     return "<br>".join(parts)
 
 
-def driver_times(strategy: Strategy, drivers: int, limits: Sequence[tuple[float, float, float]]) -> dict:
-    """Driving time of each driver: stints, time, limits not met"""
+def driver_times(strategy: Strategy, drivers: int, limits: Sequence[tuple[float, float, float]],
+                 driver_name: Callable[[int], str] = str) -> dict:
+    """Driving time of each driver: stints, time, limits not met (driver_name: name of driver number,
+    number when not named)"""
     columns = [tr("Driver"), tr("Stints"), tr("Time"), tr("Limits")]
     if drivers < 2 or not strategy.ready:
         return {"visible": False, "columns": columns, "rows": [], "warning": False, "note": ""}
@@ -536,7 +553,7 @@ def driver_times(strategy: Strategy, drivers: int, limits: Sequence[tuple[float,
         if problems:
             limit += "  " + " · ".join(tr("below minimum") if kind == "min" else tr("above maximum")
                                         for kind in problems)
-        rows.append([str(index + 1), str(stints), duration_text(seconds), limit or DASH])
+        rows.append([driver_name(index + 1), str(stints), duration_text(seconds), limit or DASH])
     note = trm(f"Minimum times add up to {ceil(strategy.drivers_short / 60):.0f} min more than the race "
                "leaves to drive: plan made without them") if strategy.drivers_short > 0 else ""
     return {"visible": True, "columns": columns, "rows": rows, "warning": bool(strategy.driver_issues),
@@ -562,8 +579,8 @@ def plan_against_race(stints: Sequence[StintDataSet], strategy: Strategy, setup_
         energy = stint.totalEnergy / laps
         rows.append([
             str(index + 1), (drivers[index] if index < len(drivers) else "") or DASH, f"{laps} / {planned or DASH}",
-            f"{stint.totalTime / laps:.2f} / {planned_time:.2f}", f"{fuel:.3f} / {setup_fuel:.3f}",
-            f"{energy:.3f} / {setup_energy:.3f}" if has_energy else DASH, f"{stint.totalTyreWear:.1f}",
+            f"{number_text(stint.totalTime / laps, 2)} / {number_text(planned_time, 2)}", f"{number_text(fuel, 3)} / {number_text(setup_fuel, 3)}",
+            f"{number_text(energy, 3)} / {number_text(setup_energy, 3)}" if has_energy else DASH, f"{number_text(stint.totalTyreWear, 1)}",
         ])
     hidden = [] if any(drivers[:len(done)]) else [1]
     if not has_energy:
@@ -599,9 +616,9 @@ def pit_exit_text(place: PitExit) -> str:
     """Rejoin after a stop at the end of this lap: class place, gaps to the cars around"""
     parts = [trm(f"Stop at the end of this lap ({place.loss:.0f} s): back on track P{place.place} in class")]
     if place.ahead is not None:
-        parts.append(trm(f"{place.ahead[1]:.1f} s behind ") + escape(place.ahead[0]))
+        parts.append(trm_number(f"{place.ahead[1]:.1f} s behind ") + escape(place.ahead[0]))
     if place.behind is not None:
-        parts.append(trm(f"{place.behind[1]:.1f} s ahead of ") + escape(place.behind[0]))
+        parts.append(trm_number(f"{place.behind[1]:.1f} s ahead of ") + escape(place.behind[0]))
     if place.passed:
         parts.append(trm(f"{place.passed} car(s) pass you"))
     return " · ".join(parts)

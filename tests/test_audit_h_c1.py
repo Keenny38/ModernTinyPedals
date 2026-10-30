@@ -68,7 +68,7 @@ OLD_CATEGORY_COLORS = {
 OLD_TOOL_SECTIONS = (
     ("Utilities", (
         ("Race Calculator", "", "race_calculator.RaceCalculator"),
-        ("Driver Stats Viewer", "", "driver_stats_viewer.DriverStatsViewer"),
+        ("Driver Stats", "", "driver_stats_viewer.DriverStatsViewer"),  # one name (UI/UX audit 2026-10-29 N3)
         ("Track Map Viewer", "", "track_map_viewer.TrackMapViewer"),
         ("Lap Telemetry Viewer", "", "lap_viewer.LapViewer"),
         ("Broadcast Director", "", "broadcast_director.BroadcastDirector"),
@@ -83,13 +83,11 @@ OLD_TOOL_SECTIONS = (
         ("Vehicle Class Editor", "", "vehicle_class_editor.VehicleClassEditor"),
         ("Track Info Editor", "", "track_info_editor.TrackInfoEditor"),
         ("Track Notes Editor", "", "track_notes_editor.TrackNotesEditor"),
-        ("Layout Editor", "", "layout_editor.LayoutEditor"),
     )),
     ("Management", (
-        ("Config", "", "app_settings.AppSettings"),
-        ("Preset Comparison", "", "preset_compare.PresetCompare"),
+        ("Settings", "", "app_settings.AppSettings"),  # one name for settings (UI/UX audit 2026-10-29 N1)
         ("Plugin Manager", "", "plugin_manager.PluginManager"),
-        ("Widget Performance", "", "perf_view.PerformanceView"),
+        ("Overlay Performance", "", "perf_view.PerformanceView"),
     )),
     ("Advanced", (
         ("Session Recorder", "", "replay_view.ReplayView"),
@@ -106,12 +104,12 @@ OLD_NAV_PAGES = (
     ("tools", "Tools", "", "T"),
 )
 OLD_SHORT_LABELS = {
-    "race_calculator": "Race", "driver_stats_viewer": "Stats", "track_map_viewer": "Map", "lap_viewer": "Telemetry",
+    "race_calculator": "Calculator", "driver_stats_viewer": "Stats", "track_map_viewer": "Map", "lap_viewer": "Telemetry",
     "replay_view": "Recorder", "broadcast_director": "Broadcast",
     "race_results_viewer": "Results", "stream_overlay_view": "Stream", "heatmap_editor": "Heatmap",
     "brake_editor": "Brakes", "tyre_compound_editor": "Compounds", "vehicle_brand_editor": "Brands",
     "vehicle_class_editor": "Classes", "track_info_editor": "Tracks", "track_notes_editor": "Notes",
-    "layout_editor": "Layout", "preset_compare": "Compare", "plugin_manager": "Plugins", "perf_view": "Performance",
+    "plugin_manager": "Plugins", "perf_view": "Performance",  # Preset Comparison: panel of Presets (audit N5)
 }
 OLD_KEYWORD_TOOLS = {
     "app_settings.AppSettings", "stream_overlay_view.StreamOverlaysView", "race_results_viewer.RaceResultsViewer",
@@ -298,7 +296,7 @@ def test_rail_entries_unchanged():
 
     entries = rail_entries()
     assert list(entries)[:len(OLD_NAV_PAGES)] == [key for key, *_ in OLD_NAV_PAGES]
-    assert entries["app_settings"].label == "Config" and entries["app_settings"].letter == "C"
+    assert entries["app_settings"].label == "Settings" and entries["app_settings"].letter == "S"
     assert entries["lap_viewer"].label == "Telemetry" and entries["lap_viewer"].tooltip == "Lap Telemetry Viewer"
     assert entries["home"].letter == "A" and entries["home"].page == 0
 

@@ -11,7 +11,8 @@ TpPage {
 
     readonly property bool narrow: width < theme.em * 46  // content-tuned: step list becomes a progress bar
     readonly property var stepFiles: [
-        "SetupWelcome.qml", "SetupGame.qml", "SetupUnits.qml", "SetupLook.qml", "SetupOverlays.qml", "SetupReady.qml"
+        "SetupWelcome.qml", "SetupGame.qml", "SetupUnits.qml", "SetupLook.qml", "SetupOverlays.qml", "SetupStream.qml",
+        "SetupReady.qml"
     ]
     readonly property var current: backend.steps[backend.step]
     readonly property bool last: backend.step === backend.stepCount - 1
@@ -81,7 +82,7 @@ TpPage {
             visible: !page.narrow
             Layout.fillHeight: true
             Layout.preferredWidth: Math.round(theme.em * 15)
-            color: theme.dark ? Qt.darker(theme.window, 1.12) : Qt.darker(theme.window, 1.025)
+            color: theme.surfaceSunken
 
             ColumnLayout {
                 anchors.fill: parent
@@ -90,7 +91,7 @@ TpPage {
 
                 RowLayout {
                     Layout.bottomMargin: theme.em * 1.6
-                    spacing: theme.em * 0.6
+                    spacing: theme.space4
                     Image {
                         source: backend.appIcon
                         asynchronous: true
@@ -178,7 +179,8 @@ TpPage {
                                 anchors.centerIn: parent
                                 visible: !entry.done
                                 text: entry.index + 1
-                                color: entry.active ? "white" : theme.dimText
+                                textFormat: Text.PlainText
+                                color: entry.active ? theme.accentInk : theme.dimText
                                 font.pointSize: theme.fontSmall
                                 font.weight: Font.DemiBold
                             }
@@ -187,16 +189,17 @@ TpPage {
                                 visible: entry.done
                                 fallback: "✓"
                                 glyph: ""  // check
-                                color: "white"
-                                size: theme.em * 0.8
+                                color: theme.accentInk
+                                size: theme.iconSm
                             }
                         }
                         Text {
                             anchors.left: dot.right
-                            anchors.leftMargin: theme.em * 0.7
+                            anchors.leftMargin: theme.padCard
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: entry.modelData.label
+                            textFormat: Text.PlainText
                             color: entry.active || entry.done ? theme.text : theme.dimText
                             font.weight: entry.active ? Font.DemiBold : Font.Normal
                             elide: Text.ElideRight
@@ -234,8 +237,8 @@ TpPage {
                 Layout.fillWidth: true
                 Layout.leftMargin: page.contentX
                 Layout.rightMargin: page.contentRight
-                Layout.topMargin: theme.em * 1.2
-                spacing: theme.em * 0.3
+                Layout.topMargin: theme.space6
+                spacing: theme.space2
                 Repeater {
                     model: backend.stepCount
                     Rectangle {
@@ -261,27 +264,29 @@ TpPage {
                     id: stageContent
                     width: stage.width
                     height: stage.height
-                    spacing: theme.em * 1.2
+                    spacing: theme.space6
 
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.leftMargin: page.contentX
                         Layout.rightMargin: page.contentRight
                         Layout.topMargin: theme.em * 1.6
-                        spacing: theme.em * 0.3
+                        spacing: theme.space2
                         Text {
                             Layout.fillWidth: true
                             text: (backend.step + 1) + " / " + backend.stepCount + "  ·  " + page.current.label
+                            textFormat: Text.PlainText
                             color: theme.accent
                             font.pointSize: theme.fontSmall
                             font.weight: Font.DemiBold
                             font.capitalization: Font.AllUppercase
-                            font.letterSpacing: 0.8
+                            font.letterSpacing: theme.letterSpacingOverline
                             elide: Text.ElideRight
                         }
                         Text {
                             Layout.fillWidth: true
                             text: page.current.title
+                            textFormat: Text.PlainText
                             color: theme.text
                             wrapMode: Text.WordWrap
                             font.pointSize: theme.fontDisplay
@@ -290,6 +295,7 @@ TpPage {
                         Text {
                             Layout.fillWidth: true
                             text: page.current.subtitle
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             wrapMode: Text.WordWrap
                         }
@@ -343,6 +349,7 @@ TpPage {
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignRight
                     text: page.last ? backend.nameError : ""
+                    textFormat: Text.PlainText
                     color: theme.loss
                     elide: Text.ElideRight
                 }
@@ -362,4 +369,7 @@ TpPage {
             }
         }
     }
+
+    // Dialogs & toasts asked by the backend (ui/quick/dialogs.py, ui/toast.show_toast)
+    TpDialogHost {}
 }

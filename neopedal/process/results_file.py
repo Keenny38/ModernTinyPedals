@@ -55,8 +55,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
-from collections.abc import Iterable
-from typing import NamedTuple, cast
+from collections.abc import Iterable, Iterator
+from typing import BinaryIO, NamedTuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ STAMP_SETTLE = 2.0  # seconds: folder or file changed more recently is read agai
 LISTING_MAX_AGE = 60.0  # seconds: folder listing read again at least this often
 STEAM_CACHE_SECONDS = 30.0  # seconds: game folders found in Steam libraries looked up again
 PARSE_CHUNK = 1 << 20  # bytes fed to the parser at once
+TAIL_BYTES = 4096  # end of file looked at for the root end tag (file parsed as read when found there)
 CACHE_BYTES = 32 << 20  # memory estimate of results files parsed kept for next readers
 LAP_BYTES = 700  # memory estimate of a lap (named tuple, numbers, sector & wear tuples, compound)
 EVENT_BYTES = 400  # memory estimate of a stream event
@@ -374,7 +375,49 @@ class _Parsed(NamedTuple):
     events: tuple[Event, ...]
 
 
-def _parse_tree(data: bytes | memoryview) -> _Parsed:
+def _chunks(data: bytes | memoryview) -> Iterator[bytes]:
+    """Content in PARSE_CHUNK pieces"""
+    view = memoryview(data)
+    for start in range(0, len(view), PARSE_CHUNK):
+        yield bytes(view[start:start + PARSE_CHUNK])
+
+
+class _StreamFailed(Exception):
+    """File not parsed as read: content read whole (root end tag & DOCTYPE found anywhere, invalid UTF-8 repaired)"""
+
+
+def _file_chunks(file: BinaryIO, size: int) -> Iterator[bytes]:
+    """Results file fed to the parser as read, never held whole: DOCTYPE dropped, invalid characters removed,
+    up to the root end tag (looked for in the last TAIL_BYTES)
+
+    Raises:
+        _StreamFailed: root end tag not at the end of the file, DOCTYPE not whole in the first chunk, file
+            shrank meanwhile.
+    """
+    start = max(size - TAIL_BYTES, 0)
+    file.seek(start)
+    found = file.read().rfind(ROOT_END)
+    if found < 0:
+        raise _StreamFailed
+    end = start + found + len(ROOT_END)
+    file.seek(0)
+    position = 0
+    while position < end:
+        chunk = file.read(min(PARSE_CHUNK, end - position))
+        if not chunk:
+            raise _StreamFailed
+        first = position == 0
+        position += len(chunk)
+        if first and b"<!DOCTYPE" in chunk:
+            if DOCTYPE.search(chunk) is None:
+                raise _StreamFailed
+            chunk = DOCTYPE.sub(b"", chunk, count=1)
+        if INVALID_CHARS.search(chunk) is not None:  # single bytes: removed chunk by chunk
+            chunk = INVALID_CHARS.sub(b"", chunk)
+        yield chunk
+
+
+def _parse_tree(chunks: Iterable[bytes]) -> _Parsed:
     """Cars & stream of the session parsed as soon as read, their elements emptied (a 24 h race file is never
     held as a whole tree)
 
@@ -415,9 +458,8 @@ def _parse_tree(data: bytes | memoryview) -> _Parsed:
                 events = parse_events(element)
                 element.clear()
 
-    view = memoryview(data)
-    for start in range(0, len(view), PARSE_CHUNK):
-        parser.feed(bytes(view[start:start + PARSE_CHUNK]))
+    for chunk in chunks:
+        parser.feed(chunk)
         handle()
     parser.close()
     handle()
@@ -426,12 +468,24 @@ def _parse_tree(data: bytes | memoryview) -> _Parsed:
     return _Parsed(root, results, session, entries, events)
 
 
-def _parse_raw(data: bytes, path: str) -> tuple[SessionResult, tuple[Entry, ...]]:
-    """Results file content without player marked: result (entries left empty), cars in file order
+def _parse_raw(data: bytes | BinaryIO, path: str) -> tuple[SessionResult, tuple[Entry, ...]]:
+    """Results file (open file: parsed as read, its content read whole & repaired only if that fails) or its
+    content, without player marked: result (entries left empty), cars in file order
 
     Raises:
         ValueError: not a results file (or not complete yet: game still writing it).
     """
+    if isinstance(data, bytes):
+        return _parse_bytes(data, path)
+    try:
+        return _session_of(_parse_tree(_file_chunks(data, os.fstat(data.fileno()).st_size)), path)
+    except (_StreamFailed, ET.ParseError):
+        data.seek(0)
+        return _parse_bytes(data.read(), path)
+
+
+def _parse_bytes(data: bytes, path: str) -> tuple[SessionResult, tuple[Entry, ...]]:
+    """Results file content held whole (see _parse_raw): invalid UTF-8 repaired if not well formed"""
     if DOCTYPE.search(data) is not None:
         data = DOCTYPE.sub(b"", data, count=1)
     end = data.rfind(ROOT_END)
@@ -441,7 +495,7 @@ def _parse_raw(data: bytes, path: str) -> tuple[SessionResult, tuple[Entry, ...]
     if INVALID_CHARS.search(content) is not None:
         content = INVALID_CHARS.sub(b"", content)
     try:
-        parsed = _parse_tree(content)
+        parsed = _parse_tree(_chunks(content))
     except ET.ParseError as error:
         original = bytes(content)
         repaired = repair_utf8(original)
@@ -449,9 +503,18 @@ def _parse_raw(data: bytes, path: str) -> tuple[SessionResult, tuple[Entry, ...]
             raise ValueError(f"invalid results file: {error}") from error
         del original
         try:  # Windows-1252 name in a file declared UTF-8: whole session kept
-            parsed = _parse_tree(repaired)
+            parsed = _parse_tree(_chunks(repaired))
         except ET.ParseError as repaired_error:
             raise ValueError(f"invalid results file: {repaired_error}") from repaired_error
+    return _session_of(parsed, path)
+
+
+def _session_of(parsed: _Parsed, path: str) -> tuple[SessionResult, tuple[Entry, ...]]:
+    """Result of the parsed file (entries left empty) & its cars in file order
+
+    Raises:
+        ValueError: not a results file.
+    """
     results = parsed.results
     if results is None:
         raise ValueError("no RaceResults element")
@@ -526,12 +589,17 @@ def _cache_put(key: tuple[str, int, int], raw: SessionResult, cars: tuple[Entry,
             _cache_size -= _cache.popitem(last=False)[1][2]
 
 
-def forget_results() -> None:
-    """Results files parsed released"""
+def forget_results(paths: Iterable[str] | None = None) -> None:
+    """Results files parsed released: those of paths (files other readers parsed stay for them), else all"""
     global _cache_size
     with _cache_lock:
-        _cache.clear()
-        _cache_size = 0
+        if paths is None:
+            _cache.clear()
+            _cache_size = 0
+            return
+        wanted = set(paths)
+        for key in [key for key in _cache if key[0] in wanted]:
+            _cache_size -= _cache.pop(key)[2]
 
 
 def read_results(path: str, player_names: Iterable[str] = (), keep: bool = True) -> SessionResult:
@@ -555,9 +623,7 @@ def read_results(path: str, player_names: Iterable[str] = (), keep: bool = True)
     if cached is not None:
         return _with_player(cached[0], cached[1], player_names)
     with open(path, "rb") as file:
-        data = file.read()
-    raw, cars = _parse_raw(data, path)
-    del data
+        raw, cars = _parse_raw(file, path)  # parsed as read: file never held whole unless damaged
     if keep:
         _cache_put(key, raw, cars)
     return _with_player(raw, cars, player_names)
@@ -572,6 +638,7 @@ def is_results_file(name: str) -> bool:
 _lookup_lock = threading.Lock()
 _listings: dict[str, tuple[tuple, float, list[str]]] = {}  # folder: (stamp, time listed, results files)
 _chosen: dict[str, tuple[tuple, str]] = {}  # config folder: (settings file stamp, chosen folder)
+_profiles: dict[str, tuple[tuple, list[str]]] = {}  # game profile file: (stamp, player names)
 _found: tuple[float, dict[str, str]] | None = None  # time found, game folders of Steam libraries
 
 
@@ -592,6 +659,7 @@ def forget_lookups() -> None:
     with _lookup_lock:
         _listings.clear()
         _chosen.clear()
+        _profiles.clear()
         _found = None
 
 
@@ -636,12 +704,31 @@ def game_root(results_folder: str) -> str:
 
 
 def profile_player_names(results_folder: str) -> list[str]:
-    """Driver name & nickname of game profile (UserData/player/Settings.JSON), empty if not found"""
+    """Driver name & nickname of game profile (UserData/player/Settings.JSON), empty if not found
+
+    Names kept while the profile file (hundreds of KB) is unchanged: read once for the scans of every page.
+    """
     path = os.path.join(game_root(results_folder), "UserData", "player", "Settings.JSON")
+    stamp = settled_stamp(path)
+    if stamp is not None:
+        with _lookup_lock:
+            cached = _profiles.get(path)
+        if cached is not None and cached[0] == stamp:
+            return list(cached[1])
+    names = _read_profile_names(path)
+    if stamp is not None:
+        with _lookup_lock:
+            if path not in _profiles and len(_profiles) >= 16:
+                _profiles.clear()
+            _profiles[path] = (stamp, names)
+    return list(names)
+
+
+def _read_profile_names(path: str) -> list[str]:
     try:
         with open(path, encoding="utf-8", errors="replace") as file:
             profile = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return []
     driver = profile.get("DRIVER") if isinstance(profile, dict) else None
     if not isinstance(driver, dict):
@@ -726,7 +813,7 @@ def chosen_results_folder(config_path: str) -> str:
     try:
         with open(path, encoding="utf-8-sig") as file:
             settings = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return ""
     folder = settings.get("folder", "") if isinstance(settings, dict) else ""
     folder = folder if isinstance(folder, str) else ""

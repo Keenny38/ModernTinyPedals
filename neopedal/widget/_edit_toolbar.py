@@ -136,6 +136,19 @@ class EditToolbar(QWidget):
         self.font_title = self.make_font(family, 15, QFont.Weight.Bold)
         self.font_detail = self.make_font(family, 12, QFont.Weight.Medium)
         self.font_icon = self.make_font(self.icon_family, 16, QFont.Weight.Normal)
+        # Fixed tooltips translated once here (refresh runs on every undo step: each arrow key press)
+        tips = {
+            "title": tr("Drag an overlay to move it, its corner to resize it. Arrow keys move the selected "
+                        "overlay (Shift: 10 pixels). Right click an overlay for more."),
+            "snap": tr("Snap to screen edges & other overlays (hold Ctrl to move freely)"),
+            "grid": tr("Grid Move"),
+            "guides": tr("Alignment guides & position while dragging"),
+            "overlays": tr("Active overlays"),
+            "done": tr("Lock overlays & leave edit mode"),
+            "close": tr("Hide toolbar (overlays stay unlocked)"),
+        }
+        for item in self.items:
+            item.tip = tips.get(item.key, "")
         self.relayout()
         self.update()
 
@@ -180,7 +193,9 @@ class EditToolbar(QWidget):
         self.setFixedSize(x + PADDING + SHADOW, BAR_HEIGHT + 2 * SHADOW)
 
     def refresh(self):
-        """Read toggles, history & selection again"""
+        """Read toggles, history & selection again, drawn again only where changed: whole bar when a button
+        state changed, title area when only title or position text did (called on every undo step recorded,
+        each arrow key press while an overlay is moved)"""
         from ._edit_mode import active_overlays
 
         overlays = active_overlays()
@@ -191,34 +206,35 @@ class EditToolbar(QWidget):
             "grid": cfg.overlay["enable_grid_move"],
             "guides": cfg.application["show_layout_guides"],
         }
-        tips = {
-            "title": tr("Drag an overlay to move it, its corner to resize it. Arrow keys move the selected "
-                        "overlay (Shift: 10 pixels). Right click an overlay for more."),
-            "snap": tr("Snap to screen edges & other overlays (hold Ctrl to move freely)"),
-            "grid": tr("Grid Move"),
-            "guides": tr("Alignment guides & position while dragging"),
-            "undo": f"{tr('Undo')}{step_text(undo)} (Ctrl+Z)",
-            "redo": f"{tr('Redo')}{step_text(redo)} (Ctrl+Y)",
-            "overlays": tr("Active overlays"),
-            "done": tr("Lock overlays & leave edit mode"),
-            "close": tr("Hide toolbar (overlays stay unlocked)"),
-        }
+        buttons_changed = False
         for item in self.items:
-            item.checked = bool(states.get(item.key, False))
-            item.tip = tips.get(item.key, "")
+            checked = bool(states.get(item.key, False))
+            enabled = item.enabled
             if item.key == "undo":
-                item.enabled = undo is not None
+                item.tip = f"{tr('Undo')}{step_text(undo)} (Ctrl+Z)"
+                enabled = undo is not None
             elif item.key == "redo":
-                item.enabled = redo is not None
+                item.tip = f"{tr('Redo')}{step_text(redo)} (Ctrl+Y)"
+                enabled = redo is not None
+            if checked != item.checked or enabled != item.enabled:
+                item.checked, item.enabled = checked, enabled
+                buttons_changed = True
         selected = overlays.get(self.controller.selected)
         if selected is not None:
-            self.title = module_label(self.controller.selected)
-            self.detail = geometry_text(selected.geometry())
+            title = module_label(self.controller.selected)
+            detail = geometry_text(selected.geometry())
         else:
             count = len(overlays)
-            self.title = tr("Edit Overlays")
-            self.detail = f"{count} overlay{'s' if count != 1 else ''}"
-        self.update()
+            title = tr("Edit Overlays")
+            detail = f"{count} overlay{'s' if count != 1 else ''}"
+        title_changed = (title, detail) != (self.title, self.detail)
+        self.title, self.detail = title, detail
+        if buttons_changed:
+            self.update()
+        elif title_changed:
+            for item in self.items:
+                if item.kind == TITLE:
+                    self.update(item.rect)
 
     def show_geometry(self, geometry: QRect):
         """Selected overlay dragged: only its position text drawn again (no full refresh per mouse move)"""
@@ -430,7 +446,7 @@ class EditToolbar(QWidget):
             action.triggered.connect(partial(disable_overlay, name))
         if names:
             menu.addSeparator()
-        menu.addAction(tr("All Overlays..."), open_overlays_page)
+        menu.addAction(tr("All Overlays…"), open_overlays_page)
         item = next(item for item in self.items if item.key == "overlays")
         menu.exec(self.mapToGlobal(item.rect.bottomLeft() + QPoint(0, 6)))
         menu.deleteLater()

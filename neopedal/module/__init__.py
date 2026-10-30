@@ -18,10 +18,21 @@
 
 """
 Data modules
+
+Imported when first used (module started, see module_control.ModuleControl.module_of): disabled modules
+never load their code nor their dependencies (recorder: replay & lap cache, stats: results & driver files).
 """
+
+from importlib import import_module
+from types import ModuleType
 
 from ..template.setting_module import MODULE_FILENAME
 
 __all__ = MODULE_FILENAME
 
-from . import *
+
+def __getattr__(name: str) -> ModuleType:
+    """Data module imported on first access (neopedal.module.<name>)"""
+    if name in MODULE_FILENAME:
+        return import_module(f"{__name__}.{name}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

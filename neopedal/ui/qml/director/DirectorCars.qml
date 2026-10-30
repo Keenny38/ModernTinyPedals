@@ -44,7 +44,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.padCard
-        spacing: theme.em * 0.5
+        spacing: theme.space3
 
         TpCardHeader {
             glyph: ""  // car
@@ -215,6 +215,7 @@ Item {
                             visible: row.gained !== 0
                             horizontalAlignment: Text.AlignHCenter
                             text: (row.gained > 0 ? "▲" : "▼") + Math.abs(row.gained)
+                            textFormat: Text.PlainText
                             color: row.gained > 0 ? theme.gain : theme.loss
                             font.pointSize: theme.fontMicro
                             font.features: { "tnum": 1 }
@@ -227,6 +228,7 @@ Item {
                     Text {
                         Layout.preferredWidth: theme.em * 2.4
                         text: row.number !== "" ? "#" + row.number : ""
+                        textFormat: Text.PlainText
                         color: theme.dimOn(rowBack.color)
                         font.pointSize: theme.fontLabel
                         font.features: { "tnum": 1 }
@@ -248,6 +250,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             text: row.driver
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.weight: row.onAir ? Font.Bold : Font.DemiBold
                             elide: Text.ElideRight
@@ -255,6 +258,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             text: row.status !== "" ? row.status : row.team
+                            textFormat: Text.PlainText
                             color: row.status !== "" ? theme.tone(row.statusTone) : theme.dimOn(rowBack.color)
                             font.pointSize: theme.fontCaption
                             elide: Text.ElideRight
@@ -276,7 +280,7 @@ Item {
                         visible: row.battle
                         glyph: ""  // pulse
                         fallback: "↔"
-                        size: theme.em * 0.85
+                        size: theme.iconSm
                         color: theme.accent
                         ToolTip.visible: battleArea.containsMouse
                         ToolTip.text: i18n.tr("Battles")
@@ -287,7 +291,7 @@ Item {
                         visible: row.incidents > 0
                         glyph: ""  // lightning
                         fallback: "!"
-                        size: theme.em * 0.8
+                        size: theme.iconSm
                         color: theme.warning
                         ToolTip.visible: incidentArea.containsMouse
                         ToolTip.text: i18n.tr("%1 contacts").arg(row.incidents)
@@ -301,6 +305,7 @@ Item {
                             width: parent.width
                             horizontalAlignment: Text.AlignRight
                             text: row.interval
+                            textFormat: Text.PlainText
                             color: row.intervalTone !== "" ? theme.tone(row.intervalTone) : theme.dimOn(rowBack.color)
                             font.pointSize: theme.fontSmall
                             font.weight: row.intervalTone !== "" ? Font.DemiBold : Font.Normal
@@ -345,7 +350,7 @@ Item {
                         glyph: ""  // camera
                         fallback: "◎"
                         tip: i18n.tr("Cut to this car (double click)")
-                        opacity: row.onAir || rowArea.containsMouse || hovered || visualFocus || row.current ? 1 : 0.4
+                        opacity: row.onAir || rowArea.containsMouse || hovered || visualFocus || row.current ? 1 : 0  // revealed: hover, focus, current
                         onClicked: backend.cutToCar(row.slot)
                     }
                 }

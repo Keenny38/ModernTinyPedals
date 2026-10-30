@@ -21,6 +21,7 @@ Modern overlay design: fuel & virtual energy panel base
 
 Top: remaining amount (large) & refill needed, level gauge with stint start & refill marks.
 Below: estimate tiles (laps, minutes, consumption, saving target, pit stops, delta, end).
+Each value is shown by its own option ("show_<value>"), top section left out with both its values hidden.
 Low amount warning flashes the remaining value & gauge.
 """
 
@@ -35,7 +36,7 @@ from PySide6.QtGui import QPainter
 from ...i18n import tr_overlay as tr
 from .._common import warning_flash
 from .._data import consumption_data, level_data
-from .base import LEFT, RIGHT, ModernOverlay
+from .base import LEFT, RIGHT, ModernOverlay, signed
 from .draw import rounded
 from .stats import Stat, StatsMixin, Value
 
@@ -55,13 +56,27 @@ class Names(NamedTuple):
     level_bar: str  # option: show level bar
     start_mark: str  # option: show starting level mark
     refill_mark: str  # option: show refill level mark
+    refill_shown: str  # option: show refill needed
+
+
+# Estimate tiles: (stat, option showing it), in design order
+TILES = (
+    (Stat("laps", "Laps", "888.8"), "show_estimated_laps"),
+    (Stat("minutes", "Minutes", "888.8"), "show_estimated_minutes"),
+    (Stat("used", "Per lap", "88.88"), "show_estimated_consumption"),
+    (Stat("save", "Save", "8.88"), "show_saving_target"),
+    (Stat("pits", "Pit stops", "88.88"), "show_estimated_pitstop_count"),
+    (Stat("early", "Early", "88.88"), "show_early_pitstop_count"),
+    (Stat("delta", "Delta", "+8.88"), "show_delta_consumption"),
+    (Stat("end", "End", "888.88"), "show_end_remaining"),
+)
 
 
 COMMON_OPTIONS = (
-    "font_size", "decimal_places_remaining", "decimal_places_estimated_laps", "decimal_places_estimated_minutes",
-    "decimal_places_estimated_consumption", "decimal_places_saving_target", "show_estimated_pitstop_count",
-    "decimal_places_pitstop_count", "decimal_places_early_pitstop_count", "show_delta_consumption_and_end_remaining",
-    "decimal_places_delta_consumption", "decimal_places_end_remaining", "number_of_warning_flashes",
+    "font_size", "show_caption", "show_remaining", "decimal_places_remaining", "decimal_places_estimated_laps",
+    "decimal_places_estimated_minutes", "decimal_places_estimated_consumption", "decimal_places_saving_target",
+    "decimal_places_pitstop_count", "decimal_places_early_pitstop_count", "decimal_places_delta_consumption",
+    "decimal_places_end_remaining", *(option for _, option in TILES), "number_of_warning_flashes",
     "warning_flash_highlight_duration", "warning_flash_interval",
 )
 
@@ -83,6 +98,9 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         self.add_font("hero", 1.7, "bold")
         pad = unit * 0.3
         inner = unit * 0.55
+        self.show_remaining = bool(wcfg["show_remaining"])
+        self.show_refill = bool(wcfg[names.refill_shown])
+        hero_shown = self.show_remaining or self.show_refill
         self.dec_remaining = max(int(wcfg["decimal_places_remaining"]), 0)
         self.dec_refill = max(int(wcfg[names.refill_decimals]), 0)
         self.refill_sign = "" if wcfg[names.absolute] else "+"
@@ -95,24 +113,19 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         else:
             self.warn_flash = None
 
-        stats = [
-            Stat("laps", "Laps", "888.8"),
-            Stat("minutes", "Minutes", "888.8"),
-            Stat("used", "Per lap", "88.88"),
-            Stat("save", "Save", "8.88"),
-        ]
-        if wcfg["show_estimated_pitstop_count"]:
-            stats += [Stat("pits", "Pit stops", "88.88"), Stat("early", "Early", "88.88")]
-        if wcfg["show_delta_consumption_and_end_remaining"]:
-            stats += [Stat("delta", "Delta", "+8.88"), Stat("end", "End", "888.88")]
+        stats = [stat for stat, option in TILES if wcfg[option]]
         stats += extra_stats
         self.keys = tuple(stat.key for stat in stats)
         columns = 4 if len(stats) <= 8 else 5
 
-        hero_h = unit * 2.6
+        hero_h = unit * 2.6 if hero_shown else 0.0
         gauge_h = max(unit * 0.42, 4.0) if wcfg[names.level_bar] else 0.0
         tiles_top = pad + hero_h + (gauge_h + unit * 0.45 if gauge_h else unit * 0.1)
-        hero_w = self.text_width("hero", "888.88") + self.text_width("small", self.symbol) + self.text_width("value", "+888.88") + unit * 3
+        hero_w = 0.0
+        if self.show_remaining:
+            hero_w += self.text_width("hero", "888.88") + self.text_width("small", self.symbol) + unit * 1.5
+        if self.show_refill:
+            hero_w += self.text_width("value", "+888.88") + unit * 1.5
         width, height = self.build_stats(stats, columns=columns, top=tiles_top, min_width=hero_w)
         self.rect_hero = QRectF(pad + inner, pad, width - (pad + inner) * 2, hero_h)
         self.rect_gauge = QRectF(pad + inner, pad + hero_h + unit * 0.05, width - (pad + inner) * 2, gauge_h)
@@ -123,10 +136,12 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         self.paint_stats_static(painter)
         hero = self.rect_hero
         label_h = self.unit * 0.95
-        self.draw_text(painter, QRectF(hero.left(), hero.top() + self.unit * 0.15, hero.width(), label_h),
-                       tr(self.names.title), "label", theme.text_muted, LEFT)
-        self.draw_text(painter, QRectF(hero.left(), hero.top() + self.unit * 0.15, hero.width(), label_h),
-                       tr(self.names.refill), "label", theme.text_muted, RIGHT)
+        if self.show_remaining:
+            self.draw_text(painter, QRectF(hero.left(), hero.top() + self.unit * 0.15, hero.width(), label_h),
+                           tr(self.names.title), "label", theme.text_muted, LEFT)
+        if self.show_refill:
+            self.draw_text(painter, QRectF(hero.left(), hero.top() + self.unit * 0.15, hero.width(), label_h),
+                           tr(self.names.refill), "label", theme.text_muted, RIGHT)
         if self.rect_gauge.height():
             rounded(painter, self.rect_gauge, self.rect_gauge.height() / 2, theme.surface_raised)
 
@@ -135,14 +150,16 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
         values, remaining, refill, low, level = self.state
         hero = self.rect_hero
         value_rect = QRectF(hero.left(), hero.top() + self.unit * 0.95, hero.width(), hero.height() - self.unit * 0.95)
-        color = theme.negative if low else theme.text
-        self.draw_text(painter, value_rect, remaining, "hero", color, LEFT)
-        number_w = self.text_width("hero", remaining)
-        symbol_rect = QRectF(value_rect.left() + number_w + self.unit * 0.2, value_rect.top() + self.unit * 0.25,
-                             self.unit * 2, value_rect.height())
-        self.draw_text(painter, symbol_rect, self.symbol, "small", theme.text_muted, LEFT)
-        refill_color = theme.negative if low else (theme.accent if refill[1] > 0 else theme.positive)
-        self.draw_text(painter, value_rect, refill[0], "strong", refill_color, RIGHT)
+        if self.show_remaining:
+            color = theme.negative if low else theme.text
+            self.draw_text(painter, value_rect, remaining, "hero", color, LEFT)
+            number_w = self.text_width("hero", remaining)
+            symbol_rect = QRectF(value_rect.left() + number_w + self.unit * 0.2, value_rect.top() + self.unit * 0.25,
+                                 self.unit * 2, value_rect.height())
+            self.draw_text(painter, symbol_rect, self.symbol, "small", theme.text_muted, LEFT)
+        if self.show_refill:
+            refill_color = theme.negative if low else (theme.accent if refill[1] > 0 else theme.positive)
+            self.draw_text(painter, value_rect, refill[0], "strong", refill_color, RIGHT)
         if self.rect_gauge.height() and level is not None:
             self.draw_gauge(painter, level, low)
         self.draw_stats(painter, values)
@@ -204,7 +221,7 @@ class ConsumptionPanel(StatsMixin, ModernOverlay):
                 values.append(Value(f"{data.pits_early:.{decimals(wcfg, 'early_pitstop_count')}f}", theme.text_dim))
             elif key == "delta":
                 delta = data.delta
-                values.append(Value(f"{delta:+.{decimals(wcfg, 'delta_consumption')}f}",
+                values.append(Value(signed(delta, decimals(wcfg, "delta_consumption")),
                                     theme.negative if delta > 0 else theme.positive))
             elif key == "end":
                 values.append(Value(f"{data.end:.{decimals(wcfg, 'end_remaining')}f}"))

@@ -26,6 +26,7 @@ through DirectorPart.page.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import weakref
@@ -34,7 +35,6 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QLocale, QObject
 
-from ... import calculation as calc
 from ...formatter import (  # noqa: F401  # class_*: shared by Director parts
     class_alias,
     class_color,
@@ -46,7 +46,7 @@ from ...process import championship as champ
 from ...process import director as dr
 from ...process.driver_history import history as driver_history
 from ...process.game_info import Standing
-from ...process.results_text import gap_seconds_text, laps_behind_text
+from ...process.results_text import gap_seconds_text, laps_behind_text, laptime_text, signed_text
 from ...setting import cfg
 from ...template.setting_compounds import compound_letter
 from ...template.setting_status_colors import SAME_TIME
@@ -59,6 +59,10 @@ if TYPE_CHECKING:
 POLL_MS = 1000  # game asked again (session or replay)
 IDLE_POLL_MS = 5000  # game in menus or not answering
 HIDDEN_POLL_MS = 5000  # page hidden, nothing needs fresh answers (see needs_fresh): game asked this often
+# Game answering without session while one is shown: session left only after so many answers in a row, or two
+# answers this many seconds apart (one missed answer, game busy loading, keeps the desk: greyed, banner)
+LOST_ANSWERS = 3
+LOST_SECONDS = 2.0
 SHARED_MAX_AGE = POLL_MS / 2000  # seconds an answer read by connector or another page is used instead of asking
 SETTINGS_FILE = "broadcast_director.json"
 MODES = ("manual", "assist", "auto")
@@ -132,7 +136,7 @@ TIMING_COLUMNS: dict[str, tuple[str, float, str]] = {
     "laps": ("Laps", 3.0, "right"), "interval": ("Interval", 4.6, "right"), "gap": ("Gap", 4.8, "right"),
     "best": ("Best", 5.4, "right"), "last": ("Last", 5.4, "right"), "s1": ("S1", 4.2, "right"),
     "s2": ("S2", 4.2, "right"), "s3": ("S3", 4.2, "right"), "pits": ("Pit Stops", 3.4, "right"),
-    "stint": ("Stint", 3.2, "right"), "pitTime": ("Pit lane", 6.0, "right"), "energy": ("Energy", 5.0, "left"),
+    "stint": ("Stint", 3.2, "right"), "pitTime": ("Pit Lane", 6.0, "right"), "energy": ("Energy", 5.0, "left"),
     "tyres": ("Tyres", 3.4, "center"), "penalties": ("Pen", 2.8, "center"), "status": ("Status", 6.5, "left"),
 }
 TIMING_VIEWS: dict[str, tuple[str, ...]] = {
@@ -211,7 +215,12 @@ CAR_ROLES = (
 FEED_ROLES = ("key", "timeText", "kind", "kindText", "glyph", "tone", "title", "detail", "live", "classColor",
               "unseen", "canReplay")
 SUGGESTION_ROLES = ("key", "slot", "kind", "kindText", "glyph", "tone", "title", "detail", "number",
-                    "classColor", "score", "best")
+                    "classColor", "score", "best", "hotkey")
+# Hotkeys of the director (keyboard shortcut settings): key text shown in tooltips & the keys sheet
+DIRECTOR_HOTKEYS = ("director_toggle", "director_next_car", "director_previous_car", "director_auto",
+                    "director_take_best", "director_lock", "director_starting_grid", "director_event_card",
+                    "director_classification", "director_championship", "director_hide_graphics",
+                    "director_next_layout")
 BATTLE_ROLES = ("key", "behindSlot", "carClass", "classColor", "position", "ahead", "behind", "gap", "trend",
                 "duration", "onAir", "gapTone", "trendText")
 CLASS_ROLES = ("key", "name", "classColor", "count", "leader", "leaderNumber", "bestLap", "bestDriver", "battles")
@@ -238,8 +247,8 @@ def localized(text: str) -> str:
 
 
 def lap_text(seconds: float) -> str:
-    """Lap time m:ss.sss, "-" if none"""
-    return calc.sec2laptime_full(seconds) if seconds > 0 else "-"
+    """Lap time m:ss.sss, missing text if none"""
+    return laptime_text(seconds)
 
 
 def clock_text(seconds: float) -> str:
@@ -424,7 +433,7 @@ def load_championships() -> list[dict[str, Any]]:
     try:
         with open(championship_path(), encoding="utf-8") as file:
             data = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return []
     result = []
     for item in data if isinstance(data, list) else []:
@@ -433,7 +442,10 @@ def load_championships() -> list[dict[str, Any]]:
         rows = []
         for row in item["rows"]:
             try:
-                rows.append(champ.ChampionshipRow(str(row[0]), float(row[1]), str(row[2]), str(row[3]), str(row[4])))
+                points = float(row[1])
+                if not math.isfinite(points):  # NaN & Infinity accepted by json: never shown
+                    continue
+                rows.append(champ.ChampionshipRow(str(row[0]), points, str(row[2]), str(row[3]), str(row[4])))
             except (IndexError, TypeError, ValueError):
                 continue
         if rows:
@@ -441,8 +453,9 @@ def load_championships() -> list[dict[str, Any]]:
     return result
 
 
-def save_championships(items: list[dict[str, Any]]):
-    with atomic_write(championship_path()) as file:
+def save_championships(items: list[dict[str, Any]]) -> None:
+    """Championships written, OSError if the file could not be written (caller tells the user)"""
+    with atomic_write(championship_path(), raise_error=True) as file:
         file.write(json.dumps([{"name": item["name"], "rows": [list(row) for row in item["rows"]]} for item in items],
                               indent=1, ensure_ascii=False))
 
@@ -460,7 +473,8 @@ def speed_value(speed: float) -> tuple[float, str]:
 
 
 def delta_text(seconds: float) -> str:
-    return localized(f"{'+' if seconds >= 0 else '-'}{abs(seconds):.3f}")
+    """Gap "+0,345", "-0,345" (typeset minus sign, decimal separator of app language)"""
+    return signed_text(seconds, 3)
 
 
 def safe_name(text: str) -> str:

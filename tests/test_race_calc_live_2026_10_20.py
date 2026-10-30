@@ -174,7 +174,8 @@ def test_race_plan_widget_live_consumption(ui_env, monkeypatch, host):  # noqa: 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
     closed_page(lambda backend: set_race(backend, laps=40))  # 3.0 per lap, 15 laps a tank
-    monkeypatch.setattr(minfo.history, "consumptionDataSet", history(5))  # 4.5 per lap in the race
+    race_laps = tuple(lap._replace(lapNumber=20 - index) for index, lap in enumerate(history(5)))  # laps 20-16
+    monkeypatch.setattr(minfo.history, "consumptionDataSet", race_laps)  # 4.5 per lap in the race
     live_race(monkeypatch, laps_done=20, fuel=9.0, stops=1)
     cfg.user.setting["race_plan"]["enable_live_replan"] = True
     cfg.user.setting["race_plan"]["enable_live_consumption"] = False

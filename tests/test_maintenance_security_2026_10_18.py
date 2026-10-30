@@ -184,7 +184,7 @@ def temp_root(monkeypatch, tmp_path):
 
 def test_download_in_private_folder_removed_on_discard(monkeypatch, temp_root):
     content = b"installer" * 100
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(content))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(content))
     path = update.download_installer(installer_asset("Setup.exe", content))
     folder = os.path.dirname(path)
     assert os.path.dirname(folder) == str(temp_root)
@@ -200,7 +200,7 @@ def test_download_in_private_folder_removed_on_discard(monkeypatch, temp_root):
 
 
 def test_failed_download_removes_private_folder(monkeypatch, temp_root):
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(b"other"))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(b"other"))
     with pytest.raises(ValueError):
         update.download_installer(installer_asset("Setup.exe", b"expected"))
     assert not list(temp_root.iterdir())
@@ -228,7 +228,7 @@ def tamper_after_replace(monkeypatch, suffix: str):
 
 def test_installer_changed_after_download_refused(monkeypatch, tmp_path):
     content = b"installer" * 100
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(content))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(content))
     tamper_after_replace(monkeypatch, ".exe")
     with pytest.raises(ValueError, match="changed"):
         update.download_installer(installer_asset("Setup.exe", content), str(tmp_path))
@@ -244,7 +244,7 @@ def setup_zip(installer: bytes) -> bytes:
 
 def test_setup_zip_extracted_from_verified_file(monkeypatch, tmp_path):
     data = setup_zip(b"setup program")
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(data))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(data))
     path = update.download_installer(installer_asset("NeoPedal-1.0.0-setup.zip", data), str(tmp_path))
     assert os.path.basename(path) == "NeoPedal-1.0.0-windows-setup.exe"
     with open(path, "rb") as file:
@@ -254,7 +254,7 @@ def test_setup_zip_extracted_from_verified_file(monkeypatch, tmp_path):
 
 def test_setup_zip_changed_after_download_refused(monkeypatch, tmp_path):
     data = setup_zip(b"setup program")
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(data))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(data))
     tamper_after_replace(monkeypatch, ".zip")
     with pytest.raises(ValueError, match="changed"):
         update.download_installer(installer_asset("NeoPedal-1.0.0-setup.zip", data), str(tmp_path))

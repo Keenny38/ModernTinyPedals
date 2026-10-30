@@ -17,40 +17,18 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Preset comparison dialog
+Preset comparison files: presets read & copied values saved for the compare panel of the Presets page
+(qml/config/PresetComparePanel.qml, quick/preset_tools_backend.py). The former Preset Comparison tool page
+opens that panel (tools_view.show_preset_compare).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QCheckBox,
-    QComboBox,
-    QGridLayout,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
-
 from .. import loader
-from ..const_file import FileExt
-from ..i18n import tr, trm
-from ..i18n.options import module_label, option_label, option_tooltip
-from ..setting import cfg, load_setting_json_file, save_and_verify_json_file
+from ..setting import RELOAD_ACCESS_TIMEOUT, cfg, load_setting_json_file, save_and_verify_json_file
 from ..userfile.json_setting import copy_setting
-from ..userfile.preset_compare import copy_values, diff_presets
-from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog
-
-COLUMNS = ("Section", "Option", "Preset A", "Preset B")
-FILTER_DELAY = 150  # ms, filter applied once typing pauses
 
 
 def load_preset(filename: str) -> dict:
@@ -61,233 +39,42 @@ def load_preset(filename: str) -> dict:
 
 
 def load_preset_file(filename: str) -> dict:
-    """Load preset file not loaded by app (thread safe: file read & validation only)"""
-    return load_setting_json_file(filename=filename, filepath=cfg.path.settings, dict_def=cfg.default.setting)
+    """Load preset file not loaded by app (thread safe: file read & validation only)
+
+    Short retry on a locked file (RELOAD_ACCESS_TIMEOUT): called on the GUI thread, never waits seconds.
+    """
+    return load_setting_json_file(filename=filename, filepath=cfg.path.settings, dict_def=cfg.default.setting,
+                                  access_timeout=RELOAD_ACCESS_TIMEOUT)
 
 
-def format_value(value) -> str:
-    if isinstance(value, bool):
-        return tr("On") if value else tr("Off")
-    return "" if value is None else str(value)
+def save_preset_edits(edits: dict[str, dict[tuple[str, str], Any]]) -> list[str]:
+    """Write copied values (file name: value by (section, key)) into a fresh copy of each preset
 
+    Presets are read when shown, then may change elsewhere (loaded preset: overlays moved, options edited),
+    so only copied values are written. Loaded preset is live (saved by app, then reloaded), others are read
+    from file again.
 
-@singleton_dialog("preset_compare")
-class PresetCompare(BaseEditor):
-    """Compare two presets, copy options between them"""
-
-    def __init__(self, parent, preset_a: str = "", preset_b: str = ""):
-        super().__init__(parent)
-        self.set_utility_title(tr("Preset Comparison"))
-        self.presets: dict[str, dict] = {}  # file name: loaded (possibly edited) preset
-        self.edits: dict[str, dict[tuple[str, str], Any]] = {}  # file name: copied values by (section, key)
-        self._haystacks: list[str] = []  # filter text of each row
-        self._labels: dict[tuple[str, str], tuple[str, str, str]] = {}  # section, option label & tooltip
-        from .quick.background import BackgroundJobs  # Qt Quick package imported when used
-
-        self._jobs = BackgroundJobs(self, "Preset comparison")
-        self._filter_timer = QTimer(self)
-        self._filter_timer.setSingleShot(True)
-        self._filter_timer.setInterval(FILTER_DELAY)
-        self._filter_timer.timeout.connect(self.filter_now)
-
-        files = [f"{name}{FileExt.JSON}" for name in cfg.preset_files()]
-        self.combo_a = QComboBox(self)
-        self.combo_b = QComboBox(self)
-        for combo in (self.combo_a, self.combo_b):
-            combo.addItems(files)
-        self.combo_a.setCurrentText(preset_a or cfg.filename.setting)
-        self.combo_b.setCurrentText(preset_b or next((name for name in files if name != self.combo_a.currentText()), ""))
-        self.combo_a.currentTextChanged.connect(self.refresh)
-        self.combo_b.currentTextChanged.connect(self.refresh)
-
-        self.check_position = QCheckBox(tr("Ignore widget positions"), self)
-        self.check_position.setChecked(True)
-        self.check_position.toggled.connect(self.refresh)
-        self.edit_filter = QLineEdit(self)
-        self.edit_filter.setPlaceholderText(tr("Filter"))
-        self.edit_filter.textChanged.connect(self._filter_timer.start)
-
-        self.table = QTableWidget(0, len(COLUMNS), self)
-        self.table.setHorizontalHeaderLabels([tr(text) for text in COLUMNS])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.setMinimumSize(UIScaler.size(46), UIScaler.size(26))
-        self.label_count = QLabel(self)
-
-        button_to_a = CompactButton(tr("Copy B → A"))
-        button_to_a.clicked.connect(lambda: self.copy_selected(to_a=True))
-        button_to_b = CompactButton(tr("Copy A → B"))
-        button_to_b.clicked.connect(lambda: self.copy_selected(to_a=False))
-        button_save = CompactButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(self.close)
-
-        layout_select = QGridLayout()
-        layout_select.addWidget(QLabel(tr("Preset A")), 0, 0)
-        layout_select.addWidget(self.combo_a, 0, 1)
-        layout_select.addWidget(QLabel(tr("Preset B")), 1, 0)
-        layout_select.addWidget(self.combo_b, 1, 1)
-        layout_select.setColumnStretch(1, 1)
-        layout_filter = QHBoxLayout()
-        layout_filter.addWidget(self.edit_filter, stretch=1)
-        layout_filter.addWidget(self.check_position)
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_to_a)
-        layout_button.addWidget(button_to_b)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_close)
-
-        layout_main = QVBoxLayout()
-        layout_main.addLayout(layout_select)
-        layout_main.addLayout(layout_filter)
-        layout_main.addWidget(self.table, stretch=1)
-        layout_main.addWidget(self.label_count)
-        layout_main.addLayout(layout_button)
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout_main)
-        self.refresh()
-
-    def preset(self, filename: str) -> dict:
-        if filename not in self.presets:
-            self.presets[filename] = load_preset(filename)
-        return self.presets[filename]
-
-    def is_loading(self) -> bool:
-        """Presets being read in background"""
-        return self._jobs.is_busy("presets")
-
-    def refresh(self):
-        """Rebuild difference table, presets not read yet are read in background first"""
-        name_a, name_b = self.combo_a.currentText(), self.combo_b.currentText()
-        self.table.setRowCount(0)
-        self._haystacks = []
-        if not name_a or not name_b:
-            return
-        missing = []
-        for name in dict.fromkeys((name_a, name_b)):
-            if name in self.presets:
-                continue
-            if cfg.is_loaded(name):  # live setting, copied on UI thread
-                self.presets[name] = copy_setting(cfg.user.setting)
-            else:
-                missing.append(name)
-        if missing:
-            self.label_count.clear()
-            self._jobs.run(
-                "read presets", lambda: {name: load_preset_file(name) for name in missing},
-                self._presets_read, key="presets")
-            return
-        self.fill_table(name_a, name_b)
-
-    def _presets_read(self, presets: dict[str, dict]):
-        for name, preset in presets.items():
-            self.presets.setdefault(name, preset)
-        self.refresh()
-
-    def fill_table(self, name_a: str, name_b: str):
-        differences = diff_presets(self.presets[name_a], self.presets[name_b], self.check_position.isChecked())
-        haystacks = self._haystacks
-        self.table.setUpdatesEnabled(False)
-        try:
-            self.table.setRowCount(len(differences))
-            for row, diff in enumerate(differences):
-                section_label, key_label, tooltip = self.labels(diff.section, diff.key)
-                key = diff.section, diff.key
-                cells = (section_label, key_label, format_value(diff.value_a), format_value(diff.value_b))
-                for column, text in enumerate(cells):
-                    item = QTableWidgetItem(text)
-                    item.setData(Qt.ItemDataRole.UserRole, key)
-                    if column == 1:
-                        item.setToolTip(tooltip)
-                    self.table.setItem(row, column, item)
-                haystacks.append(f"{section_label} {key_label} {diff.section} {diff.key}".lower())
-        finally:
-            self.table.setUpdatesEnabled(True)
-        if name_a == name_b:
-            self.label_count.setText(tr("Select two different presets."))
-        else:
-            self.label_count.setText(trm(f"Differences: {len(differences)}"))
-        self.apply_filter(self.edit_filter.text())
-
-    def labels(self, section: str, key: str) -> tuple[str, str, str]:
-        """Section label, option label & option tooltip (cached for next refresh)"""
-        labels = self._labels.get((section, key))
-        if labels is None:
-            labels = self._labels[section, key] = (
-                module_label(section), option_label(key), option_tooltip(section, key))
-        return labels
-
-    def filter_now(self):
-        """Apply filter text at once (typing applies it after a short pause)"""
-        self.apply_filter(self.edit_filter.text())
-
-    def apply_filter(self, text: str):
-        self._filter_timer.stop()
-        words = text.lower().split()
-        self.table.setUpdatesEnabled(False)
-        try:
-            for row, haystack in enumerate(self._haystacks):
-                self.table.setRowHidden(row, not all(word in haystack for word in words))
-        finally:
-            self.table.setUpdatesEnabled(True)
-
-    def selected_items(self) -> list[tuple[str, str]]:
-        rows = sorted({index.row() for index in self.table.selectedIndexes() if not self.table.isRowHidden(index.row())})
-        items = (self.table.item(row, 0) for row in rows)
-        return [item.data(Qt.ItemDataRole.UserRole) for item in items if item is not None]
-
-    def copy_selected(self, to_a: bool):
-        """Copy selected options between presets"""
-        name_a, name_b = self.combo_a.currentText(), self.combo_b.currentText()
-        items = self.selected_items()
-        if not items or name_a == name_b:
-            return
-        target, source = (name_a, name_b) if to_a else (name_b, name_a)
-        if target in cfg.user.filelock:
-            QMessageBox.warning(self, tr("Error"), trm("Changes to locked preset will not be saved."))
-            return
-        target_preset, source_preset = self.preset(target), self.preset(source)
-        if copy_values(target_preset, source_preset, items):
-            edits = self.edits.setdefault(target, {})
-            for section, key in items:
-                if key in source_preset.get(section, {}):
-                    edits[section, key] = source_preset[section][key]
-            self.set_modified()
-            self.refresh()
-
-    def save_action(self):
-        """Ctrl+S: save modified presets"""
-        return self.saving
-
-    def saving(self):
-        """Save modified presets
-
-        Presets are read when shown, then may change elsewhere (loaded preset: widgets moved,
-        options edited), so only copied values are written into a fresh copy of each preset.
-        """
-        reload_loaded = False
-        for filename in sorted(self.edits):
-            is_loaded = cfg.is_loaded(filename)
-            # Loaded preset is live (saved by app), others are read from file again
-            preset = cfg.user.setting if is_loaded else load_preset(filename)
-            for (section, key), value in self.edits[filename].items():
-                preset.setdefault(section, {})[key] = value
-            if is_loaded:
-                cfg.save(0)
-                reload_loaded = True
-            else:
-                save_and_verify_json_file(
-                    dict_user=preset, filename=filename, filepath=cfg.path.settings,
-                    max_attempts=cfg.max_saving_attempts,
-                )
-        self.edits.clear()
-        self.presets.clear()  # read again, with changes made elsewhere
-        self.set_unmodified()
-        if reload_loaded:
-            cfg.set_next_to_load(cfg.filename.setting)
-            loader.reload(reload_preset=True)  # waits for saving
-        self.refresh()
+    Returns:
+        Presets not saved (locked or file not written).
+    """
+    reload_loaded = False
+    failed = []
+    for filename in sorted(edits):
+        if filename in cfg.user.filelock:  # locked meanwhile: never changed
+            failed.append(filename)
+            continue
+        is_loaded = cfg.is_loaded(filename)
+        preset = cfg.user.setting if is_loaded else load_preset(filename)
+        for (section, key), value in edits[filename].items():
+            preset.setdefault(section, {})[key] = value
+        if is_loaded:
+            cfg.save(0)
+            reload_loaded = True
+        elif not save_and_verify_json_file(
+                dict_user=preset, filename=filename, filepath=cfg.path.settings,
+                max_attempts=cfg.max_saving_attempts):
+            failed.append(filename)
+    if reload_loaded:
+        cfg.set_next_to_load(cfg.filename.setting)
+        loader.reload(reload_preset=True)  # waits for saving
+    return failed

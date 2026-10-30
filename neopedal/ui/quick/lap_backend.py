@@ -39,6 +39,7 @@ import concurrent.futures
 import logging
 import math
 import multiprocessing
+import os
 import queue
 import threading
 from collections import OrderedDict
@@ -76,8 +77,10 @@ from ...userfile.lap_cache import (  # noqa: F401  (INFO_FOLDER & INFO_READERS r
     prune_cache,
     read_infos,
     remove_cached_lap,
+    remove_unreadable_listener,
     save_info_index,
     save_pending_index,
+    set_unreadable_listener,
 )
 from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_bounds re-exported)
     JobCancelled,
@@ -90,9 +93,10 @@ from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_boun
 )
 from ...userfile.telemetry_lap import (
     LapData,
+    best_laps,
     forget_increasing,
 )
-from .. import lap_viewer
+from .. import lap_viewer, safe_markup
 from ..lap_viewer import (
     CHANNEL_MAP,
     CHANNEL_PRESETS,
@@ -102,11 +106,14 @@ from ..lap_viewer import (
     SMOOTHING_LEVELS,
     LapEntry,
     PlotLap,
+    acquire_viewer_settings,
     channel_title,
     distance_text,
     distance_unit,
     format_laptime,
+    lap_label,
     load_viewer_setting,
+    release_viewer_settings,
     save_viewer_setting,
 )
 from . import lap_map
@@ -142,6 +149,7 @@ from .lap_library import (  # noqa: F401  (re-exported)
     TrackListModel,
     setup_text,
 )
+from .lap_library_panel import ImportedLaps
 from .lap_loading import (  # noqa: F401  (re-exported)
     LIMITS_FOLDER,
     LIMITS_LAPS,
@@ -197,7 +205,8 @@ LEGEND_ROLES = ("key", "label", "full", "color", "reference", "clean", "tip", "e
 MAP_LAP_ROLES = ("lap", "key", "highlight", "trail", "color", "reference", "shapes", "brakeZones", "throttleZones")
 LAP_ROLES = (
     "kind", "session", "path", "title", "time", "s1", "s2", "s3", "best1", "best2", "best3", "info", "note",
-    "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip", "open", "hint", "logo",
+    "checked", "reference", "color", "dim", "fastest", "personalBest", "count", "error", "gap", "tip", "open", "hint",
+    "logo", "compound",
 )
 STATUS_DURATION = 8000  # ms, transient status messages shown
 WATCH_DELAY = 1500  # ms after a lap file appears before list is refreshed (file fully written)
@@ -214,7 +223,7 @@ _export_futures: set[concurrent.futures.Future] = set()  # export jobs not finis
 _fallback_jobs: queue.SimpleQueue = queue.SimpleQueue()  # jobs worker process could not run: future, work
 _fallback_thread: threading.Thread | None = None
 _fallback_lock = threading.Lock()
-EXPORT_JOBS = ("MoTeC export", "CSV export", "MoTeC import", "Lap import")  # finished even if viewer closed (whole files)
+EXPORT_JOBS = ("MoTeC export", "CSV export", "MoTeC import", "Lap import", "lap share")  # finished even if viewer closed (whole files)
 # Never run again in page process when worker process died with them: a log too big or malformed for the worker (out of
 # memory) would freeze the page, worker is started again for next jobs instead
 IMPORT_JOBS = ("MoTeC import", "Lap import")
@@ -424,7 +433,8 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     """
 
     tracksChanged = Signal()
-    listChanged = Signal()  # best lap text, expanded sessions, hide unclean
+    listChanged = Signal()  # best lap text, expanded sessions, hide unclean, search, no match
+    listOrderChanged = Signal()  # session kinds & counts, session & lap order (filter menu)
     chartChanged = Signal()  # laps shown: panels, legend, maps, corners
     channelsChanged = Signal()
     statusChanged = Signal()
@@ -438,6 +448,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     pageHidden = Signal()  # page in background: lap playback stopped
     undoChanged = Signal()  # deleted laps that can be restored
     lapsTrashed = Signal(int, str)  # laps moved to trash: count, name of the lap when one (page toast)
+    lapColumnsLost = Signal(str, str)  # columns of a cached lap not read again (lap path, reason), from any thread
     trashChanged = Signal()  # recently deleted laps (trash folder) read
     mathChanged = Signal()  # math channels added, changed or removed
     gCircleChanged = Signal()  # G circle built (laps changed while its tab is hidden: built once shown)
@@ -448,6 +459,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     mapDataChanged = Signal()
     mapCornersChanged = Signal()  # corner labels & sector times of map (compared lap changed: map itself kept)
     picturesChanged = Signal()  # car brand & circuit logos fetched from game
+    lostCornersShown = Signal()  # guided analysis ready: charts zoom on the worst corner, keys step to the others
 
     def __init__(self, parent: QWidget, folder: str):
         super().__init__(parent, "Lap viewer")
@@ -461,6 +473,13 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         self._chart_lists: dict[str, tuple[tuple, list[dict]]] = {}
         self.chartChanged.connect(self._chart_lists.clear)
         self.folder = folder
+        self._settings = acquire_viewer_settings(folder)  # viewer settings in memory, written merged in background
+        # Cache columns of a shown lap that could not be read again (see lap_cache.CachedColumns): told from the
+        # reading thread, shown in the status line on the page thread (queued signal)
+        self.lapColumnsLost.connect(self.columns_lost)
+        self._lost_listener = self.lapColumnsLost.emit
+        set_unreadable_listener(self._lost_listener)
+        self._file_actions = 0  # lap files moved in background (deletion, restore), see lap_actions
         self.prefix = f"lap_viewer_{id(self)}|"  # vertex store keys of this page
         self.data = TraceData()
         self.entries: list[LapEntry] = []
@@ -537,16 +556,21 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         self._labels: dict[str, str] = {}  # shown lap key: short name (told apart when two are the same)
         self._filter = ""  # lap list search text
         self._no_match = False  # search or clean only filter leaves no lap (lap list hint)
+        self._session_kinds: list[str] = []  # lap list session filter, order (see load_list_view)
+        self._session_order = "newest"
+        self._lap_order = "driven"
         # Deletions undone last first, each lap: path, trash path, marks, checked, reference
         self._undo: list[list[tuple[str, str, dict, bool, bool]]] = []
         self._pending_delete: list[str] = []  # laps deleted once background loading is done
         self._pending_batch: list[tuple[str, str, dict, bool, bool]] | None = None  # deletion they join (undone with)
         self._trash_rows: list[dict] = []  # recently deleted laps (trash folder)
         self._trash_loading = False
+        self._trash_serial = 0  # trash listings asked (newest applied only)
         self._replay_lookup = False  # replay file of a lap looked for in background
         self._loaded_paths: set[str] = set()  # laps read by background loading
         self._xy_keys: set[str] = set()  # scatter vertices shown (kept when laps change)
         self._xy = {"mode": "scatter", "x": "speed_kph", "y": "accel_lat", "histogram": "throttle"}  # XY tab
+        self._xy_weights: dict[tuple, list[float]] = {}  # histogram time weights per lap, channel & zoomed part
         self._session = SessionTab(self, self)
         self._grids: dict[str, lap_map.LineGrid] = {}  # lap key: driving line points by grid cell (mouse)
         self._limits: lap_map.TrackLimits | None = None  # track edges of current track (game coordinates)
@@ -571,6 +595,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         self._pit: list[lap_map.MapLine] = []  # pit lane parts (official circuit), turned like map
         self._line_cache: dict[str, tuple[LapData, lap_map.MapLine | None]] = {}  # lap key: data, driving line
         self._road = lap_map.MapLine([], [], [])  # circuit: track map file, else reference line
+        self._road_numbered = False  # circuit of track map file: its distances are point numbers, not meters
         self._map_angle = 0.0  # radians, map turned by (auto orientation & quarter turns)
         self._map_aspect = 1.0  # map view width / height (auto orientation)
         self._g_points: list[tuple[Sequence[float], Sequence[float], Sequence[float], PlotLap]] = []  # distance, x, y
@@ -659,6 +684,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         self._watcher.directoryChanged.connect(self.folder_changed)
         setting = load_viewer_setting(folder)
         self._hide_unclean = bool(setting.get("hide_unclean_laps", False))
+        self.load_list_view(setting)
         self.data.set_time_axis(bool(setting.get("time_axis", False)))
         mode = setting.get("map_color_mode", "gain" if setting.get("map_time_gain") else "laps")
         self._map_mode = mode if mode in lap_map.MAP_MODES else "laps"
@@ -698,6 +724,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         self._charts = ChartTools(self, setting, self)
         self._conditions = LapConditions(self, setting, self)
         self._track_notes = TrackNotes(self, self)
+        self._library = ImportedLaps(self, self)  # imported laps library panel
         self._map_consistency = MapConsistency(self, setting, self)
         self._list_revision = 0  # lap list filled again (lap files may have changed)
         weights = setting.get("panel_weights", {})
@@ -725,6 +752,8 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         threads for the rest of the session).
         """
         VertexStore.remove_prefix(self.prefix)
+        remove_unreadable_listener(self._lost_listener)
+        release_viewer_settings(self.folder)  # pending setting changes written now
         for timer in (self._job_timer, self._limits_timer, self._idle_timer, self._load_timer, self._prefetch_timer,
                       self._zoom_timer, self._watch_timer, self._release_timer):
             timer.stop()
@@ -762,7 +791,8 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     def parts(self) -> tuple[PagePart, ...]:
         """Page parts (children of page)"""
         return (self._conditions, self._dashboard, self._session, self._math, self._charts, self._exports,
-                self._corner_table, self._track_notes, self._map_consistency, self._map_marks, self._map_pointer)
+                self._corner_table, self._track_notes, self._map_consistency, self._map_marks, self._map_pointer,
+                self._library)
 
     def run_job(self, name: str, work: Callable[[], Any], done: Callable[[Any], None]):
         """Run work in a thread, done(result) called on page thread once finished (result None if failed)"""
@@ -903,6 +933,11 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         return self._track_notes
 
     @Property(QObject, constant=True)
+    def library(self) -> ImportedLaps:
+        """Imported laps library panel: MoTeC logs & other drivers' laps (see lap_library_panel)"""
+        return self._library
+
+    @Property(QObject, constant=True)
     def dashboard(self) -> DashboardTab:
         """Simple view & Show menu (see lap_dashboard)"""
         return self._dashboard
@@ -939,6 +974,28 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     def corner_rows(self) -> list[CornerComparison]:
         """Corners of reference lap compared (corner table rows)"""
         return self._corner_table.rows
+
+    @Slot()
+    def analyzeLastLap(self):
+        """Guided analysis: best lap of track against newest lap (Best vs Last Lap), Corners tab opened once both are
+        shown, charts zoomed on the corner where the newest lap loses most time (lostCornersShown)"""
+        laps = [entry.file for entry in self.entries]
+        if not laps:
+            self.set_status(tr("No recorded lap"))
+            return
+        best = best_laps(laps, 1)
+        newest = laps[0].path
+        if not best or path_key(best[0].path) == path_key(newest):
+            self.compareBestLast()
+            self.set_status(tr("Your last lap is your best lap: nothing lost against it"))
+            return
+        from .lap_focus import LostCornerFocus, analyze_last_lap
+
+        for waiting in self.findChildren(LostCornerFocus):  # asked again before laps were shown: newest ask only
+            waiting.stop()
+        self._corner_table.compare_key = newest  # compared corner by corner (shown laps: best & newest only)
+        self.compareBestLast()
+        analyze_last_lap(self, best[0].path, newest)
 
     def compared_lap(self) -> PlotLap | None:
         """Lap compared corner by corner & on gain map"""
@@ -1014,7 +1071,7 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
 
     def import_motec(self, filenames: list[str], background: bool = True,
                      done: Callable[[list[tuple[str, list[str], str]]], None] | None = None):
-        """MoTeC logs imported as page jobs (read by ui/lap_library.py as page.import_motec, see LapExports)"""
+        """MoTeC logs imported as page jobs (also by imported laps library, see lap_library_panel & LapExports)"""
         self._exports.import_motec(filenames, background, done)
 
     def shown_track(self) -> str:
@@ -1062,6 +1119,24 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     @Property(bool, notify=listChanged)
     def hideUnclean(self) -> bool:
         return self._hide_unclean
+
+    @Property(list, notify=listOrderChanged)
+    def sessionKinds(self) -> list[str]:
+        """Session kinds listed: practice, qualify, race"""
+        return self._session_kinds
+
+    @Property(dict, notify=listOrderChanged)
+    def sessionCounts(self) -> dict[str, int]:
+        """Sessions of current track by kind (filter menu)"""
+        return self.session_counts()
+
+    @Property(str, notify=listOrderChanged)
+    def sessionOrder(self) -> str:
+        return self._session_order
+
+    @Property(str, notify=listOrderChanged)
+    def lapOrder(self) -> str:
+        return self._lap_order
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -1362,10 +1437,19 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
         except ValueError:
             return QByteArray()
 
+    @Slot(str, str)
+    def columns_lost(self, path: str, reason: str):
+        """Columns of a shown lap could not be read again from its cache nor its file: told in the status line
+        (channels of the lap shown as missing, never as zeros), lap read again from its file when shown next"""
+        self._lap_cache.pop(path, None)
+        self._cache_mtime.pop(path, None)
+        self.set_status(trm(f"Channels of {lap_label(os.path.basename(path))} could not be read "
+                            f"again, shown as missing: {reason}"), False)
+
     def set_status(self, text: str, transient: bool = True):
         """Status line text, transient messages cleared after a while (same message again: shown for the whole
-        while again)"""
-        self._status = text
+        while again). Rich text of the page: lap & file names, errors in it never read as markup (safe_markup)"""
+        self._status = safe_markup(text)
         if transient and text:
             self._status_timer.start()
         else:
@@ -1434,6 +1518,11 @@ class LapViewerBackend(LapLibrary, LapActions, LapLoading, ChartPanels, XyTabs, 
     def filterText(self) -> str:
         """Search text used (stripped): search field keeps text as typed"""
         return self._filter
+
+    @Property(bool, notify=listChanged)
+    def hasTrackLaps(self) -> bool:
+        """Recorded laps of current track (compare presets & guided analysis possible)"""
+        return bool(self.entries)
 
     @Property(bool, notify=listChanged)
     def noMatch(self) -> bool:

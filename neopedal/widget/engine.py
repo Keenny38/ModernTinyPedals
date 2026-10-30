@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
+from ..const_common import TEXT_PLACEHOLDER
 from ..module_info import minfo
 from ._base import Overlay
 
@@ -195,12 +196,16 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.post_update()
+        self.vehicle_reset()
 
     def post_update(self):
         self.ema_power = 0.0
-        self.max_power_kw = 0.0
         self.ema_energy_rate = 0.0
+
+    def vehicle_reset(self):
+        """Peak power found again for next car or session (power to weight ratio), kept across pit stops"""
+        self.post_update()
+        self.max_power_kw = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -216,17 +221,15 @@ class Realtime(Overlay):
                 self.ema_energy_rate = smoothed_energy_rate(self.ema_energy_rate, minfo.energy.rateOfConsumption)
                 power_kw = self.ema_energy_rate * max_ve / 100_000
                 torque = calc.engine_torque(power_kw, rpm)
-        overheating = bool(self.wcfg["show_game_overheating_highlight"] and api.read.engine.overheating())
+        overheating = bool(self.wcfg["show_game_overheating_warning"] and api.read.engine.overheating())
 
         # Oil temperature
         if self.wcfg["show_oil_temperature"]:
-            temp_oil = round(api.read.engine.oil_temperature(), 2)
-            self.update_oil(self.bar_oil, temp_oil, overheating)
+            self.update_oil(self.bar_oil, api.read.engine.oil_temperature(), overheating)
 
         # Water temperature
         if self.wcfg["show_water_temperature"]:
-            temp_water = round(api.read.engine.water_temperature(), 2)
-            self.update_water(self.bar_water, temp_water, overheating)
+            self.update_water(self.bar_water, api.read.engine.water_temperature(), overheating)
 
         # Turbo pressure
         if self.wcfg["show_turbo_pressure"]:
@@ -244,11 +247,11 @@ class Realtime(Overlay):
 
         # Engine torque
         if self.wcfg["show_torque"]:
-            self.update_torque(self.bar_torque, torque)
+            self.update_text(self.bar_torque, f"{torque:>6.2f}"[:6] + "Nm")
 
         # Engine power
         if self.wcfg["show_power"]:
-            self.update_power(self.bar_power, power_kw)
+            self.update_text(self.bar_power, f"{self.unit_power(power_kw):>6.2f}"[:6] + self.symbol_power)
 
         # Power to weight ratio
         if self.wcfg["show_power_to_weight_ratio"]:
@@ -256,23 +259,31 @@ class Realtime(Overlay):
             self.ema_power += 0.2 * (power_kw - self.ema_power)
             if self.max_power_kw < self.ema_power:
                 self.max_power_kw = self.ema_power
-            self.update_power_ratio(self.bar_pwratio, self.max_power_kw, total_static_weight)
+            if total_static_weight > 0:
+                ratio = f"{self.unit_power(self.max_power_kw) / self.unit_weight(total_static_weight):.3f}"
+            else:  # static weight not known yet (found at standstill after a reset)
+                ratio = TEXT_PLACEHOLDER
+            self.update_text(self.bar_pwratio, f"{ratio:>5.5}p/w")
 
     # GUI update methods
     def update_oil(self, target, data, overheating):
         """Oil temperature, overheat color above threshold or while game warns of overheating"""
-        if target.last != (data, overheating):
-            target.last = (data, overheating)
-            target.text = f"O{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_oil[overheating or data >= self.wcfg["overheat_threshold_oil"]]
+        text = f"O{self.unit_temp(data):>6.1f}°"
+        hot = overheating or data >= self.wcfg["overheat_threshold_oil"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_oil[hot]
             target.update()
 
     def update_water(self, target, data, overheating):
         """Water temperature, overheat color above threshold or while game warns of overheating"""
-        if target.last != (data, overheating):
-            target.last = (data, overheating)
-            target.text = f"W{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_water[overheating or data >= self.wcfg["overheat_threshold_water"]]
+        text = f"W{self.unit_temp(data):>6.1f}°"
+        hot = overheating or data >= self.wcfg["overheat_threshold_water"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_water[hot]
             target.update()
 
     def update_turbo(self, target, data):
@@ -297,32 +308,11 @@ class Realtime(Overlay):
             target.text = f"{data:>5}max"
             target.update()
 
-    def update_torque(self, target, data):
-        """Engine torque"""
-        if target.last != data:
-            target.last = data
-            text = f"{data:>6.2f}"
-            target.text = f"{text:.6}Nm"
-            target.update()
-
-    def update_power(self, target, data):
-        """Engine power"""
-        if target.last != data:
-            target.last = data
-            text = f"{self.unit_power(data):>6.2f}"
-            target.text = f"{text:.6}{self.symbol_power}"
-            target.update()
-
-    def update_power_ratio(self, target, *data):
-        """Power to weight ratio"""
-        if target.last != data:
-            target.last = data
-            if data[1] > 0:
-                ratio = self.unit_power(data[0]) / self.unit_weight(data[1])
-            else:
-                ratio = 0.0
-            text = f"{ratio:.3f}"
-            target.text = f"{text:.5}p/w"
+    def update_text(self, target, text):
+        """Torque, power & power to weight ratio: drawn again only when shown text changes"""
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
 

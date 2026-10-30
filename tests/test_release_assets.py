@@ -13,7 +13,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
-from release import RELEASE_ASSETS
+from release import BUILD_ASSETS, MANIFEST_ASSETS, RELEASE_ASSETS
 
 from neopedal import update
 
@@ -60,7 +60,19 @@ def legacy_installer(data: bytes) -> str:
 
 
 def test_workflow_publishes_release_files():
-    assert published_suffixes() == set(RELEASE_ASSETS)
+    assert published_suffixes() == set(BUILD_ASSETS)
+    assert set(RELEASE_ASSETS) == set(BUILD_ASSETS) | set(MANIFEST_ASSETS)
+
+
+def test_manifest_names_never_taken_for_installer():
+    """Manifest & signature assets: never found as installer by any app updater (old ones match name suffixes)"""
+    from neopedal import release_manifest
+
+    name = release_manifest.manifest_name("9.9.9")
+    for suffix in (*update.INSTALLER_SUFFIXES, "-windows-setup.exe.sha256"):
+        assert not name.endswith(suffix) and not f"{name}{release_manifest.SIGNATURE_SUFFIX}".endswith(suffix)
+    signature_suffix = f"{release_manifest.MANIFEST_SUFFIX}{release_manifest.SIGNATURE_SUFFIX}"
+    assert (release_manifest.MANIFEST_SUFFIX, signature_suffix) == MANIFEST_ASSETS
 
 
 def test_every_app_updater_finds_installer():

@@ -17,7 +17,10 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Vehicle brand editor
+Vehicle brand editor: car maker of each car (table editor page, see quick/table_editor.py)
+
+Import reads every car & its maker from the game while it runs (its REST API: Le Mans Ultimate, two lists, or
+rFactor 2), or from a JSON file of the same format. Names already listed keep their brand.
 """
 
 from __future__ import annotations
@@ -28,312 +31,144 @@ import logging
 import os
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QFileDialog,
-    QMenu,
-    QMessageBox,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
-
 from ..api_control import api
 from ..async_request import get_response, resolve_hostname, set_header_get
 from ..const_api import API_LMU_ALIAS, API_LMU_CONFIG, API_RF2_ALIAS, API_RF2_CONFIG
 from ..const_file import ConfigType, FileFilter
 from ..game_rest import GameRequest
-from ..i18n import tr, trm
-from ..setting import cfg, copy_setting
+from ..i18n import tr
+from ..setting import cfg
 from ..userfile.brands import extract_lmu_brand_name
-from ._common import (
-    BaseEditor,
-    CompactButton,
-    TableBatchReplace,
-    UIScaler,
-    column_texts,
-    run_after_saving,
-    table_item,
-    translate_filter,
-)
-from .toast import show_toast
-
-HEADER_BRANDS = "Vehicle name","Brand name"
+from ._common import translate_filter
+from .quick.table_editor import KIND_NAME, KIND_TEXT, Column, TableEditorBackend
+from .quick.table_editor_host import TableEditorPage
 
 logger = logging.getLogger(__name__)
 
+# Import sources: game (API config, alias in messages, resource), None for a JSON file
+GAME_SOURCES: tuple[tuple[str, str, str] | None, ...] = (
+    (API_LMU_CONFIG, API_LMU_ALIAS, "/rest/race/car"),
+    (API_LMU_CONFIG, API_LMU_ALIAS, "/rest/sessions/getAllVehicles"),
+    (API_RF2_CONFIG, API_RF2_ALIAS, "/rest/race/car"),
+    None,
+)
 
-class VehicleBrandEditor(BaseEditor):
-    """Vehicle brand editor"""
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.set_utility_title(tr("Vehicle Brand Editor"))
-        self.setMinimumSize(UIScaler.size(45), UIScaler.size(38))
+class BrandBackend(TableEditorBackend):
+    """Car brands: car name, brand name"""
 
-        self.brands_temp = copy_setting(cfg.user.brands)
-        # Rest API asked in background, game takes seconds to answer if not running
-        self.rest_request = GameRequest(self, (), self.restapi_imported)
+    COLUMNS = (
+        Column("", "Vehicle name", KIND_NAME, width=16),
+        Column("", "Brand name", KIND_TEXT, width=10, replace=True),
+    )
+    CONFIG_TYPE = ConfigType.BRANDS
+    NEW_NAME = "New Vehicle Name"
+    RESET_TEXT = "Reset every car brand to default? Changes are saved only by Save."
+    IMPORT_SOURCES = (
+        ("Le Mans Ultimate (game running)", "Cars & makers read from the game while it runs (its REST API)"),
+        ("Le Mans Ultimate, other list (game running)",
+         "Second list of the game (its REST API), all installed cars: try it if the first one fails"),
+        ("rFactor 2 (game running)", "Cars & makers read from rFactor 2 while it runs (its REST API)"),
+        ("JSON File…", "File saved from the game REST API (list of cars with their maker)"),
+    )
 
-        # Set table
-        self.table_brands = self.editor_table(HEADER_BRANDS)
-        self.table_brands.cellChanged.connect(self.set_modified)
-        self.refresh_table()
-        self.enable_table_undo("brands_temp", self.update_brands_temp, self.refresh_table)
-        self.set_unmodified()
+    def setup(self):
+        # Game asked in background: takes seconds to answer when not running
+        self.rest_request = GameRequest(self, (), self.restapi_imported, on_failed=self.restapi_failed)
 
-        # Set button
-        layout_button = self.set_layout_button()
+    def load(self) -> list[list]:
+        return [[name, brand] for name, brand in cfg.user.brands.items()]
 
-        # Set layout
-        layout_main = QVBoxLayout()
-        layout_main.addWidget(self.table_brands)
-        layout_main.addLayout(layout_button)
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout_main)
+    def default_rows(self) -> list[list]:
+        return [[name, brand] for name, brand in cfg.default.brands.items()]
 
-    def set_layout_button(self):
-        """Set button layout"""
-        # Menu
-        import_menu = QMenu(self)
+    def to_setting(self, rows: list[list]) -> dict:
+        return {name: brand for name, brand in rows}
 
-        import_rf2 = import_menu.addAction(tr("RF2 Rest API"))
-        import_rf2.triggered.connect(self.import_from_rf2)
+    def new_row(self, name: str) -> list:
+        return [name, "Unknown"]
 
-        import_lmu = import_menu.addAction(tr("LMU Rest API (Primary)"))
-        import_lmu.triggered.connect(self.import_from_lmu)
+    def session_rows(self) -> list[list]:
+        """Cars of the session, brand from car model"""
+        return [
+            [api.read.vehicle.vehicle_name(index),
+             extract_lmu_brand_name(api.read.vehicle.vehicle_model(index), "Unknown")]
+            for index in range(api.read.vehicle.total_vehicles())
+        ]
 
-        import_lmu_alt = import_menu.addAction(tr("LMU Rest API (Alternative)"))
-        import_lmu_alt.triggered.connect(self.import_from_lmu_alt)
-
-        import_json = import_menu.addAction(tr("JSON file"))
-        import_json.triggered.connect(self.import_from_file)
-
-        # Button
-        self.button_import = CompactButton(tr("Import from"), has_menu=True)
-        self.button_import.setMenu(import_menu)
-
-        return self.editor_buttons(
-            (self.button_import, ("Add", self.add_brand), ("Sort", self.sort_brand), ("Delete", self.delete_brand),
-             ("Replace", self.open_replace_dialog)),
-            self.reset_setting, self.applying)
-
-    def refresh_table(self):
-        """Refresh brands list"""
-        self.table_brands.setRowCount(0)
-        row_index = 0
-        for veh_name, brand_name in self.brands_temp.items():
-            self.add_vehicle_entry(row_index, veh_name, brand_name)
-            row_index += 1
-
-    def import_from_rf2(self):
-        """Import brand from RF2"""
-        setting_api = cfg.user.setting[API_RF2_CONFIG]
-        self.import_from_restapi(
-            API_RF2_ALIAS,
-            setting_api["url_host"],
-            setting_api["url_port"],
-            "/rest/race/car",
-        )
-
-    def import_from_lmu(self):
-        """Import brand from LMU (primary source)"""
-        setting_api = cfg.user.setting[API_LMU_CONFIG]
-        self.import_from_restapi(
-            API_LMU_ALIAS,
-            setting_api["url_host"],
-            setting_api["url_port"],
-            "/rest/race/car",
-        )
-
-    def import_from_lmu_alt(self):
-        """Import brand from LMU (alternative source)"""
-        setting_api = cfg.user.setting[API_LMU_CONFIG]
-        self.import_from_restapi(
-            API_LMU_ALIAS,
-            setting_api["url_host"],
-            setting_api["url_port"],
-            "/rest/sessions/getAllVehicles",
-        )
+    # Import
+    def import_from(self, index: int):
+        source = GAME_SOURCES[index]
+        if source is None:
+            self.import_from_file()
+        else:
+            setting_key, sim_name, resource = source
+            setting_api = cfg.user.setting[setting_key]
+            self.import_from_restapi(sim_name, setting_api["url_host"], setting_api["url_port"], resource)
 
     def import_from_restapi(self, sim_name: str, url_host: str, url_port: int, resource_name: str):
-        """Import brand from Rest API, asked in background (import button disabled until answered)"""
+        """Game asked in background (Import disabled until answered)"""
         def requesting() -> tuple[str, Any]:
             try:
                 return sim_name, request_vehicle_data(url_host, url_port, resource_name)
-            except (TimeoutError, AttributeError, TypeError, IndexError, KeyError, ValueError, OSError, EOFError):
+            except (TimeoutError, AttributeError, TypeError, IndexError, KeyError, ValueError, OSError, EOFError,
+                    RecursionError):  # RecursionError: nested too deeply
                 return sim_name, None
 
         if self.rest_request.start(requesting):
-            self.button_import.setEnabled(False)
-            self.setCursor(Qt.CursorShape.BusyCursor)
+            self.set_busy(True)
 
     def restapi_imported(self, result: tuple[str, Any]):
-        """Rest API answer received (in GUI thread), vehicle data None if request failed"""
-        self.button_import.setEnabled(True)
-        self.unsetCursor()
+        """Game answer received (in GUI thread), vehicle data None if request failed"""
+        self.set_busy(False)
         sim_name, vehicles = result
         try:
             if vehicles is None:
                 raise ValueError
-            self.parse_brand_data(vehicles)
+            self.import_vehicles(vehicles)
         except (AttributeError, TypeError, IndexError, KeyError, ValueError):
             logger.error("Failed importing vehicle data from %s Rest API", sim_name)
-            msg_text = (
+            self._host.warn(
                 f"Unable to import vehicle data from {sim_name} Rest API.<br><br>"
                 "Make sure game is running and try again."
             )
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+
+    def restapi_failed(self):
+        self.set_busy(False)
 
     def import_from_file(self):
-        """Import brand from file"""
-        filename_full = QFileDialog.getOpenFileName(self, filter=translate_filter(FileFilter.JSON))[0]
-        if not filename_full:
+        filename = self._host.open_file(translate_filter(FileFilter.JSON))
+        if not filename:
             return
-
         try:
-            # Limit import file size under 5120kb
-            if os.path.getsize(filename_full) > 5_120_000:
+            if os.path.getsize(filename) > 5_120_000:  # 5 MB at most
                 raise TypeError
-            # Load JSON
-            with open(filename_full, encoding="utf-8") as jsonfile:
-                dict_vehicles = json.load(jsonfile)
-                self.parse_brand_data(dict_vehicles)
-        except (AttributeError, IndexError, KeyError, TypeError,
-                FileNotFoundError, ValueError, OSError):
-            logger.error("Failed importing %s", filename_full)
-            msg_text = "Cannot import selected file.<br><br>Invalid vehicle data file."
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+            with open(filename, encoding="utf-8") as jsonfile:
+                vehicles = json.load(jsonfile)
+            self.import_vehicles(vehicles)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError,
+                RecursionError):  # RecursionError: nested too deeply
+            logger.error("Failed importing %s", filename)
+            self._host.warn("Cannot import selected file.<br><br>Invalid vehicle data file.")
 
-    def parse_brand_data(self, vehicles: dict):
-        """Parse brand data"""
-        if vehicles[0].get("desc"):
-            # Match LMU data format
-            brands_db = {
-                veh["desc"]: veh["manufacturer"]
-                for veh in vehicles
-            }
-        elif vehicles[0].get("name"):
-            # Match RF2 data format
-            brands_db = {
-                parse_vehicle_name(veh): veh["manufacturer"]
-                for veh in vehicles
-            }
-        else:
-            raise KeyError
-
-        if not self.verify_table():  # duplicate names would be merged by import
+    def import_vehicles(self, vehicles: Any):
+        """Brands of imported cars added, listed names keep their brand (one undo step)"""
+        brands = parse_brand_data(vehicles)
+        if not self.verify():  # duplicated names would be merged by import
             return
-        self.update_brands_temp()
-        brands_db.update(self.brands_temp)
-        self.brands_temp = brands_db
-        self.replace_table_data(self.refresh_table)
-        show_toast(self, tr("Vehicle brand data imported."))
+        brands.update(self.to_setting(self.rows))
+        self.set_rows([[name, brand] for name, brand in brands.items()])
+        self.changed()
+        self.notify(tr("Car brands imported"), undo=True)
 
-    def open_replace_dialog(self):
-        """Open replace dialog"""
-        selector = {tr(HEADER_BRANDS[1]): 1}
-        _dialog = TableBatchReplace(self, selector, self.table_brands)
-        _dialog.open()
 
-    def add_brand(self):
-        """Add new brand"""
-        start_index = row_index = self.table_brands.rowCount()
-        listed = column_texts(self.table_brands, 0)
-        with self.batch_edit():  # one undo step
-            # Add all missing vehicle name from active session
-            veh_total = api.read.vehicle.total_vehicles()
-            for index in range(veh_total):
-                veh_name = api.read.vehicle.vehicle_name(index)
-                if veh_name not in listed:
-                    brand_name = extract_lmu_brand_name(api.read.vehicle.vehicle_model(index), "Unknown")
-                    self.add_vehicle_entry(row_index, veh_name, brand_name)
-                    listed.add(veh_name)
-                    row_index += 1
-            # Add new name entry
-            if start_index == row_index:
-                new_brand_name = self.new_name_increment("New Vehicle Name", self.table_brands)
-                self.add_vehicle_entry(row_index, new_brand_name, "Unknown")
-                self.table_brands.setCurrentCell(row_index, 0)
-
-    def add_vehicle_entry(self, row_index: int, veh_name: str, brand_name: str):
-        """Add new brand entry to table"""
-        self.table_brands.insertRow(row_index)
-        self.table_brands.setItem(row_index, 0, QTableWidgetItem(veh_name))
-        self.table_brands.setItem(row_index, 1, QTableWidgetItem(brand_name))
-
-    def sort_brand(self):
-        """Sort brands in ascending order"""
-        if self.table_brands.rowCount() > 1:
-            self.table_brands.sortItems(1)
-            self.set_modified()
-
-    def delete_brand(self):
-        """Delete brand entry"""
-        selected_rows = set(data.row() for data in self.table_brands.selectedIndexes())
-        if not selected_rows:
-            QMessageBox.warning(self, tr("Error"), tr("No data selected."))
-            return
-
-        if not self.confirm_operation(message=tr("<b>Delete selected rows?</b>")):
-            return
-
-        for row_index in sorted(selected_rows, reverse=True):
-            self.table_brands.removeRow(row_index)
-        self.set_modified()
-
-    def reset_setting(self):
-        """Reset setting"""
-        msg_text = (
-            "Reset <b>brands preset</b> to default?<br><br>"
-            "Changes are only saved after clicking Apply or Save Button."
-        )
-        if self.confirm_operation(message=msg_text):
-            self.brands_temp = copy_setting(cfg.default.brands)
-            self.replace_table_data(self.refresh_table)
-
-    def applying(self):
-        """Save & apply"""
-        self.save_setting()
-
-    def saving(self):
-        """Save & close"""
-        if self.save_setting():
-            self.accept()  # close
-
-    def verify_table(self) -> bool:
-        """Verify table before saving or importing, warn if a vehicle name is listed more than once"""
-        vehicle_names = set()
-        for index in range(self.table_brands.rowCount()):
-            key_name = table_item(self.table_brands, index, 0).text()
-            if key_name in vehicle_names:
-                self.table_brands.setCurrentCell(index, 0)  # show duplicate row
-                msg_text = (
-                    f"<b>{key_name}</b> is listed more than once.<br><br>"
-                    "Each name can only be listed once, rename or delete duplicate rows."
-                )
-                QMessageBox.warning(self, tr("Error"), trm(msg_text))
-                return False
-            vehicle_names.add(key_name)
-        return True
-
-    def update_brands_temp(self):
-        """Update temporary changes to brands temp first"""
-        self.brands_temp.clear()
-        for index in range(self.table_brands.rowCount()):
-            key_name = table_item(self.table_brands, index, 0).text()
-            item_name = table_item(self.table_brands, index, 1).text()
-            self.brands_temp[key_name] = item_name
-
-    def save_setting(self) -> bool:
-        """Save setting, False if table is invalid (not saved)"""
-        if not self.verify_table():
-            return False
-        self.update_brands_temp()
-        cfg.user.brands = copy_setting(self.brands_temp)
-        cfg.save(0, config_type=ConfigType.BRANDS)
-        self.set_unmodified()
-        run_after_saving(self.reloading)
-        return True
+def parse_brand_data(vehicles: Any) -> dict[str, str]:
+    """Car name: brand, from game data (LMU "desc" or rF2 "name" format), KeyError if neither"""
+    if vehicles[0].get("desc"):  # LMU
+        return {veh["desc"]: veh["manufacturer"] for veh in vehicles}
+    if vehicles[0].get("name"):  # rF2 & LMU vehicle list
+        return {parse_vehicle_name(veh): veh["manufacturer"] for veh in vehicles}
+    raise KeyError
 
 
 def request_vehicle_data(url_host: str, url_port: int, resource_name: str) -> Any:
@@ -357,3 +192,10 @@ def parse_vehicle_name(vehicle):
         # Get version number from last second split of path_split
         version_length = len(path_split[-2]) + 1
     return vehicle["name"][:-version_length]
+
+
+class VehicleBrandEditor(TableEditorPage):
+    """Vehicle brand editor"""
+
+    BACKEND = BrandBackend
+    TITLE = "Vehicle Brand Editor"

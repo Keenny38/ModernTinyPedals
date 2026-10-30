@@ -32,6 +32,22 @@ if TYPE_CHECKING:
     from ..template.widget_config_types import LapsAndPositionConfig
 
 
+def finish_lap_text(lap_total: float, dash: str = "-") -> str:
+    """Race finish lap: lap race total, timed race estimate (~), dash until lap pace is known (estimate would
+    be the completed laps)"""
+    if api.read.session.finish_type(minfo.vehicles.finishAsLap):
+        return f"{lap_total:.2f}"
+    if minfo.delta.lapTimePace > 0:
+        return f"~{lap_total:.2f}"
+    return f"~{dash}"
+
+
+def on_final_lap() -> bool:
+    """Lap being driven is the last lap allowed (lap race, maximum laps of qualifying), from completed laps (same
+    count as the laps shown)"""
+    return api.read.lap.completed_laps() >= api.read.lap.maximum() - 1
+
+
 class Realtime(Overlay):
     """Draw widget"""
 
@@ -239,15 +255,8 @@ class Realtime(Overlay):
     # GUI update methods
     def update_laps(self, target):
         """Lap number, predicted lap total (changes while lap progress does not: pit stop of a timed race)"""
-        lap_num = api.read.lap.number()
-        lap_max = api.read.lap.maximum()
         laps_done, lap_total = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
-
-        if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-            text_lap_total = f"{lap_total:.2f}"
-        else:
-            text_lap_total = f"~{lap_total:.2f}"
-
+        text_lap_total = finish_lap_text(lap_total)
         text_laps_done = f"{laps_done:.2f}"
         if self.wcfg["show_predicted_extra_laps"]:
             text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}({minfo.vehicles.finishLapOffset:+.0f})"
@@ -257,7 +266,7 @@ class Realtime(Overlay):
         if self.wcfg["show_invalid_lap_highlight"] and api.read.lap.invalidated():
             color_index = 2
         else:
-            color_index = int(lap_num - lap_max >= -1)  # last laps
+            color_index = int(on_final_lap())
         if target.last != (text, color_index):
             target.last = (text, color_index)
             target.text = text

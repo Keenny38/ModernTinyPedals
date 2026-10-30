@@ -1,9 +1,9 @@
 import QtQuick
 
-// Surface for page sections: rounded, subtle border
+// Surface for page sections: card surface above the page (theme.surfaceCard), subtle border, card corners
 Rectangle {
-    radius: theme.radiusXl
-    color: theme.base
+    radius: theme.radiusLg
+    color: theme.surfaceCard
     border.width: 1
-    border.color: theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border
+    border.color: theme.strokeSubtle
 }

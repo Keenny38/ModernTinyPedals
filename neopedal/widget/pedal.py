@@ -131,12 +131,6 @@ class Realtime(PedalAlertMixin, Overlay):
             (key, getattr(self, f"bar_{key}")) for key in ("throttle", "brake") if self.wcfg[f"show_{key}"])
         self.setup_alerts(tuple(key for key, _ in self.alert_bars))
 
-        # Last data
-        self.max_brake_pres = 0.01
-
-    def post_update(self):
-        self.max_brake_pres = 0.01
-
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Throttle
@@ -153,7 +147,7 @@ class Realtime(PedalAlertMixin, Overlay):
             raw_brake = api.read.inputs.brake_raw()
             if self.wcfg["show_brake_filtered"]:
                 if self.wcfg["show_brake_pressure"]:
-                    f_brake = self.filtered_brake_pressure(api.read.brake.pressure())
+                    f_brake = self.brake_pressure_share()
                 else:
                     f_brake = api.read.inputs.brake()
                 brake = raw_brake + f_brake
@@ -197,13 +191,6 @@ class Realtime(PedalAlertMixin, Overlay):
             target.update_input(data, data)
 
     # Additional methods
-    def filtered_brake_pressure(self, value):
-        """Percentage filtered brake pressure"""
-        brake_pres = sum(value)
-        if brake_pres > self.max_brake_pres:
-            self.max_brake_pres = brake_pres
-        return brake_pres / self.max_brake_pres
-
     def set_pedal_size(self, font_m) -> tuple[
         int, int, tuple[int, int, int, int], tuple[int, int, int, int],
         tuple[int, int, int, int], tuple[int, int, int, int], tuple[float, float, int, int],

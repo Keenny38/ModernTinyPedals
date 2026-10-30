@@ -94,7 +94,8 @@ def test_lap_names(viewer, laps):
     assert lap_label(os.path.basename(laps[1])) == "Lap 2 · 1:10.000"
     assert lap_label("other file.csv") == "other file"
     legend = viewer.backend.legend
-    assert legend[0]["full"].startswith("Lap 2 · 1:10.000 · Practice 03/10")
+    assert legend[0]["full"].startswith("Lap 2 · 1:10.000 · Practice ")  # then day & month in language format
+    assert "03/10" in legend[0]["full"] or "10/3" in legend[0]["full"]
     assert legend[0]["label"] == "Lap 2 · 1:10.000"
 
 

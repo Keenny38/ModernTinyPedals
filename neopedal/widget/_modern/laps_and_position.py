@@ -33,7 +33,8 @@ from ...api_control import api
 from ...formatter import format_points
 from ...module_info import minfo
 from .._common import player_race_laps, player_vehicle
-from .base import DASH, ModernOverlay
+from ..laps_and_position import finish_lap_text, on_final_lap
+from .base import DASH, ModernOverlay, signed
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -117,17 +118,11 @@ class Realtime(StatsMixin, ModernOverlay):
 
     def laps_value(self) -> Value:
         """Laps done / total laps, last lap highlighted"""
-        lap_num = api.read.lap.number()
-        lap_max = api.read.lap.maximum()
         laps_done, lap_total = player_race_laps(api.read.session.remaining() - minfo.vehicles.finishTimeOffset)
-        if api.read.session.finish_type(minfo.vehicles.finishAsLap):
-            text_total = f"{lap_total:.2f}"
-        else:
-            text_total = f"~{lap_total:.2f}"
-        text = f"{laps_done:.2f}/{text_total}"
+        text = f"{laps_done:.2f}/{finish_lap_text(lap_total, DASH)}"
         if self.wcfg["show_predicted_extra_laps"]:
-            text = f"{text} ({minfo.vehicles.finishLapOffset:+.0f})"
-        final = lap_num - lap_max >= -1
+            text = f"{text} ({signed(minfo.vehicles.finishLapOffset)})"
+        final = on_final_lap()
         invalid = self.show_invalid and api.read.lap.invalidated()
         return Value(text, self.theme.negative if invalid else None,
                      self.theme.tint(self.theme.warning, 60) if final else None)

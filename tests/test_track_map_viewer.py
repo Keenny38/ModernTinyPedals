@@ -1,4 +1,4 @@
-"""Track map viewer (Qt Quick page) & track map widget of track notes editor: load map, position, curve, slope"""
+"""Track map viewer (Qt Quick page) & track map of track notes editor: load map, position, curve, slope"""
 
 import math
 import time
@@ -214,51 +214,41 @@ def test_geometry_helpers():
     assert curve_description(30, 1, grades["curve"]) == "Right 2"
 
 
-# --- Track map widget (track notes editor)
+# --- Track map of track notes editor (Qt Quick page since the UI/UX audit of 2026-10-29: same map backend)
 @pytest.fixture
-def widget(ui_env):
-    from PySide6.QtWidgets import QWidget
-
-    from neopedal.ui.track_map_widget import MapView
+def notes_map(ui_env):
+    from neopedal.ui.track_notes_editor import TrackNotesEditor
 
     write_map(cfg.path.track_map)
     for key, value in cfg.user.config["track_map_viewer"].items():
         if key.startswith("show_") and isinstance(value, bool):
             cfg.user.config["track_map_viewer"][key] = True  # every overlay
-    parent = QWidget()
-    view = MapView(parent)
-    view.resize(700, 600)
-    view.load_trackmap(cfg.path.track_map, "Ring")
-    yield view
-    parent.deleteLater()
+    editor = TrackNotesEditor(None)
+    editor.resize(1000, 700)
+    editor.backend.trackMap.load_map(cfg.path.track_map, "Ring")
+    wait_jobs(editor.backend.trackMap)
+    yield editor.backend
+    editor.set_unmodified()
+    editor.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def drawn(widget) -> int:
-    image = widget.grab().toImage()
-    return sum(1 for y in range(0, image.height(), 7) for x in range(0, image.width(), 7)
-               if QColor(image.pixel(x, y)).lightness() > 40)
-
-
-def test_widget_map_drawn_with_position(widget):
-    assert widget.map_filename == "Ring" and widget.edit_filename.text() == "Ring"
-    assert widget.map_nodes == 200 and widget.map_length == pytest.approx(1990, abs=1)
+def test_notes_map_position_nodes_and_marks(notes_map):
+    trackmap = notes_map.trackMap
+    assert trackmap.mapName == "Ring" and trackmap.nodes == 200
     for position in (0, 1000, 1900):
-        widget.spinbox_pos_dist.setValue(position)
-        assert widget.slider_pos_dist.value() == position and widget.map_seek_dist == position
-        widget.update_highlighted_coords()
-        assert widget.highlighted_coords is not None
-        assert drawn(widget) > 50
-
-
-def test_widget_zoom_nodes_and_marks(widget):
-    widget.spinbox_map_scale.setValue(3.0)
-    widget.spinbox_nodes.setValue(25)
-    assert widget.map_scale == 3.0 and widget.curve_nodes == 25
-    widget.update_marked_coords({100.0, 900.0, 5000.0})  # out of track ignored
-    assert len(widget.marked_coords) == 2
-    assert drawn(widget) > 0
-    menu = widget.set_context_menu()
-    checkable = [action for action in menu.actions() if action.isCheckable()]
-    assert len(checkable) == 11 and all(action.isChecked() for action in checkable)
-    widget.load_config()  # config reloaded after edit
+        trackmap.setPosition(position)
+        assert trackmap.current["distance"] == pytest.approx(position, abs=10)
+    trackmap.setCurveNodes(25)
+    assert trackmap.curveNodes == 25
+    first = notes_map.rows[0]["key"]
+    notes_map.setValue(first, "distance", "100")
+    notes_map.addRow()
+    notes_map.setValue(notes_map.rows[1]["key"], "distance", "900")
+    notes_map.addRow()
+    notes_map.setValue(notes_map.rows[2]["key"], "distance", "5000")  # out of track ignored
+    assert [mark["key"] for mark in notes_map.marks] == [row["key"] for row in notes_map.rows[:2]]
+    mark = notes_map.marks[1]
+    assert QColor(notes_map.marksColor).isValid()
+    assert math.hypot(mark["x"] - 400 * math.cos(90 / 200 * math.tau),
+                      mark["y"] - 250 * math.sin(90 / 200 * math.tau)) < 1  # node at 900 m

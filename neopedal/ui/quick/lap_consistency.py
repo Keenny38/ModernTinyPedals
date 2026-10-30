@@ -189,7 +189,7 @@ class MapConsistency(PagePart):
         known = [spread for spread in found.get("spreads", []) if spread >= 0]
         laps = int(found.get("laps", 0))
         if found.get("busy"):
-            text = tr("Reading laps...")
+            text = tr("Reading laps…")
         elif not known:
             text = tr("3 clean laps or more needed")
         else:

@@ -46,6 +46,7 @@ from collections.abc import Callable, Iterator, Sequence
 from typing import Any, NamedTuple, Protocol
 
 from ..userfile import append_line, atomic_replace
+from ..validator import load_json_strict
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def _nodes(value: Any) -> Iterator[dict]:
             if text[:1] in ("{", "["):
                 try:
                     push((json.loads(text), depth + 1))
-                except ValueError:
+                except (ValueError, RecursionError):  # RecursionError: nested too deeply
                     continue
             continue
         if isinstance(value, dict):
@@ -156,10 +157,10 @@ def _load(text: str | bytes) -> Any:
     """JSON data of storage text or file content (UTF-8 read without copy, invalid bytes replaced), raises
     ValueError if invalid"""
     try:
-        return json.loads(text)
+        return load_json_strict(text, allow_nan=True)  # nested too deeply: ValueError
     except UnicodeDecodeError:  # ValueError too: invalid bytes replaced like decoding with errors="replace"
         assert isinstance(text, bytes)
-        return json.loads(text.decode("utf-8", errors="replace"))
+        return load_json_strict(text.decode("utf-8", errors="replace"), allow_nan=True)
 
 
 def parse_storage(text: str | bytes) -> list[DriverRanks]:
@@ -368,7 +369,7 @@ def read_history(path: str) -> list[HistoryEntry]:
             for line in file:
                 try:
                     data = json.loads(line)
-                except ValueError:
+                except (ValueError, RecursionError):  # RecursionError: nested too deeply
                     continue
                 if isinstance(data, dict) and isinstance(data.get("time"), (int, float)):
                     entries.append(HistoryEntry(float(data["time"]), _rank_from_list(data.get("driver")),
@@ -517,9 +518,9 @@ class RankWatcher:
                 return
             self._checked_time = now
             self._busy = True
-        from ..game_rest_poll import poll_worker  # shared poll threads, no thread made per check
+        from ..game_rest_poll import FileRead, poll_worker  # shared poll threads, no thread made per check
 
-        poll_worker.submit(self._check_polled)
+        poll_worker.submit(FileRead(self._check_polled))  # file lane: a 64 MB read never delays route reads
 
     def _check_polled(self) -> None:
         try:

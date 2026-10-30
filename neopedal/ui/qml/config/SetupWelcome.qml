@@ -35,13 +35,13 @@ SetupStep {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: theme.padCard
-            spacing: theme.em * 0.8
+            spacing: theme.space5
             Repeater {
                 model: backend.steps.slice(1, backend.stepCount - 1)  // game to overlays
                 RowLayout {
                     required property var modelData
                     Layout.fillWidth: true
-                    spacing: theme.em * 0.8
+                    spacing: theme.space5
                     Icon {
                         Layout.preferredWidth: theme.em * 1.6
                         Layout.alignment: Qt.AlignTop
@@ -54,12 +54,14 @@ SetupStep {
                         Text {
                             Layout.fillWidth: true
                             text: modelData.label
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.weight: Font.DemiBold
                         }
                         Text {
                             Layout.fillWidth: true
                             text: modelData.subtitle
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             wrapMode: Text.WordWrap
                             font.pointSize: theme.fontLabel

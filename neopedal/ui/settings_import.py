@@ -45,7 +45,7 @@ def start_folder() -> str:
 
 def import_settings(parent: QWidget | None) -> None:
     """Choose a settings folder, confirm, then restart to import it"""
-    source = QFileDialog.getExistingDirectory(parent, tr("Import Settings..."), start_folder())
+    source = QFileDialog.getExistingDirectory(parent, tr("Import Settings…"), start_folder())
     if not source:
         return
     if not settings_import.is_settings_folder(source, cfg.path.config):
@@ -61,7 +61,10 @@ def import_settings(parent: QWidget | None) -> None:
         tr("Import settings from this folder?") + f"\n{os.path.normpath(source)}\n\n" + tr(
             "Options, shortcuts, driver stats, language packs and Dashboard HUD incidents are copied, "
             "the folder is not changed. Current settings are set aside in a backup folder (never "
-            "deleted), then the app restarts with the imported settings."),
+            "deleted), then the app restarts with the imported settings.") + "\n\n" + tr(
+            "Never imported (the folder may come from someone else): update source, LAN access, Dashboard "
+            "access code, stream overlay token and trusted plugins keep your current values, network folders "
+            "and game addresses on another computer are reset."),
         tr("Import and Restart"),
     ):
         return

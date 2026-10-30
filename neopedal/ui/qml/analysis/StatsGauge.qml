@@ -56,6 +56,7 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 text: segment.modelData.letter
+                textFormat: Text.PlainText
                 color: segment.lit ? segment.modelData.color : theme.dimText
                 font.pointSize: theme.fontCaption
                 font.weight: segment.lit ? Font.Bold : Font.Normal
@@ -87,6 +88,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: 0
                 text: (marker.mark.main ? marker.mark.label : marker.mark.short) || ""
+                textFormat: Text.PlainText
                 color: marker.mark.main ? theme.text : theme.dimText
                 font.pointSize: (marker.mark.main ? theme.fontSmall : theme.fontCaption)
                 font.weight: marker.mark.main ? Font.Bold : Font.DemiBold

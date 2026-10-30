@@ -33,6 +33,7 @@ from ... import units
 from ...api_control import api
 from ...const_common import COMPASS_BEARINGS
 from ...module_info import minfo
+from ..cruise import compass_heading
 from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
@@ -86,8 +87,8 @@ class Realtime(StatsMixin, ModernOverlay):
         values = []
         for key in self.keys:
             if key == "compass":
-                degree = 180 - calc.degrees(api.read.vehicle.orientation_yaw_radians())
-                values.append(Value(f"{degree:03.0f}° {calc.select_grade(COMPASS_BEARINGS, degree)}"))
+                degree = compass_heading(api.read.vehicle.orientation_yaw_radians())
+                values.append(Value(f"{degree:03d}° {calc.select_grade(COMPASS_BEARINGS, degree)}"))
             elif key == "elevation":
                 values.append(Value(f"{self.unit_dist(api.read.vehicle.position_vertical()):.0f}{self.symbol_dist}"))
             elif key == "odometer":

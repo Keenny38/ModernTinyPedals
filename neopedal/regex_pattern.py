@@ -23,8 +23,6 @@ Regular expression, pattern, string constants
 import re
 from types import MappingProxyType
 
-from PySide6.QtGui import QFont
-
 from .const_api import API_MAP_ALIAS
 
 # Compiled regex function
@@ -107,6 +105,7 @@ CFG_STRING = (
     "^hidden_columns$|"
     "^input_driver_table$|"
     "^input_driver_names$|"
+    "^input_stint_drivers$|"
     "^live_unfollowed$|"
     "^preset$|"
     "^process_id$|"
@@ -116,6 +115,7 @@ CFG_STRING = (
     "^last_run_version$|"
     "^favorite_overlays$|"
     "^recent_overlays$|"
+    "^command_palette_recent$|"
     "^version$|"
     "^user_profile_[0-9]$|"  # black box user display profiles (see black_box_ui.USER_PROFILES)
     # Partial match
@@ -241,17 +241,17 @@ ABBR_PATTERN = "|".join(
 )
 
 
-# Font weight
+# Font weight (QFont.Weight values: no QtGui import, the lap viewer worker process reads this module)
 FONT_WEIGHT_MAP = MappingProxyType({
-    "Thin": QFont.Weight.Thin,
-    "Extra Light": QFont.Weight.ExtraLight,
-    "Light": QFont.Weight.Light,
-    "Normal": QFont.Weight.Normal,
-    "Medium": QFont.Weight.Medium,
-    "Semi Bold": QFont.Weight.DemiBold,
-    "Bold": QFont.Weight.Bold,
-    "Extra Bold": QFont.Weight.ExtraBold,
-    "Black": QFont.Weight.Black,
+    "Thin": 100,
+    "Extra Light": 200,
+    "Light": 300,
+    "Normal": 400,
+    "Medium": 500,
+    "Semi Bold": 600,
+    "Bold": 700,
+    "Extra Bold": 800,
+    "Black": 900,
 })
 
 # Choice dictionary

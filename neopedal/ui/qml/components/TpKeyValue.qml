@@ -26,6 +26,7 @@ GridLayout {
         id: labelText
         Layout.fillWidth: true
         text: pair.label
+        textFormat: Text.PlainText
         color: theme.dimText
         font.pointSize: pair.layout === "stack" ? theme.fontSmall : theme.fontPoint
         elide: Text.ElideRight
@@ -42,14 +43,15 @@ GridLayout {
             glyph: ""  // warning
             fallback: "!"
             color: theme.loss
-            size: theme.em * 0.85
+            size: theme.iconSm
         }
-        Text {
+        TpText {
+            role: "numeric"
+            elide: Text.ElideNone
             text: pair.value
             color: pair.warning ? theme.loss : pair.tone ? pair.tone : theme.text
             font.pointSize: pair.large ? theme.fontLarge : theme.fontPoint
             font.weight: pair.large ? Font.DemiBold : Font.Normal
-            font.features: { "tnum": 1 }
             horizontalAlignment: pair.layout === "stack" ? Text.AlignLeft : Text.AlignRight
         }
     }

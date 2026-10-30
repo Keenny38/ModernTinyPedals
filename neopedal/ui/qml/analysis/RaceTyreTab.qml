@@ -40,7 +40,7 @@ Item {
             current = cell.info.name || ""
             wheel = cell
             listing = true  // items made before it opens: size & place right at once
-            popup(cell, 0, cell.height + 2)
+            popup(cell, 0, cell.height + theme.space1)
         }
         onAboutToShow: listing = true  // opened again while closing: closed may have come in between
         onClosed: {
@@ -63,7 +63,7 @@ Item {
         }
         MenuSeparator {}
         TpMenuItem {
-            text: (tab.plan.stock || []).length ? i18n.tr("Remove Tyre") : i18n.tr("No tyre in stock: add tyres to the stock first")
+            text: (tab.plan.stock || []).length ? i18n.tr("Take Tyre Off") : i18n.tr("No tyre in stock: add tyres to the stock first")
             enabled: wheelMenu.current !== ""
             onTriggered: backend.clearTyre(wheelMenu.row, wheelMenu.corner)
         }
@@ -79,7 +79,7 @@ Item {
             row = index
             button = source
             refocus = source.activeFocus
-            popup(source, 0, source.height + 2)
+            popup(source, 0, source.height + theme.space1)
         }
         onClosed: {
             var source = button
@@ -91,7 +91,7 @@ Item {
         TpMenuItem { visible: !tab.plan.linked; height: visible ? implicitHeight : 0; text: i18n.tr("Duplicate Row"); onTriggered: backend.duplicateRow(planRowMenu.row) }
         TpMenuItem { visible: !tab.plan.linked; height: visible ? implicitHeight : 0; text: i18n.tr("Insert Row Above"); onTriggered: backend.insertRow(planRowMenu.row, true) }
         TpMenuItem { visible: !tab.plan.linked; height: visible ? implicitHeight : 0; text: i18n.tr("Insert Row Below"); onTriggered: backend.insertRow(planRowMenu.row, false) }
-        TpMenuItem { visible: !tab.plan.linked; height: visible ? implicitHeight : 0; text: i18n.tr("Delete Row"); onTriggered: backend.deleteRow(planRowMenu.row) }
+        TpMenuItem { visible: !tab.plan.linked; height: visible ? implicitHeight : 0; text: i18n.tr("Delete Row"); onTriggered: backend.deleteRow(planRowMenu.row) }  // undo toast
     }
 
     Flickable {
@@ -211,14 +211,11 @@ Item {
                         Layout.fillWidth: true
                         enabled: !backend.askingGame
                         glyph: ""  // game
-                        text: backend.askingGame ? i18n.tr("Asking game...") : i18n.tr("From Game")
+                        text: backend.askingGame ? i18n.tr("Asking game…") : i18n.tr("From Game")
                         tip: i18n.tr("Tyres allowed by the session in the game (LMU)")
                         onClicked: backend.tyreAllocationFromGame()
-                        BusyIndicator {  // waiting for the game
+                        TpSpinner {  // waiting for the game
                             visible: backend.askingGame
-                            running: visible && pageState.active
-                            width: Math.round(theme.em * 1.3)
-                            height: width
                             anchors.right: parent.right
                             anchors.rightMargin: theme.space3
                             anchors.verticalCenter: parent.verticalCenter
@@ -274,7 +271,7 @@ Item {
                         glyph: ""  // folder
                         text: i18n.tr("File")
                         checked: fileMenu.visible
-                        onClicked: fileMenu.popup(fileButton, 0, fileButton.height + 4)
+                        onClicked: fileMenu.toggleBelow(fileButton)
                         TpMenu {
                             id: fileMenu
                             TpMenuItem { text: i18n.tr("New File"); onTriggered: backend.newTyrePlan() }
@@ -282,8 +279,8 @@ Item {
                             TpMenuItem { text: i18n.tr("Open File"); onTriggered: backend.openTyrePlan() }
                             RaceRecentMenu { kind: "tyre_plan" }
                             MenuSeparator {}
-                            TpMenuItem { text: i18n.tr("Save As..."); onTriggered: backend.saveTyrePlan() }
-                            TpMenuItem { text: i18n.tr("Export As..."); onTriggered: backend.exportTyrePlanCsv() }
+                            TpMenuItem { text: i18n.tr("Save As…"); onTriggered: backend.saveTyrePlan() }
+                            TpMenuItem { text: i18n.tr("Export As…"); onTriggered: backend.exportTyrePlanCsv() }
                         }
                     },
                     TpButton {
@@ -320,6 +317,7 @@ Item {
                     text: tab.plan.linked
                           ? i18n.tr("One row per stint of the strategy: tyre change time added to the stop, wear = wear per lap x stint laps (compound wear per stint without wear per lap).")
                           : i18n.tr("Drag a tyre onto a wheel of the plan.")
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontSmall
                     wrapMode: Text.Wrap
@@ -364,6 +362,7 @@ Item {
                                 id: stintLabel
                                 Text {
                                     text: slot.rowData ? slot.rowData.label : ""
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
@@ -383,6 +382,7 @@ Item {
                                 Text {  // tyres changed at this stop: tyre color & ◆ mark (as the strategy)
                                     readonly property bool changed: slot.rowData !== undefined && slot.rowData.changes > 0
                                     text: (slot.rowData ? slot.rowData.change : "") + (changed ? " ◆" : "")
+                                    textFormat: Text.PlainText
                                     color: changed ? theme.seriesTyre : theme.dimText
                                     font.features: { "tnum": 1 }
                                     horizontalAlignment: Text.AlignRight
@@ -395,7 +395,7 @@ Item {
                                     id: rowButton
                                     flat: true
                                     size: "sm"
-                                    glyph: ""  // more
+                                    glyph: theme.glyphs.more
                                     fallback: "⋯"
                                     tip: i18n.tr("Row")
                                     checked: planRowMenu.visible && planRowMenu.button === rowButton
@@ -409,7 +409,7 @@ Item {
                     visible: !tab.plan.linked
                     flat: true
                     size: "sm"
-                    glyph: ""  // add
+                    glyph: theme.glyphs.add
                     text: i18n.tr("New Row")
                     onClicked: backend.addRow()
                 }
@@ -449,7 +449,7 @@ Item {
                         fallback: "⇅"
                         tip: i18n.tr("Sort By")
                         checked: sortMenu.visible
-                        onClicked: sortMenu.popup(sortButton, 0, sortButton.height + 4)
+                        onClicked: sortMenu.toggleBelow(sortButton)
                         TpMenu {
                             id: sortMenu
                             TpMenuItem { text: i18n.tr("Compound Type"); onTriggered: backend.sortStock(false) }
@@ -460,15 +460,15 @@ Item {
                         id: stockMore
                         flat: true
                         size: "sm"
-                        glyph: ""  // more
+                        glyph: theme.glyphs.more
                         fallback: "⋯"
                         tip: i18n.tr("Clean Up Stock")
                         checked: stockMenu.visible
-                        onClicked: stockMenu.popup(stockMore, 0, stockMore.height + 4)
+                        onClicked: stockMenu.toggleBelow(stockMore)
                         TpMenu {
                             id: stockMenu
                             TpMenuItem { text: i18n.tr("Remove Unused"); onTriggered: backend.removeUnusedTyres() }  // undo toast
-                            TpMenuItem { text: i18n.tr("Clear All"); onTriggered: backend.clearTyres() }  // confirmed
+                            TpMenuItem { text: i18n.tr("Remove All from Stock"); onTriggered: backend.clearTyres() }  // undo toast
                         }
                     }
                 ]
@@ -489,7 +489,7 @@ Item {
                         }
                     }
                     TpButton {
-                        glyph: ""  // add
+                        glyph: theme.glyphs.add
                         fallback: "+"
                         tip: i18n.tr("Add")
                         onClicked: backend.addTyre()
@@ -505,6 +505,7 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: (tab.plan.stock || []).length ? i18n.tr("Drag a tyre onto a wheel of the plan.") : i18n.tr("No tyre in stock: add tyres to the stock first")
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontSmall
                     wrapMode: Text.Wrap
@@ -526,12 +527,12 @@ Item {
                             color: chipArea.containsMouse || activeFocus ? theme.hover : theme.raised
                             border.width: 1
                             border.color: used ? tab.usedColor : theme.border  // fitted in the plan: stints badge too
-                            // Keyboard: Tab reaches each tyre, Delete removes it (after confirmation)
+                            // Keyboard: Tab reaches each tyre, Delete removes it from stock (undo toast)
                             activeFocusOnTab: true
                             Accessible.role: Accessible.ListItem
                             Accessible.name: tyreName + (modelData.tread ? " " + modelData.tread : "")
                                              + (used ? ", " + i18n.trm("Stints: " + modelData.stints) : "")
-                            Accessible.description: i18n.tr("Delete: remove from stock")
+                            Accessible.description: i18n.tr("Delete key: remove from stock")
                             Keys.onDeletePressed: backend.removeTyre(chip.tyreName)
                             FocusRing { visible: chip.activeFocus }
                             Row {
@@ -543,10 +544,11 @@ Item {
                                     name: chip.tyreName
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
-                                Text { text: chip.tyreName; color: theme.text; font.pointSize: theme.fontLabel; anchors.verticalCenter: parent.verticalCenter }
+                                Text { text: chip.tyreName; color: theme.text; font.pointSize: theme.fontLabel; anchors.verticalCenter: parent.verticalCenter; textFormat: Text.PlainText }
                                 Text {  // used tyre of the game: tread left
                                     visible: (chip.modelData.tread || "") !== ""
                                     text: chip.modelData.tread || ""
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     font.pointSize: theme.fontCaption
                                     anchors.verticalCenter: parent.verticalCenter
@@ -562,6 +564,7 @@ Item {
                                         id: stintsText
                                         anchors.centerIn: parent
                                         text: chip.modelData.stints
+                                        textFormat: Text.PlainText
                                         color: theme.text
                                         font.pointSize: theme.fontCaption
                                         font.features: { "tnum": 1 }
@@ -587,7 +590,7 @@ Item {
                                 focusPolicy: Qt.NoFocus  // keyboard: Delete on the chip
                                 flat: true
                                 size: "xs"
-                                glyph: ""  // cancel
+                                glyph: theme.glyphs.remove
                                 fallback: "✕"
                                 anchors.right: parent.right
                                 anchors.rightMargin: theme.space1
@@ -609,7 +612,7 @@ Item {
                                 Drag.source: ghost
                                 Drag.hotSpot.x: width / 2
                                 Drag.hotSpot.y: height / 2
-                                Text { anchors.centerIn: parent; text: chip.tyreName; color: "white"; font.weight: Font.DemiBold }
+                                Text { anchors.centerIn: parent; text: chip.tyreName; color: "white"; font.weight: Font.DemiBold; textFormat: Text.PlainText }
                             }
                         }
                     }
@@ -636,6 +639,7 @@ Item {
                     Layout.fillWidth: true
                     visible: text !== ""
                     text: compoundCard.compare.note || ""
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontLabel
                     wrapMode: Text.Wrap

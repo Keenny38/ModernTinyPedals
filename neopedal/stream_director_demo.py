@@ -30,7 +30,7 @@ def demo_state() -> dict[str, Any]:
     """Sample state showing every graphic (layout editor), texts in app language"""
     from .i18n import tr
 
-    colors = ("#E5484D", "#3E8EF7", "#30A46C")
+    colors = ("#E21E19", "#0088FF", "#009639")
     classes = ("Hypercar", "LMP2", "LMGT3")
     names = ("A. Martin", "L. Hartmann", "K. Sato", "M. Rossi", "J. Novak", "E. Dubois", "T. Becker", "S. Lindqvist",
              "R. Costa", "P. Walsh", "N. Ivanova", "D. Okafor")
@@ -83,7 +83,7 @@ def demo_state() -> dict[str, Any]:
         "replay": True, "replayInfo": None,
         "clock": {"text": "2:41:07", "label": tr("Remaining")}, "flag": "",
         "weather": [tr("Air %1").replace("%1", "24°C"), tr("Track %1").replace("%1", "33°C")],
-        "pitRadar": {"title": tr("Pit lane"), "count": tr("%1 cars approaching").replace("%1", "1"),
+        "pitRadar": {"title": tr("Pit Lane"), "count": tr("%1 cars approaching").replace("%1", "1"),
                      "rows": [{"number": "22", "name": "J. Novak", "color": colors[1], "distance": "38 m",
                                "alongside": False, "ahead": True},
                               {"number": "31", "name": "T. Becker", "color": colors[2], "distance": "",

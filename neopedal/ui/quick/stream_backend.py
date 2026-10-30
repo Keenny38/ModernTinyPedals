@@ -26,6 +26,7 @@ Sources watched now are shown live (asked again every second while page is shown
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
 
@@ -170,6 +171,7 @@ class StreamOverlaysBackend(PageBackend):
         self._layout_state: tuple | None = ()
         self._layout_undo: tuple[str, dict[str, list[float]], int] | None = None  # section, places & version at reset
         self._model = DictListModel(OVERLAY_ROLES, self)
+        self._overlay_labels: list[str] = []  # labels of overlay rows (see refresh_overlays)
         self._timer = self.page_timer(self.refresh, REFRESH_MS)
         app_signal.refresh.connect(self.overlays_changed)
 
@@ -246,12 +248,25 @@ class StreamOverlaysBackend(PageBackend):
     def refresh_overlays(self, *_args):
         """Overlay rows synced in place (every second while shown), page told only when something changed"""
         if self._model.sync(overlay_rows(self.watched)):
+            self._overlay_labels = [str(row["label"]) for row in self._model.rows]
             self.overlaysChanged.emit()
 
-    def notify(self, text: str):
+    def notify(self, text: str, undo: Callable[[], object] | None = None):
+        """Short message (copied address, new token, port unavailable): page toast, nothing without a page;
+        undo: Undo button of the toast (change done without confirmation, Ctrl+Z too)"""
+        from PySide6.QtWidgets import QWidget
+
+        from ..toast import show_toast
+
         self.notice = text
         self.notice_count += 1
         self.noticeChanged.emit()
+        page = self.parent()
+        if isinstance(page, QWidget):
+            if undo is not None:
+                show_toast(page, text, action_text=tr("Undo"), action=undo)
+            else:
+                show_toast(page, text)
 
     # Server
     @staticmethod
@@ -352,7 +367,7 @@ class StreamOverlaysBackend(PageBackend):
         """New access token: addresses copied before stop working"""
         streamoverlay.new_access_token()
         self.refresh(force=True)
-        self.notify(tr("New access token: copy the addresses again into your streaming software."))
+        self.notify(tr("New access token: copy the addresses again into your streaming software"))
 
     # Addresses
     @Property(str, notify=addressesChanged)
@@ -406,14 +421,16 @@ class StreamOverlaysBackend(PageBackend):
 
     @Slot()
     def resetLayout(self):
-        """Overlays of this layout format back to their place on screen, places kept for one undo"""
+        """Overlays of this layout format back to their place on screen at once, places kept for one undo (toast,
+        Ctrl+Z: reversible, never confirmed)"""
         section = layout_section(self.crop())
         places = stream_layout.get(section)
         stream_layout.set(section, {})
         self._layout_undo = (section, places, stream_layout.version) if places else None
         streamoverlay.store.bump()
         self.refresh(force=True)
-        self.notify(tr("Overlays back to their place on screen"))
+        self.notify(tr("Overlays back to their place on screen"),
+                    self.undoResetLayout if self._layout_undo is not None else None)
 
     @Property(bool, notify=layoutChanged)
     def canUndoReset(self) -> bool:
@@ -464,7 +481,7 @@ class StreamOverlaysBackend(PageBackend):
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None and text:
             clipboard.setText(text)
-            self.notify(tr("Address copied: paste it as URL of a Browser source."))
+            self.notify(tr("Address copied: paste it as URL of a Browser source"))
 
     @Slot(str)
     def openInBrowser(self, url: str):
@@ -530,6 +547,11 @@ class StreamOverlaysBackend(PageBackend):
     @Property(int, notify=overlaysChanged)
     def overlayCount(self) -> int:
         return len(self._model.rows)
+
+    @Property(list, notify=overlaysChanged)
+    def overlayLabels(self) -> list[str]:
+        """Labels of overlay rows (page search: says when no row matches)"""
+        return self._overlay_labels
 
     @Slot(str, int)
     def setVisibility(self, name: str, index: int):

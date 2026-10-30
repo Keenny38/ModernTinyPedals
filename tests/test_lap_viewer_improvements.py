@@ -602,7 +602,7 @@ def test_loading_one_lap_message(viewer, laps, monkeypatch):  # noqa: F811
     monkeypatch.setattr(backend, "set_status", lambda text, transient=True: (shown.append(text), set_status(text, transient)))
     backend.load_in_background([laps[3]])
     wait_loaded(viewer)
-    assert shown[0] == "Loading 1 lap..."
+    assert shown[0] == "Loading 1 lap…"
 
 
 # --- Theme values copied into QML (no Python call per binding), follow palette

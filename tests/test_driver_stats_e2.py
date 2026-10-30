@@ -206,6 +206,9 @@ def test_driver_stats_page_with_stints_and_friend(stats_page, tmp_path):
         view.show()
         for _ in range(10):
             QCoreApplication.processEvents()
+        stats_page.setStatsTab(2)  # friend in the Compare tab (stints in Overview, made first)
+        for _ in range(3):
+            QCoreApplication.processEvents()
         assert not view.errors()
         texts, stack = set(), [view.rootObject()]
         while stack:
@@ -214,6 +217,7 @@ def test_driver_stats_page_with_stints_and_friend(stats_page, tmp_path):
             if isinstance(text, str):
                 texts.add(text)
             stack.extend(item.childItems())
+        stats_page.setStatsTab(0)
         assert "Relais et régularité" in texts and "Indice de régularité" in texts
         assert os.path.basename(str(tmp_path / "all")) in " ".join(texts)  # friend's name
     finally:

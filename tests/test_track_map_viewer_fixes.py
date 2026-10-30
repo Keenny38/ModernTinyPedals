@@ -97,14 +97,14 @@ def test_failed_first_map_leaves_page_empty(empty_viewer, warnings, tmp_path):
 # --- 3: loading state replaces empty state while reading
 def test_loading_state_while_reading(empty_viewer):
     root, backend = empty_viewer.view.rootObject(), empty_viewer.backend
-    empty, loading = item_named(root, "emptyMap"), item_named(root, "mapLoading")
-    assert empty.property("visible") and not loading.property("visible")
+    state = item_named(root, "mapState")  # one TpStateView: loading wins over empty
+    assert state.property("visible") and state.property("empty") and not state.property("loading")
     write_map(cfg.path.track_map)
     backend.load_map(cfg.path.track_map, "Ring")
     assert backend.loading
-    assert loading.property("visible") and not empty.property("visible")
+    assert state.property("visible") and state.property("loading")
     wait_jobs(backend)
-    assert backend.loaded and not loading.property("visible") and not empty.property("visible")
+    assert backend.loaded and not state.property("visible")
 
 
 # --- 4: recorded maps of app folder (track picker)
@@ -182,4 +182,4 @@ def test_dropped_files(empty_viewer, tmp_path):
     assert backend.openDropped([svg])
     wait_jobs(backend)
     assert backend.loaded and backend.mapName == "Dropped"
-    assert item_of_type(empty_viewer.view.rootObject(), "DropArea") is not None
+    assert item_of_type(empty_viewer.view.rootObject(), "TpDropZone") is not None  # shared drop area (S15)

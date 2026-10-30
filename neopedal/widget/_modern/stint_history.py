@@ -34,7 +34,7 @@ from PySide6.QtGui import QPainter
 from ... import calculation as calc
 from ... import units
 from ...module_info import minfo
-from .base import ModernOverlay, display_order_options
+from .base import ModernOverlay, display_order_options, lap_delta_color, signed
 from .draw import panel
 from .rows import compound_cell
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin, compounds_width
@@ -84,12 +84,13 @@ class Realtime(TableMixin, ModernOverlay):
         if wcfg["show_wear"]:
             columns.append(Column("wear", self.text_width("dim", f"88.{'8' * self.dec_wear}%"), RIGHT, "Wear"))
         if wcfg["show_delta"]:
-            columns.append(Column("delta", self.text_width("dim", f"+8.{'8' * self.dec_delta}"), RIGHT, "Delta"))
+            columns.append(Column("delta", self.text_width("dim", f"+88.{'8' * self.dec_delta}"), RIGHT, "Delta"))
         if wcfg["show_consistency"]:
             columns.append(Column("consistency", self.text_width("dim", f"188.{'8' * self.dec_consist}%"), RIGHT, "Consist."))  # 100% at stint start
         columns = self.display_ordered(columns)
         self.table = self.build_table(columns, ROW_SCALE, header=True)
         self.history_rows: tuple = ()
+        self.history_version = 0  # changed with history rows: drawn in static layer
         self.last_data_version = -1
         self.resize_rows(1)
 
@@ -100,11 +101,13 @@ class Realtime(TableMixin, ModernOverlay):
             self.set_size(self.table.width, height)
 
     def paint_static(self, painter: QPainter):
-        panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+        """Panel, header & previous stints (they only change when a stint ends)"""
+        panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         self.draw_header(painter)
+        self.draw_rows(painter, self.history_rows, start=1)
 
     def paint(self, painter: QPainter):
-        self.draw_rows(painter, self.state)
+        self.draw_rows(painter, self.state[:1])  # current stint
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -119,9 +122,12 @@ class Realtime(TableMixin, ModernOverlay):
                     rows.append(self.stint_row(dataset[index], self.wcfg["show_virtual_energy_if_available"]))
                 elif self.wcfg["show_empty_history"]:
                     rows.append(None)
-            self.history_rows = tuple(rows)
-            self.resize_rows(1 + len(rows))
-        self.refresh((current, *self.history_rows))
+            if tuple(rows) != self.history_rows:
+                self.history_rows = tuple(rows)
+                self.history_version += 1
+                self.resize_rows(1 + len(rows))
+                self.redraw_static()
+        self.refresh((current, self.history_version))
 
     def stint_row(self, data, energy_type: bool, current: bool = False) -> Row:
         """Cells of one stint"""
@@ -144,9 +150,8 @@ class Realtime(TableMixin, ModernOverlay):
             elif key == "wear":
                 cells.append(Cell(TEXT, f"{fit(data.totalTyreWear, self.dec_wear)}{self.sign_wear}", "dim", theme.text_dim))
             elif key == "delta":
-                delta = data.lapTimeDelta
-                color = theme.text_dim if not delta else (theme.negative if delta > 0 else theme.positive)
-                cells.append(Cell(TEXT, f"{delta:+.{self.dec_delta}f}", "dim", color))
+                delta = calc.sym_max(data.lapTimeDelta, 99.9)  # column fits +99.9
+                cells.append(Cell(TEXT, signed(delta, self.dec_delta), "dim", lap_delta_color(theme, delta)))
             elif key == "consistency":
                 text = f"{data.lapTimeConsistency:.{self.dec_consist}f}{self.sign_consist}"
                 cells.append(Cell(TEXT, text, "dim", theme.text_dim))

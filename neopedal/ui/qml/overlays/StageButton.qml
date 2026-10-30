@@ -3,12 +3,12 @@ import QtQuick.Controls.Basic
 import "../components"
 
 // Round icon button on the dark preview stage of an overlay card (white tints): settings, favorite star.
-// No Tab stop: the focused card answers Enter (settings) and Ctrl+F (favorite).
+// No Tab stop: the focused card answers Enter (options) and Ctrl+D (favorite).
 AbstractButton {
     id: button
     property string glyph: ""
     property string fallback: ""
-    property color glyphColor: "white"
+    property color glyphColor: theme.stageInk
     property string tip: ""
 
     width: Math.round(theme.em * 2)
@@ -23,14 +23,15 @@ AbstractButton {
 
     background: Rectangle {
         radius: width / 2
-        color: button.down ? Qt.rgba(1, 1, 1, 0.3) : button.hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(0, 0, 0, 0.45)
+        color: button.down ? theme.tint(theme.stageInk, "strong") : button.hovered ? theme.tint(theme.stageInk, "selected")
+             : theme.stageScrim
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.18)
+        border.color: theme.tint(theme.stageInk, "selected")
     }
     contentItem: Icon {
         glyph: button.glyph
         fallback: button.fallback
-        size: theme.em * 0.95
+        size: theme.iconSm
         color: button.glyphColor
     }
 }

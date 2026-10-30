@@ -24,9 +24,11 @@ TpPopup {
     readonly property real windowHeight: parent ? parent.height : theme.em * 32
 
     // Marks besides colors (colorblind): ◆ best of class, ● personal best
-    function mark(tone) { return tone === "fastest" ? "◆ " : tone === "gain" ? "● " : "" }
+    // Record mark right of the time, as every page (TpLapTime): ◆ best of class first, ● personal best
+    function mark(tone) { return tone === "fastest" ? " ◆" : tone === "gain" ? " ●" : "" }
 
     component Cell: Text {
+        textFormat: Text.PlainText  // text of each use: names & values, never markup
         property string tint: ""
         Layout.preferredWidth: theme.em * 4.6
         horizontalAlignment: Text.AlignRight
@@ -42,7 +44,7 @@ TpPopup {
     contentItem: LazyPane {
         shown: popup.visible
         sourceComponent: ColumnLayout {
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             TpCardHeader {
                 level: "popup"
                 glyph: ""  // stopwatch
@@ -88,8 +90,8 @@ TpPopup {
                     required property string energy
                     required property int position
                     width: ListView.view.width - (laps.ScrollBar.vertical.visible ? laps.ScrollBar.vertical.width : 0)
-                    height: Math.round(theme.em * 1.9)
-                    TpListRow { anchors.fill: parent; radius: theme.radiusSm; striped: lapRow.index % 2 === 1 }
+                    height: Math.round(theme.rowCompact)
+                    TpListRow { anchors.fill: parent; striped: lapRow.index % 2 === 1 }
                     RowLayout {
                         anchors.fill: parent
                         spacing: theme.space3
@@ -97,22 +99,23 @@ TpPopup {
                             Layout.preferredWidth: theme.em * 3
                             leftPadding: theme.space2
                             text: lapRow.lap + (lapRow.pit ? "  P" : "")
+                            textFormat: Text.PlainText
                             color: lapRow.pit ? theme.warning : theme.dimText
                             font.weight: lapRow.pit ? Font.DemiBold : Font.Normal
                             font.features: { "tnum": 1 }
                         }
-                        Cell { text: popup.mark(lapRow.timeTone) + lapRow.time; tint: lapRow.timeTone; Layout.preferredWidth: theme.em * 5.4; font.weight: Font.DemiBold }
-                        Cell { text: popup.mark(lapRow.s1Tone) + lapRow.s1; tint: lapRow.s1Tone }
-                        Cell { text: popup.mark(lapRow.s2Tone) + lapRow.s2; tint: lapRow.s2Tone }
-                        Cell { text: popup.mark(lapRow.s3Tone) + lapRow.s3; tint: lapRow.s3Tone }
+                        Cell { text: lapRow.time + popup.mark(lapRow.timeTone); tint: lapRow.timeTone; Layout.preferredWidth: theme.em * 5.4; font.weight: Font.DemiBold }
+                        Cell { text: lapRow.s1 + popup.mark(lapRow.s1Tone); tint: lapRow.s1Tone }
+                        Cell { text: lapRow.s2 + popup.mark(lapRow.s2Tone); tint: lapRow.s2Tone }
+                        Cell { text: lapRow.s3 + popup.mark(lapRow.s3Tone); tint: lapRow.s3Tone }
                         Cell { text: lapRow.energy; color: theme.dimText }
                         Cell { text: lapRow.position > 0 ? "P" + lapRow.position : ""; Layout.preferredWidth: theme.em * 3.4 }
                     }
                 }
-                EmptyState {
+                TpStateView {
                     parent: laps
                     anchors.centerIn: parent
-                    visible: laps.count === 0
+                    empty: laps.count === 0
                     compact: true
                     glyph: ""  // stopwatch
                     title: i18n.tr("No lap yet")

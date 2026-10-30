@@ -9,7 +9,7 @@ TextField {
     property bool invalid: false
     signal escaped()
 
-    implicitHeight: Math.round(theme.em * 2.05)
+    implicitHeight: Math.round(theme.fieldHeight)
     implicitWidth: theme.em * 12
     leftPadding: theme.em * 0.55
     rightPadding: theme.em * 0.55
@@ -17,7 +17,7 @@ TextField {
     color: theme.text
     placeholderTextColor: theme.dimText
     selectionColor: theme.accentFill
-    selectedTextColor: "white"
+    selectedTextColor: theme.accentInk
     selectByMouse: true
     opacity: enabled ? 1 : theme.disabledOpacity
     Accessible.name: tip !== "" ? tip : placeholderText
@@ -27,12 +27,12 @@ TextField {
     ToolTip.delay: theme.tipDelay
 
     background: Rectangle {
-        radius: theme.radiusMd
-        color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
+        radius: theme.radiusSm
+        color: theme.surfaceSunken
         border.width: field.activeFocus || field.invalid ? 1.5 : 1
         border.color: field.invalid ? theme.loss
                     : field.activeFocus ? theme.accent
-                    : field.hovered ? Qt.lighter(theme.border, 1.2) : theme.border
+                    : field.hovered ? theme.strokeStrong : theme.border
         Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
     }
 

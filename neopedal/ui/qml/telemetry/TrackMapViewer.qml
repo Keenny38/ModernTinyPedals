@@ -100,7 +100,7 @@ TpPage {
                 TpAction {
                     name: "openMapButton"
                     text: i18n.tr("Open File")
-                    glyph: ""  // open file
+                    glyph: theme.glyphs.openFile
                     fallback: "+"
                     tip: i18n.tr("Open a track map from another folder")
                     priority: 2
@@ -108,7 +108,7 @@ TpPage {
                 }
                 TpAction {
                     name: "followButton"
-                    text: i18n.tr("Follow position")
+                    text: i18n.tr("Follow Position")
                     tip: i18n.tr("Map zoomed & centered on position")
                     priority: 3
                     checkable: true
@@ -125,10 +125,7 @@ TpPage {
                     priority: 5
                     pinned: true
                     checked: overlayMenu.visible
-                    onTriggered: function(source) {
-                        if (overlayMenu.visible) overlayMenu.close()
-                        else overlayMenu.popup(source, 0, source.height + theme.space1)
-                    }
+                    onTriggered: function(source) { overlayMenu.toggleBelow(source) }
                 }
                 TpAction {
                     name: "configButton"
@@ -198,11 +195,11 @@ TpPage {
                             transform: Matrix4x4 { matrix: canvas.matrix }
                             GpuShape {
                                 key: page.view.edge || ""
-                                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
+                                color: theme.tint(theme.text, "selected")
                             }
                             GpuShape {
                                 key: page.view.road || ""
-                                color: theme.dark ? Qt.lighter(theme.base, 1.5) : Qt.darker(theme.base, 1.08)
+                                color: theme.mapRoad
                             }
                             GpuShape {
                                 key: page.view.sectors || ""
@@ -277,15 +274,16 @@ TpPage {
                             height: cornerText.implicitHeight + 4
                             radius: height / 2
                             readonly property bool current: page.current.corner === modelData.label
-                            color: current ? theme.accentFill : cornerArea.containsMouse ? theme.raised
-                                 : Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
+                            color: current ? theme.accentFill : cornerArea.containsMouse ? theme.hover
+                                 : theme.surfaceFlyout
                             border.width: 1
-                            border.color: cornerArea.containsMouse ? theme.accent : theme.tint(theme.text, 0.15)
+                            border.color: cornerArea.containsMouse ? theme.strokeStrong : theme.tint(theme.text, "selected")
                             Behavior on color { ColorAnimation { duration: theme.motionBase } }
                             Text {
                                 id: cornerText
                                 anchors.centerIn: parent
                                 text: modelData.label
+                                textFormat: Text.PlainText
                                 color: parent.current ? theme.inkOn(theme.accentFill) : theme.text
                                 font.pointSize: theme.fontCaption
                                 font.weight: Font.Bold
@@ -315,41 +313,36 @@ TpPage {
                         border.color: page.colors.highlighted_coordinates_color || "#22DD00"
                     }
 
-                    // Empty map
-                    EmptyState {
-                        objectName: "emptyMap"
+                    // No map yet (what to do), or map file read in background (first map, or other one replacing
+                    // map shown): spinner wins, never "load a map" while reading
+                    TpStateView {
+                        objectName: "mapState"
                         anchors.centerIn: parent
-                        visible: !page.loaded && !backend.loading && !dropArea.containsDrag
+                        loading: backend.loading
+                        empty: !page.loaded && !dropArea.containsDrag
+                        loadingText: i18n.tr("Reading track map…")
                         glyph: "\uE707"  // map pin
                         title: i18n.tr("Load a track map recorded by the Mapping module.")
                         text: i18n.tr("Or drop a track map file (.svg) here.")
                         actionText: i18n.tr("Choose a track map")
                         onAction: picker.openSearch()
                     }
-
-                    // Map file read in background (first map, or other one replacing map shown)
-                    TpLoadingState {
-                        objectName: "mapLoading"
-                        anchors.centerIn: parent
-                        visible: backend.loading
-                        text: i18n.tr("Reading track map...")
-                    }
                 }
 
                 // Sector legend
                 Row {
                     visible: page.loaded
-                    anchors { left: parent.left; top: parent.top; margins: theme.em * 0.6 }
-                    spacing: theme.em * 0.6
+                    anchors { left: parent.left; top: parent.top; margins: theme.space4 }
+                    spacing: theme.space4
                     Repeater {
                         model: page.loaded ? page.view.sectorLengths : []
                         Row {
-                            spacing: theme.em * 0.3
-                            opacity: page.current.sector === index + 1 ? 1 : 0.6
+                            spacing: theme.space2
                             Rectangle { width: theme.em * 0.7; height: theme.em * 0.3; radius: height / 2; color: page.view.sectorColors[index]; anchors.verticalCenter: parent.verticalCenter }
                             Text {
                                 text: "S" + (index + 1) + "  " + page.distance(modelData, 0)
-                                color: theme.text
+                                textFormat: Text.PlainText
+                                color: page.current.sector === index + 1 ? theme.text : theme.dimText  // current: text & bold
                                 font.pointSize: theme.fontSmall
                                 font.weight: page.current.sector === index + 1 ? Font.DemiBold : Font.Normal
                                 font.features: { "tnum": 1 }
@@ -385,7 +378,7 @@ TpPage {
                     visible: page.overlays.show_curve_info
                     title: i18n.tr("Curve")
                     value: page.current.radiusDesc || "—"
-                    accentColor: page.current.direction > 0 ? theme.seriesFuel : page.current.direction < 0 ? theme.purple : theme.text
+                    accentColor: page.current.direction > 0 ? theme.seriesFuel : page.current.direction < 0 ? theme.seriesWear : theme.text  // not purple (best)
                     lines: [
                         i18n.tr("Radius") + " " + page.distance(page.current.radius, 1),
                         i18n.tr("Length") + " " + page.distance(page.current.curveLength, 1) + " (" + (page.current.lengthDesc || "") + ")",
@@ -414,7 +407,7 @@ TpPage {
                         spacing: 0
                         RowLayout {
                             Text { text: i18n.tr("Section nodes"); color: theme.dimText; Layout.fillWidth: true; elide: Text.ElideRight }
-                            Text { text: backend.curveNodes; color: theme.text; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
+                            Text { text: backend.curveNodes; color: theme.text; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                         }
                         TpSlider {  // Tab reaches it (arrows then move it); a click leaves left / right keys to position
                             Layout.fillWidth: true
@@ -470,7 +463,7 @@ TpPage {
                             transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
                             GpuShape {
                                 key: page.view.elevation || ""
-                                color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
+                                color: theme.tint(theme.accent, "selected")
                             }
                             GpuShape {
                                 key: page.view.elevationLine || ""
@@ -478,8 +471,8 @@ TpPage {
                             }
                         }
                     }
-                    Text { x: theme.space1; y: 2; text: page.distance(profile.maxZ, 1); color: theme.dimText; font.pointSize: theme.fontCaption }
-                    Text { x: theme.space1; anchors.bottom: parent.bottom; text: page.distance(profile.minZ, 1); color: theme.dimText; font.pointSize: theme.fontCaption }
+                    TpText { x: theme.space1; y: 2; role: "caption"; text: page.distance(profile.maxZ, 1) }
+                    TpText { x: theme.space1; anchors.bottom: parent.bottom; role: "caption"; text: page.distance(profile.minZ, 1) }
                     Rectangle {  // position
                         x: backend.position * profile.sx
                         width: 2
@@ -516,6 +509,7 @@ TpPage {
                     TpButton { glyph: ""; fallback: "›"; tip: i18n.tr("Next node") + " (→)"; flat: true; onClicked: page.step(1) }  // chevron right
                     Text {
                         text: page.number(backend.position * backend.distanceScale, 0) + " / " + page.distance(backend.length, 0)
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.features: { "tnum": 1 }
                         Layout.preferredWidth: theme.em * 7
@@ -527,33 +521,13 @@ TpPage {
     }
 
     // Track map file (.svg) dropped on page: loaded like one opened, other files refused
-    DropArea {
+    TpDropZone {
         id: dropArea
         anchors.fill: parent
-        onEntered: function(drag) { drag.accepted = drag.hasUrls && backend.droppedMap(drag.urls) !== "" }
-        onDropped: function(drop) {
-            if (drop.hasUrls && backend.openDropped(drop.urls)) drop.acceptProposedAction()
-        }
+        text: i18n.tr("Drop a track map (.svg) to open it")
+        accepts: function(urls) { return backend.droppedMap(urls) !== "" }
+        onFilesDropped: function(urls) { backend.openDropped(urls) }
     }
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: theme.space3
-        visible: dropArea.containsDrag
-        radius: theme.radiusXl
-        color: theme.tint(theme.accent, "subtle")
-        border.width: 2
-        border.color: theme.accent
-        Column {
-            anchors.centerIn: parent
-            spacing: theme.em * 0.6
-            Icon { anchors.horizontalCenter: parent.horizontalCenter; glyph: ""; size: theme.em * 3; color: theme.accent }  // download
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: i18n.tr("Drop a track map (.svg) to open it")
-                color: theme.text
-                font.weight: Font.DemiBold
-                font.pointSize: theme.fontHeading
-            }
-        }
-    }
+
+    TpDialogHost {}  // dialogs of the backend (map missing or unreadable)
 }

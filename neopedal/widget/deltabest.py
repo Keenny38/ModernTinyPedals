@@ -31,7 +31,7 @@ from .. import calculation as calc
 from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import delta_shown, game_deltabest, lap_delta_shown
+from ._common import delta_shown, game_deltabest, lap_delta_shown, lap_reference
 from ._painter import fill_rect
 
 if TYPE_CHECKING:
@@ -59,7 +59,6 @@ class Realtime(Overlay):
         font_m = self.get_font_metrics(font)
 
         # Config variable
-        self.laptime_source = f"lapTime{self.wcfg['deltabest_source']}"
         self.delta_source = f"delta{self.wcfg['deltabest_source']}"
         self.bar_range = max(float(self.wcfg["delta_bar_display_range"]), 0.001)  # 0 = division by zero
         bar_gap = self.wcfg["bar_gap"]
@@ -97,7 +96,15 @@ class Realtime(Overlay):
         self.rect_text_delta = self.rect_delta.adjusted(0, font_m.voffset, 0, 0)
 
         self.freeze_duration = min(max(self.wcfg["freeze_duration"], 0), 30)
-        self.delta_color = self.wcfg["background_color_time_gain"], self.wcfg["background_color_time_loss"]
+        self.source = self.wcfg["deltabest_source"]
+        self.game_delta = self.wcfg["show_game_deltabest_if_available"]
+        self.show_bar = self.wcfg["show_delta_bar"]
+        # Colors parsed once (not on every repaint)
+        self.delta_color = (QColor(self.wcfg["background_color_time_gain"]),
+                            QColor(self.wcfg["background_color_time_loss"]))
+        self.no_delta_color = QColor(NO_DELTA_COLOR)
+        self.bar_color = QColor(self.wcfg["background_color_delta_bar"])
+        self.box_color = QColor(self.wcfg["background_color_deltabest"])
 
         # Config canvas
         if self.wcfg["show_delta_bar"]:
@@ -115,7 +122,8 @@ class Realtime(Overlay):
         # Last data
         self.delta_best: float | None = 0.0  # None: no delta (no reference lap, or out lap)
         self.invalid = False
-        self.last_laptime = 0
+        self.state: tuple | None = None  # as drawn: delta text, loss, bar position (device pixels), invalid
+        self.last_laptime = 0.0
         self.new_lap = True
 
     def timerEvent(self, event):
@@ -125,19 +133,26 @@ class Realtime(Overlay):
             temp_best = minfo.delta.lapTimeLast - self.last_laptime if lap_delta_shown(self.last_laptime) else None
             self.new_lap = True
         else:
-            if self.new_lap:
-                self.last_laptime = getattr(minfo.delta, self.laptime_source)
+            if self.new_lap:  # reference of lap under way, as live delta (game delta: game best lap)
+                self.last_laptime = lap_reference(self.source, self.game_delta)
                 self.new_lap = False
 
-            if delta_shown(self.wcfg["deltabest_source"]):  # else no reference lap, or out lap
+            if delta_shown(self.source):  # else no reference lap, or out lap
                 temp_best = getattr(minfo.delta, self.delta_source)
-                if self.wcfg["show_game_deltabest_if_available"]:
+                if self.game_delta:
                     temp_best = game_deltabest(temp_best)
             else:
                 temp_best = None
 
         invalid = self.wcfg["show_invalid_lap_highlight"] and api.read.lap.invalidated()
-        if self.delta_best != temp_best or self.invalid != invalid:
+        # Repainted only when drawing changes: text as displayed, color, bar moved a device pixel
+        bar_position = 0
+        if self.show_bar and temp_best is not None:
+            delta_pos = self.delta_position(self.bar_range, temp_best, self.dbar_length)
+            bar_position = round(delta_pos * self.devicePixelRatioF())
+        state = (self.delta_text(temp_best), temp_best is not None and temp_best > 0, bar_position, invalid)
+        if self.state != state:
+            self.state = state
             self.delta_best = temp_best
             self.invalid = invalid
             self.update()
@@ -151,13 +166,14 @@ class Realtime(Overlay):
             self.bar_range,
             delta,
             self.dbar_length)
-        highlight_color = NO_DELTA_COLOR if self.delta_best is None else self.delta_color[delta > 0]
+        highlight_color = self.no_delta_color if self.delta_best is None else self.delta_color[delta > 0]
 
         # Draw deltabar
-        if self.wcfg["show_delta_bar"]:
+        if self.show_bar:
             self.rect_deltapos.setLeft(delta_pos)
-            fill_rect(painter, self.rect_deltabar, self.wcfg["background_color_delta_bar"])
-            fill_rect(painter, self.rect_deltapos, highlight_color)
+            fill_rect(painter, self.rect_deltabar, self.bar_color)
+            # Time gain: bar left edge right of center (negative width), normalized so corners & shading apply
+            fill_rect(painter, self.rect_deltapos.normalized(), highlight_color)
 
             if self.wcfg["enable_animated_deltabest"]:
                 pos_x = calc.zero_max(
@@ -169,24 +185,26 @@ class Realtime(Overlay):
 
         # Draw delta readings
         if self.wcfg["swap_style"]:
-            self.pen_text.setColor(self.wcfg["background_color_deltabest"])
+            self.pen_text.setColor(self.box_color)
             bg_color = highlight_color
         else:
             self.pen_text.setColor(highlight_color)
-            bg_color =  self.wcfg["background_color_deltabest"]
+            bg_color = self.box_color
 
         fill_rect(painter, self.rect_delta, bg_color)
         painter.setPen(self.pen_text)
-        if self.delta_best is None:
-            text = "-"
-        else:
-            text = f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
-        painter.drawText(self.rect_text_delta, Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawText(self.rect_text_delta, Qt.AlignmentFlag.AlignCenter, self.delta_text(self.delta_best))
         if self.invalid:
             inset = self.outline_inset
             painter.setPen(self.pen_invalid)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(self.rect_delta.adjusted(inset, inset, -inset, -inset))
+
+    def delta_text(self, delta: float | None) -> str:
+        """Delta as displayed (never -0.000), dash if none"""
+        if delta is None:
+            return "-"
+        return f"{calc.sym_max(delta, self.delta_display_range):+z.{self.decimals}f}"[:self.max_padding]
 
     # Additional methods
     def delta_position(self, rng, delta, length):

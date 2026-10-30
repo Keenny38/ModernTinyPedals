@@ -66,7 +66,7 @@ def test_track_map_viewer_shapes_and_cards(viewer, warnings):  # noqa: F811
         found = {}
         for card in cards:
             column = next(item for item in items(card) if class_name(item).startswith("QQuickColumn"))
-            texts = [item for item in column.childItems() if class_name(item).startswith("QQuickText")]
+            texts = [item for item in column.childItems() if item.inherits("QQuickText")]  # TpText too
             found.update({pointer(item): item.property("text") for item in texts[2:]})
         return found
 

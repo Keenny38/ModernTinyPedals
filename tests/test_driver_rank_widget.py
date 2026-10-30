@@ -40,7 +40,8 @@ def test_classic(make, monkeypatch):
     widget = make(False)
     widget.timerEvent(None)
     texts = {key: bar.text for key, bar in widget.bars.items()}
-    assert texts == {"driver_rank": "DR  S2  40%", "safety_rank": "SR  P3  50%", "track_limits": "TL   1.25/5"}
+    # Cells fit track limits of 10 characters (10.25/12.5) with progress shown too
+    assert texts == {"driver_rank": "DR    S2  40%", "safety_rank": "SR    P3  50%", "track_limits": "TL     1.25/5"}
     monkeypatch.setattr(rank_info.ranks, "player", None)  # unknown: dash
     widget.timerEvent(None)
     assert widget.bars["driver_rank"].text.endswith("-")

@@ -120,9 +120,16 @@ def choice_values(kind: OptionKind) -> tuple[str, ...]:
     return font_families() if kind.kind == KIND_FONT else kind.choices
 
 
+# Saved unit names shown as the symbol overlays & pages display (saved value unchanged)
+UNIT_CHOICE_LABELS = {"KPH": "km/h", "MPH": "mph"}
+
+
 def choice_label(kind: OptionKind, value: Any) -> str:
     """Shown text of a choice value"""
-    return tr(str(value)) if kind.translate else str(value)
+    text = str(value)
+    if text in UNIT_CHOICE_LABELS:
+        return UNIT_CHOICE_LABELS[text]
+    return tr(text) if kind.translate else text
 
 
 def number_text(value: Any) -> str:
@@ -185,6 +192,14 @@ def check_value(key: str, kind: OptionKind, value: Any) -> str:
         return "" if not value or os.path.exists(value) else "File not found"
     if kind.kind == KIND_PATH:
         return "" if value.strip() else "Folder required"
+    if key == "access_code" and value.strip():  # web dashboard, shorter code replaced by a generated one
+        from ...web_dashboard import MIN_CODE_LENGTH
+
+        return "" if len(value.strip()) >= MIN_CODE_LENGTH else "At least 8 characters, or empty for a random code"
+    if key == "access_token" and value.strip():  # remote control & stream overlay
+        from ...command_server import MIN_TOKEN_LENGTH
+
+        return "" if len(value.strip()) >= MIN_TOKEN_LENGTH else "At least 16 characters, or empty for a random token"
     return ""
 
 

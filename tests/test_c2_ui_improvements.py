@@ -203,7 +203,7 @@ def test_ctrl_s_config_page_saves_and_clears_marker(window, saved):
 def test_ctrl_s_without_save_action(window):
     view = window.centralWidget()
     assert not window.save_current_page()  # app page (home): nothing to save
-    open_tool_page(window, "preset_compare.PresetCompare")
+    open_tool_page(window, "perf_view.PerformanceView")
     view.set_current_index(0)
     assert not window.save_current_page()
 
@@ -223,7 +223,7 @@ def test_separate_window_has_own_save_shortcut(ui_env):
         flush_deleted()
     notes = TrackNotesEditor(None)
     try:
-        assert notes.save_action() == notes.saving  # file name asked, editor kept open
+        assert notes.save_action() == notes.backend.save  # same file once saved (name asked once), kept open
     finally:
         notes.set_unmodified()
         notes.close()
@@ -231,14 +231,15 @@ def test_separate_window_has_own_save_shortcut(ui_env):
 
 
 def test_font_config_marker(window, answers):
-    from neopedal.ui.config import FontConfig
+    """Global font override (Settings page category): unsaved changes marker of the page"""
+    from neopedal.ui.app_settings import AppSettings
+    from neopedal.ui.menu import open_preset_config
 
-    FontConfig(window, cfg.user.setting, lambda: None).open()
-    page = window.centralWidget().dialog_pages()[-1]
-    dialog = page.dialog
-    dialog.edit_fontsize.setValue(2)
+    settings = open_preset_config(window, "font")
+    page = next(page for page in window.centralWidget().dialog_pages() if isinstance(page.dialog, AppSettings))
+    settings.backend.setNumber("font:font_size_addend", 2)
     assert page.is_modified()
-    dialog.edit_fontsize.setValue(0)
+    settings.backend.setNumber("font:font_size_addend", 0)
     assert not page.is_modified()
 
 
@@ -435,8 +436,6 @@ def preset_page(ui_env, answers, monkeypatch):
 
     for name in ("race.json", "practice.json"):
         write_preset(name)
-    toasts = []
-    monkeypatch.setattr(preset_view, "show_toast", lambda *args, **kwargs: toasts.append((args, kwargs)))
     monkeypatch.setattr(cfg.filename, "setting", "default.json")
     cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": "practice"}}
     cfg.user.tracks = {"Spa": {"preset": "practice"}}
@@ -444,7 +443,8 @@ def preset_page(ui_env, answers, monkeypatch):
     cfg.user.shortcuts["preset_1"]["preset"] = "practice"
     widget = preset_view.PresetList(None)
     widget.backend.set_active(True)  # presets read while page is shown
-    widget.toasts = toasts
+    widget.toasts = []
+    widget.backend.toastShown.connect(lambda text, error, undo: widget.toasts.append((text, error, undo)))
     yield widget
     widget.deleteLater()
     flush_deleted()
@@ -458,11 +458,11 @@ def test_delete_moves_to_trash_and_undo_restores_references(preset_page):
     assert [entry.name for entry in list_trash(cfg.path.settings)] == ["practice"]
     assert cfg.user.tracks["Spa"]["preset"] == "" and cfg.user.classes["GT3"]["preset"] == ""
     assert cfg.user.shortcuts["preset_1"]["preset"] == ""
-    args, kwargs = preset_page.toasts[-1]
-    assert "moved to trash" in args[1] and kwargs["action_text"] and callable(kwargs["action"])
+    text, error, undo = preset_page.toasts[-1]
+    assert text == "Preset practice moved to trash" and not error and undo  # toast of the page, with Undo
     assert preset_page.shortcut_undo.isEnabled()
     cfg.user.classes["GT3"]["preset"] = "race"  # set to another preset meanwhile: kept
-    kwargs["action"]()  # undo button of toast
+    preset_page.backend.undoDelete()  # undo button of toast
     assert os.path.exists(f"{cfg.path.settings}practice.json") and not list_trash(cfg.path.settings)
     assert cfg.user.tracks["Spa"]["preset"] == "practice" and cfg.user.shortcuts["preset_1"]["preset"] == "practice"
     assert cfg.user.classes["GT3"]["preset"] == "race"
@@ -493,37 +493,44 @@ def test_loaded_preset_still_refused(preset_page, answers, monkeypatch):
     assert os.path.exists(f"{cfg.path.settings}race.json") and answers.warnings
 
 
-def test_trash_dialog_restore_delete_empty(ui_env, answers, monkeypatch):
+def test_trash_panel_restore_delete_empty(preset_page):
+    import time as clock
+
     from neopedal.ui import preset_management
     from neopedal.userfile.preset_trash import list_trash
 
-    monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
-    cfg.user.tracks = {"Spa": {"preset": "race"}}
-    for name in ("race.json", "practice.json", "qualy.json"):
+    cfg.user.tracks = {"Spa": {"preset": "qualy"}}
+    for name in ("qualy.json", "sprint.json", "endurance.json"):
         write_preset(name)
         preset_management.trash_preset(name)
-    write_preset("race.json")  # new preset with same name meanwhile
-    dialog = preset_management.PresetTrash(None)
-    try:
-        assert dialog.listbox_trash.count() == 3 and "day(s) left" in dialog.listbox_trash.item(0).text()
-        row = next(row for row, entry in enumerate(dialog.entries) if entry.name == "race")
-        dialog.listbox_trash.setCurrentRow(row)
-        dialog.restore()
-        assert os.path.exists(f"{cfg.path.settings}race (2).json")
-        assert cfg.user.tracks["Spa"]["preset"] == "race (2)"  # reference set again, to restored name
-        assert dialog.listbox_trash.count() == 2
-        answers.reply = QMessageBox.StandardButton.No
-        dialog.delete()
-        assert dialog.listbox_trash.count() == 2  # cancelled
-        answers.reply = QMessageBox.StandardButton.Yes
-        dialog.delete()
-        assert dialog.listbox_trash.count() == 1 and len(list_trash(cfg.path.settings)) == 1
-        dialog.empty()
-        assert dialog.listbox_trash.count() == 0 and not dialog.button_empty.isEnabled()
-        assert not dialog.button_restore.isEnabled()
-    finally:
-        dialog.close()
-        flush_deleted()
+    write_preset("qualy.json")  # new preset with same name meanwhile
+    trash = preset_page.backend.trash
+
+    def read():
+        trash.refresh()
+        deadline = clock.monotonic() + 5
+        while trash.loading and clock.monotonic() < deadline:  # read in background
+            QCoreApplication.processEvents()
+        QCoreApplication.processEvents()
+
+    read()
+    assert trash.count == 3 and trash.model.rows[0]["daysLeft"] == 30 and trash.model.rows[0]["deleted"]
+    assert preset_page.backend.trashCount == 3
+    key = next(row["key"] for row in trash.model.rows if row["name"] == "qualy")
+    trash.restore(key)
+    QCoreApplication.processEvents()
+    assert os.path.exists(f"{cfg.path.settings}qualy (2).json")
+    assert cfg.user.tracks["Spa"]["preset"] == "qualy (2)"  # reference set again, to restored name
+    read()
+    assert trash.count == 2
+    assert trash.deleteText(trash.model.rows[0]["key"]).startswith("Delete ")  # asked by the panel first
+    trash.remove(trash.model.rows[0]["key"])
+    read()
+    assert trash.count == 1 and len(list_trash(cfg.path.settings)) == 1
+    assert trash.emptyText().startswith("Delete all 1 preset(s) in trash permanently?")
+    trash.empty()
+    read()
+    assert trash.count == 0 and preset_page.backend.trashCount == 0
 
 
 def test_trash_keep_days_option(ui_env):
@@ -664,7 +671,7 @@ def test_download_progress_and_cancel(monkeypatch, tmp_path):
     content = b"x" * (1 << 18)
     digest = hashlib.sha256(content).hexdigest()
     asset = ASSET._replace(sha256=digest)
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(content))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(content))
     reports = []
     path = update.download_installer(asset, str(tmp_path), progress=lambda *args: reports.append(args))
     assert os.path.exists(path) and reports[-1] == (len(content), len(content)) and len(reports) == 4
@@ -677,7 +684,7 @@ def test_download_progress_and_cancel(monkeypatch, tmp_path):
     with pytest.raises(update.DownloadCancelled):
         update.download_installer(asset, str(tmp_path), progress=cancel_after_first, cancelled=cancel)
     assert not list(tmp_path.iterdir())  # partial file removed
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(content, length=False))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(content, length=False))
     reports.clear()
     update.download_installer(asset, str(tmp_path), progress=lambda *args: reports.append(args))
     assert reports[-1] == (len(content), 0)  # size unknown
@@ -779,22 +786,17 @@ def test_release_notes_opened_while_downloading(updates):
 def test_track_notes_labels_translated(ui_env, french, monkeypatch):
     from neopedal.ui import track_notes_editor
 
-    editor = track_notes_editor.TrackNotesEditor(None)
+    editor = track_notes_editor.TrackNotesEditor(None)  # Qt Quick page (UI/UX audit 2026-10-29)
     try:
-        headers = [editor.table_notes.horizontalHeaderItem(index).text()
-                   for index in range(editor.table_notes.columnCount())]
-        assert headers == ["Distance", "Note de pilotage", "Commentaire", "Étiquettes"]
-        assert "notes de pilotage" in editor.status_bar.currentMessage()
-        assert editor.filename_entry.placeholderText() == "Nom des notes de pilotage"
-        replace = []
-        monkeypatch.setattr(track_notes_editor, "TableBatchReplace", lambda parent, selector, table: type(
-            "Dialog", (), {"open": lambda self: replace.append(selector)})())
-        editor.open_replace_dialog()
-        assert replace == [{"Note de pilotage": 1, "Commentaire": 2}]
-        info = track_notes_editor.MetaDataEditor(editor, editor.notes_metadata, lambda: None)
-        labels = {label.text() for label in info.findChildren(QLabel)}
+        backend = editor.backend
+        backend.create("Pace Notes")  # labels of the language now set
+        assert backend.columnLabels == ["Distance", "Note de pilotage", "Commentaire", "Étiquettes"]
+        assert "notes de pilotage" in backend.statusText
+        assert backend.namePlaceholder == "Nom des notes de pilotage"
+        assert backend.textColumns == [{"key": "note", "label": "Note de pilotage"},
+                                       {"key": "comment", "label": "Commentaire"}]  # batch replace columns
+        labels = {field["label"] for field in backend.metadataFields}
         assert {"Titre :", "Auteur :", "Date :", "Description :"} <= labels
-        info.close()
     finally:
         editor.set_unmodified()
         editor.close()
@@ -815,29 +817,38 @@ def test_file_filters_translated_and_mapped_back(french):
     assert translate_filter(FileFilter.JSON) == "Fichier JSON (*.json)"
 
 
-def test_brand_import_menu_and_transfer_headers_translated(ui_env, french):
-    from neopedal.ui.preset_management import ListHeader, PresetTransfer
+def test_brand_import_menu_translated(ui_env, french):
     from neopedal.ui.vehicle_brand_editor import VehicleBrandEditor
 
     editor = VehicleBrandEditor(None)
-    transfer = PresetTransfer(None)
     try:
-        actions = [action.text() for action in editor.button_import.menu().actions()]
-        assert actions[:3] == ["API Rest RF2", "API Rest LMU (principale)", "API Rest LMU (alternative)"]
-        titles = {label.text() for header in transfer.findChildren(ListHeader) for label in header.findChildren(QLabel)}
-        assert titles == {"Choisir les réglages", "Choisir les types d'option"}
-        option_texts = [transfer.listbox_options.itemWidget(transfer.listbox_options.item(row)).text()
-                        for row in range(transfer.listbox_options.count())]
-        assert "Autres options" in option_texts and "Polices" in option_texts
-        keys = [transfer.listbox_options.itemWidget(transfer.listbox_options.item(row)).key_name
-                for row in range(transfer.listbox_options.count())]
-        assert "other_options" in keys  # keys kept for transfer
+        # Plain wording: game & source told (its REST API in tooltip), no "Primary" / "Alternative"
+        actions = [source["label"] for source in editor.backend.importSources]
+        assert actions == ["Le Mans Ultimate (jeu lancé)", "Le Mans Ultimate, autre liste (jeu lancé)",
+                           "rFactor 2 (jeu lancé)", "Fichier JSON…"]
+        assert "API REST" in editor.backend.importSources[0]["tip"]
     finally:
         editor.set_unmodified()
         editor.close()
-        transfer.close()
         flush_deleted()
 
+
+def test_transfer_headers_and_option_types_translated(ui_env, french):
+    from neopedal.ui.quick.preset_backend import PresetBackend
+
+    backend = PresetBackend(None, None)
+    try:
+        assert {i18n.tr("Select Setting"), i18n.tr("Select Option Type")} == {
+            "Choisir les réglages", "Choisir les types d'option"}  # titles of the transfer panel lists
+        backend.transfer.start()
+        option_texts = [row["label"] for row in backend.transfer.types_model.rows]
+        assert "Autres options" in option_texts and "Polices" in option_texts
+        keys = [row["key"] for row in backend.transfer.types_model.rows]
+        assert "other_options" in keys  # keys kept for transfer
+    finally:
+        backend.release()
+        backend.deleteLater()
+        flush_deleted()
 
 def test_new_texts_translated(french):
     from neopedal.i18n import tr, trm
@@ -929,16 +940,12 @@ def test_focus_ring_on_new_buttons(ui_env, monkeypatch, theme):
 
 
 def test_new_controls_keyboard_reachable(ui_env, updates):
-    from neopedal.ui.preset_management import PresetTrash
+    """Recently deleted presets: Qt Quick panel (list reached with Tab, TpButton actions, see test_qml_design_tokens)"""
+    from neopedal.ui.quick import qml_path
 
-    dialog = PresetTrash(None)
-    try:
-        # What's new page: Qt Quick buttons (TpButton), reached with Tab (see test_qml_design_tokens)
-        for widget in (dialog.listbox_trash, dialog.button_restore, dialog.button_delete, dialog.button_empty):
-            assert widget.focusPolicy() & Qt.FocusPolicy.TabFocus
-    finally:
-        dialog.close()
-        flush_deleted()
+    with open(qml_path("DeletedPresets.qml"), encoding="utf-8") as file:
+        text = file.read()
+    assert "activeFocusOnTab: true" in text and text.count("TpButton {") >= 3
 
 
 def test_release_notes_page_kept_by_language_change_still_installs(window, updates, monkeypatch):
@@ -948,7 +955,7 @@ def test_release_notes_page_kept_by_language_change_still_installs(window, updat
     from neopedal.ui.release_notes import ReleaseNotesDialog
 
     window.show()
-    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button = window.statusBar().findChild(UpdatesNotifyButton)  # status chip of the window status band
     button.checking(False)  # update found: what's new page shown (prompt)
     flush_deleted()
     downloads = []
@@ -966,7 +973,7 @@ def test_release_notes_page_kept_by_language_change_still_installs(window, updat
         assert downloads == [True]
         pages[0].dialog.skip_requested.emit()
         assert cfg.application["skipped_update_version"] == 99_001_002
-        assert window.centralWidget().findChild(UpdatesNotifyButton).isHidden()
+        assert window.statusBar().findChild(UpdatesNotifyButton).isHidden()  # status chip of the status band
     finally:
         cfg.application["language"] = language
         window.last_language = language

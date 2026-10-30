@@ -35,13 +35,15 @@ import lzma
 import os
 import zipfile
 import zlib
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from ..const_app import LEGACY_PACKAGE
 from ..const_file import FileExt
-from ..validator import is_allowed_filename, load_json_strict
-from . import atomic_replace, replace_retry
+from ..validator import is_allowed_filename, is_reserved_filename, load_json_strict
+from . import atomic_replace, replace_retry, sync_folder
+from .private_option import keep_receiver_options
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +59,12 @@ NOTES_FOLDERS = {  # package folder: allowed file extensions
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # refuse suspiciously large entry
 MAX_MANIFEST_SIZE = 64 * 1024  # manifest is a few lines
+# Whole package refused above these (zip bomb filling the disk): one preset, styles & notes of a few tracks
+# weigh a few MB, a package of many presets a few tens
+MAX_ENTRIES = 1000
+MAX_PRESETS = 200
+MAX_TOTAL_SIZE = 100 * 1024 * 1024  # uncompressed size of every entry, as announced by the zip directory
 WINDOWS_RESERVED_CHARS = frozenset('<>:"|?*')  # ":" would write an NTFS alternate stream
-WINDOWS_RESERVED_NAMES = frozenset(
-    ("CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(1, 10)), *(f"LPT{index}" for index in range(1, 10))))
 
 
 class ImportResult(NamedTuple):
@@ -69,6 +74,7 @@ class ImportResult(NamedTuple):
     styles: list[str]  # imported style preset file names
     notes: int  # number of imported notes files
     skipped: list[str]  # skipped entries
+    kept: tuple[str, ...] = ()  # "preset: section.option" given the receiver's value (local file, game connection)
 
 
 def export_preset_package(
@@ -173,12 +179,15 @@ def import_preset_package(
     settings_path: str,
     overwrite_styles: bool = False,
     notes_paths: dict[str, str] | None = None,
+    receiver: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ImportResult:
     """Import preset package
 
     Presets are never overwritten (renamed if exists). Style presets are imported
     only if overwrite_styles is True. Notes are imported only if not exist.
     Only file name of each entry is used, so package cannot write outside target folders.
+    Local file & game connection options of presets get the values of receiver (loaded preset),
+    see private_option. Package of too many entries or too large is refused before anything is written.
 
     Raises:
         ValueError: invalid package.
@@ -188,9 +197,12 @@ def import_preset_package(
     styles: list[str] = []
     notes = 0
     skipped: list[str] = []
+    kept: list[str] = []
+    written_folders: set[str] = set()  # flushed to disk once, files are written without fsync
     notes_paths = notes_paths or {}
     with zipfile.ZipFile(zip_filename, "r") as package:
         read_manifest(package)
+        check_package_size(package.infolist())
         for info in package.infolist():
             if info.is_dir() or info.filename == "manifest.json":
                 continue
@@ -205,32 +217,52 @@ def import_preset_package(
                 continue
             data = read_entry(package, info)
             if folder == "presets" and filename.lower().endswith(FileExt.JSON):
-                if not is_allowed_filename(filename[:-len(FileExt.JSON)]) or not is_json_dict(data):
+                preset = load_json_dict(data)
+                if not is_allowed_filename(filename[:-len(FileExt.JSON)]) or preset is None:
                     skipped.append(info.filename)
                     continue
+                changed = keep_receiver_options(preset, receiver)
+                if changed:  # written again from parsed data, else bytes kept as they are
+                    data = json.dumps(preset, indent=4).encode("utf-8")
                 target = unique_filename(settings_path, filename)
-                write_file(f"{settings_path}{target}", data)
+                write_file(f"{settings_path}{target}", data, written_folders)
                 presets.append(target)
+                kept.extend(f"{target[:-len(FileExt.JSON)]}: {option}" for option in changed)
             elif folder == "styles" and filename in STYLE_FILES:
                 if not overwrite_styles or not is_json_dict(data):
                     skipped.append(info.filename)
                     continue
-                write_file(f"{settings_path}{filename}", data)
+                write_file(f"{settings_path}{filename}", data, written_folders, fsync=True)  # replaces user's file
                 styles.append(filename)
             elif folder in NOTES_FOLDERS and filename.lower().endswith(NOTES_FOLDERS[folder]):
                 filepath = notes_paths.get(folder, "")
                 if not filepath or os.path.exists(os.path.join(filepath, filename)):
                     skipped.append(info.filename)
                     continue
-                write_file(os.path.join(filepath, filename), data)
+                write_file(os.path.join(filepath, filename), data, written_folders)
                 notes += 1
             else:
                 skipped.append(info.filename)
+    for folder in written_folders:
+        sync_folder(folder)
     logger.info(
         "USERDATA: imported %s preset(s), %s style(s), %s notes from %s",
         len(presets), len(styles), notes, zip_filename,
     )
-    return ImportResult(presets, styles, notes, skipped)
+    if kept:
+        logger.info("USERDATA: local file & game connection options kept as receiver's: %s", ", ".join(kept))
+    return ImportResult(presets, styles, notes, skipped, tuple(kept))
+
+
+def check_package_size(infos: Sequence[zipfile.ZipInfo]) -> None:
+    """Refuse package of too many entries, presets, or too large once uncompressed (sizes of zip directory:
+    reading an entry never inflates more than its announced size), raise ValueError"""
+    if len(infos) > MAX_ENTRIES:
+        raise ValueError("too many files in package")
+    if sum(1 for info in infos if info.filename.replace("\\", "/").startswith("presets/")) > MAX_PRESETS:
+        raise ValueError("too many presets in package")
+    if sum(info.file_size for info in infos) > MAX_TOTAL_SIZE:
+        raise ValueError("package too large once uncompressed")
 
 
 def is_windows_filename(filename: str) -> bool:
@@ -238,7 +270,7 @@ def is_windows_filename(filename: str) -> bool:
     return (
         not any(char in WINDOWS_RESERVED_CHARS or ord(char) < 32 for char in filename)
         and not filename.endswith((".", " "))
-        and filename.split(".", 1)[0].strip().upper() not in WINDOWS_RESERVED_NAMES
+        and not is_reserved_filename(filename)
     )
 
 
@@ -252,12 +284,25 @@ def read_entry(package: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
 
 def is_json_dict(data: bytes) -> bool:
     """Check if data is valid json object (NaN & Infinity not allowed)"""
+    return load_json_dict(data) is not None
+
+
+def load_json_dict(data: bytes) -> dict | None:
+    """Valid json object of data (NaN & Infinity not allowed), None if invalid"""
     try:
-        return isinstance(load_json_strict(data.decode("utf-8-sig")), dict)
+        value = load_json_strict(data.decode("utf-8-sig"))
     except ValueError:  # UnicodeDecodeError & JSONDecodeError included
-        return False
+        return None
+    return value if isinstance(value, dict) else None
 
 
-def write_file(filename: str, data: bytes) -> None:
-    """Write file atomically (temporary file replaces target): existing file never left half-written"""
-    atomic_replace(filename, data)
+def write_file(filename: str, data: bytes, written_folders: set[str] | None = None, fsync: bool = False) -> None:
+    """Write file atomically (temporary file replaces target): existing file never left half-written
+
+    New files (presets, notes) are not flushed to disk one by one (an import of many files runs on the GUI
+    thread, and can be done again): their folder is noted in written_folders, flushed once by the caller
+    (see sync_folder). A file replacing the user's own (styles) is flushed before the replace, as always.
+    """
+    atomic_replace(filename, data, fsync=fsync)
+    if written_folders is not None:
+        written_folders.add(os.path.dirname(filename))

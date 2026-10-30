@@ -54,7 +54,7 @@ from ...process.game_info import (
     parse_session_time,
     parse_standings,
 )
-from ...process.results_text import gap_seconds_text, laps_behind_text
+from ...process.results_text import MISSING, gap_seconds_text, laps_behind_text, laptime_text
 from ...template.setting_status_colors import SAME_TIME
 from ...userfile.track_geometry import parse_points
 from . import page_settings
@@ -73,6 +73,7 @@ FOCUS_RESOURCE = "/rest/watch/focus"  # answers outside a session too (-1): tell
 SESSION_RESOURCE = "/rest/watch/sessionInfo"
 STANDINGS_RESOURCE = "/rest/watch/standings"
 TRACKMAP_RESOURCE = "/rest/watch/trackmap"
+MAP_TRIES = 5  # answers without the track map before the track is taken as having none (asked again on track change)
 CAMERA_RESOURCE = "/rest/replay/CameraController/getCameraInfo"  # answers in sessions too
 SET_CAMERA_RESOURCE = "/rest/replay/CameraController/setCamera"
 HUD_RESOURCE = "/rest/hud"
@@ -118,7 +119,7 @@ PLAYBACK = (
 PLAYBACK_COMMANDS = tuple(command for command, _ in PLAYBACK)
 PAUSE, PLAY = "VCRCOMMAND_STOP", "VCRCOMMAND_PLAY"
 HUD_LABELS = {"chat": "Chat", "mfd": "MFD", "speedo": "Car HUD", "timing": "Timing", "trackMap": "Track Map"}
-SESSIONS = {"PRACTICE": "Practice", "QUALIFY": "Qualify", "WARMUP": "Warmup", "RACE": "Race"}
+SESSIONS = {"PRACTICE": "Practice", "QUALIFY": "Qualifying", "WARMUP": "Warmup", "RACE": "Race"}
 SESSION_FILTERS = ("", "PRACTICE", "QUALIFY", "RACE")  # filter index: session type ("" all)
 EVENT_TYPES = {
     "daily": "Daily Race", "specialevent": "Special Event", "hosted": "Hosted Session",
@@ -185,18 +186,16 @@ def car_text(car: CarInfo | None) -> str:
 
 
 def lap_text(seconds: float) -> str:
-    """Lap time m:ss.sss, "-" if none"""
-    from ... import calculation as calc
-
-    return calc.sec2laptime_full(seconds) if seconds > 0 else "-"
+    """Lap time m:ss.sss, missing text if none"""
+    return laptime_text(seconds)
 
 
 def gap_text(car: Standing, race: bool = True, leader_best: float = 0.0) -> str:
     """Gap to leader, as the game shows it: race: "+12.345" or "+2 laps"; practice & qualifying: best lap
-    behind best lap of leader ("-" without lap time); "" for leader"""
+    behind best lap of leader (missing text without lap time); "" for leader"""
     if not race:
         if car.best <= 0:
-            return "-"
+            return MISSING
         gap = car.best - leader_best
         return gap_seconds_text(gap) if leader_best > 0 and gap > SAME_TIME else ""
     if car.position == 1:

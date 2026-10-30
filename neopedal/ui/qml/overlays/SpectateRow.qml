@@ -34,19 +34,16 @@ Item {
     Accessible.role: Accessible.ListItem
     Accessible.name: place + ", " + name + ", " + vehicle + (spectated ? ", " + i18n.tr("Spectating") : "")
 
-    Rectangle {
+    TpListRow {
         id: surface
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.radiusMd
-        // Spectated row stays tinted while hovered (tint a step stronger): both states shown
-        color: row.spectated ? Qt.tint(theme.base, theme.tint(theme.accent, area.containsMouse ? theme.tintStrong : "selected"))
-             : area.containsMouse ? theme.hover : theme.base
-        border.width: 1
-        border.color: row.spectated ? theme.accent : theme.cardBorder
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionBase } }
-        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: theme.motionBase } }
+        // Spectated row stays tinted while hovered (on the hovered surface): both states shown
+        card: true
+        hovered: area.containsMouse
+        selected: row.spectated
+        animate: !row.recycling
 
         MouseArea {
             id: area
@@ -73,6 +70,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignRight
             text: row.place > 0 ? row.place : "-"
+            textFormat: Text.PlainText
             color: row.spectated ? theme.accent : theme.dimOn(surface.color)
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
@@ -105,6 +103,7 @@ Item {
                     id: nameText
                     width: Math.min(implicitWidth, parent.width - (youPill.visible ? youPill.width + theme.space3 : 0))
                     text: row.name
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.weight: row.spectated ? Font.DemiBold : Font.Medium
                     elide: Text.ElideRight
@@ -120,6 +119,7 @@ Item {
             Text {
                 width: parent.width
                 text: row.wide ? row.vehicle : [row.carClass, row.vehicle].filter(function(part) { return part !== "" }).join(" · ")
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: theme.dimOn(surface.color)
                 font.pointSize: theme.fontSmall
@@ -162,6 +162,7 @@ Item {
                 width: theme.em * 5
                 horizontalAlignment: Text.AlignRight
                 text: row.bestLap !== "" ? row.bestLap : "-"
+                textFormat: Text.PlainText
                 color: row.bestLap !== "" ? theme.text : theme.dimOn(surface.color)
                 font.features: { "tnum": 1 }
                 anchors.verticalCenter: parent.verticalCenter
@@ -179,8 +180,8 @@ Item {
                     anchors.centerIn: parent
                     glyph: ""  // view
                     fallback: "◉"
-                    color: theme.accent
-                    opacity: row.spectated ? 1 : area.containsMouse ? 0.35 : 0
+                    color: row.spectated ? theme.accent : theme.dimOn(surface.color)  // hovered: hint in dim text
+                    opacity: row.spectated || area.containsMouse ? 1 : 0
                     Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: theme.motionBase } }
                 }
             }

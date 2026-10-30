@@ -35,8 +35,6 @@ CLASSIC_OPTIONS = {
     "laps_and_position": ("show_invalid_lap_highlight", "warning_color_invalid_lap"),
     "weather": ("show_wind_speed", "prefix_wind", "font_color_wind", "background_color_wind"),
     "gear": ("show_speed_limiter_pit_reminder",),
-    "engine": ("show_game_overheating_highlight",),
-    "engine_temperature": ("show_game_overheating_highlight",),
 }
 
 
@@ -179,14 +177,14 @@ def test_classic_deltabest_outlined_while_invalid(widgets, monkeypatch):  # noqa
 
 def test_classic_laps_background_while_invalid(widgets, monkeypatch):  # noqa: F811
     widget = widgets("laps_and_position", modern=False, show_invalid_lap_highlight=True)
-    reader(monkeypatch, "lap", "number", 3)
+    reader(monkeypatch, "lap", "completed_laps", 3)
     reader(monkeypatch, "lap", "maximum", 20)
     widget.timerEvent(None)
     assert widget.bar_laps.bg == widget.wcfg["background_color_laps"]
     reader(monkeypatch, "lap", "invalidated", True)
     widget.timerEvent(None)
     assert widget.bar_laps.bg == widget.wcfg["warning_color_invalid_lap"]
-    reader(monkeypatch, "lap", "number", 19)  # last lap: invalid lap shown first
+    reader(monkeypatch, "lap", "completed_laps", 19)  # last lap: invalid lap shown first
     widget.timerEvent(None)
     assert widget.bar_laps.bg == widget.wcfg["warning_color_invalid_lap"]
     reader(monkeypatch, "lap", "invalidated", False)
@@ -256,16 +254,16 @@ def test_classic_gear_limiter_reminder(widgets, monkeypatch):  # noqa: F811
     ("engine", ("bar_oil", "bar_water")),
     ("engine_temperature", ("bar_oil_temp", "bar_water_temp")),
 ])
-def test_classic_game_overheating_highlight(widgets, monkeypatch, name, bars):  # noqa: F811
+def test_classic_game_overheating_warning(widgets, monkeypatch, name, bars):  # noqa: F811
     reader(monkeypatch, "engine", "oil_temperature", 90.0)
     reader(monkeypatch, "engine", "water_temperature", 85.0)
     reader(monkeypatch, "engine", "overheating", True)
-    default = widgets(name, modern=False)
-    default.timerEvent(None)
-    widget = widgets(name, modern=False, show_game_overheating_highlight=True)
+    widget = widgets(name, modern=False)  # same option as modern design, on by default
     widget.timerEvent(None)
+    off = widgets(name, modern=False, show_game_overheating_warning=False)
+    off.timerEvent(None)
     for bar in bars:
-        assert getattr(default, bar).bg != widget.wcfg["warning_color_overheat"]
+        assert getattr(off, bar).bg != widget.wcfg["warning_color_overheat"]
         assert getattr(widget, bar).bg == widget.wcfg["warning_color_overheat"]
     reader(monkeypatch, "engine", "overheating", False)
     widget.timerEvent(None)
@@ -296,6 +294,6 @@ def test_power_estimate_never_negative(widgets, monkeypatch, modern):  # noqa: F
     widget.timerEvent(None)
     assert widget.ema_energy_rate == pytest.approx(300.0 * ENERGY_RATE_SMOOTHING)  # one sample: smoothed
     if not modern:
-        assert widget.bar_power.last == pytest.approx(300.0 * ENERGY_RATE_SMOOTHING)
+        assert widget.bar_power.text == " 60.00kW"  # 300 x ENERGY_RATE_SMOOTHING
     widget.post_update()
     assert widget.ema_energy_rate == 0.0

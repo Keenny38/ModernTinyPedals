@@ -37,6 +37,7 @@ def preupdate_global_setting(preset_version: tuple[int, int, int], dict_user: di
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 6), _global_prior_2_51_6),  # 2026-10-30
         ((2, 51, 3), _global_prior_2_51_3),  # 2026-10-18
         ((2, 51, 0), _global_prior_2_51_0),  # 2026-10-12
         ((2, 50, 8), _global_prior_2_50_8),  # 2026-10-11
@@ -55,6 +56,8 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 51, 5), _user_prior_2_51_5),  # 2026-10-29
+        ((2, 51, 4), _user_prior_2_51_4),  # 2026-10-29
         ((2, 51, 3), _user_prior_2_51_3),  # 2026-10-18
         ((2, 51, 2), _user_prior_2_51_2),  # 2026-10-17
         ((2, 51, 1), _user_prior_2_51_1),  # 2026-10-15
@@ -84,6 +87,12 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
 
 
 # Global setting update function
+def _global_prior_2_51_6(dict_user: dict):
+    # Class colors (Hypercar red, GT3 green, GTE orange): classes still at former default color updated once
+    # (see StyleValidator.classes)
+    PENDING_STYLE_UPDATES.add("class_colors")
+
+
 def _global_prior_2_51_3(dict_user: dict):
     # Navigation bar: Stream Overlays page added after Broadcast Director (or last), customized bars kept
     application = dict_user.get("application")
@@ -141,6 +150,61 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_51_5(dict_user: dict):
+    # Engine & engine temperature: game overheating warning got one option for both designs (on by default),
+    # formerly show_game_overheating_highlight for classic layout (off by default); explicit choices kept:
+    # classic turned on wins, unless modern turned off while classic layout not set on this overlay
+    for name in ("engine", "engine_temperature"):
+        widget = dict_user.get(name)
+        if not isinstance(widget, dict):
+            continue
+        highlight = widget.pop("show_game_overheating_highlight", None)
+        if highlight is True and (
+            widget.get("show_game_overheating_warning") is not False or widget.get("enable_classic_layout") is True
+        ):
+            widget["show_game_overheating_warning"] = True
+
+
+def _user_prior_2_51_4(dict_user: dict):
+    # Driver lists: driver badge got its own column (formerly drawn after driver & safety ranks, show_driver_badge),
+    # shown where it was; with display orders set by user, placed right after driver & safety ranks
+    from .template.setting_widget import WIDGET_DEFAULT
+
+    for name in ("relative", "standings", "rivals"):
+        widget = dict_user.get(name)
+        if not isinstance(widget, dict) or "show_driver_badge" not in widget:
+            continue
+        badge = widget.pop("show_driver_badge")
+        if "column_driver_badge" in widget or widget.get("column_driver_ranks") is not True or badge is not True:
+            continue
+        widget["column_driver_badge"] = True
+        ranks = widget.get("display_order_driver_ranks")
+        default = WIDGET_DEFAULT.get(name, {})
+        orders = {key: value for key, value in widget.items() if key.startswith("display_order_")}
+        if isinstance(ranks, int) and any(value != default.get(key) for key, value in orders.items()):
+            for key, value in orders.items():
+                if isinstance(value, int) and value > ranks:
+                    widget[key] = value + 1
+            widget["display_order_driver_badge"] = ranks + 1
+    # Fuel & virtual energy: each value got its own on/off option (formerly shown by pairs)
+    for name in ("fuel", "virtual_energy"):
+        widget = dict_user.get(name)
+        if not isinstance(widget, dict):
+            continue
+        pairs = {
+            "show_estimated_pitstop_count": ("show_estimated_pitstop_count", "show_early_pitstop_count"),
+            "show_delta_consumption_and_end_remaining": ("show_delta_consumption", "show_end_remaining"),
+            "show_fuel_ratio_and_fuel_bias": ("show_fuel_ratio", "show_fuel_bias"),
+        }
+        for old, new in pairs.items():
+            shown = widget.get(old)
+            if old not in new:
+                widget.pop(old, None)
+            if isinstance(shown, bool):
+                for key in new:
+                    widget.setdefault(key, shown)
+
+
 def _user_prior_2_51_3(dict_user: dict):
     # Standings: pit stop durations of every car while player pit stop requested off by default (whole lap time
     # column replaced, looked broken); presets keeping the former default turned off too

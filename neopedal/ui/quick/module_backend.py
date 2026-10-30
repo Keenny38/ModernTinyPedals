@@ -35,7 +35,7 @@ from typing import NamedTuple
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ... import app_signal
-from ...i18n import tr, trm
+from ...i18n import tr
 from ...i18n.options import module_label
 from ...module_control import (  # noqa: F401  (code scan re-exported: tests, other readers)
     MODULE_PACKAGE,
@@ -72,6 +72,7 @@ class Counts(NamedTuple):
     shown: int = 0
     needed: tuple[str, ...] = ()  # labels of modules off that enabled overlays or modules need
     states: tuple[int, int, int] = (0, 0, 0)  # rows of All, Active & Inactive choice (search applied)
+    shown_active: int = 0  # shown modules enabled (Disable button count; Enable button: the others)
 
 
 class ModuleSpec(NamedTuple):
@@ -129,7 +130,7 @@ MODULE_SPECS = {
     ),
     "module_stats": ModuleSpec(
         "", ("stats",),  # pie chart
-        "Driver stats and session history for the Driver Stats Viewer, car setup backups.",
+        "Driver stats and session history for the Driver Stats page, car setup backups.",
     ),
     "module_stint": ModuleSpec(
         "", ("history",),  # history
@@ -223,8 +224,10 @@ class ModuleBackend(PageBackend):
     """
 
     countsChanged = Signal()
+    shownChanged = Signal()  # modules shown & shown enabled (batch buttons)
     filterChanged = Signal()
     dependenciesChanged = Signal()
+    bulkToggled = Signal(str)  # shown modules enabled or disabled: message (undo offered)
 
     def __init__(
         self,
@@ -235,8 +238,14 @@ class ModuleBackend(PageBackend):
         confirm: Callable[[str], bool],
         show_log: Callable[[], None] = lambda: None,
         reset_data: Callable[[str], None] = lambda method: None,
+        ask: Callable[[str, Callable[[bool], object]], None] | None = None,
     ):
+        """
+        Args:
+            ask: confirmation over the page, answer by callback (confirm answers at once if not set).
+        """
         super().__init__(parent, "Modules page")
+        self._ask = ask
         self._control = module_control
         self._widgets = widget_control
         self._open_config = open_config
@@ -249,6 +258,7 @@ class ModuleBackend(PageBackend):
         self._words: tuple[str, ...] = ()
         self._state = FILTER_ALL
         self._counts = Counts()
+        self._bulk: tuple[list[str], bool] | None = None  # modules switched by the last Enable / Disable
         self.rows_model = DictListModel(ROLES, self)
         self.refresh()
 
@@ -369,10 +379,14 @@ class ModuleBackend(PageBackend):
             len(self._rows), sum(row["active"] for row in self._rows), sum(row["failed"] for row in self._rows),
             len(shown), tuple(row["label"] for row in self._rows if row["needed"]),
             (len(searched), searched_active, len(searched) - searched_active),
+            sum(row["active"] for row in shown),
         )
         if counts != self._counts:
+            shown_before = self._counts.shown, self._counts.shown_active
             self._counts = counts
             self.countsChanged.emit()
+            if (counts.shown, counts.shown_active) != shown_before:
+                self.shownChanged.emit()
 
     def row(self, name: str) -> dict | None:
         return next((row for row in self._rows if row["key"] == name), None)
@@ -395,9 +409,14 @@ class ModuleBackend(PageBackend):
     def failedCount(self) -> int:
         return self._counts.failed
 
-    @Property(int, notify=countsChanged)
+    @Property(int, notify=shownChanged)
     def shownCount(self) -> int:
         return self._counts.shown
+
+    @Property(int, notify=shownChanged)
+    def shownActiveCount(self) -> int:
+        """Shown modules enabled (Disable button count; Enable button: the others)"""
+        return self._counts.shown_active
 
     @Property(list, notify=countsChanged)
     def neededNames(self) -> list[str]:
@@ -488,23 +507,45 @@ class ModuleBackend(PageBackend):
             self.refresh()
 
     def _set_shown(self, enable: bool):
-        """Enable or disable shown modules (every module without filter), confirmed if set so"""
-        shown = [row["key"] for row in self._rows if self._matches(row)]
-        names = [name for name in shown if self._enabled(name) != enable]
+        """Enable or disable shown modules (every module without filter) at once, Undo offered by the page toast
+        (as on the Overlays page)"""
+        names = [row["key"] for row in self._rows if self._matches(row) and row["active"] != enable]
         if not names:
             return
-        word = "Enable" if enable else "Disable"
-        everything = not self.filtered or len(names) == len(self._rows)
-        if cfg.application["show_confirmation_for_batch_toggle"]:
-            text = f"<b>{word}</b> all modules?" if everything else f"<b>{word}</b> {len(names)} shown modules?"
-            if not self._confirm(trm(text)):
-                return
-        if everything:
+        if len(names) == len(self._rows) or not self.filtered:
             if enable:
                 self._control.enable_all()
             else:
                 self._control.disable_all()
         else:
             self._control.set_enabled(names, enable)  # saved & on demand modules updated once
+        self._bulk = (names, enable)
+        if len(names) == 1:
+            text = tr("1 module enabled") if enable else tr("1 module disabled")
+        else:
+            text = (tr("%1 modules enabled") if enable else tr("%1 modules disabled")).replace("%1", str(len(names)))
+        self.bulkToggled.emit(text)
+        self._toast(text, self.undoBulk)
         app_signal.refresh.emit(True)  # other pages & menus follow, rows updated by refresh
         self.refresh()
+
+    @Slot()
+    def undoBulk(self):
+        """Modules switched by the last Enable / Disable put back as they were"""
+        if self._bulk is None:
+            return
+        names, enable = self._bulk
+        self._bulk = None
+        self._control.set_enabled([name for name in names if name in self._control.names], not enable)
+        app_signal.refresh.emit(True)
+        self.refresh()
+
+    def _toast(self, text: str, undo: Callable[[], object] | None = None):
+        """Message in the page toast (Undo button if undo is set), nothing without a page (tests)"""
+        from PySide6.QtWidgets import QWidget
+
+        from ..toast import show_toast
+
+        page = self.parent()
+        if isinstance(page, QWidget):
+            show_toast(page, text, action_text=tr("Undo") if undo is not None else "", action=undo)

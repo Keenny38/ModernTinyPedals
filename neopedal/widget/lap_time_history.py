@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from .. import calculation as calc
 from ..api_control import api
 from ..const_common import TEXT_NOLAPTIME
+from ..fuel_strategy import history_laps
 from ..module_info import ConsumptionDataSet, minfo
 from ._common import delta_shown
 from ._data import cut_number, lap_delta, used_amount
@@ -95,7 +96,7 @@ class Realtime(HistoryTable):
 
         # Current laps data
         if self.wcfg["show_laps"]:
-            self.update_laps(self.bars_laps[0], api.read.lap.number() + 1)
+            self.update_laps(self.bars_laps[0], api.read.lap.completed_laps() + 1)  # lap driven, as history numbers
         if self.wcfg["show_time"]:
             self.update_time(self.bars_time[0], minfo.delta.lapTimeEstimated)
         if self.wcfg["show_delta"]:
@@ -119,7 +120,7 @@ class Realtime(HistoryTable):
         ):
             self.last_data_version = minfo.history.consumptionDataVersion
             self.last_energy_type = energy_type
-            self.update_laps_history(minfo.history.consumptionDataSet)
+            self.update_laps_history(history_laps(minfo.history.consumptionDataSet))  # no placeholder row
 
     # GUI update methods
     def update_laps(self, target, data):
@@ -171,9 +172,11 @@ class Realtime(HistoryTable):
 
             if self.wcfg["show_time"]:
                 invalid = (2 - data.isValidLap) if (data.lapTimeLast > 0) else 1
-                self.bars_time[index].fg = self.bar_style_time[invalid][0]
-                self.bars_time[index].bg = self.bar_style_time[invalid][1]
-                self.update_time(self.bars_time[index], data.lapTimeLast)
+                target = self.bars_time[index]
+                if (target.fg, target.bg) != self.bar_style_time[invalid]:  # validity changed with same time
+                    target.fg, target.bg = self.bar_style_time[invalid]
+                    target.update()
+                self.update_time(target, data.lapTimeLast)
                 self.bars_time[index].setHidden(hidden)
 
             if self.wcfg["show_delta"]:

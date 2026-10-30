@@ -378,7 +378,7 @@ class OrderedPicker(QWidget):
         self.label_available = QLabel(tr("Available"), self.available_card)
         self.label_available.setObjectName("pickerTitle")
         self.edit_search = QLineEdit(self.available_card)
-        self.edit_search.setPlaceholderText(tr("Search..."))
+        self.edit_search.setPlaceholderText(tr("Search…"))
         self.edit_search.setClearButtonEnabled(True)
         self.edit_search.textChanged.connect(self.filter_available)
         self.available_list = AvailableList(self)

@@ -30,6 +30,8 @@ from ._painter import WheelGaugeBar
 if TYPE_CHECKING:
     from ..template.widget_config_types import SuspensionForceConfig
 
+FULL_GAUGE_RATIO = 50  # force ratio (percent) of full gauge: each wheel near 25% (half gauge) when balanced
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -91,6 +93,7 @@ class Realtime(Overlay):
                 bar_width=bar_width,
                 bar_height=bar_height,
                 offset_y=font_m.voffset,
+                display_range=FULL_GAUGE_RATIO,
                 decimals=self.wcfg["decimal_places"],
                 input_color=self.wcfg["highlight_color"],
                 fg_color=self.wcfg["font_color"],
@@ -119,7 +122,8 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_force(self, target, data, ratio):
-        """Suspension force & ratio"""
-        if target.last != data:
+        """Suspension force & ratio, repainted on visible change only (text & bar length)"""
+        ratio = min(ratio, FULL_GAUGE_RATIO)
+        if target.changed(data, round(ratio * target.width_scale)):
             target.last = data
             target.update_input(ratio)

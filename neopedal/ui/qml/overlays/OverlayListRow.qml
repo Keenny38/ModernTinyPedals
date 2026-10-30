@@ -43,19 +43,15 @@ Item {
                      + (favorite ? ", " + i18n.tr("Favorite") : "") + (failed ? ", " + i18n.tr("Error") : "")
     Accessible.description: description
 
-    Rectangle {
+    TpListRow {  // card row: active overlay tinted (outline too), hover on the card surface
         id: surface
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.radiusMd
-        // Same states as the cards: active tint, a step stronger while hovered
-        color: row.active ? Qt.tint(theme.base, theme.tint(theme.accent, row.hovered ? theme.tintSubtle * 1.4 : theme.tintSubtle * 0.7))
-             : row.hovered ? theme.hover
-             : theme.base
-        border.width: 1
-        border.color: row.active ? theme.accent : theme.cardBorder
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
+        card: true
+        hovered: row.hovered
+        emphasized: row.active
+        animate: !row.recycling
 
         MouseArea {
             id: area
@@ -85,6 +81,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.min(implicitWidth, controls.x - x - theme.space4 - badgeIcons.width)
             text: row.label
+            textFormat: Text.PlainText
             color: row.active ? theme.text : theme.dimOn(surface.color)
             font.weight: row.active ? Font.DemiBold : Font.Normal
             elide: Text.ElideRight
@@ -102,7 +99,7 @@ Item {
                     required property var modelData
                     glyph: modelData.kind === "stream" ? "" : modelData.kind === "screen" ? "" : ""
                     fallback: "•"
-                    size: theme.em * 0.8
+                    size: theme.iconSm
                     color: theme.dimOn(surface.color)
                     MouseArea { id: iconArea; anchors.fill: parent; hoverEnabled: true }
                     ToolTip.visible: iconArea.containsMouse
@@ -118,6 +115,7 @@ Item {
             anchors.rightMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
             text: row.description !== "" ? row.categoryLabel + "  \u00b7  " + row.description : row.categoryLabel
+            textFormat: Text.PlainText
             color: theme.dimOn(surface.color)
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight
@@ -126,40 +124,27 @@ Item {
         Row {
             id: controls
             anchors.right: parent.right
-            anchors.rightMargin: theme.em * 0.5
+            anchors.rightMargin: theme.space3
             anchors.verticalCenter: parent.verticalCenter
             spacing: theme.space2
-            Rectangle {  // start error: icon & text (same badge as the cards)
+            Pill {  // start error: icon & text (same badge as the cards)
+                objectName: "errorBadge"
                 visible: row.failed
                 anchors.verticalCenter: parent.verticalCenter
-                height: Math.round(theme.em * 1.5)
-                width: failedRow.implicitWidth + theme.space5
-                radius: height / 2
-                color: theme.lossFill
-                Row {
-                    id: failedRow
-                    anchors.centerIn: parent
-                    spacing: theme.space2
-                    Icon { glyph: ""; fallback: "!"; size: theme.em * 0.8; color: theme.inkOn(theme.lossFill); anchors.verticalCenter: parent.verticalCenter }  // warning
-                    Text {
-                        text: i18n.tr("Error")
-                        color: theme.inkOn(theme.lossFill)
-                        font.pointSize: theme.fontCaption
-                        font.weight: Font.DemiBold
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-                MouseArea { id: failedArea; anchors.fill: parent; hoverEnabled: true }
-                ToolTip.visible: failedArea.containsMouse
-                ToolTip.text: i18n.tr("Overlay could not start, see log (Help menu)")
-                ToolTip.delay: theme.tipDelay
+                solid: true
+                tint: theme.lossFill
+                glyph: "\uE7BA"  // warning
+                fallback: "!"
+                text: i18n.tr("Error")
+                tip: i18n.tr("Overlay could not start, see log (Help menu)")
             }
             TpButton {
                 flat: true
                 size: "sm"
-                glyph: row.favorite ? "" : ""  // star filled : outline
+                glyph: row.favorite ? theme.glyphs.favoriteOn : theme.glyphs.favorite
                 fallback: row.favorite ? "★" : "☆"
                 tip: row.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")
+                shortcut: "Ctrl+D"  // list key, in the tooltip
                 opacity: row.favorite || row.hovered || hovered || visualFocus || row.current ? 1 : 0
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: {
@@ -172,8 +157,8 @@ Item {
                 size: "sm"
                 glyph: ""  // settings
                 fallback: "⚙"
-                tip: i18n.tr("Config")
-                opacity: row.hovered || hovered || visualFocus || row.current ? 1 : 0.6
+                tip: i18n.tr("Options…")
+                opacity: row.hovered || hovered || visualFocus || row.current ? 1 : 0  // revealed: hover, focus, current
                 anchors.verticalCenter: parent.verticalCenter
                 onClicked: backend.openConfig(row.name)
             }
@@ -194,13 +179,13 @@ Item {
         }
 
         // Preview tooltip next to cursor
-        ToolTip {
+        TpToolTip {  // picture on the preview stage (always dark): its own background
             id: previewTip
             visible: row.hovered && row.previewState === 1 && !row.menuOpen
                      && area.mouseX < controls.x - theme.em
-            delay: 350
+            delay: theme.hoverIntentDelay  // a row hovered a moment, not passed over
             x: Math.round(area.mouseX + theme.em)
-            y: surface.height + 4
+            y: surface.height + theme.space1
             padding: theme.space3
             readonly property real fit: Math.min(1, theme.em * 30 / Math.max(row.previewWidth, 1),
                                                  theme.em * 20 / Math.max(row.previewHeight, 1))
@@ -215,7 +200,7 @@ Item {
                 smooth: true
             }
             background: Rectangle {
-                radius: theme.radiusMd
+                radius: theme.radiusSm
                 color: theme.stageBottom
                 border.width: 1
                 border.color: theme.border

@@ -342,7 +342,7 @@ def test_summary_and_jump_back(wizard):
 
 def test_finish_applies_choices_skip_does_not(ui_env, renders, monkeypatch):
     applied = []
-    monkeypatch.setattr(setup_wizard, "run_setup", applied.append)
+    monkeypatch.setattr(setup_wizard, "run_setup", lambda choices, done=None: applied.append(choices))
     wizard = setup_wizard.SetupWizard(None, detect_games=False)
     game = wizard.backend.games[-1]["name"]
     wizard.backend.setGame(game)
@@ -440,7 +440,7 @@ def test_buttons_of_qml_page_close_and_jump_without_crash(ui_env, renders, monke
     """Finish & Skip close the window (QML page deleted) after their click handler, Change replaces its own step,
     Esc & window close ask first"""
     applied = []
-    monkeypatch.setattr(setup_wizard, "run_setup", applied.append)
+    monkeypatch.setattr(setup_wizard, "run_setup", lambda choices, done=None: applied.append(choices))
     closed = []
     wizard = setup_wizard.SetupWizard(None, detect_games=False)
     wizard.finished.connect(closed.append)

@@ -32,7 +32,7 @@ from PySide6.QtGui import QPainter
 from ... import units
 from ...api_control import api
 from ...const_common import MAX_SECONDS
-from ..acceleration import AccelTimer
+from ..acceleration import AccelTimer, speed_range_text
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
 
@@ -63,7 +63,7 @@ class Realtime(ModernOverlay):
             for index in range(1, 11) if wcfg[f"speed_range_{index}_end"] > 0
         )
         unit_speed = units.set_unit_speed(self.cfg.units["speed_unit"])
-        self.labels = tuple(f"{unit_speed(timer.speed_start):.0f}-{unit_speed(timer.speed_end):.0f}" for timer in self.timers)
+        self.labels = tuple(speed_range_text(timer, unit_speed) for timer in self.timers)
         count = max(len(self.timers), 1)
         pad = unit * 0.3
         gap = unit * 0.14
@@ -83,7 +83,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for slot, label in enumerate(self.labels):
             column = QRectF(self.cells[1][slot].topLeft(), self.cells[3][slot].bottomRight())
             rounded(painter, column, self.radius(0.3), theme.tint(theme.surface_alt, 170))
@@ -91,12 +91,13 @@ class Realtime(ModernOverlay):
 
     def paint(self, painter: QPainter):
         theme = self.theme
-        for slot, (last, active, best, delta) in enumerate(self.state):
+        delta_colors = (theme.text_dim, theme.negative, theme.positive)  # by delta sign: 0, loss, gain
+        for slot, (last, active, best, delta, sign) in enumerate(self.state):
             if active:
                 rounded(painter, self.cells[1][slot], self.radius(0.3), theme.highlight)
             self.draw_text(painter, self.cells[1][slot], last, "value", theme.accent if active else theme.text, CENTER)
             self.draw_text(painter, self.cells[2][slot], best, "value", theme.positive, CENTER)
-            color = theme.text_faint if delta == DASH else (theme.negative if delta.startswith("+") else theme.positive)
+            color = theme.text_faint if delta == DASH else delta_colors[sign]
             self.draw_text(painter, self.cells[3][slot], delta, "small", color, CENTER)
 
     def time_text(self, value: float) -> str:
@@ -116,7 +117,8 @@ class Realtime(ModernOverlay):
                 timer.reset()
             timer.update(speed, elapsed)
             active = timer.start_time > 0
-            delta = timer.delta
-            delta_text = f"{delta:+.{self.dec_delta}f}"[:self.char_width] if delta else DASH
-            values.append((self.time_text(timer.timer if active else timer.valid), active, self.time_text(timer.best), delta_text))
+            delta = round(timer.delta, self.dec_delta)  # sign of shown value (0: neutral)
+            delta_text = f"{delta:+z.{self.dec_delta}f}"[:self.char_width] if timer.delta else DASH
+            values.append((self.time_text(timer.timer if active else timer.valid), active, self.time_text(timer.best),
+                           delta_text, (delta > 0) - (delta < 0)))
         self.refresh(tuple(values))

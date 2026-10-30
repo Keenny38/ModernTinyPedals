@@ -71,9 +71,10 @@ def hotkey_overlay_lock():
 
 
 def hotkey_overlay_auto_hide():
-    """Command - overlay auto hide"""
-    cfg.overlay["auto_hide"] = not cfg.overlay["auto_hide"]
-    cfg.save()
+    """Command - overlay auto hide (overlay control woken: hidden state applied at once)"""
+    from ..overlay_control import octrl
+
+    octrl.toggle.hide()
 
 
 def hotkey_vr_compatibility():

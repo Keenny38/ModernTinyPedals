@@ -61,6 +61,8 @@ NO_ROWS: tuple = (None, (), ())
 NO_TELE_MAP: tuple = (None, ())
 # Zeroed telemetry of vehicle without telemetry match (never another car's data)
 EMPTY_TELE: Any = lmu_struct.LMUVehicleTelemetry()
+# Zeroed scoring of player while not synced (never the last slot of the array, stale in a dense session)
+EMPTY_SCOR: Any = lmu_struct.LMUVehicleScoring()
 
 
 def local_scoring_index(scor_veh: Sequence[lmu_data.LMUVehicleScoring], veh_total: int = MAX_VEHICLES) -> int:
@@ -92,6 +94,8 @@ def local_scoring_index_by_id(
 
 # "<Incident et="120.0">Name (FR)(12) reported contact ..." (name may contain parenthesis)
 INCIDENT_DRIVER = re.compile(rb">(.+?)\(\d+\) reported contact")
+# "<TrackLimits Driver=... CurrentPoints="2.75" Resolution=...>": points after this cut (0 once penalty given)
+TRACK_POINTS = re.compile(rb' CurrentPoints="([0-9.]+)"')
 DRIVER_NAME_SIZE = lmu_struct.LMUVehicleScoring.mDriverName.size  # bytes of shared memory name, with NUL
 
 
@@ -113,19 +117,25 @@ class LMUResults:
     __slots__ = (
         "data",
         "penalties",
+        "track_points",
         "timestamp",
         "_last_stream",
         "_full_names",
+        "_points_source",
     )
 
     def __init__(self) -> None:
         self.data: dict[bytes, dict[str, int]] = {}
         self.penalties: dict[bytes, Penalty] = {}  # driver name: penalties to serve, added, disqualified
+        # driver name: (track limits points of server, count of track limits lines)
+        self.track_points: dict[bytes, tuple[float, int]] = {}
         self.timestamp = 0
         self._last_stream = b""
-        # (table is penalties, cut name): full name matched by start, None if no or several matches.
+        # (id of table, cut name): full name matched by start, None if no or several matches.
         # Replaced (never mutated) after driver names change, so a lookup of old names is never kept
-        self._full_names: dict[tuple[bool, bytes], bytes | None] = {}
+        self._full_names: dict[tuple[int, bytes], bytes | None] = {}
+        # shared memory name: (last shared memory points, last line count, stream value is newer)
+        self._points_source: dict[bytes, tuple[float, int, bool]] = {}
 
     def find(self, table: dict, driver: bytes, default: Any) -> Any:
         """Value of driver, shared memory name cut to field size: matched by start of full name
@@ -137,7 +147,7 @@ class LMUResults:
             return data
         if driver and len(driver) >= DRIVER_NAME_SIZE - 1:  # bytes compared: cut may split a character
             full_names = self._full_names  # lookup stored in the cache of the names it was made from
-            key = (table is self.penalties, driver)
+            key = (id(table), driver)  # tables cleared in place, never replaced: id stays unique
             if key in full_names:
                 full_name = full_names[key]
             else:
@@ -161,11 +171,34 @@ class LMUResults:
         """Penalties of driver (to serve, added time, disqualified)"""
         return self.find(self.penalties, driver, NO_PENALTY)
 
+    def cut_points(self, driver: bytes, shared_points: float) -> float:
+        """Track limits points of driver: newest of shared memory & server (results stream)
+
+        Shared memory points of other cars are not reset when the server gives the penalty (stays at
+        2.75 of 3 through the drive through), the stream line of the penalty gives 0. A shared memory
+        change after the last stream line wins (value the stream never reports).
+        """
+        stream = self.find(self.track_points, driver, None)
+        if stream is None:
+            return shared_points
+        points, count = stream
+        last = self._points_source.get(driver)
+        if last is None or last[1] != count:
+            use_stream = True  # new server line (same check as a shared memory change: server wins)
+        elif last[0] != shared_points:
+            use_stream = False
+        else:
+            use_stream = last[2]
+        self._points_source[driver] = (shared_points, count, use_stream)
+        return points if use_stream else shared_points
+
     def clear(self) -> None:
         """Forget drivers of previous session"""
         self.data.clear()
         self.penalties.clear()
+        self.track_points.clear()
         self._full_names = {}
+        self._points_source = {}
 
     def check_missing(self, driver: bytes) -> None:
         """Check & add missing driver"""
@@ -196,15 +229,27 @@ class LMUResults:
                     else:
                         results_data[driver]["contact_immovable"] += 1
                 continue
-            # Log track cuts
-            if line.startswith(b"<TrackLimits") and b"No Further Action" not in line:
+            # Log track cuts & points of server (every line, also "No Further Action")
+            if line.startswith(b"<TrackLimits"):
                 pos_beg = line.find(b"Driver=")
                 if pos_beg > 11:
                     pos_beg += 8
                     pos_end = line.find(b'"', pos_beg)
+                    if pos_end < 0:  # line cut (end of stream buffer): name incomplete, never a ghost driver
+                        continue
                     driver = unescape_name(line[pos_beg:pos_end])
-                    self.check_missing(driver)
-                    results_data[driver]["track_cut"] += 1
+                    matched = TRACK_POINTS.search(line, pos_end)
+                    if matched:
+                        try:
+                            points = float(matched.group(1))
+                        except ValueError:
+                            points = -1.0
+                        if points >= 0:
+                            last = self.track_points.get(driver)
+                            self.track_points[driver] = (points, last[1] + 1 if last else 1)
+                    if b"No Further Action" not in line:
+                        self.check_missing(driver)
+                        results_data[driver]["track_cut"] += 1
                 continue
             # Log penalties: received, served, added at finish, disqualified
             if line.startswith(b"<Penalty"):
@@ -282,22 +327,30 @@ class SyncData(_sync.SyncData):
         self.results = LMUResults()
 
     def __sync_player_scor(self, scor_index: int = INVALID_INDEX) -> None:
-        """Sync local player vehicle scoring data"""
-        self.player_scor = self.dataset.shmm.data.scoring.vehScoringInfo[scor_index]
+        """Sync local player vehicle scoring data, zeroed if no scoring index (cached wrapper otherwise)"""
+        if scor_index < 0:
+            self.player_scor = EMPTY_SCOR
+        else:
+            self.player_scor = self.vehicle_rows(self.dataset.shmm.data)[1][scor_index]
 
     def __sync_player_tele(self, tele_index: int = INVALID_INDEX) -> None:
-        """Sync local player vehicle telemetry data, zeroed if no telemetry index"""
+        """Sync local player vehicle telemetry data, zeroed if no telemetry index (cached wrapper otherwise)"""
         if tele_index < 0:
             self.player_tele = EMPTY_TELE
         else:
-            self.player_tele = self.dataset.shmm.data.telemetry.telemInfo[tele_index]
+            self.player_tele = self.vehicle_rows(self.dataset.shmm.data)[2][tele_index]
 
     def _player_scoring_index(self) -> int:
         """Scoring index of local player (or player index override), from cached vehicle wrappers
-        (same data as scoring array)"""
+        (same data as scoring array); last index checked first, it rarely changes between ticks"""
         data = self.dataset.shmm.data
-        veh_total = data.scoring.scoringInfo.mNumVehicles
+        veh_total = min(data.scoring.scoringInfo.mNumVehicles, MAX_VEHICLES)
         scor_rows = self.vehicle_rows(data)[1]
+        last_index = self.player_scor_index
+        if 0 <= last_index < veh_total:
+            last_row = scor_rows[last_index]
+            if (last_row.mID == self.player_slot_id) if self.override_player_index else last_row.mIsPlayer:
+                return last_index
         if self.override_player_index:
             return local_scoring_index_by_id(self.player_slot_id, scor_rows, veh_total)
         return local_scoring_index(scor_rows, veh_total)
@@ -449,6 +502,14 @@ class LMUInfo:
         """Stop data updating thread"""
         self._sync.stop()
 
+    def request_stop(self) -> None:
+        """Signal data updating thread to stop, see SyncData.request_stop (threads of an API stop in parallel)"""
+        self._sync.request_stop()
+
+    def wait_stopped(self, timeout: float = _sync.STOP_TIMEOUT, deadline: float | None = None) -> bool:
+        """Wait for signalled data updating thread & close mmap, see SyncData.wait_stopped"""
+        return self._sync.wait_stopped(timeout, deadline)
+
     def setMode(self, mode: int = 0) -> None:
         """Set LMU mmap access mode
 
@@ -492,21 +553,30 @@ class LMUInfo:
         """LMU scoring info data"""
         return self._shmm.data.scoring.scoringInfo
 
-    def lmuPenalty(self, index: int | None = INVALID_INDEX) -> Penalty:
-        """LMU penalties of vehicle from results stream"""
-        if index is None:
-            data = self._sync.player_scor
-        else:
-            data = self._shmm.data.scoring.vehScoringInfo[index]
-        return self._sync.results.penalty(data.mDriverName)
+    def lmuPenalty(self, index: int | None = None) -> Penalty:
+        """LMU penalties of vehicle from results stream
 
-    def lmuResults(self, index: int | None = INVALID_INDEX) -> Mapping[str, float]:
-        """LMU results data"""
-        if index is None:
-            data = self._sync.player_scor
-        else:
-            data = self._shmm.data.scoring.vehScoringInfo[index]
-        return self._sync.results.get(data.mDriverName)
+        Args:
+            index: None for local player (same as other vehicle accessors).
+        """
+        return self._sync.results.penalty(self.lmuScorVeh(index).mDriverName)
+
+    def lmuCutPoints(self, index: int | None, shared_points: float) -> float:
+        """LMU track limits points of vehicle: shared memory value, or newer server value of results stream
+
+        Args:
+            index: None for local player (same as other vehicle accessors).
+            shared_points: points of shared memory telemetry.
+        """
+        return self._sync.results.cut_points(self.lmuScorVeh(index).mDriverName, shared_points)
+
+    def lmuResults(self, index: int | None = None) -> Mapping[str, float]:
+        """LMU results data
+
+        Args:
+            index: None for local player (same as other vehicle accessors).
+        """
+        return self._sync.results.get(self.lmuScorVeh(index).mDriverName)
 
     def lmuScorVeh(self, index: int | None = None) -> lmu_data.LMUVehicleScoring:
         """LMU scoring vehicle data

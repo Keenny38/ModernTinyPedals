@@ -37,7 +37,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from ...api_control import api
 from ...i18n import tr_overlay
 from .._black_box.damage import DamagePainter, damage_geometry
-from .._common import tyre_punctured
+from .._common import FLASH_MINIMUM, flash_lit, impact_cone_position, tyre_punctured
 from .._painter import fit_font
 from .._style import StyledConfig
 from .base import ModernOverlay
@@ -120,8 +120,8 @@ class Realtime(DamagePainter, ModernOverlay):
         self.set_size(body_w + pad * 2, body_h + pad * 2)
         self.cone_duration = wcfg["last_impact_cone_duration"]
         self.flash = wcfg["show_detached_warning_flash"]
-        self.flash_on = max(float(wcfg["warning_flash_highlight_duration"]), 0.05)  # bright part (seconds)
-        self.flash_off = max(float(wcfg["warning_flash_interval"]), 0.0)  # dim part
+        self.flash_on = max(float(wcfg["warning_flash_highlight_duration"]), FLASH_MINIMUM)  # bright part (seconds)
+        self.flash_off = max(float(wcfg["warning_flash_interval"]), FLASH_MINIMUM)  # dim part (as every flash)
         self.inverted = wcfg["show_inverted_integrity"]
         # Damage state (black box painter attributes)
         self.body_damage: tuple[int, ...] = (0,) * 8
@@ -131,7 +131,8 @@ class Realtime(DamagePainter, ModernOverlay):
         self.damage_suspension: tuple[float, ...] = (0.0,) * 4
         self.impact_position = (0.0, 0.0)
         self.impact_visible = False
-        self.last_impact_time = None
+        self.last_impact_time = None  # last impact time from game
+        self.impact_cone_time = 0.0  # time of impact shown by cone (light impacts ignored)
         self.impact_old = False  # impact of a previous session (impact time ahead of elapsed)
 
     # Black box painter helpers
@@ -141,7 +142,7 @@ class Realtime(DamagePainter, ModernOverlay):
         if not self.flash:
             return 1.0
         phase = monotonic() % (self.flash_on + self.flash_off)
-        if phase >= self.flash_on:
+        if not flash_lit(phase, self.flash_on, self.flash_off):
             return 0.35
         return 0.35 + 0.65 * math.sin(math.pi * phase / self.flash_on)
 
@@ -179,9 +180,13 @@ class Realtime(DamagePainter, ModernOverlay):
             self.grown_fonts[rect.height()] = grown
         return grown
 
+    def vehicle_reset(self):
+        """Impact cone of previous car or session hidden"""
+        self.impact_cone_time = 0.0
+
     def paint_static(self, painter: QPainter):
         if self.wcfg["show_background"]:
-            panel(painter, QRectF(self.rect()), self.theme, self.radius(0.6), self.depth_effects)
+            panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
 
     def paint(self, painter: QPainter):
         self.draw_damage_panel(painter, self.rect_panel)
@@ -193,15 +198,18 @@ class Realtime(DamagePainter, ModernOverlay):
             impact_time = vehicle.impact_time()
             if self.last_impact_time != impact_time:
                 self.last_impact_time = impact_time
-                self.impact_position = vehicle.impact_position()
-                self.impact_old = False
+                impact_position = impact_cone_position()
+                if impact_position is not None:
+                    self.impact_position = impact_position
+                    self.impact_cone_time = impact_time
+                    self.impact_old = False
             # Impact time not reset on a new session while elapsed restarts: negative age = old impact,
             # kept hidden even once elapsed catches up with it
-            impact_age = api.read.timing.elapsed() - impact_time
+            impact_age = api.read.timing.elapsed() - self.impact_cone_time
             if impact_age < 0:
                 self.impact_old = True
             self.impact_visible = (
-                bool(impact_time) and not self.impact_old and 0 <= impact_age <= self.cone_duration)
+                bool(self.impact_cone_time) and not self.impact_old and 0 <= impact_age <= self.cone_duration)
         self.body_damage = tuple(vehicle.damage_severity())
         self.damage_aero = vehicle.aero_damage()
         self.damage_detached = tuple(api.read.wheel.is_detached())

@@ -6,7 +6,8 @@ import "../components"
 // Laps of car picked: car picker, driver & team, best / average / consistency of clean laps, theoretical best,
 // top speed; then every lap: place, time (session best purple ◆, own best green ●: marks too, never color
 // alone), gap to own best, sectors (same colors & marks), top speed, tyre compound, pit lane, energy (or fuel)
-// used & tyre wear (own car only). Session replay: Tab to the laps, Up / Down & Enter watch a lap.
+// used & tyre wear (own car only). Session replay: Tab to the laps, Up / Down & Enter watch a lap. Laps of
+// the player's car recorded by the Recorder module: open its telemetry in the lap viewer (T on the current lap).
 Item {
     id: laps
 
@@ -27,7 +28,11 @@ Item {
     readonly property real wWear: wear ? theme.em * 4.6 : 0
     readonly property bool replay: (backend.sessionHeader.replay || "") !== ""  // session replay (LMU)
     readonly property real wWatch: replay ? theme.em * 2.6 : 0
-    readonly property real markRoom: theme.em * 1.1  // record mark after the time (◆ ●), kept on every row
+    readonly property bool telemetry: backend.lapColumns.telemetry === true  // a lap of player's car recorded
+    readonly property real wTelemetry: telemetry ? theme.em * 2.6 : 0
+    readonly property real markRoom: markProbe.markRoom  // record mark after the time (◆ ●), kept on every row
+
+    TpLapTime { id: markProbe; visible: false }  // room of record mark: headers line up with times
 
     component Header: TpHeaderCell {
         property real cellWidth: 0
@@ -36,9 +41,9 @@ Item {
         align: Qt.AlignRight
     }
     component Cell: Text {
+        textFormat: Text.PlainText  // text of each use: names & values, never markup
         property real cellWidth: 0
         property string tone: ""
-        property bool marked: false  // column with record marks (times & sectors)
         width: cellWidth
         visible: cellWidth > 0
         anchors.verticalCenter: parent ? parent.verticalCenter : undefined
@@ -46,17 +51,18 @@ Item {
         font.weight: tone === "purple" || tone === "gain" ? Font.DemiBold : Font.Normal
         font.features: { "tnum": 1 }
         horizontalAlignment: Text.AlignRight
-        rightPadding: marked ? laps.markRoom : theme.em * 0.6
+        rightPadding: theme.space4
         elide: Text.ElideRight
-        Text {  // session best ◆, own best ●
-            visible: parent.marked && (parent.tone === "purple" || parent.tone === "gain")
-            anchors.right: parent.right
-            anchors.rightMargin: theme.space2
-            anchors.verticalCenter: parent.verticalCenter
-            text: parent.tone === "purple" ? "◆" : "●"
-            color: parent.color
-            font.pointSize: theme.fontMicro
-        }
+    }
+    component TimeCell: TpLapTime {  // time & sectors: session best ◆ purple, own best ● green (shared mark)
+        property real cellWidth: 0
+        property string tone: ""
+        width: cellWidth
+        height: implicitHeight
+        visible: cellWidth > 0
+        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+        record: tone === "purple" ? "session" : tone === "gain" ? "personal" : ""
+        textColor: tone === "dim" ? theme.dimText : theme.text
     }
 
     ColumnLayout {
@@ -93,6 +99,7 @@ Item {
                 Layout.fillWidth: true
                 text: [laps.info.team || "", laps.info.car || "", laps.info.drivers ? i18n.tr("Drivers") + ": " + laps.info.drivers : ""]
                       .filter(function(part) { return part !== "" }).join(" · ")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 elide: Text.ElideRight
             }
@@ -159,6 +166,7 @@ Item {
                         Header { cellWidth: laps.wUsage; text: i18n.tr("Used") }
                         Header { cellWidth: laps.wWear; text: i18n.tr("Tread") }
                         Header { cellWidth: laps.wWatch; text: "" }
+                        Header { cellWidth: laps.wTelemetry; text: "" }
                     }
                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border }
 
@@ -169,7 +177,7 @@ Item {
                         Layout.fillHeight: true
                         Layout.preferredWidth: laps.pad + laps.wLap + laps.wPos + laps.wTime + laps.wDelta + laps.wSector * 3
                                                + laps.wSpeed + laps.wTyre + laps.wPit + laps.wUsage + laps.wWear + laps.wWatch
-                                               + laps.scrollWidth
+                                               + laps.wTelemetry + laps.scrollWidth
                         clip: true
                         model: backend.lapModel
                         reuseItems: true  // rows scrolled out fed again with other laps (see delegate onPooled)
@@ -184,6 +192,13 @@ Item {
                         onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
                         Keys.onReturnPressed: if (laps.replay && currentItem) backend.watchLap(currentItem.lap)
                         Keys.onEnterPressed: if (laps.replay && currentItem) backend.watchLap(currentItem.lap)
+                        Keys.onPressed: function(event) {  // T: telemetry of current lap (recorded)
+                            if (event.key === Qt.Key_T && event.modifiers === Qt.NoModifier && currentItem
+                                    && currentItem.telemetry) {
+                                backend.openLapTelemetry(currentItem.lap)
+                                event.accepted = true
+                            }
+                        }
 
                         delegate: Item {
                             id: row
@@ -205,6 +220,7 @@ Item {
                             required property string usageText
                             required property string wearText
                             required property string accessibleText  // lap, time, record & pit (backend)
+                            required property bool telemetry  // lap recorded (lap viewer)
                             // Reused row: fed other lap values at once, no color animation from the old lap
                             property bool live: true
                             ListView.onPooled: live = false
@@ -234,23 +250,24 @@ Item {
                                 anchors.leftMargin: laps.pad
                                 Cell { cellWidth: laps.wLap; text: row.lap; tone: "dim" }
                                 Cell { cellWidth: laps.wPos; text: row.posText }
-                                Cell { cellWidth: laps.wTime; text: row.timeText; tone: row.timeTone; marked: true }
+                                TimeCell { cellWidth: laps.wTime; text: row.timeText; tone: row.timeTone }
                                 Cell { cellWidth: laps.wDelta; text: row.deltaText; tone: "dim" }
-                                Cell { cellWidth: laps.wSector; text: row.s1; tone: row.s1Tone; marked: true }
-                                Cell { cellWidth: laps.wSector; text: row.s2; tone: row.s2Tone; marked: true }
-                                Cell { cellWidth: laps.wSector; text: row.s3; tone: row.s3Tone; marked: true }
+                                TimeCell { cellWidth: laps.wSector; text: row.s1; tone: row.s1Tone }
+                                TimeCell { cellWidth: laps.wSector; text: row.s2; tone: row.s2Tone }
+                                TimeCell { cellWidth: laps.wSector; text: row.s3; tone: row.s3Tone }
                                 Cell { cellWidth: laps.wSpeed; text: row.speedText }
                                 Item {  // compound badge (as overlays) & name, right aligned
                                     width: laps.wTyre
                                     height: parent.height
                                     Row {
                                         anchors.right: parent.right
-                                        anchors.rightMargin: theme.em * 0.6
+                                        anchors.rightMargin: theme.space4
                                         anchors.verticalCenter: parent.verticalCenter
                                         spacing: theme.space2
                                         TpCompound { name: row.compound; anchors.verticalCenter: parent.verticalCenter }
                                         Text {
                                             text: row.compound
+                                            textFormat: Text.PlainText
                                             color: theme.dimOn(surface.color)
                                             width: Math.min(implicitWidth, laps.wTyre - theme.em * 2)
                                             elide: Text.ElideRight
@@ -264,7 +281,7 @@ Item {
                                     Pill {
                                         visible: row.pit
                                         anchors.right: parent.right
-                                        anchors.rightMargin: theme.em * 0.6
+                                        anchors.rightMargin: theme.space4
                                         anchors.verticalCenter: parent.verticalCenter
                                         size: "sm"
                                         text: i18n.tr("PIT")
@@ -285,6 +302,22 @@ Item {
                                         fallback: "▶"
                                         tip: i18n.tr("Watch lap in replay")
                                         onClicked: backend.watchLap(row.lap)
+                                    }
+                                }
+                                Item {
+                                    width: laps.wTelemetry
+                                    height: parent.height
+                                    visible: laps.telemetry
+                                    TpButton {  // recorded lap of player's car opened in the lap viewer
+                                        objectName: "lapTelemetryButton"
+                                        anchors.centerIn: parent
+                                        visible: row.telemetry
+                                        flat: true
+                                        size: "sm"
+                                        glyph: ""  // chart
+                                        fallback: "~"
+                                        tip: i18n.tr("Telemetry of this lap") + " (T)"
+                                        onClicked: backend.openLapTelemetry(row.lap)
                                     }
                                 }
                             }

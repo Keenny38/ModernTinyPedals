@@ -42,6 +42,7 @@ from ..const_file import FileExt
 from ..fuel_strategy import (
     Strategy,
     StrategyInput,
+    history_laps,
     measured_input,
     plan,
     remaining_input,
@@ -49,6 +50,7 @@ from ..fuel_strategy import (
     target_to_stop,
     whole_laps,
 )
+from ..i18n import tr_overlay
 from ..module_info import minfo
 from ..process.game_info import distance_ahead
 from ..race_live import StopCounter
@@ -86,6 +88,36 @@ def distance_text(meters: float, unit_name: str) -> str:
     return f"{value:.0f}{symbol}"
 
 
+def energy_plan(setup: StrategyInput) -> bool:
+    """Plan amounts checked in virtual energy (%): car using it (game pit menu refills virtual energy) planned with
+    energy, or plan of energy only"""
+    return setup.energy_per_lap > 0 and (minfo.energy.available or setup.fuel_per_lap <= 0)
+
+
+def pit_menu_check(setup: StrategyInput, stop, unit_fuel, symbol_fuel: str) -> tuple[float, float, str] | None:
+    """Refill set in game pit menu & amount after next stop of plan, in the unit of the menu (virtual energy % for a
+    car using it, else fuel), None if no stop or refill set, or if plan has no amount in that unit"""
+    refill = api.read.vehicle.absolute_refill()
+    if stop is None or refill <= 0:
+        return None
+    if minfo.energy.available:
+        return (refill, stop.energy_after, "%") if setup.energy_per_lap > 0 else None
+    return (unit_fuel(refill), stop.fuel_after, symbol_fuel) if setup.fuel_per_lap > 0 else None
+
+
+def session_laps(dataset, laps_done: int) -> list:
+    """Laps of the session in progress in consumption history (newest first, every session of the combo): laps
+    numbered down from the laps done now, up to a lap of an earlier session (number not below the one after it)"""
+    laps = []
+    last = laps_done + 1
+    for lap in history_laps(dataset):
+        if not 0 < lap.lapNumber < last:
+            break
+        laps.append(lap)
+        last = lap.lapNumber
+    return laps
+
+
 def load_plan_input(filename: str) -> tuple[StrategyInput, list[int]] | None:
     """Plan input & tyres changed at each stop kept by race calculator, None if missing or wrong"""
     try:
@@ -116,7 +148,8 @@ def load_plan_input(filename: str) -> tuple[StrategyInput, list[int]] | None:
         return StrategyInput(**kwargs), changes
     except FileNotFoundError:
         return None
-    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:  # read once per file change
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            RecursionError) as error:  # read once per file change, RecursionError: nested too deeply
         logger.warning("RACE PLAN: %s not read (%s: %s), plan made from race calculator inputs",
                        filename, type(error).__name__, error)
         return None
@@ -191,7 +224,7 @@ class Realtime(Overlay):
             self.wcfg["display_order_pit_menu"]) if self.wcfg["show_pit_menu"] else None
         prefix_target = self.wcfg["prefix_target"]
         self.bar_target = add_bar(
-            "target", f"{prefix_target}-.--", len(prefix_target) + 6,
+            "target", f"{prefix_target}-.--", len(prefix_target) + 6 + max(len(self.symbol_fuel), 1),
             self.wcfg["display_order_target"]) if self.wcfg["show_target"] else None
         prefix_entry = self.wcfg["prefix_pit_entry"]
         self.distance_unit = cfg.units["distance_unit"]
@@ -206,7 +239,7 @@ class Realtime(Overlay):
             self.next_check = now + PLAN_CHECK_SECONDS
             self.refresh_plan()
 
-        live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
+        live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel, describe=False)
         laps_done = api.read.lap.completed_laps()
         in_pits = live.in_pits
         if self.wcfg["enable_live_replan"]:
@@ -222,7 +255,7 @@ class Realtime(Overlay):
 
         if self.bar_next_stop:
             if stop is None:
-                text = f"{self.wcfg['prefix_next_stop']}{'END' if strategy.ready else '---'}"
+                text = f"{self.wcfg['prefix_next_stop']}{tr_overlay('END') if strategy.ready else '---'}"
                 laps_to_go = 99
             else:
                 laps_to_go = max(stop.lap - lap, 0)
@@ -258,14 +291,11 @@ class Realtime(Overlay):
         """Refill set in game pit menu (fuel, or virtual energy of a car using it) against amount
         after next stop of the plan: OK, or menu > plan"""
         prefix = self.wcfg["prefix_pit_menu"]
-        refill = api.read.vehicle.absolute_refill()
-        if stop is None or refill <= 0:
+        check = pit_menu_check(self.setup, stop, self.unit_fuel, self.symbol_fuel)
+        if check is None:
             self.update_bar(self.bar_pit_menu, f"{prefix}--", self.wcfg["background_color_pit_menu"])
             return
-        if self.setup.energy_per_lap > 0:
-            menu, planned, unit = refill, stop.energy_after, "%"
-        else:
-            menu, planned, unit = self.unit_fuel(refill), stop.fuel_after, self.symbol_fuel
+        menu, planned, unit = check
         if abs(menu - planned) <= MENU_TOLERANCE:
             self.update_bar(self.bar_pit_menu, f"{prefix}OK", self.wcfg["background_color_pit_menu"])
         else:
@@ -278,17 +308,18 @@ class Realtime(Overlay):
         prefix = self.wcfg["prefix_target"]
         end = stop.lap if stop is not None else strategy.last_lap
         laps = end - position
-        energy = self.setup.fuel_per_lap <= 0 and self.setup.energy_per_lap > 0
-        if energy:
+        if energy_plan(self.setup):
             target = target_to_stop(self.setup, api.read.engine.virtual_energy() * 100, laps, "energy")
             last = minfo.energy.lastLapConsumption
+            unit = "%"
         else:
             target = target_to_stop(self.setup, self.unit_fuel(api.read.engine.fuel()), laps)
             last = self.unit_fuel(minfo.fuel.lastLapConsumption)
+            unit = self.symbol_fuel
         if not strategy.ready or target <= 0:
             self.update_bar(self.bar_target, f"{prefix}-.--", self.wcfg["background_color_target"])
             return
-        self.update_bar(self.bar_target, f"{prefix}{target:.2f}", self.wcfg[
+        self.update_bar(self.bar_target, f"{prefix}{target:.2f}{unit}", self.wcfg[
             "warning_color_target" if last > target else "background_color_target"])
 
     def refresh_plan(self):
@@ -339,8 +370,9 @@ class Realtime(Overlay):
             return
         self.live_key = key
         setup = self.setup
-        if self.wcfg["enable_live_consumption"]:  # lap time & consumption of the race so far
-            setup = measured_input(setup, minfo.history.consumptionDataSet, self.unit_fuel)
+        if self.wcfg["enable_live_consumption"]:  # lap time & consumption of the race so far (no practice laps)
+            laps = session_laps(minfo.history.consumptionDataSet, state.laps_done)
+            setup = measured_input(setup, laps, self.unit_fuel)
         rest = plan(remaining_input(setup, self.strategy, state))
         if self.tyre_changes:
             rest.tyre_changes = self.tyre_changes[state.stops_done:][:len(rest.stops)]

@@ -85,7 +85,7 @@ class Realtime(DeltaGraphMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         rounded(painter, self.rect_chart_box, self.radius(0.3), theme.tint(theme.surface_alt, 200))
         chart = self.chart
         zero = chart.center().y()

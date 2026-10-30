@@ -17,202 +17,68 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Vehicle class editor
+Vehicle class editor: alias & color of each car class (table editor page, see quick/table_editor.py)
+
+Primary preset of a class is set from the Presets page: kept as is here.
 """
 
 import random
-from typing import cast
-
-from PySide6.QtWidgets import (
-    QMessageBox,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
 
 from ..api_control import api
 from ..const_common import EMPTY_DICT
 from ..const_file import ConfigType
 from ..formatter import random_color_class
-from ..i18n import tr, trm
-from ..setting import cfg, copy_setting
-from ..validator import is_hex_color
-from ._common import (
-    QVAL_COLOR,
-    BaseEditor,
-    UIScaler,
-    column_texts,
-    run_after_saving,
-    table_item,
-)
-from ._option import ColorEdit
+from ..setting import cfg
+from ..template.setting_classes import CLASS_PRESET_KEYS, CLASSINFO_DEFAULT
+from .quick.table_editor import KIND_COLOR, KIND_NAME, KIND_TEXT, Column, TableEditorBackend, dict_rows
+from .quick.table_editor_host import TableEditorPage
 
-HEADER_CLASSES = "Class name","Alias name","Color"
+KEYS = ("alias", "color")
 
 
-class VehicleClassEditor(BaseEditor):
+class ClassBackend(TableEditorBackend):
+    """Car classes: name, alias, color (primary preset kept)"""
+
+    COLUMNS = (
+        Column("", "Class name", KIND_NAME, width=12),
+        Column("alias", "Alias name", KIND_TEXT, width=8),
+        Column("color", "Color", KIND_COLOR, width=7),
+    )
+    CONFIG_TYPE = ConfigType.CLASSES
+    NEW_NAME = "New Class Name"
+    RESET_TEXT = "Reset every class to default? Changes are saved only by Save."
+
+    def load(self) -> list[list]:
+        return dict_rows(cfg.user.classes, KEYS, CLASSINFO_DEFAULT)
+
+    def default_rows(self) -> list[list]:
+        return dict_rows(cfg.default.classes, KEYS, CLASSINFO_DEFAULT)
+
+    def to_setting(self, rows: list[list]) -> dict:
+        """Primary presets of each class kept (every session & by session, set from Presets page)"""
+        saved = cfg.user.classes
+        return {
+            name: {
+                "alias": alias, "color": color,
+                **{key: saved.get(name, EMPTY_DICT).get(key, "") for key in CLASS_PRESET_KEYS},
+            }
+            for name, alias, color in rows
+        }
+
+    def new_row(self, name: str) -> list:
+        return [name, "NAME", random_color_class(str(random.random()))]
+
+    def session_rows(self) -> list[list]:
+        """Classes of the session (alias: class name, color from name)"""
+        rows = []
+        for index in range(api.read.vehicle.total_vehicles()):
+            class_name = api.read.vehicle.class_name(index)
+            rows.append([class_name, class_name, random_color_class(class_name)])
+        return rows
+
+
+class VehicleClassEditor(TableEditorPage):
     """Vehicle class editor"""
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.set_utility_title(tr("Vehicle Class Editor"))
-        self.setMinimumSize(UIScaler.size(30), UIScaler.size(30))
-
-        self.classes_temp = copy_setting(cfg.user.classes)
-
-        # Set table
-        self.table_classes = self.editor_table(HEADER_CLASSES, {2: 7})  # color column
-        self.table_classes.verticalHeader().setVisible(False)
-        self.table_classes.cellChanged.connect(self.set_modified)
-        self.refresh_table()
-        self.enable_table_undo("classes_temp", self.update_classes_temp, self.refresh_table)
-        self.set_unmodified()
-
-        # Set button
-        layout_button = self.set_layout_button()
-
-        # Set layout
-        layout_main = QVBoxLayout()
-        layout_main.addWidget(self.table_classes)
-        layout_main.addLayout(layout_button)
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout_main)
-
-    def set_layout_button(self):
-        """Set button layout"""
-        return self.editor_buttons(
-            (("Add", self.add_class), ("Sort", self.sort_class), ("Delete", self.delete_class)),
-            self.reset_setting, self.applying)
-
-    def refresh_table(self):
-        """Refresh class list"""
-        self.table_classes.setRowCount(0)
-        row_index = 0
-        for class_name, class_data in self.classes_temp.items():
-            self.add_vehicle_entry(
-                row_index, class_name, class_data["alias"], class_data["color"])
-            row_index += 1
-
-    def __add_option_color(self, key):
-        """Color string"""
-        color_edit = ColorEdit(self, key)
-        color_edit.setMaxLength(9)
-        color_edit.setValidator(QVAL_COLOR)
-        color_edit.textChanged.connect(self.set_modified)
-        color_edit.setText(key)  # load selected option
-        return color_edit
-
-    def add_class(self):
-        """Add new class entry"""
-        start_index = row_index = self.table_classes.rowCount()
-        listed = column_texts(self.table_classes, 0)
-        with self.batch_edit():  # one undo step
-            # Add all missing vehicle class from active session
-            veh_total = api.read.vehicle.total_vehicles()
-            for index in range(veh_total):
-                class_name = api.read.vehicle.class_name(index)
-                if class_name not in listed:
-                    self.add_vehicle_entry(
-                        row_index, class_name, class_name, random_color_class(class_name))
-                    listed.add(class_name)
-                    row_index += 1
-            # Add new class entry
-            if start_index == row_index:
-                new_class_name = self.new_name_increment("New Class Name", self.table_classes)
-                self.add_vehicle_entry(
-                    row_index, new_class_name, "NAME", random_color_class(str(random.random())))
-                self.table_classes.setCurrentCell(row_index, 0)
-
-    def add_vehicle_entry(self, row_index: int, class_name: str, alias_name: str, color: str):
-        """Add new class entry to table"""
-        self.table_classes.insertRow(row_index)
-        self.table_classes.setItem(row_index, 0, QTableWidgetItem(class_name))
-        self.table_classes.setItem(row_index, 1, QTableWidgetItem(alias_name))
-        self.table_classes.setCellWidget(row_index, 2, self.__add_option_color(color))
-
-    def sort_class(self):
-        """Sort class in ascending order"""
-        if self.table_classes.rowCount() > 1:
-            self.table_classes.sortItems(0)
-            self.set_modified()
-
-    def delete_class(self):
-        """Delete class entry"""
-        selected_rows = set(data.row() for data in self.table_classes.selectedIndexes())
-        if not selected_rows:
-            QMessageBox.warning(self, tr("Error"), tr("No data selected."))
-            return
-
-        if not self.confirm_operation(message=tr("<b>Delete selected rows?</b>")):
-            return
-
-        for row_index in sorted(selected_rows, reverse=True):
-            self.table_classes.removeRow(row_index)
-        self.set_modified()
-
-    def reset_setting(self):
-        """Reset setting"""
-        msg_text = (
-            "Reset <b>classes preset</b> to default?<br><br>"
-            "Changes are only saved after clicking Apply or Save Button."
-        )
-        if self.confirm_operation(message=msg_text):
-            self.classes_temp = copy_setting(cfg.default.classes)
-            self.replace_table_data(self.refresh_table)
-
-    def applying(self):
-        """Save & apply"""
-        self.save_setting()
-
-    def saving(self):
-        """Save & close"""
-        if self.save_setting():
-            self.accept()  # close
-
-    def verify_table(self) -> bool:
-        """Verify table before saving, warn if a class name is listed twice or a color is invalid"""
-        class_names = set()
-        for index in range(self.table_classes.rowCount()):
-            class_name = table_item(self.table_classes, index, 0).text()
-            color_string = cast(ColorEdit, self.table_classes.cellWidget(index, 2)).text()
-            if class_name in class_names:
-                msg_text = (
-                    f"<b>{class_name}</b> is listed more than once.<br><br>"
-                    "Each name can only be listed once, rename or delete duplicate rows."
-                )
-            elif not is_hex_color(color_string):
-                msg_text = (
-                    f"Invalid color <b>{color_string}</b> for <b>{class_name}</b>.<br><br>"
-                    "Use #RGB, #RRGGBB or #AARRGGBB format."
-                )
-            else:
-                class_names.add(class_name)
-                continue
-            self.table_classes.setCurrentCell(index, 0)  # show invalid row
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
-            return False
-        return True
-
-    def update_classes_temp(self):
-        """Update temporary changes to class temp first"""
-        loaded = self.classes_temp.copy()
-        self.classes_temp.clear()
-        for index in range(self.table_classes.rowCount()):
-            class_name = table_item(self.table_classes, index, 0).text()
-            abbr_name = table_item(self.table_classes, index, 1).text()
-            color_string = cast(ColorEdit, self.table_classes.cellWidget(index, 2)).text()
-            self.classes_temp[class_name] = {
-                "alias": abbr_name,
-                "color": color_string,
-                "preset": loaded.get(class_name, EMPTY_DICT).get("preset", ""),
-            }
-
-    def save_setting(self) -> bool:
-        """Save setting, False if table is invalid (not saved)"""
-        if not self.verify_table():
-            return False
-        self.update_classes_temp()
-        cfg.user.classes = copy_setting(self.classes_temp)
-        cfg.save(0, config_type=ConfigType.CLASSES)
-        self.set_unmodified()
-        run_after_saving(self.reloading)
-        return True
+    BACKEND = ClassBackend
+    TITLE = "Vehicle Class Editor"

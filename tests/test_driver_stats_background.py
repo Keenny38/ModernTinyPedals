@@ -412,9 +412,11 @@ def test_page_loading_without_qml_warnings(dialogs, big_history, monkeypatch):  
         assert viewer.backend.loading and "No stats yet: drive a few laps." not in visible_texts(viewer.view)
         holder.release()
         settle(viewer.backend)
+        viewer.backend.setStatsTab(2)  # Compare tab: lap time reference
         for _ in range(3):
             QCoreApplication.processEvents()
         assert not viewer.backend.loading and "Lap Time Reference" in item_texts(viewer.view)
+        viewer.backend.setStatsTab(0)
     finally:
         holder.release()
         qInstallMessageHandler(previous)

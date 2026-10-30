@@ -182,18 +182,23 @@ def test_page_without_qml_warnings(page):  # noqa: F811
                      lambda: backend.setSessionFilter(3), lambda: backend.selectTrack(""),
                      lambda: backend.sortBy("meters"), lambda: backend.setColumnVisible("meters", False),
                      lambda: page.resize(860, 640), lambda: backend.selectTrack(SPA),
-                     lambda: backend.setColumnVisible("meters", True), lambda: page.resize(1400, 860)):
+                     lambda: backend.setColumnVisible("meters", True), lambda: page.resize(1400, 860),
+                     # every tab of a track & of All Tracks (cards made when first shown)
+                     lambda: backend.setStatsTab(1), lambda: backend.setStatsTab(2), lambda: backend.selectTrack(""),
+                     lambda: backend.setStatsTab(1), lambda: backend.setStatsTab(0), lambda: page.resize(860, 640),
+                     lambda: backend.setStatsTab(2), lambda: page.resize(1400, 860)):
             step()
             for _ in range(3):
                 QCoreApplication.processEvents()
         backend.selectTrack("")
         QCoreApplication.processEvents()
-        texts = item_texts(page.view)
+        texts = item_texts(page.view)  # every tab shown once: cards kept
         assert "Activity" in texts and "Recent Sessions" in texts and "Levels, All Tracks" in texts
         backend.selectTrack(SPA)
         QCoreApplication.processEvents()
         texts = item_texts(page.view)
         assert "Lap Time Reference" in texts and "Progression" in texts and "Next level" in texts
+        backend.setStatsTab(0)
     finally:
         qInstallMessageHandler(previous)
     assert not [text for text in messages if ".qml" in text], messages

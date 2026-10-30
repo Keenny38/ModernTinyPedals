@@ -146,12 +146,19 @@ class Realtime(Overlay):
         if self.wcfg["show_pressure_deviation"]:
             self.tpavg = list(WHEELS_ZERO)
 
+    def vehicle_reset(self):
+        """Compounds read again, average pressures restart (followed car changed, session changed, back to garage)"""
+        self.last_in_pits = -1
+        self.post_update()
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         in_pits = api.read.vehicle.in_pits()
 
         # Update compound while in pit (or switched pit state)
         if in_pits or self.last_in_pits != in_pits:
+            if self.last_in_pits > 0 and not in_pits:  # left pits: average pressures of other tyres
+                self.post_update()
             self.last_in_pits = in_pits
             compounds = api.read.tyre.compound_class()
 

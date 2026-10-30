@@ -35,6 +35,7 @@ from PySide6.QtCore import QStandardPaths
 
 from ...const_file import ConfigType
 from ...i18n import tr, trm
+from ...process.results_text import MISSING, seconds_text
 from ...setting import cfg
 from ...userfile.json_setting import copy_setting
 from ...userfile.tyre_strategy import (
@@ -135,7 +136,7 @@ def tread_color(fraction: float) -> str:
 def tread_text(remaining: float, end: float) -> str:
     """Tread at start & end of stint: "New-70%", "95-65%", "Blowout" (below zero)"""
     if not (isfinite(remaining) and isfinite(end)):
-        return "-"
+        return MISSING
     if end < 0:
         return tr("Blowout")
     if remaining < 1:
@@ -615,7 +616,7 @@ class TyrePlan:
             seconds = self.change_times[row_index] if row_index < len(self.change_times) else 0.0
             rows.append({
                 "label": self.labels[row_index] if self.linked and row_index < len(self.labels) else str(row_index + 1),
-                "cells": cells, "change": f"{seconds:+.1f}s" if seconds > 0 else tr("N/A"),
+                "cells": cells, "change": seconds_text(seconds, 1, sign=True) if seconds > 0 else MISSING,
                 "changes": self.row_changes[row_index] if row_index < len(self.row_changes) else 0,
             })
         stock = [{"name": name, "stints": self.uses[name], "compound": extract_tyre_key(name),

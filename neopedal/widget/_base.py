@@ -68,18 +68,27 @@ ARROW_KEYS = {
     Qt.Key.Key_Down: (0, 1),
 }
 OPACITY_STEPS = (100, 90, 80, 70, 60, 50, 40)  # percent, context menu
-# Window content (own or child widget repainted: update request on window) or place changed
-PAINT_EVENTS = frozenset((
-    QEvent.Type.UpdateRequest, QEvent.Type.Paint, QEvent.Type.Show, QEvent.Type.Hide,
-    QEvent.Type.Move, QEvent.Type.Resize,
-))
 
 
 class PaintCounter:
     """Overlay window changes (GUI thread): each change gives the window a new "paint_serial",
-    so stream & VR capture skip windows unchanged since their last copy"""
+    so stream & VR capture skip windows unchanged since their last copy (see count_paint)"""
 
     count = 0
+
+
+def count_paint(window) -> None:
+    """Overlay window picture or place changed: new paint serial (PaintCounter)
+
+    Counted in the window handlers already in Python (paintEvent, move, resize, show & hide events) rather
+    than in an event() override, which would take every event of every overlay window through Python. The
+    window paintEvent runs for every repaint of its content, child cells too (the window is translucent: no
+    opaque child hides it from the dirty region), a hidden cell included.
+    Not once stopped: its Hide event would set an attribute again, never seen "closed" (reload waits).
+    """
+    if window.__dict__:
+        PaintCounter.count += 1
+        window.paint_serial = PaintCounter.count
 
 
 def position_values(pos: QPoint) -> dict:
@@ -223,6 +232,10 @@ class Base(QWidget):
 
     def post_update(self):
         """Run once after state inactive"""
+
+    def vehicle_reset(self):
+        """Run once before update after player vehicle reset (realtime_state.resets: session changed, back to
+        garage, followed car changed while spectating), override to clear values of the previous car or session"""
 
     def __unload_resource(self):
         """Unload widget resource"""
@@ -542,14 +555,28 @@ class Base(QWidget):
         else:
             super().keyPressEvent(event)
 
-    def event(self, event):
-        """Count window repaints & moves (paint serial, see PaintCounter)"""
-        result = super().event(event)
-        # Not once stopped: its Hide event would set an attribute again, never seen "closed" (reload waits)
-        if event.type() in PAINT_EVENTS and self.__dict__:
-            PaintCounter.count += 1
-            self.paint_serial = PaintCounter.count
-        return result
+    # Window change count (paint serial, see count_paint): own paintEvent of overlays drawing themselves is
+    # wrapped to count too (Overlay.__init_subclass__)
+    def paintEvent(self, event):
+        """Window content painted (child cells repainted or hidden): counted"""
+        super().paintEvent(event)
+        count_paint(self)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        count_paint(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        count_paint(self)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        count_paint(self)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        count_paint(self)
 
     def changeEvent(self, event):
         """Overlay no longer active window (game or app clicked): not selected"""
@@ -578,9 +605,9 @@ class Base(QWidget):
         """
         before = position_values(self.pos())
         self.move(pos)
+        # Toolbar read again by record (selection, new position): no second refresh per key press
         edit_mode().record(self.widget_name, action, before, position_values(self.pos()), merge)
         self.__save_position(store_now=not merge)
-        edit_mode().placement_changed(self.widget_name)
 
     def center_on_screen(self, horizontal: bool):
         """Center on its screen (centering rect of widget), horizontally or vertically"""
@@ -626,7 +653,7 @@ class Base(QWidget):
         show_name.setFont(show_name_font)
         menu.addSeparator()
 
-        add(menu, tr("Config"), lambda: config_widget(name))
+        add(menu, tr("Options…"), lambda: config_widget(name))
         menu.addSeparator()
         add(menu, tr("Center Horizontally"), lambda: self.center_on_screen(horizontal=True))
         add(menu, tr("Center Vertically"), lambda: self.center_on_screen(horizontal=False))
@@ -713,9 +740,10 @@ class Overlay(Base):
                 method = klass.__dict__.get(method_name)
                 if method is not None:
                     if not getattr(method, "timed", False):  # not wrapped by a parent widget already
-                        wrapped = timed_event(method, event)
                         if method_name == "timerEvent":
-                            wrapped = guarded_timer_event(wrapped)
+                            wrapped = guarded_timer_event(timed_event(method, event))
+                        else:  # own paintEvent replaces Base.paintEvent: window change counted here
+                            wrapped = timed_event(method, event, count_paint)
                         setattr(cls, method_name, wrapped)
                     break
 
@@ -773,7 +801,7 @@ class Overlay(Base):
         font.setFamily(name)
         font.setPixelSize(max(int(size), 1))
         if weight:
-            font.setWeight(FONT_WEIGHT_MAP[weight])
+            font.setWeight(QFont.Weight(FONT_WEIGHT_MAP[weight]))
         if self.modern_style:
             font.setFeature(QFont.Tag("tnum"), 1)  # fixed width digits for proportional font
             font.setFeature(QFont.Tag("calt"), 0)  # no ligature, such as "--" or "->"
@@ -1115,6 +1143,11 @@ def guarded_timer_event(func):
     @wraps(func)
     def wrapper(self, qt_event):
         try:
+            resets = realtime_state.resets
+            state = self.__dict__  # empty once unloaded (kept empty, see closed)
+            if state and state.setdefault("_vehicle_resets", resets) != resets:
+                state["_vehicle_resets"] = resets
+                self.vehicle_reset()
             result = func(self, qt_event)
         except Exception:
             errors = self.__dict__.get("_timer_errors", 0) + 1

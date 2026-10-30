@@ -231,7 +231,8 @@ def test_lap_time_text_rounded_first():
 
     assert format_laptime(119.9996) == "2:00.000"
     assert format_laptime(59.9997) == "1:00.000"
-    assert format_laptime(71.19) == "1:11.190" and format_laptime(9.5) == "9.500" and format_laptime(0.0) == "-"
+    # Same lap time text as every app page (0:09.500), missing value em dash
+    assert format_laptime(71.19) == "1:11.190" and format_laptime(9.5) == "0:09.500" and format_laptime(0.0) == "—"
 
 
 # --- J42 setup differences show lap times timed by game

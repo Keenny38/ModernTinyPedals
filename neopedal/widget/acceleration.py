@@ -20,6 +20,7 @@
 Acceleration Widget
 """
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .. import units
@@ -162,9 +163,7 @@ class Realtime(Overlay):
         )
 
         for index, timer in enumerate(self.timers):
-            start = self.unit_speed(timer.speed_start)
-            end = self.unit_speed(timer.speed_end)
-            self.bars_speed_range[index].text = f"{start:.0f}-{end:.0f}"
+            self.bars_speed_range[index].text = speed_range_text(timer, self.unit_speed)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -208,13 +207,16 @@ class Realtime(Overlay):
             target.update()
 
     def update_timer_delta(self, target, data):
-        """Delta acceleration time between last & best"""
+        """Delta acceleration time between last & best, none (0) before first comparison"""
         if target.last != data:
             target.last = data
-            delta_text = f"{data:+.{self.decimals_delta}f}"[:self.char_width]
-            color_index = (data >= 0) if data else 2
-            target.text = delta_text
-            target.fg = self.delta_color[color_index]
+            if data:
+                rounded = round(data, self.decimals_delta)  # color of shown value (0: neutral)
+                target.text = f"{rounded:+z.{self.decimals_delta}f}"[:self.char_width]
+                target.fg = self.delta_color[(rounded > 0) if rounded else 2]
+            else:
+                target.text = TEXT_PLACEHOLDER
+                target.fg = self.delta_color[2]
             target.update()
 
     # Additional methods
@@ -231,6 +233,12 @@ class Realtime(Overlay):
                 start = self.wcfg[f"speed_range_{index + 1}_start"]
                 end = self.wcfg[f"speed_range_{index + 1}_end"]
                 yield AccelTimer(start, end, speed_drop)
+
+
+def speed_range_text(timer: "AccelTimer", unit_speed: Callable[[float], float]) -> str:
+    """Speed range label, start below 1 m/s shown 0 (default 0.6 m/s: 0-60 km/h, not 2-60)"""
+    start = unit_speed(timer.speed_start) if timer.speed_start >= 1 else 0
+    return f"{start:.0f}-{unit_speed(timer.speed_end):.0f}"
 
 
 class AccelTimer:

@@ -130,7 +130,7 @@ def test_fill_for_white_text_keeps_dark_enough_colors():
 def test_theme_tokens_copied_to_qml(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from neopedal.ui.quick import FONT_SCALE, MOTION, RADIUS_SCALE, Theme, create_quick_view
+    from neopedal.ui.quick import FONT_SCALE, GLYPHS, ICON_SCALE, MOTION, RADIUS_SCALE, Theme, create_quick_view
 
     parent = QWidget()
     try:
@@ -139,8 +139,18 @@ def test_theme_tokens_copied_to_qml(ui_env):
         original = Theme()
         assert not isinstance(theme, Theme)
         for name in (*FONT_SCALE, *RADIUS_SCALE, *MOTION, "bpWide", "tipDelay", "disabledOpacity", "tintSelected",
-                     "monoFont", "animate", "accentFill", "lossFill", "seriesFuel", "silver", "live"):
+                     "monoFont", "animate", "accentFill", "lossFill", "seriesFuel", "silver", "live",
+                     "surfacePage", "surfaceCard", "surfaceFlyout", "surfaceSunken", "surfaceHover", "strokeSubtle",
+                     "strokeStrong", "scrim", "shadowOpacity", "accentHover", "accentPressed", "lossHover",
+                     "lossPressed", "accentInk", "headerTint", "legacy", "stageInk", "stageScrim", "hoverIntentDelay",
+                     "flashDuration", "chipHeight", "chipHeightSm", "shadowExtent", "shadowOffset",
+                     "letterSpacingOverline", "displayFont", "displayStyle", *ICON_SCALE, "headerHeight",
+                     "chipFilterHeight", "chipFilterHeightSm", "pulseDuration", "chartGrid", "chartAxis", "mapRoad",
+                     "letterSpacingCode"):
             assert theme.property(name) == getattr(original, name), name
+        glyphs = theme.property("glyphs")
+        glyphs = glyphs.toVariant() if hasattr(glyphs, "toVariant") else glyphs
+        assert glyphs == GLYPHS and glyphs["openFolder"] != glyphs["browse"]  # one glyph per action (S4)
         assert theme.property("fontSmall") == pytest.approx(original.fontPoint * 0.85)
         assert theme.property("motionBase") in (0, 180)
     finally:
@@ -401,10 +411,123 @@ ICON_BUTTONS_WITHOUT_TIP = 0
 CLICK_AREAS_WITHOUT_CURSOR = 0
 FADED_TEXTS = 0
 RAW_BREAKPOINTS = 0
-RAW_TINTS = 53
+RAW_TINTS = 11
 BUTTON_HEIGHT_OVERRIDES = 0
 PIXEL_FONT_SIZES = 0
-EM_SPACINGS = 278
+EM_SPACINGS = 96
+# 2026-10-29 audit (V3): colors, sizes & delays that went around the ratchets above
+LIGHTER_DARKER = 4
+DARK_CHECKS = 10
+NUMERIC_TINT_ALPHAS = 3
+WHITE_BLACK_LITERALS = 3
+COPIED_CONTROL_HEIGHTS = 1
+DELAY_LITERALS = 8
+# 2026-10-29 audit (S1..S16): design system
+ICON_EM_SIZES = 1  # left: transport buttons (icon sized to the round button)
+RAW_ACTION_GLYPHS = 9  # left: state icons (stars of levels & protected replays, lock state, pending bar), Stop
+BASE_FILLS = 0
+DIRECT_EMPTY_STATES = 0
+PULSE_LITERALS = 0
+
+
+def test_shades_from_tokens_do_not_grow():
+    """Surfaces & shades are tokens (surfaceCard / surfaceFlyout / surfaceSunken / surfaceHover, strokeSubtle /
+    strokeStrong, accentHover / accentPressed, tintInk()...), not Qt.lighter / Qt.darker of a palette color"""
+    found = matches(r"Qt\.(lighter|darker)\(")
+    assert len(found) <= LIGHTER_DARKER, "\n".join(found)
+
+
+def test_theme_kind_checks_do_not_grow():
+    """`theme.dark ? a : b` picks colors the theme already computes per theme (Legacy themes too)"""
+    found = matches(r"theme\.dark \?")
+    assert len(found) <= DARK_CHECKS, "\n".join(found)
+
+
+def test_tint_alphas_named():
+    """theme.tint(color, "subtle" | "selected" | "strong" | "outline" | "stripe"), not a number of its own"""
+    found = matches(r"theme\.tint\([^()]*(\([^()]*\))?[^()]*, *0?\.[0-9]+\)")
+    assert len(found) <= NUMERIC_TINT_ALPHAS, "\n".join(found)
+
+
+def test_white_and_black_literals_do_not_grow():
+    """Text on accent / loss fills: theme.accentInk or theme.inkOn(fill); over overlay previews: theme.stageInk"""
+    found = matches(r'"(white|black)"')
+    assert len(found) <= WHITE_BLACK_LITERALS, "\n".join(found)
+
+
+def test_control_heights_not_copied():
+    """theme.controlHeight / controlHeightSm / fieldHeight, not their em factors written again"""
+    found = matches(r"theme\.em \* (2\.05|2\.3|1\.85)\b")
+    assert len(found) <= COPIED_CONTROL_HEIGHTS, "\n".join(found)
+
+
+def test_delays_from_tokens():
+    """Delays felt by the user (hover intent, flash of a corrected value): theme.hoverIntentDelay / flashDuration.
+    Repeating timers (clock ticks, polls) are not delays."""
+    def repeating(lines, index):
+        return any("repeat: true" in line for line in lines[max(0, index - 4): index + 5])
+
+    found = matches(r"\binterval: ([3-9]\d\d|\d{4,})\b", skip=repeating)
+    assert len(found) <= DELAY_LITERALS, "\n".join(found)
+
+
+def test_components_use_surface_tokens():
+    """Shared components hold no ratchet value (pages get the tokens through them)"""
+    folder = os.path.join("ui", "qml", "components")
+    components = {os.path.basename(path) for path in qml_paths() if folder in path}
+    for pattern in (r"theme\.dark \?", r'"(white|black)"', r"Qt\.rgba\(", r"theme\.em \* (2\.05|2\.3|1\.85)\b",
+                    r"theme\.tint\([^()]*, *0?\.[0-9]+\)"):
+        found = [line for line in matches(pattern) if line.split(":")[0] in components]
+        assert found == [], (pattern, found)
+    shades = [line for line in matches(r"Qt\.(lighter|darker)\(") if line.split(":")[0] in components]
+    assert len(shades) <= 1, shades  # class badge strip: a shade of the class color itself
+
+
+@pytest.mark.parametrize("palette", PALETTES)
+def test_surface_elevation_order(themed, palette):
+    """Elevation: dark themes lighter as surfaces rise (page < card < flyout), light themes white cards & flyouts on a
+    gray page (page < card <= flyout, shadows tell flyouts); sunken fields under cards, hover shows on cards. Legacy
+    Dark cards above the page too (its base is darker than its window). Legacy corners half as round."""
+    from neopedal.ui.quick import Theme, luminance
+
+    themed(palette)
+    theme = Theme()
+    page, card, flyout = (luminance(color) for color in (theme.surfacePage, theme.surfaceCard, theme.surfaceFlyout))
+    sunken, hover = luminance(theme.surfaceSunken), luminance(theme.surfaceHover)
+    if theme.dark:
+        assert page < card < flyout, palette
+        assert sunken < card < hover, palette
+    else:
+        assert page < card <= flyout, palette
+        assert sunken < card and hover < card, palette
+    assert theme.cardBorder == theme.strokeSubtle and theme.strokeStrong != theme.strokeSubtle
+    assert theme.legacy == palette.startswith("Legacy")
+    assert theme.headerTint == (theme.dimText if theme.legacy else theme.accent)
+    legacy_radius = theme.radiusLg
+    themed("Modern Dark" if theme.dark else "Modern Light")
+    assert legacy_radius == pytest.approx(theme.radiusLg / 2 if palette.startswith("Legacy") else theme.radiusLg)
+
+
+@pytest.mark.parametrize("palette", PALETTES)
+def test_text_contrast_on_surfaces(themed, palette):
+    """Text 7:1 & dim text 4.5:1 on every surface; accent 4.4:1 on cards & flyouts (icons, accent texts); white on
+    hovered & pressed accent / loss fills; stage ink on the overlay preview stage"""
+    from PySide6.QtGui import QColor
+
+    from neopedal.ui.quick import Theme, contrast_ratio
+
+    themed(palette)
+    theme = Theme()
+    for name in ("surfacePage", "surfaceCard", "surfaceFlyout", "surfaceSunken", "surfaceHover"):
+        surface = getattr(theme, name)
+        assert contrast_ratio(theme.text, surface) >= 7, name
+        assert contrast_ratio(theme.dimText, surface) >= 4.5, name
+    for name in ("surfaceCard", "surfaceFlyout"):
+        assert contrast_ratio(theme.accent, getattr(theme, name)) >= 4.4, name
+    for fill in (theme.accentHover, theme.accentPressed, theme.lossHover, theme.lossPressed):
+        assert contrast_ratio(theme.accentInk, fill) >= 4.5
+    assert theme.accentInk == QColor("white") and theme.stageInk == QColor("white")
+    assert contrast_ratio(theme.stageInk, theme.stageTop) >= 4.5
 
 
 @pytest.mark.parametrize("palette", PALETTES)
@@ -477,7 +600,9 @@ def test_new_theme_functions_same_in_qml_and_python(themed, palette):
                 '    property color t2: theme.tint(theme.gain, "strong")',
                 '    property color d0: theme.dimOn(theme.hover)',
                 '    property color d1: theme.dimOn(theme.tint(theme.loss, 0.16))',
-                '    property color d2: theme.dimOn(theme.accentFill)']
+                '    property color d2: theme.dimOn(theme.accentFill)',
+                '    property color k0: theme.tintInk(theme.gain)',
+                '    property color k1: theme.tint(theme.loss, "outline")']
         body += [f'    property color o{i}: theme.tone("{name}")' for i, name in enumerate(tones)]
         body += [f'    property color s{i}: theme.sessionColor("{code}")' for i, code in enumerate(sessions)]
         body.append("}")
@@ -488,7 +613,8 @@ def test_new_theme_functions_same_in_qml_and_python(themed, palette):
         theme = Theme()
         python = {"t0": theme.tint(theme.accent, "selected"), "t1": theme.tint(theme.loss, 0.3),
                   "t2": theme.tint(theme.gain, "strong"), "d0": theme.dimOn(theme.hover),
-                  "d1": theme.dimOn(theme.tint(theme.loss, 0.16)), "d2": theme.dimOn(theme.accentFill)}
+                  "d1": theme.dimOn(theme.tint(theme.loss, 0.16)), "d2": theme.dimOn(theme.accentFill),
+                  "k0": theme.tintInk(theme.gain), "k1": theme.tint(theme.loss, "outline")}
         python.update({f"o{i}": theme.tone(name) for i, name in enumerate(tones)})
         python.update({f"s{i}": theme.sessionColor(code) for i, code in enumerate(sessions)})
         for key, expected in python.items():
@@ -637,3 +763,99 @@ Item {{
     finally:
         view.setSource(QUrl())
         view.deleteLater()
+
+
+# --- Design system rules of the 2026-10-29 audit (S1..S16)
+def qml_text(name: str) -> str:
+    return "\n".join(qml_files()[name])
+
+
+def test_icon_sizes_from_tokens():
+    """Icon sizes: theme.iconXs / iconSm / iconMd / iconLg / iconHero, not em factors of their own (S7)"""
+    found = [f"{name}:{number}" for name, number, own in element_blocks("Icon")
+             if any("theme.em" in line for line in own_lines(own, "size"))]
+    assert len(found) <= ICON_EM_SIZES, found
+
+
+def test_action_glyphs_from_table():
+    """One glyph per action: theme.glyphs.<action> (GLYPHS, table in docs/wiki/Development.md), not raw codes (S4)"""
+    from neopedal.ui.quick import GLYPHS
+
+    codes = "|".join(sorted(set(GLYPHS.values())))
+    found = matches(r'glyph: [^\n]*"(' + codes + r')"')
+    assert len(found) <= RAW_ACTION_GLYPHS, len(found)
+    assert len(set(GLYPHS.values())) == len(GLYPHS) - 3  # close = remove, restore = undo, import = openFile
+    used = matches(r"theme\.glyphs\.\w+")
+    assert used and all(re.search(r"theme\.glyphs\.(\w+)", line).group(1) in GLYPHS for line in used)
+
+
+def test_surfaces_not_base_and_no_hover_accent_border():
+    """Cards, rows & sticky headers on surfaceCard / surfaceHover / surfaceSunken, not theme.base (S2); hover never
+    draws an accent border (S3); corners radiusSm / radiusMd / radiusLg, never radiusXl (S10)"""
+    assert len(matches(r"(?<![.\w])color: .*theme\.base\b")) <= BASE_FILLS
+    assert matches(r"border\.color: .*(containsMouse|hovered)[^?]*\? theme\.accent\b") == []
+    assert matches(r"theme\.radiusXl") == []
+    row = qml_text("TpListRow.qml")
+    assert "pressed && !selected ? theme.surfaceSunken" in row and "card ?" in row
+
+
+def test_shared_states_spinners_and_tooltips():
+    """Spinners are TpSpinner, progress TpMeter, tooltips TpToolTip (S9, S12); data panels use TpStateView"""
+    raw = matches(r"(?<![\w.])(BusyIndicator|ProgressBar)\s*\{")
+    assert [line for line in raw if not line.startswith("TpSpinner.qml")] == []
+    assert [line for line in matches(r"(?<![\w.])ToolTip\s*\{") if not line.startswith("TpToolTip.qml")] == []
+    direct = [line for line in matches(r"(?<![\w.])EmptyState\s*\{")
+              if not line.startswith(("EmptyState.qml", "TpStateView.qml"))]
+    assert len(direct) <= DIRECT_EMPTY_STATES, direct
+
+
+def test_one_count_badge_chip_and_tag():
+    """Counts are TpCountBadge, tags TpChip { interactive: false } (TpTag removed), chip heights from tokens (S5)"""
+    assert "TpTag.qml" not in qml_files() and matches(r"\bTpTag\b") == []
+    for name in ("TpCardHeader.qml", "TpPageHeader.qml", "LapList.qml", "LapLibraryPanel.qml", "Settings.qml",
+                 "OverlayOptions.qml"):
+        assert "TpCountBadge {" in qml_text(name), name
+    assert "theme.chipFilterHeight" in qml_text("TpChip.qml")
+    assert "solid: card.failed" in qml_text("ModuleCard.qml")  # error badge as the overlays'
+
+
+def test_hover_revealed_buttons_never_half_faded():
+    """A hover-revealed action is hidden (0) or shown (1), never a faded button with its text or icon (S14)"""
+    number = re.compile(r"(?<![\w.])0?\.\d+")
+    found = []
+    for name, line_number, own in element_blocks("TpButton"):
+        for line in own_lines(own, "opacity"):
+            values = [float(value) for value in number.findall(line.split("opacity", 1)[1].split("//")[0])]
+            if any(0 < value < 1 for value in values):
+                found.append(f"{name}:{line_number}: {line.strip()}")
+    assert found == []
+
+
+def test_pulse_flash_and_row_heights_from_tokens():
+    """Status pulses at theme.pulseDuration (TpPulseDot, TpTally reuses it), table headers theme.headerHeight,
+    letter spacing from tokens (S6, S8, S13)"""
+    assert len(matches(r"pulseDuration: \d")) <= PULSE_LITERALS
+    assert matches(r"\bduration: [6-9]\d\d\b") == []
+    assert "TpPulseDot {" in qml_text("TpTally.qml")
+    assert "theme.headerHeight" in qml_text("TpHeaderCell.qml")
+    assert matches(r"letterSpacing: [0-9]") == []
+
+
+def test_toolbar_menu_and_shared_drop_zone():
+    """TpToolbar "⋯" opens with toggleBelow (S16); drops through TpDropZone, swatches TpColorSwatch (S15); popup
+    headers through TpCardHeader (S1)"""
+    toolbar = qml_text("TpToolbar.qml")
+    assert "overflowMenu.toggleBelow(more" in toolbar and "popup(more" not in toolbar
+    assert "toggleBelow(source)" in qml_text("TpAction.qml")
+    file_drops = [f"{name}:{number}" for name, number, own in element_blocks("DropArea") if "hasUrls" in own]
+    assert [found for found in file_drops if not found.startswith("TpDropZone.qml")] == []  # tyre drags: own drops
+    for name in ("RaceCalculator.qml", "RaceResults.qml", "TrackMapViewer.qml"):
+        assert "TpDropZone {" in qml_text(name), name
+    for name in ("TpOptionEditor.qml", "EditorCell.qml"):
+        assert "TpColorSwatch {" in qml_text(name), name
+    for name in ("DeletedPresets.qml", "PresetBackups.qml", "PresetComparePanel.qml", "PresetTransfer.qml",
+                 "RecentlyDeleted.qml", "ReleaseViewer.qml"):
+        text = qml_text(name)
+        assert 'level: "popup"' in text and "closable: true" in text, name
+    for name in ("RaceQuickSetup.qml", "RaceTimeline.qml", "RaceHistory.qml"):
+        assert qml_text(name).startswith(("import", "//")) and "TpSectionCard {" in qml_text(name), name

@@ -23,7 +23,8 @@ Overlay Options page: on/off options really controlling other options, where the
 Plain data only (no Qt). Checked against the overlay code: an option is dimmed only while it does nothing.
 
 - TOGGLE_FIXES: section led by the wrong on/off option, led by the right one instead (wrong one kept in it).
-- DEPENDENCY_FIXES: option -> on/off option it is used with ("" if none: used whatever other options are).
+- DEPENDENCY_FIXES: option -> on/off option it is used with ("" if none: used whatever other options are),
+  on/off option -> itself: leads a section of its own (cut in the section of a sibling item: early pit stops).
 - INACTIVE_RULES: options doing nothing with some values of other options (count, choice, "not while on"),
   see OptionUI.inactive for the states.
 - ANY_OF: options used by several parts, each switched by its own on/off option: used while any is on.
@@ -64,6 +65,12 @@ _NOTES_TEXTS = {
     "pit_notes_text": "",
     "pit_comments_text": "",
 }
+# Early pit stops: own on/off option & section, not part of pit stops (both words "pitstop count")
+_EARLY_PITSTOPS = {
+    "show_early_pitstop_count": "show_early_pitstop_count",
+    **{f"{prefix}_early_pitstop_count": "show_early_pitstop_count"
+       for prefix in ("decimal_places", "font_color", "background_color")},
+}
 _RPM_MULTIPLIERS = ("rpm_multiplier_low", "rpm_multiplier_safe", "rpm_multiplier_redline", "rpm_multiplier_critical",
                     "rpm_multiplier_over_rev")
 
@@ -90,10 +97,12 @@ OPTION_FIXES: dict[str, tuple[OptionFix, ...]] = {
     "fuel": (OptionFix(dependencies={
         "low_fuel_lap_threshold": "",  # low amount color, flashing or not
         "show_refueling_level_mark": "show_fuel_level_bar",
+        **_EARLY_PITSTOPS,
     }),),
     "virtual_energy": (OptionFix(dependencies={
         "low_energy_lap_threshold": "",
         "show_refilling_level_mark": "show_energy_level_bar",
+        **_EARLY_PITSTOPS,
     }),),
     "track_notes": (OptionFix(dependencies=_NOTES_TEXTS),),
     "pace_notes": (OptionFix(dependencies=_NOTES_TEXTS),),
@@ -134,7 +143,9 @@ OPTION_FIXES: dict[str, tuple[OptionFix, ...]] = {
             "tyre_pressure_target_minimum", "tyre_pressure_target_maximum", "tyre_pressure_target_rear_minimum",
             "tyre_pressure_target_rear_maximum", "tyre_target_by_compound", "tyre_pressure_low_color",
             "tyre_pressure_high_color"), "enable_tyre_pressure_target"),
-    }),),
+    }), OptionFix(MODERN, dependencies={
+        "warning_threshold_remaining": "",  # of tread left & tread gauge (see ANY_OF)
+    })),
     "track_map": (OptionFix(dependencies={
         "auto_prediction_additional_pitstop_time": "enable_auto_pitout_prediction"}),),
     "corner_coach": (OptionFix(dependencies={"braking_point_tolerance": "show_braking_point"}),),
@@ -210,7 +221,11 @@ _DRIVING_EVENTS = "show_setting_popup_driving_events"  # pop-up of limiter, head
 _ENGINE = ("show_engine_status", "show_engine_overheat_events")
 # Option -> on/off options of the parts using it (chains followed: event log events need the event log on)
 ANY_OF: dict[str, Mapping[str, tuple[str, ...]]] = {
-    "tyre_overview": {"show_layer_labels": ("show_carcass_temperature", "show_inner_layer_temperature")},
+    "tyre_overview": {
+        "show_layer_labels": ("show_carcass_temperature", "show_inner_layer_temperature"),
+        # Tread left & tread gauge (modern design only: classic one follows show_wear, see OPTION_FIXES)
+        "warning_threshold_remaining": ("show_wear", "show_tread_gauge"),
+    },
     "black_box": {
         # Labels of status chips also named by setting change pop-up
         "text_abs": ("show_abs_indicator", _SETTING_POPUP),

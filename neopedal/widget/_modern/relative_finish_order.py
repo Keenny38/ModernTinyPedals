@@ -77,7 +77,8 @@ class Realtime(ModernOverlay):
 
         pad = unit * 0.3
         gap = unit * 0.14
-        labels = ["LAPS", tr_overlay("LDR"), tr_overlay("DIFF")]  # first column labels
+        # First column labels: race length & energy type (any of them), leader, difference
+        labels = [*map(tr_overlay, RACELENGTH_TYPE_ID + ENERGY_TYPE_ID), tr_overlay("LDR"), tr_overlay("DIFF")]
         if self.rows > 5:
             labels.append(f"{tr_overlay('EX+')}{self.extra_laps}")
         cell_w = max(self.text_width("value", "8" * self.char_width), *(self.text_width("label", text) for text in labels))
@@ -108,7 +109,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for row_index, row in enumerate(self.cells):
             if row_index in LABEL_ROWS:
                 continue
@@ -227,9 +228,10 @@ class Realtime(ModernOverlay):
                 leader_final = leader_remaining % 1
                 leader_hi = self.highlight(leader_pace, leader_final)
             leader.append((self.laps_text(leader_final), leader_hi))
-        live_pit_times = (self.leader_pit_times[-1] // 1, self.player_pit_times[-1] // 1)  # last column
+        # Last column, rounded as displayed (:.0f)
+        live_pit_times = (round(self.leader_pit_times[-1]), round(self.player_pit_times[-1]))
         self.refresh((
-            RACELENGTH_TYPE_ID[finish_as_lap], ENERGY_TYPE_ID[energy_type > 0], lap_diff_text,
+            tr_overlay(RACELENGTH_TYPE_ID[finish_as_lap]), tr_overlay(ENERGY_TYPE_ID[energy_type > 0]), lap_diff_text,
             tuple(leader), tuple(player), tuple(refills), tuple(extras), live_pit_times,
         ))
 

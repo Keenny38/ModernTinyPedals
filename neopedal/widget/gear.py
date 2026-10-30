@@ -283,15 +283,15 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_gauge(self, target, rpm, gear, speed):
-        """Gauge bar: state as tuple (a sum of values may stay equal while they change), neutral warning
-        included (set by shifting timer alone, values unchanged)"""
-        gauge_state = (rpm, gear, speed, self.neutral_warning(gear, speed))
+        """Gauge bar: repaint when drawn (gear, speed shown, color: neutral warning & flicker included)"""
+        color_index = self.color_rpm(rpm, gear, speed)
+        speed_shown = round(self.unit_speed(speed))
+        gauge_state = (gear, speed_shown, color_index)
         if target.last != gauge_state:
             target.last = gauge_state
-            color_index = self.color_rpm(rpm, gear, speed)
             target.update_input(
                 GEAR_SEQUENCE(gear, "N"),
-                self.unit_speed(speed),
+                speed_shown,
                 color_index,
                 self.gauge_color[color_index],
             )

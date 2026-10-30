@@ -20,7 +20,7 @@
 Ride height Widget, modern design
 
 Ride height per wheel with gauge, warning below bottoming height, front & rear ride height
-(aero reference, from game) between left & right tiles.
+(aero reference, from game; average of wheels if game gives none, LMU) between left & right tiles.
 """
 
 from __future__ import annotations
@@ -69,18 +69,26 @@ class Realtime(GaugeQuad):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        heights = api.read.wheel.ride_height()
         axles: tuple[str, ...] = ()
         if self.show_axle:
-            vehicle = api.read.vehicle
-            axles = tuple(f"{value:.{self.decimals}f}" for value in (vehicle.ride_height_front(), vehicle.ride_height_rear()))
-        tiles = self.read()
+            axles = tuple(f"{value:z.{self.decimals}f}" for value in axle_ride_heights(heights))
+        tiles = self.read(heights)
         rects = self.quad_slots[0].tiles if self.quad_slots else ()
         self.refresh_keyed((tiles, axles),
                            (self.pixel_key(tiles, [rect.width() for rect in rects], "level", "mark"), axles))
 
-    def read(self) -> tuple:
+    def read(self, heights: tuple[float, ...] | None = None) -> tuple:
         theme = self.theme
         return tuple(
             self.gauge(value, value, value / self.max_range, theme.positive, value < bottom)
-            for value, bottom in zip(api.read.wheel.ride_height(), self.bottoming)
+            for value, bottom in zip(api.read.wheel.ride_height() if heights is None else heights, self.bottoming)
         )
+
+
+def axle_ride_heights(heights: tuple[float, ...]) -> tuple[float, float]:
+    """Front & rear ride height from game, average of axle wheels if game gives none (LMU: always 0)"""
+    vehicle = api.read.vehicle
+    front = vehicle.ride_height_front() or (heights[0] + heights[1]) * 0.5
+    rear = vehicle.ride_height_rear() or (heights[2] + heights[3]) * 0.5
+    return front, rear

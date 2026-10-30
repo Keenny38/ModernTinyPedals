@@ -449,7 +449,9 @@ def test_game_hud_menu(director_page, monkeypatch):
     backend.camera.toggleGameUi()
     assert len(clicks) == 1 and backend.noticeError
     backend.game.game_host = ""
-    poll(page, {})  # game closed: nothing sent
+    for _ in range(3):  # game closed (session left once it stays unanswered, see lost_answer): nothing sent
+        poll(page, {})
+    assert not backend.inSession
     sent = len(page.game.sent)
     backend.camera.setHudShown(False)
     backend.camera.toggleHudComponent("chat")

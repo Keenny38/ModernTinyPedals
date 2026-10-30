@@ -27,9 +27,13 @@ from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import SessionBestLap
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import TimingConfig
+
+# Running times formatted uncached: new value every update, would evict lap times of tables from cache
+running_laptime = calc.sec2laptime.__wrapped__
 
 
 class Realtime(Overlay):
@@ -215,27 +219,17 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.player_index = 0
-        self.laptime_sbst = MAX_SECONDS
+        self.session_best = SessionBestLap()
 
     def post_update(self):
-        self.laptime_sbst = MAX_SECONDS  # reset laptime
+        self.session_best.reset()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Session best laptime
         if self.wcfg["show_session_best"]:
-            if (not self.wcfg["show_session_best_from_same_class_only"]
-                or api.read.vehicle.same_class(self.player_index)):
-                laptime_best_tmp = api.read.timing.best_laptime(self.player_index)
-                if 0 < laptime_best_tmp < self.laptime_sbst:
-                    self.laptime_sbst = laptime_best_tmp
-
-            self.player_index += 1  # wrap after last car, never read one past it
-            if self.player_index >= api.read.vehicle.total_vehicles():
-                self.player_index = 0
-
-            self.update_laptime(self.bar_sbst, self.laptime_sbst, self.prefix_sbst)
+            laptime_sbst = self.session_best.update(self.wcfg["show_session_best_from_same_class_only"])
+            self.update_laptime(self.bar_sbst, laptime_sbst, self.prefix_sbst)
 
         # Personal best laptime
         if self.wcfg["show_best"]:
@@ -259,7 +253,7 @@ class Realtime(Overlay):
         # Estimated laptime
         if self.wcfg["show_estimated"]:
             laptime_esti = minfo.delta.lapTimeEstimated
-            self.update_laptime(self.bar_esti, laptime_esti, self.prefix_esti)
+            self.update_laptime(self.bar_esti, laptime_esti, self.prefix_esti, running_laptime)
 
         # Session personal best laptime
         if self.wcfg["show_session_personal_best"]:
@@ -277,12 +271,12 @@ class Realtime(Overlay):
             self.update_laptime(self.bar_avpc, laptime_avpc, self.prefix_avpc)
 
     # GUI update methods
-    def update_laptime(self, target, data, prefix):
+    def update_laptime(self, target, data, prefix, laptime_text=calc.sec2laptime):
         """Update laptime"""
         if target.last != data:
             target.last = data
             if 0 < data < MAX_SECONDS:
-                text = f"{prefix}{calc.sec2laptime(data):>8.8}"
+                text = f"{prefix}{laptime_text(data):>8.8}"
             else:
                 text = f"{prefix}{TEXT_NOLAPTIME}"
             target.text = text
@@ -294,7 +288,7 @@ class Realtime(Overlay):
             target.last = (data, invalid)
             target.fg = self.bar_style_curr[invalid]
             if 0 < data < MAX_SECONDS:
-                text = f"{self.prefix_curr}{calc.sec2laptime(data):>8.8}"
+                text = f"{self.prefix_curr}{running_laptime(data):>8.8}"
             else:
                 text = f"{self.prefix_curr}{TEXT_NOLAPTIME}"
             target.text = text

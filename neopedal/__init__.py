@@ -53,7 +53,7 @@ class RealtimeState:
         version: activity change counter (active, paused, shown, resets, connector freeze & resume).
 
     Activity change: notify_change wakes threads idle until activity changes (wait_change, subscribed wake
-    events) and emits overlay_signal.activity, instead of polling state while game is closed or inactive.
+    events), instead of polling state while game is closed or inactive.
     """
 
     __slots__ = (
@@ -94,13 +94,16 @@ class RealtimeState:
         self._wakes: tuple[threading.Event, ...] = ()  # copy on write, set without lock
 
     def notify_change(self) -> None:
-        """Activity changed: wake waiting threads & subscribed events, emit overlay_signal.activity"""
+        """Activity changed: wake waiting threads & subscribed events
+
+        Called from data threads (connector sync, overlay control), never emits a Qt signal: a plain function
+        connected to it would run in the emitting thread (GUI readers poll realtime_state or wait_change).
+        """
         with self._change:
             self.version += 1
             self._change.notify_all()
         for wake in self._wakes:
             wake.set()
-        overlay_signal.activity.emit()
 
     def subscribe(self, wake: threading.Event) -> None:
         """Set wake event on every activity change (thread waiting with its own stop wake)"""
@@ -144,7 +147,6 @@ class OverlaySignal(QObject):
         iconify: signal for toggling taskbar icon visibility state (for VR compatibility).
         context: signal for session type or pit state changed (widget visibility context).
         editing: signal for overlay edit mode started or ended.
-        activity: signal for activity state changed (see RealtimeState.notify_change), any thread.
     """
 
     hidden = Signal(bool)
@@ -153,7 +155,6 @@ class OverlaySignal(QObject):
     paused = Signal(bool)
     iconify = Signal(bool)
     editing = Signal(bool)
-    activity = Signal()
     __slots__ = ()
 
 

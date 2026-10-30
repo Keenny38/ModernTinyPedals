@@ -5,8 +5,9 @@ import "../components"
 
 // Settings page: global options (config.json) by category. Navigation & search on the left (a choice
 // list on narrow pages), options of the category in group cards, status cards (web dashboard address,
-// remote control, settings file). Edits stay pending until applied: bar at the bottom with Undo, Redo,
-// Discard & Apply (Ctrl+S). A search ("/") looks through every category.
+// remote control, settings file). Edits stay pending until applied: unsaved changes bar at the bottom
+// (TpPendingBar, as on Overlay Options) with Undo, Redo, Discard & Apply (Ctrl+S). A search ("/") or
+// "Changed Only" looks through every category. Rows: more actions with "⋯", right click or Menu key.
 TpPage {
     id: page
 
@@ -16,6 +17,9 @@ TpPage {
     readonly property var remote: backend.remoteControl
     readonly property var previews: backend.previews
     readonly property var categories: backend.categories  // read once per change (navigation, choice list)
+    readonly property var section: backend.sectionState  // category kept in the loaded preset: preset, lock, on / off
+    readonly property var fontPreview: backend.fontPreview
+    property var menuData: null  // option row of the more actions menu
 
     function scrollToKey(key) {
         var index = backend.optionIndex(key)
@@ -29,6 +33,17 @@ TpPage {
             item.flash()
         }
     }
+    // Sample text of the global font override preview: font & weight chosen, pixel size of an overlay font
+    component SampleText: Text {
+        property real size: 1
+        text: "Aa 0123  " + size + " px"
+        textFormat: Text.PlainText
+        color: theme.text
+        font.family: page.fontPreview.family !== "" ? page.fontPreview.family : Qt.application.font.family
+        font.weight: page.fontPreview.weightValue > 0 ? page.fontPreview.weightValue : Font.Normal
+        font.pixelSize: Math.max(1, size)
+    }
+
     // Field being edited committed (Apply, Ctrl+S: buttons & shortcuts take no focus): focus left
     function commitEdits() {
         flick.forceActiveFocus()
@@ -39,8 +54,14 @@ TpPage {
         field.selectAll()
     }
 
+    // Ctrl+F or "/": search of this page (Ctrl+Shift+F finds any option of the app)
+    Shortcut {
+        sequences: [StandardKey.Find]
+        enabled: pageState.active && !backend.singleCategory
+        onActivated: page.focusSearch()
+    }
     Keys.onPressed: function(event) {
-        if (event.text === "/") {  // Ctrl+F is Find Option (every option of the app)
+        if (event.text === "/" && !backend.singleCategory) {
             page.focusSearch()
             event.accepted = true
         }
@@ -69,16 +90,47 @@ TpPage {
         }
     }
 
+    // More actions of an option row (same menu as Overlay Options & Find Option)
+    TpMenu {
+        id: rowMenu
+        objectName: "settingMenu"
+        TpMenuItem {
+            text: i18n.tr("Reset to Default")
+            enabled: page.menuData !== null && page.menuData.modified
+            onTriggered: backend.resetOption(page.menuData.key)
+        }
+        TpMenuItem {
+            readonly property bool shown: page.menuData !== null && page.menuData.kind === "path"
+            visible: shown
+            height: shown ? implicitHeight : 0
+            text: i18n.tr("Open Folder")
+            onTriggered: backend.openFolder(page.menuData.key)
+        }
+        MenuSeparator {}
+        TpMenuItem {
+            text: i18n.tr("Copy Option Key")
+            onTriggered: backend.copyText(page.menuData.option)
+        }
+        onClosed: flick.forceActiveFocus()
+    }
+    function openRowMenu(data, anchor, x, y) {
+        page.menuData = data
+        if (x < 0)
+            rowMenu.toggleBelow(anchor, true)  // right aligned under the button or row
+        else
+            rowMenu.popup(anchor, x, y)
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
 
         // Navigation
         Rectangle {
-            visible: !page.narrow
+            visible: !page.narrow && !backend.singleCategory
             Layout.fillHeight: true
             Layout.preferredWidth: Math.round(theme.em * 15.5)
-            color: theme.dark ? Qt.darker(theme.window, 1.12) : Qt.darker(theme.window, 1.025)
+            color: theme.surfaceSunken
 
             ColumnLayout {
                 anchors.fill: parent
@@ -88,9 +140,20 @@ TpPage {
                 TpSearchField {
                     id: search
                     Layout.fillWidth: true
-                    placeholderText: i18n.tr("Search settings")
+                    placeholderText: i18n.tr("Search settings") + "   Ctrl+F"
                     onSearchChanged: function(text) { backend.setSearch(text) }
                     onExitField: flick.forceActiveFocus()
+                }
+                TpSwitch {
+                    objectName: "changedOnlySwitch"
+                    checkable: false  // follows backend
+                    checked: backend.changedOnly
+                    text: i18n.tr("Changed Only")
+                    tip: i18n.tr("Only options set apart from their default value or not applied yet, in every category")
+                    onClicked: backend.setChangedOnly(!backend.changedOnly)
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: i18n.tr("Changed Only")
+                    Accessible.checked: backend.changedOnly
                 }
 
                 ListView {
@@ -112,157 +175,99 @@ TpPage {
                         var index = keys.indexOf(backend.category)
                         backend.selectCategory(keys[Math.max(0, Math.min(keys.length - 1, index + offset))])
                     }
-                    delegate: Rectangle {
+                    // Category, with the heading "In the loaded preset" above the first one kept in the preset
+                    delegate: Item {
                         id: entry
                         required property int index
                         readonly property var info: page.categories[index] || ({})
                         readonly property bool selected: !backend.searching && backend.category === entry.info.key
                         readonly property bool dimmed: backend.searching && entry.info.matches === 0
                         width: ListView.view.width
-                        height: Math.round(theme.em * 2.4)
-                        radius: theme.radiusMd
-                        color: theme.rowColor(entryArea.containsMouse, selected)
-                        Behavior on color { ColorAnimation { duration: theme.motionFast } }
-                        Accessible.role: Accessible.PageTab
-                        Accessible.name: entry.info.label
-                        Accessible.description: entry.info.errors > 0 && !backend.searching
-                            ? i18n.tr("%1 invalid value(s)").arg(entry.info.errors) : ""
-                        Accessible.selected: selected
-                        // Keyboard focus on the navigation (Up / Down choose): ring on the shown category
-                        FocusRing { anchors.margins: gap; visible: nav.activeFocus && backend.category === entry.info.key }  // inside: list clips
+                        height: entryHeading.height + entryBox.height
+                        TpSectionLabel {
+                            id: entryHeading
+                            width: parent.width
+                            height: entry.info.heading ? implicitHeight + theme.space2 : 0
+                            visible: entry.info.heading !== ""
+                            leftPadding: theme.space2
+                            topPadding: theme.space4
+                            text: entry.info.heading || ""
+                        }
+                        Rectangle {
+                            id: entryBox
+                            y: entryHeading.height
+                            width: parent.width
+                            height: Math.round(theme.em * 2.4)
+                            radius: theme.radiusMd
+                            color: theme.rowColor(entryArea.containsMouse, entry.selected)
+                            Behavior on color { ColorAnimation { duration: theme.motionFast } }
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: entry.info.label
+                            Accessible.description: entry.info.errors > 0 && !backend.searching
+                                ? i18n.tr("%1 invalid value(s)").arg(entry.info.errors) : ""
+                            Accessible.selected: entry.selected
+                            // Keyboard focus on the navigation (Up / Down choose): ring on the shown category
+                            FocusRing { anchors.margins: gap; visible: nav.activeFocus && backend.category === entry.info.key }  // inside: list clips
 
-                        Rectangle {
-                            visible: entry.selected
-                            width: Math.round(theme.em * 0.22)
-                            height: parent.height * 0.5
-                            radius: width / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: theme.accent
-                        }
-                        Icon {
-                            id: entryIcon
-                            x: theme.em * 0.7
-                            anchors.verticalCenter: parent.verticalCenter
-                            glyph: entry.info.glyph
-                            color: entry.selected ? theme.accent : theme.dimText
-                            size: theme.em * 1.0
-                        }
-                        Text {
-                            anchors.left: entryIcon.visible ? entryIcon.right : parent.left
-                            anchors.leftMargin: entryIcon.visible ? theme.em * 0.6 : theme.em * 0.8
-                            anchors.right: badge.left
-                            anchors.rightMargin: theme.em * 0.3
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: entry.info.label
-                            color: entry.dimmed ? theme.dimOn(entry.color) : theme.text  // no match in search
-                            font.weight: entry.selected ? Font.DemiBold : Font.Normal
-                            elide: Text.ElideRight
-                        }
-                        Rectangle {
-                            id: badge
-                            readonly property int count: backend.searching ? entry.info.matches : entry.info.changed
-                            readonly property bool errors: entry.info.errors > 0 && !backend.searching
-                            visible: count > 0
-                            anchors.right: parent.right
-                            anchors.rightMargin: theme.em * 0.5
-                            anchors.verticalCenter: parent.verticalCenter
-                            height: Math.round(theme.em * 1.3)
-                            width: Math.max(height, badgeText.implicitWidth + theme.em * 0.6)
-                            radius: height / 2
-                            color: badge.errors ? theme.lossFill
-                                 : backend.searching ? theme.hover : theme.accentFill
+                            Rectangle {
+                                visible: entry.selected
+                                width: Math.round(theme.em * 0.22)
+                                height: parent.height * 0.5
+                                radius: width / 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: theme.accent
+                            }
+                            Icon {
+                                id: entryIcon
+                                x: theme.em * 0.7
+                                anchors.verticalCenter: parent.verticalCenter
+                                glyph: entry.info.glyph
+                                color: entry.selected ? theme.accent : theme.dimText
+                                size: theme.iconMd
+                            }
                             Text {
-                                id: badgeText
-                                anchors.centerIn: parent
-                                text: badge.errors ? "! " + badge.count : badge.count  // invalid values: mark, not only red
-                                color: backend.searching ? theme.text : "white"
-                                font.pointSize: theme.fontCaption
-                                font.weight: Font.DemiBold
-                                font.features: { "tnum": 1 }
+                                anchors.left: entryIcon.visible ? entryIcon.right : parent.left
+                                anchors.leftMargin: entryIcon.visible ? theme.em * 0.6 : theme.em * 0.8
+                                anchors.right: badge.left
+                                anchors.rightMargin: theme.space2
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: entry.info.label
+                                textFormat: Text.PlainText
+                                color: entry.dimmed ? theme.dimOn(entryBox.color) : theme.text  // no match in search
+                                font.weight: entry.selected ? Font.DemiBold : Font.Normal
+                                elide: Text.ElideRight
                             }
-                        }
-                        MouseArea {
-                            id: entryArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                backend.selectCategory(entry.info.key)
-                                search.clear()
+                            TpCountBadge {  // changed options (search: matches), invalid values: error tone with "!"
+                                id: badge
+                                readonly property int count: backend.searching ? entry.info.matches : entry.info.changed
+                                visible: count > 0
+                                anchors.right: parent.right
+                                anchors.rightMargin: theme.space3
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: "sm"
+                                text: count
+                                tone: entry.info.errors > 0 && !backend.searching ? "error" : backend.searching ? "neutral" : "accent"
                             }
-                        }
-                    }
-                }
-
-                // Settings kept in the loaded preset
-                TpSectionLabel {
-                    Layout.fillWidth: true
-                    Layout.topMargin: theme.space2
-                    text: i18n.tr("In the loaded preset")
-                }
-                Repeater {
-                    model: [
-                        { "name": "units", "text": i18n.tr("Units"), "glyph": "" },  // sliders
-                        { "name": "font", "text": i18n.tr("Global Font Override"), "glyph": "" },  // font
-                        { "name": "api", "text": i18n.tr("API Options"), "glyph": "" },  // network
-                    ]
-                    Rectangle {
-                        id: link
-                        required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: Math.round(theme.rowCompact)
-                        radius: theme.radiusMd
-                        color: linkArea.containsMouse ? theme.hover : "transparent"
-                        activeFocusOnTab: true
-                        Accessible.role: Accessible.Link
-                        Accessible.name: modelData.text
-                        Keys.onReturnPressed: backend.openLink(link.modelData.name)
-                        Keys.onEnterPressed: backend.openLink(link.modelData.name)
-                        Keys.onSpacePressed: backend.openLink(link.modelData.name)
-                        FocusRing { visible: link.activeFocus }
-                        Icon {
-                            id: linkIcon
-                            x: theme.em * 0.7
-                            anchors.verticalCenter: parent.verticalCenter
-                            glyph: link.modelData.glyph
-                            color: theme.dimText
-                            size: theme.em * 0.95
-                        }
-                        Text {
-                            anchors.left: linkIcon.visible ? linkIcon.right : parent.left
-                            anchors.leftMargin: linkIcon.visible ? theme.em * 0.6 : theme.em * 0.8
-                            anchors.right: linkArrow.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: link.modelData.text
-                            color: theme.text
-                            elide: Text.ElideRight
-                        }
-                        Icon {
-                            id: linkArrow
-                            fallback: "›"
-                            anchors.right: parent.right
-                            anchors.rightMargin: theme.em * 0.6
-                            anchors.verticalCenter: parent.verticalCenter
-                            glyph: ""  // chevron right
-                            size: theme.em * 0.7
-                            color: theme.dimText
-                        }
-                        MouseArea {
-                            id: linkArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.openLink(link.modelData.name)
+                            MouseArea {
+                                id: entryArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    backend.selectCategory(entry.info.key)
+                                    search.clear()
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         Rectangle {
-            visible: !page.narrow
+            visible: !page.narrow && !backend.singleCategory
             Layout.fillHeight: true
             Layout.preferredWidth: 1
-            color: theme.dark ? Qt.lighter(theme.window, 1.25) : theme.border
+            color: theme.strokeSubtle
         }
 
         // Content
@@ -273,7 +278,7 @@ TpPage {
 
             // Narrow page: category choice & search
             RowLayout {
-                visible: page.narrow
+                visible: page.narrow && !backend.singleCategory
                 Layout.fillWidth: true
                 Layout.margins: theme.padPage
                 Layout.bottomMargin: 0
@@ -290,30 +295,28 @@ TpPage {
                 TpSearchField {
                     id: narrowSearch
                     Layout.fillWidth: true
-                    placeholderText: i18n.tr("Search settings")
+                    placeholderText: i18n.tr("Search settings") + "   Ctrl+F"
                     onSearchChanged: function(text) { backend.setSearch(text) }
                     onExitField: flick.forceActiveFocus()
                 }
-                TpButton {
-                    id: presetLinksButton
-                    flat: true
-                    glyph: ""  // more
-                    fallback: "..."
-                    tip: i18n.tr("In the loaded preset")
-                    checked: presetLinks.visible
-                    onClicked: presetLinks.visible ? presetLinks.close() : presetLinks.popup(presetLinksButton, 0, presetLinksButton.height + 4)
-                    TpMenu {
-                        id: presetLinks
-                        onClosed: presetLinksButton.forceActiveFocus()  // menus give focus back to the window
-                        Action { text: i18n.tr("Units"); onTriggered: backend.openLink("units") }
-                        Action { text: i18n.tr("Global Font Override"); onTriggered: backend.openLink("font") }
-                        Action { text: i18n.tr("API Options"); onTriggered: backend.openLink("api") }
-                    }
+                TpSwitch {
+                    checkable: false  // follows backend
+                    checked: backend.changedOnly
+                    text: i18n.tr("Changed Only")
+                    tip: i18n.tr("Only options set apart from their default value or not applied yet, in every category")
+                    onClicked: backend.setChangedOnly(!backend.changedOnly)
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: i18n.tr("Changed Only")
+                    Accessible.checked: backend.changedOnly
                 }
             }
 
-            // Header
+            // Header: icon tile, title (TpText title role, as TpPageHeader), description & preset pills, actions. Own
+            // row: TpPageHeader has no leading icon nor pills under its subtitle
             RowLayout {
+                id: header
+                // Header actions as icons (names in tooltips) when the title would be cut
+                readonly property bool tight: width < theme.em * 50  // content-tuned: title & 3 named actions in French
                 Layout.fillWidth: true
                 Layout.leftMargin: theme.padPage
                 Layout.rightMargin: theme.padPage
@@ -321,40 +324,82 @@ TpPage {
                 Layout.bottomMargin: theme.space3
                 spacing: theme.em * 0.7
                 TpIconTile {
-                    size: Math.round(theme.em * 2.6)
+                    size: Math.round(theme.iconHero)  // page badge
                     Layout.preferredWidth: size  // TpIconTile sets width only (no implicit size)
                     Layout.preferredHeight: size
                     glyph: backend.searching ? "" : page.info.glyph  // search
-                    fallbackText: backend.searching ? i18n.tr("Search results") : page.info.label
+                    fallbackText: !backend.searching ? page.info.label
+                                : backend.searchText === "" ? i18n.tr("Modified options") : i18n.tr("Search results")
                 }
-                // Page title: same look as TpPageHeader (fontTitle), description under it on 2 lines
+                // Page title: same look as TpPageHeader (title role), description under it on 2 lines
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
-                    Text {
+                    TpText {
                         Layout.fillWidth: true
-                        text: backend.searching ? i18n.tr("Search results") : page.info.label
-                        color: theme.text
-                        font.pointSize: theme.fontTitle
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                        Accessible.role: Accessible.Heading
-                        Accessible.name: text
+                        role: "title"
+                        text: !backend.searching ? page.info.label
+                            : backend.searchText === "" ? i18n.tr("Modified options") : i18n.tr("Search results")
                     }
-                    Text {
+                    TpText {
                         Layout.fillWidth: true
+                        role: "caption"
                         text: backend.searching ? i18n.trm("Found: " + backend.matchCount) : page.info.description
-                        color: theme.dimText
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
-                        elide: Text.ElideRight
                     }
+                    // Category kept in the loaded preset: which preset, locked (changes not saved)
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.topMargin: theme.space1
+                        visible: !backend.searching && page.info.preset === true
+                        spacing: theme.space2
+                        Pill {
+                            glyph: ""  // library
+                            text: page.section.preset || ""
+                            maximumTextWidth: theme.em * 14
+                            tint: theme.dimText
+                            tip: i18n.tr("Saved in the loaded preset")
+                        }
+                        Pill {
+                            visible: page.section.locked === true
+                            glyph: theme.glyphs.lock
+                            fallback: "!"
+                            text: i18n.tr("Locked")
+                            tint: theme.warning
+                            tip: i18n.tr("Locked: changes are not saved")
+                        }
+                    }
+                }
+                // On / off of the section (module, pace notes playback): at once, like the Modules page
+                TpSwitch {
+                    objectName: "sectionSwitch"
+                    visible: !backend.searching && page.section.switchable === true
+                    checkable: false  // follows backend
+                    checked: page.section.enabled === true
+                    text: checked ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                    tip: i18n.tr("Turned on or off at once")
+                    onClicked: backend.setSectionEnabled(!(page.section.enabled === true))
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: page.info.label
+                    Accessible.checked: checked
+                }
+                TpButton {
+                    objectName: "testSound"
+                    visible: !backend.searching && page.info.paceNotes === true
+                    flat: true
+                    glyph: ""  // volume
+                    fallback: i18n.tr("Test Sound")
+                    text: header.tight ? "" : i18n.tr("Test Sound")
+                    tip: i18n.tr("Play a sound of the sound folder with the volume shown")
+                    onClicked: backend.testSound()
                 }
                 TpButton {
                     visible: !backend.searching
                     flat: true
-                    glyph: ""  // undo
-                    text: i18n.tr("Reset Section")
+                    glyph: theme.glyphs.reset
+                    fallback: i18n.tr("Reset Section")
+                    text: header.tight ? "" : i18n.tr("Reset Section")
                     tip: i18n.tr("Every option of this section back to default (saved with Apply)")
                     onClicked: backend.resetCategory()
                 }
@@ -402,7 +447,7 @@ TpPage {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: theme.padCard
-                            spacing: theme.em * 0.4
+                            spacing: theme.space3
                             RowLayout {
                                 spacing: theme.em * 0.5
                                 Rectangle {
@@ -414,7 +459,8 @@ TpPage {
                                 Text {
                                     text: page.web.running ? i18n.tr("Web dashboard is running")
                                         : page.web.enabled ? i18n.tr("Web dashboard is not running (port in use?), see log")
-                                        : i18n.tr("Web dashboard is off: turn on its first option, then Apply")
+                                        : i18n.tr("Web dashboard is off: turn on its first option")
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.weight: Font.DemiBold
                                     wrapMode: Text.WordWrap
@@ -430,11 +476,12 @@ TpPage {
                                 RowLayout {
                                     required property string modelData
                                     Layout.fillWidth: true
-                                    spacing: theme.em * 0.4
+                                    spacing: theme.space3
                                     Text {
                                         id: urlText
                                         Layout.fillWidth: true
                                         text: modelData
+                                        textFormat: Text.PlainText
                                         color: theme.accent
                                         font.underline: linkArea.containsMouse || activeFocus
                                         elide: Text.ElideMiddle
@@ -466,10 +513,11 @@ TpPage {
                                 Text { text: i18n.tr("Access code"); color: theme.dimText }
                                 Text {
                                     text: page.web.code || ""
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.pointSize: theme.fontHeading
                                     font.weight: Font.DemiBold
-                                    font.letterSpacing: 2
+                                    font.letterSpacing: theme.letterSpacingCode  // access code read out digit by digit
                                     font.features: { "tnum": 1 }
                                 }
                                 TpButton {
@@ -500,6 +548,44 @@ TpPage {
                         }
                     }
 
+                    // Global font override: font sizes of the overlays now & once applied, sample text in the font chosen
+                    TpSectionCard {
+                        objectName: "fontPreview"
+                        width: parent.width
+                        visible: !backend.searching && page.info.font === true
+                        height: visible ? implicitHeight : 0
+                        fillContent: false
+                        title: i18n.tr("Preview")
+                        glyph: "\ue8d2"  // font
+                        fallback: "A"
+                        TpText {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: page.fontPreview.neutral
+                                ? i18n.tr("Font sizes now: %1 to %2 px. Choose a change below, its result shows here before Apply.")
+                                    .arg(page.fontPreview.sizeNow[0]).arg(page.fontPreview.sizeNow[1])
+                                : i18n.tr("Font sizes: %1 to %2 px now, %3 to %4 px after Apply.")
+                                    .arg(page.fontPreview.sizeNow[0]).arg(page.fontPreview.sizeNow[1])
+                                    .arg(page.fontPreview.sizeAfter[0]).arg(page.fontPreview.sizeAfter[1])
+                        }
+                        TpText {
+                            Layout.fillWidth: true
+                            visible: !page.fontPreview.neutral
+                            role: "caption"
+                            wrapMode: Text.WordWrap
+                            text: i18n.tr("Overlays and modules changed: %1 (%2 options). Undo is offered once applied.")
+                                .arg(page.fontPreview.sections).arg(page.fontPreview.options)
+                        }
+                        // Smallest & largest font size once applied, in the font & weight chosen
+                        Flow {
+                            Layout.fillWidth: true
+                            visible: !page.fontPreview.neutral
+                            spacing: theme.space5
+                            SampleText { size: page.fontPreview.sampleSmall }
+                            SampleText { size: page.fontPreview.sampleLarge }
+                        }
+                    }
+
                     // Remote control: address
                     Card {
                         width: parent.width
@@ -511,7 +597,7 @@ TpPage {
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.margins: theme.padCard
-                            spacing: theme.em * 0.3
+                            spacing: theme.space2
                             RowLayout {
                                 spacing: theme.em * 0.5
                                 Rectangle {
@@ -523,7 +609,8 @@ TpPage {
                                 Text {
                                     text: page.remote.running ? i18n.tr("Remote control is listening")
                                         : page.remote.enabled ? i18n.tr("Remote control is not running (port in use?), see log")
-                                        : i18n.tr("Remote control is off: turn on its first option, then Apply")
+                                        : i18n.tr("Remote control is off: turn on its first option")
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.weight: Font.DemiBold
                                     wrapMode: Text.WordWrap
@@ -546,10 +633,11 @@ TpPage {
                                     required property var modelData
                                     readonly property string code: page.remote[modelData.key] || ""
                                     Layout.fillWidth: true
-                                    spacing: theme.em * 0.4
+                                    spacing: theme.space3
                                     Text {
                                         Layout.fillWidth: true
                                         text: parent.code
+                                        textFormat: Text.PlainText
                                         color: theme.text
                                         font.family: theme.monoFont
                                         font.pointSize: theme.fontLabel
@@ -577,6 +665,7 @@ TpPage {
                     x: theme.padPage
                     width: flick.width - theme.padPage * 2
                     preview: backend.category === "notification" && !backend.searching ? (page.previews[group] || null) : null
+                    onMenuRequested: function(data, anchor, x, y) { page.openRowMenu(data, anchor, x, y) }
                 }
 
                 footer: Column {
@@ -584,13 +673,15 @@ TpPage {
                     width: flick.width - theme.padPage * 2
                     spacing: 0
 
-                    EmptyState {
-                        visible: flick.count === 0
+                    TpStateView {
+                        empty: flick.count === 0
                         width: parent.width
                         topPadding: theme.em * 3
                         glyph: ""  // search
-                        title: i18n.tr("No setting found")
-                        text: i18n.tr("Search looks through every category. Check spelling, or try other words.")
+                        title: backend.changedOnly && backend.searchText === "" ? i18n.tr("Every option has its default value")
+                             : i18n.tr("No setting found")
+                        text: backend.changedOnly && backend.searchText === "" ? ""
+                            : i18n.tr("Search looks through every category. Check spelling, or try other words.")
                     }
 
                     // Settings file
@@ -604,16 +695,15 @@ TpPage {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             spacing: theme.em * 0.5
-                            Text {
+                            TpText {
                                 Layout.fillWidth: true
+                                role: "caption"
                                 text: i18n.trm("Settings file: " + backend.configFile)
-                                color: theme.dimText
-                                font.pointSize: theme.fontSmall
                                 elide: Text.ElideMiddle
                             }
                             TpButton {
                                 flat: true
-                                glyph: ""  // open folder
+                                glyph: theme.glyphs.openFolder
                                 size: "sm"
                                 text: i18n.tr("Open Folder")
                                 onClicked: backend.openConfigFolder()
@@ -624,104 +714,35 @@ TpPage {
                 }
             }
 
-            // Pending changes (Discard: "Changes discarded" & Undo kept a few seconds). Hidden bar: out of the
-            // Tab order (not only folded), its buttons never take focus unseen
-            Rectangle {
-                id: bar
+            // Unsaved changes (after Discard: "Changes discarded" & Undo kept a few seconds)
+            TpPendingBar {
                 objectName: "pendingBar"
-                readonly property bool discarded: undoGrace.running && backend.pendingCount === 0
-                readonly property bool shown: backend.pendingCount > 0 || discarded
-                visible: shown || heightAnimation.running
-                enabled: shown
-                Layout.fillWidth: true
-                Layout.preferredHeight: shown ? barRow.implicitHeight + theme.em * 1.0 : 0
-                clip: true
-                color: theme.dark ? Qt.lighter(theme.window, 1.1) : Qt.darker(theme.window, 1.04)
-                Behavior on Layout.preferredHeight {
-                    NumberAnimation { id: heightAnimation; duration: theme.motionBase; easing.type: Easing.OutCubic }
+                pendingCount: backend.pendingCount
+                errorCount: backend.errorCount
+                firstError: backend.firstError
+                canUndo: backend.canUndo
+                canRedo: backend.canRedo
+                onShowErrorRequested: backend.showFirstError()
+                onUndoRequested: {
+                    page.commitEdits()  // field being edited left first: shows undone value, never sent again
+                    backend.undo()
                 }
-                Rectangle { width: parent.width; height: 1; color: theme.border }
-                Timer { id: undoGrace; interval: 6000 }
-                Connections {
-                    target: backend
-                    function onStateChanged() {
-                        if (backend.pendingCount > 0)
-                            undoGrace.stop()  // edited or undone meanwhile: the usual bar
-                    }
+                onRedoRequested: {
+                    page.commitEdits()
+                    backend.redo()
                 }
-
-                RowLayout {
-                    id: barRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.topMargin: theme.em * 0.5
-                    anchors.leftMargin: theme.padPage
-                    anchors.rightMargin: theme.padPage
-                    spacing: theme.em * 0.5
-                    Icon {
-                        visible: bar.discarded
-                        glyph: ""  // check
-                        fallback: "✓"
-                        color: theme.gain
-                    }
-                    Icon {
-                        visible: !bar.discarded
-                        fallback: backend.errorCount > 0 ? "!" : ""
-                        glyph: backend.errorCount > 0 ? "" : ""  // warning, edit
-                        color: backend.errorCount > 0 ? theme.loss : theme.accent
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: bar.discarded ? i18n.tr("Changes discarded")
-                            : backend.errorCount > 0
-                              ? i18n.trm("Fix " + backend.errorCount + " invalid value(s) to save") + "  ·  " + backend.firstError
-                              : i18n.trm("Unsaved changes: " + backend.pendingCount)
-                        color: backend.errorCount > 0 && !bar.discarded ? theme.loss : theme.text
-                        elide: Text.ElideRight
-                    }
-                    TpButton {
-                        flat: true
-                        glyph: ""  // undo
-                        objectName: "pendingUndo"
-                        text: bar.discarded ? i18n.tr("Undo") : ""  // after Discard: told in words
-                        fallback: i18n.tr("Undo")
-                        tip: i18n.tr("Undo (Ctrl+Z)")
-                        enabled: backend.canUndo
-                        onClicked: backend.undo()
-                    }
-                    TpButton {
-                        flat: true
-                        glyph: ""  // redo
-                        visible: !bar.discarded
-                        fallback: i18n.tr("Redo")
-                        tip: i18n.tr("Redo (Ctrl+Y)")
-                        enabled: backend.canRedo
-                        onClicked: backend.redo()
-                    }
-                    TpButton {
-                        objectName: "pendingDiscard"
-                        visible: !bar.discarded
-                        text: i18n.tr("Discard")
-                        tip: i18n.tr("Drop every unsaved change")
-                        onClicked: {
-                            undoGrace.restart()  // bar kept with Undo for a moment
-                            backend.discard()
-                        }
-                    }
-                    TpButton {
-                        visible: !bar.discarded
-                        accent: true
-                        text: i18n.tr("Apply")
-                        tip: i18n.tr("Save & apply (Ctrl+S)")
-                        enabled: backend.errorCount === 0
-                        onClicked: {
-                            page.commitEdits()
-                            backend.apply()
-                        }
-                    }
+                onDiscardRequested: {
+                    page.commitEdits()  // focus left: typed value dropped too, field shows saved value
+                    backend.discard()
+                }
+                onApplyRequested: {
+                    page.commitEdits()
+                    backend.apply()
                 }
             }
         }
     }
+
+    // Dialogs & toasts asked by the backend (ui/quick/dialogs.py, ui/toast.show_toast)
+    TpDialogHost {}
 }

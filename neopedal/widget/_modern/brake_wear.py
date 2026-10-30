@@ -32,7 +32,7 @@ from PySide6.QtGui import QPainter
 from ...i18n import tr_overlay
 from ...module_info import minfo
 from .._data import brake_wear_data, wear_text
-from .base import ModernOverlay, display_order_options
+from .base import DASH, ModernOverlay, display_order_options
 from .draw import fraction
 from .quad import QuadMixin, Section, Tile
 
@@ -54,7 +54,8 @@ class Realtime(QuadMixin, ModernOverlay):
     wcfg: BrakeWearConfig
 
     options = (
-        "font_size", "layout", "show_thickness", "warning_threshold_remaining", "warning_threshold_wear",
+        "font_size", "layout", "show_caption", "show_thickness", "warning_threshold_remaining",
+        "warning_threshold_wear",
         "warning_threshold_laps", "warning_threshold_minutes", *(f"show_{key}" for key, _, _ in SECTIONS),
         *display_order_options("brake_wear"),
     )
@@ -84,7 +85,9 @@ class Realtime(QuadMixin, ModernOverlay):
         for index in range(4):
             data = brake_wear_data(wheels, index, thickness, minfo.delta.lapTimePace)
             for key in self.keys:
-                if key == "remaining":
+                if not data.available:  # no game data yet, spectated car
+                    values[key].append(Tile((DASH,), colors=(theme.text_dim,)))
+                elif key == "remaining":
                     failed = data.failed
                     warn = data.remaining_percent <= self.threshold_remaining * 100
                     color = theme.negative if warn or failed else theme.positive

@@ -17,27 +17,24 @@ Card {
         id: column
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: theme.padCard }
         spacing: theme.space1
-        Text { width: parent.width; text: card.title; color: theme.dimText; font.pointSize: theme.fontSmall; elide: Text.ElideRight }
-        Text {
+        TpText { width: parent.width; role: "caption"; text: card.title }
+        TpText {
             width: parent.width
+            role: "title"
+            font.pointSize: theme.fontTitle  // key figure: larger than page titles
+            tabular: true
             text: card.value
             color: card.accentColor
-            font.pointSize: theme.fontTitle
-            font.weight: Font.DemiBold
-            font.features: { "tnum": 1 }
-            elide: Text.ElideRight
             Behavior on color { ColorAnimation { duration: theme.motionBase } }
         }
         // Keyed on line count: new texts every update (playback: every frame) keep the same Text items
         Repeater {
             model: card.lines.length
-            Text {
+            TpText {
                 width: column.width
+                role: "numeric"
                 text: card.lines[index] || ""
                 visible: text !== ""
-                color: theme.text
-                font.features: { "tnum": 1 }
-                elide: Text.ElideRight
             }
         }
     }

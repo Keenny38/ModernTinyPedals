@@ -154,7 +154,7 @@ def test_restyled_font_weight_kept_when_modern_font_off(make):
     from neopedal.widget._modern import design_option_keys
     from neopedal.widget._modern.restyle import DESIGN_WEIGHT
 
-    for name in ("black_box", "pace_notes"):
+    for name in ("black_box",):  # pace notes: modern card (track notes design) since 2026-10-29
         cfg.user.setting[name]["font_weight"] = "Bold"
         off = make(name, {"enable_modern_font": False}, enable_auto_resize=False)
         assert off.wcfg["font_weight"] == "Bold"

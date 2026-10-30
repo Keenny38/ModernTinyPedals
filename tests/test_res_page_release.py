@@ -225,7 +225,7 @@ def test_app_page_released_and_built_again(window, monkeypatch):
         QApplication.processEvents()
         if view._lazy_pages[key].page.findChild(QQuickWidget) is not None:
             quick_keys.append(key)
-    assert quick_keys and "hotkey" not in quick_keys
+    assert "hotkey" in quick_keys  # Hotkeys page in QML since the UI/UX audit 2026-10-29: released too
     view.set_current_index(PAGE_INDEX["home"])
     QApplication.processEvents()
     clock.now += 5 * 60

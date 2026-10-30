@@ -31,7 +31,7 @@ from PySide6.QtGui import QPainter
 
 from ... import units
 from ...api_control import api
-from .base import ModernOverlay, display_order_options
+from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -70,14 +70,16 @@ class Realtime(StatsMixin, ModernOverlay):
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
-        self.speed_min = self.speed_max = 0.0
-        self.speed_fast = -1.0
+        self.speed_min = self.speed_max = self.speed_fast = -1.0  # -1: no reading yet, dash
         self.min_timer = self.max_timer = 0.0
 
     def post_update(self):
         """Speeds restart from next reading (new session, track or vehicle)"""
-        self.speed_min = self.speed_max = 0.0
-        self.speed_fast = -1.0
+        self.speed_min = self.speed_max = self.speed_fast = -1.0
+
+    def vehicle_reset(self):
+        """Speeds of the previous car or session not kept (followed car changed)"""
+        self.post_update()
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -111,5 +113,11 @@ class Realtime(StatsMixin, ModernOverlay):
             self.speed_fast = -1.0
         self.speed_fast = max(self.speed_fast, speed)
         speeds = {"speed": speed, "speed_minimum": self.speed_min, "speed_maximum": self.speed_max,
-                  "speed_fastest": max(self.speed_fast, 0.0)}
-        self.refresh(tuple(Value(f"{self.unit_speed(speeds[key]):0{self.digits}.{self.decimals}f}") for key in self.keys))
+                  "speed_fastest": self.speed_fast}
+        self.refresh(tuple(self.speed_value(speeds[key]) for key in self.keys))
+
+    def speed_value(self, speed: float) -> Value:
+        """Speed in unit, dash before first reading"""
+        if speed < 0:
+            return Value(DASH, self.theme.text_dim)
+        return Value(f"{self.unit_speed(speed):0{self.digits}.{self.decimals}f}")

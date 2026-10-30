@@ -60,3 +60,7 @@ prof.out
 /tests/_render/
 coverage.xml
 .coverage
+
+# local audit reports (French, kept out of the repo)
+/AUDIT.md
+/audit_*.md

@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from neopedal.setting import cfg
 from neopedal.userfile.overlay_package import (
@@ -209,7 +209,7 @@ def share(ui_env, monkeypatch, tmp_path):
     from neopedal.ui import overlay_share
 
     record: dict = {"warnings": [], "toasts": []}
-    monkeypatch.setattr(overlay_share.QMessageBox, "warning", lambda parent, title, text: record["warnings"].append(text))
+    monkeypatch.setattr(QMessageBox, "warning", lambda parent, title, text: record["warnings"].append(text))
     monkeypatch.setattr(overlay_share, "show_toast", lambda parent, text: record["toasts"].append(text))
     monkeypatch.setattr(overlay_share, "save_filename", lambda parent, name: str(tmp_path / name))
     monkeypatch.setattr(overlay_share, "screen_rect", lambda: SCREEN)

@@ -321,10 +321,10 @@ def test_controller_button_hotkey(ui_env, monkeypatch):
 
 @WINDOWS_KEYS
 def test_controller_button_with_modifier_and_mouse_hotkey(ui_env, monkeypatch):
-    from neopedal.hotkey.joystick import joystick_code
+    from neopedal.hotkey.joystick import JOY_MAX_BUTTONS, joystick_code
     from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
-    ctrl, pov_up, mouse = KEYMAP_MODIFIER["ctrl"], joystick_code(0, 32), KEYMAP_GENERAL["mouse_back"]
+    ctrl, pov_up, mouse = KEYMAP_MODIFIER["ctrl"], joystick_code(0, JOY_MAX_BUTTONS), KEYMAP_GENERAL["mouse_back"]
     states = [{pov_up}, set(), {ctrl, pov_up}, set(), {mouse}]
     binds = {"overlay_lock": "ctrl+joy1_pov_up", "overlay_auto_hide": "mouse_back"}
     assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]

@@ -674,13 +674,22 @@ class TraceData:
         if channel.column.startswith(MATH_PREFIX):
             return any(self.math_available(channel.column, lap) for lap in self.laps)
         sources = channel_sources(channel)
-        return any(
-            all(source in lap.data.columns for source in sources)
-            # Wheel speeds read as 0 when not available from game, car settings as -1
-            and all(any(lap.data.columns[source]) for source in sources if source.startswith("wheel_speed"))
-            and all(max(lap.data.columns[source], default=-1) >= 0 for source in sources if source in SETTING_CHANNELS)
-            for lap in self.laps
-        )
+        return any(self.sources_available(sources, lap) for lap in self.laps)
+
+    @staticmethod
+    def sources_available(sources: Sequence[str], lap: PlotLap) -> bool:
+        """Whether every recorded column of channel is in lap (a cached column that could not be read again is
+        dropped from the lap while first used: KeyError, see lap_cache.CachedColumns)"""
+        try:
+            return (
+                all(source in lap.data.columns for source in sources)
+                # Wheel speeds read as 0 when not available from game, car settings as -1
+                and all(any(lap.data.columns[source]) for source in sources if source.startswith("wheel_speed"))
+                and all(max(lap.data.columns[source], default=-1) >= 0
+                        for source in sources if source in SETTING_CHANNELS)
+            )
+        except KeyError:
+            return False
 
     # Math channels: expression over recorded & computed channels of each lap, on its recorded samples
     def math_names(self, column: str) -> list[str] | None:
@@ -862,7 +871,10 @@ class TraceData:
             cached = (self.shared_xs(lap, xs, "shift", shift), ys)
             self._series[key] = cached
             return cached
-        distances, values = self.computed(channel, lap)
+        try:
+            distances, values = self.computed(channel, lap)
+        except KeyError:  # column dropped by the lap cache while first read (lap file gone or changed): no series
+            distances, values = [], []
         convert = self.units.get(channel.quantity, (None, ""))[0] if channel.quantity else None
         if convert is not None:
             values = [convert(value) for value in values]

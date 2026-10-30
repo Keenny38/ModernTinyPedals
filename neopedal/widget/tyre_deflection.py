@@ -122,7 +122,8 @@ class Realtime(Overlay):
     # GUI update methods
     def update_deflect(self, target, data):
         """Tyre deflection"""
-        if target.last != data:
+        lift_off = data <= self.threshold_liftoff
+        if target.changed(data, lift_off):
             target.last = data
-            target.bg_color = self.deflect_color[data <= self.threshold_liftoff]
+            target.bg_color = self.deflect_color[lift_off]
             target.update_input(data)

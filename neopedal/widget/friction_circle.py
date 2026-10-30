@@ -30,10 +30,24 @@ from .. import calculation as calc
 from ..module_info import minfo
 from ..validator import infnan_to_zero as rmnan
 from ._base import Overlay
+from ._modern.friction_circle import TRACE_PARTS, draw_trace, trace_alpha
 from ._painter import fill_pixmap
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import FrictionCircleConfig
+
+
+def trace_colors(color: str, fade_step: float | None) -> tuple[QColor, ...]:
+    """Trace color per part (oldest part first), fainter with age at fade out step, one part without fade out"""
+    base = QColor(color)
+    if fade_step is None:
+        return (base,)
+    colors = []
+    for index in range(TRACE_PARTS):
+        part = QColor(base)
+        part.setAlpha(round(base.alpha() * trace_alpha(index, fade_step) / 255))
+        colors.append(part)
+    return tuple(colors)
 
 
 class Realtime(Overlay):
@@ -93,19 +107,18 @@ class Realtime(Overlay):
         self.pixmap_background = QPixmap(self.area_size, self.area_size)
         dot_pixels = round(self.dot_size * 2)  # pixmap size: whole pixels
         self.pixmap_dot = QPixmap(dot_pixels, dot_pixels)
-        self.pixmap_trace = QPixmap(self.area_size, self.area_size)
-        self.pixmap_trace.fill(Qt.GlobalColor.transparent)
-        if self.wcfg["show_trace_fade_out"]:
-            trace_alpha = int(255 * min(max(self.wcfg["trace_fade_out_step"], 0.1), 0.9) / 2)
-            self.fademask_color = QColor(0, 0, 0, trace_alpha)
-            self.rect_fademask = QRectF(0, 0, self.area_size, self.area_size)
 
         self.pen_mark = QPen()
         self.pen_trace = QPen()
         self.pen_trace.setWidthF(self.wcfg["trace_width"])
-        self.pen_trace.setColor(self.wcfg["trace_color"])
         self.pen_trace.setStyle(Qt.PenStyle.SolidLine)
         self.pen_trace.setCapStyle(Qt.PenCapStyle.RoundCap)
+        # Trace drawn in parts, older parts fainter (as modern design), or in one part without fade out
+        self.trace_colors = trace_colors(
+            self.wcfg["trace_color"],
+            self.wcfg["trace_fade_out_step"] if self.wcfg["show_trace_fade_out"] else None,
+        )
+        self.trace_dots = bool(self.wcfg["trace_style"])
         self.pen_text_raw = QPen()
         self.pen_text_raw.setColor(self.wcfg["font_color_readings"])
         self.pen_text_max = QPen()
@@ -122,6 +135,11 @@ class Realtime(Overlay):
 
     def post_update(self):
         self.data_gforce.clear()
+
+    def vehicle_reset(self):
+        """Trace of previous car or session not joined to next car"""
+        self.data_gforce.clear()
+        self.update()
 
     def to_screen(self, gforce: float) -> float:
         """Scale a G reading to a drawable coordinate
@@ -154,7 +172,6 @@ class Realtime(Overlay):
             self.last_y = self.to_screen(temp_gforce_raw[0])
             if self.wcfg["show_trace"]:
                 self.data_gforce.append(QPointF(self.last_x, self.last_y))
-                self.draw_trace()
             self.update()
 
     # GUI update methods
@@ -174,8 +191,8 @@ class Realtime(Overlay):
                 self.wcfg["maximum_average_lateral_g_circle_color"]
             )
         # Draw trace
-        if self.wcfg["show_trace"]:
-            painter.drawPixmap(0, 0, self.pixmap_trace)
+        if self.wcfg["show_trace"] and len(self.data_gforce) > 1:
+            draw_trace(painter, list(self.data_gforce), self.pen_trace, self.trace_colors, self.trace_dots)
         # Draw dot
         if self.wcfg["show_dot"]:
             painter.drawPixmap(  # whole pixel position (truncated)
@@ -251,22 +268,6 @@ class Realtime(Overlay):
             self.pen_mark.setColor(color)
             painter.setPen(self.pen_mark)
             painter.drawEllipse(pos, pos, size, size)
-
-    def draw_trace(self):
-        """Draw trace image"""
-        painter = QPainter(self.pixmap_trace)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        if self.wcfg["show_trace_fade_out"]:
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
-            painter.fillRect(self.rect_fademask, self.fademask_color)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        else:
-            self.pixmap_trace.fill(Qt.GlobalColor.transparent)
-        painter.setPen(self.pen_trace)
-        if self.wcfg["trace_style"]:
-            painter.drawPoints(list(self.data_gforce))
-        else:
-            painter.drawPolyline(list(self.data_gforce))
 
     def draw_dot(self):
         """Draw dot image (one time)"""

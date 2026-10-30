@@ -40,6 +40,7 @@ from .regex_pattern import CFG_INVALID_FILENAME, rex_hex_color
 logger = logging.getLogger(__name__)
 
 SESSION_START_TOLERANCE = 2.0  # seconds, session start time from whole elapsed seconds
+_URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+:")  # file:, smb:, http: (a single letter is a drive)
 
 
 # Decorator
@@ -103,6 +104,33 @@ def is_allowed_filename(filename: str) -> bool:
     return re.search(CFG_INVALID_FILENAME, filename, flags=re.IGNORECASE) is None
 
 
+# Windows device names: a file named so (any case, any extension, spaces before the dot) opens the device
+WINDOWS_RESERVED_NAMES = frozenset((
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+    *(f"{device}{index}" for device in ("COM", "LPT") for index in (*range(10), "¹", "²", "³")),
+))
+
+
+def _reserved_stem(name: str) -> str:
+    """Part of file name Windows matches against device names (before first dot, spaces stripped)"""
+    return name.split(".", 1)[0].strip(" ")
+
+
+def is_reserved_filename(name: str) -> bool:
+    """Is Windows device file name (CON, NUL, COM1, LPT¹, CONIN$...: any case, with any extension, trailing
+    dots & spaces), writing such file fails or opens the device"""
+    return _reserved_stem(name).upper() in WINDOWS_RESERVED_NAMES
+
+
+def avoid_reserved_filename(name: str) -> str:
+    """File name with "_" after a Windows device name (CON.txt: CON_.txt), other names unchanged"""
+    if not is_reserved_filename(name):
+        return name
+    stem = _reserved_stem(name)
+    index = name.index(stem) + len(stem)
+    return f"{name[:index]}_{name[index:]}"
+
+
 def invalid_save_name(name: str) -> bool:
     """Is invalid save name (empty, or track or class name missing in combo name)"""
     return name == "" or name[:3] == " - " or name[-3:] == " - " or name[-2:] == " -"
@@ -126,13 +154,19 @@ def _finite_json_float(text: str) -> float:
     return value
 
 
-def load_json_strict(data: str | bytes | bytearray) -> Any:
+def load_json_strict(data: str | bytes | bytearray, allow_nan: bool = False) -> Any:
     """Parse untrusted JSON text (imported file), raise ValueError if invalid
 
     Unlike json.loads, NaN, Infinity & out of range numbers are rejected, and too deeply nested
     data raises ValueError (not RecursionError).
+
+    Args:
+        allow_nan: accept NaN & Infinity (files the app writes with json.dumps, such as lap info,
+            may hold them), only nesting checked.
     """
     try:
+        if allow_nan:
+            return json.loads(data)
         return json.loads(data, parse_constant=_reject_json_constant, parse_float=_finite_json_float)
     except RecursionError as error:
         raise ValueError("JSON data nested too deeply") from error
@@ -202,9 +236,26 @@ def file_last_modified(filepath: str = "", filename: str = "", extension: str = 
     return 0
 
 
-def image_exists(filepath: str, extension: str = FileExt.PNG, max_size: int = 10_240_000) -> bool:
-    """Validate image file path, file format (default PNG), max file size (default < 10MB)"""
+def is_network_path(path: str) -> bool:
+    """Path opening a network share, a device or a URL instead of a local file: UNC (\\\\server\\share,
+    //server/share), device & NT paths (\\\\?\\UNC\\..., \\\\.\\..., \\??\\...), URL (file:, smb:...)
+
+    A setting value (shared preset, imported settings) holding one would connect to its host as soon as
+    the file is checked or opened, sending the Windows sign-in hash (NTLM): never opened automatically.
+    Drive letters (C:\\, mapped Z:\\) are local paths.
+    """
+    if not isinstance(path, str):
+        return False
+    text = path.strip().replace("/", "\\")
+    return text.startswith(("\\\\", "\\??\\")) or bool(_URL_SCHEME.match(text))
+
+
+def image_exists(
+    filepath: str, extension: str = FileExt.PNG, max_size: int = 10_240_000, allow_network: bool = False) -> bool:
+    """Validate image file path, file format (default PNG), max file size (default < 10MB), never a network
+    path unless allow_network (file listed from a folder the user set in global settings, NAS folder)"""
     return (
+        (allow_network or not is_network_path(filepath)) and
         os.path.exists(filepath) and
         os.path.getsize(filepath) < max_size and
         filepath.lower().endswith(extension)

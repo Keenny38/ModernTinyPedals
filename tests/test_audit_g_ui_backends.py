@@ -224,48 +224,52 @@ def test_pdf_report_locked_target(ui_env, monkeypatch, tmp_path):
 
 # Point 35: track map file not loaded: nothing drawn
 def test_track_map_load_failure_clears_map(ui_env, monkeypatch):
-    from neopedal.ui import track_map_widget
-    from tests.test_track_map_viewer import write_map
+    """Map of track notes editor (QPainter map view replaced by the Qt Quick map, UI/UX audit 2026-10-29): a map
+    file with too few points is invalid, warned, never drawn"""
+    from neopedal.ui.quick import track_map_backend
+    from tests.test_track_map_viewer import wait_jobs, write_map
 
     write_map(cfg.path.track_map)
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: None))
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warned.append(args[2])))
+    monkeypatch.setattr(track_map_backend, "load_track_map_file",
+                        lambda **kwargs: ([(0.0, 0.0)] * 5, [(0.0, 0.0)] * 5, [0, 0]))
+    assert track_map_backend.read_geometry(cfg.path.track_map, "Ring") is None  # too few points
     parent = QWidget()
-    view = track_map_widget.MapView(parent)
-    view.resize(400, 300)
+    map_backend = track_map_backend.TrackMapBackend(parent)
     try:
-        view.load_trackmap(cfg.path.track_map, "Ring")
-        assert view.raw_coords and view.map_path is not None
-        monkeypatch.setattr(track_map_widget, "load_track_map_file",
-                            lambda **kwargs: ([(0.0, 0.0)] * 5, [(0.0, 0.0)] * 5, [0, 0]))
-        view.load_trackmap(cfg.path.track_map, "Ring")  # too few points
-        assert view.raw_coords is None and view.raw_dists is None and view.map_path is None
-        assert view.map_nodes == 0
-        assert not view.grab().isNull()  # painted without map
+        map_backend.load_map(cfg.path.track_map, "Ring")
+        wait_jobs(map_backend)
+        assert not map_backend.loaded and map_backend.raw_coords == [] and map_backend.nodes == 0
+        assert warned and "Only support SVG file" in warned[-1]
     finally:
+        map_backend.release()
         parent.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-# Point 60: screen captured once window is gone from screen
+# Point 60: screen captured once window is gone from screen (screen view of Overlays page, was Layout Editor)
 def test_capture_waits_then_shows_window(ui_env, monkeypatch):
     from PySide6.QtGui import QGuiApplication
 
-    from neopedal.ui import layout_editor
+    from neopedal.ui import overlay_view
 
-    monkeypatch.setattr(layout_editor, "CAPTURE_DELAY_MS", 20)
-    editor = layout_editor.LayoutEditor(None)
-    editor.show()
+    monkeypatch.setattr(overlay_view, "CAPTURE_DELAY_MS", 20)
+    overlays = overlay_view.OverlayView(None)
+    overlays.show()
     screen = QGuiApplication.primaryScreen()
     grabbed = []
 
     def grab(self, *args):
-        grabbed.append(editor.isVisible())
+        grabbed.append(overlays.isVisible())
         return QImage()
 
     monkeypatch.setattr(type(screen), "grabWindow", grab)
     try:
-        editor.capture_screen()
-        assert grabbed == [False] and editor.isVisible()
+        assert overlays.capture_screen(screen.name()) is None  # nothing grabbed: no picture
+        assert grabbed == [False] and overlays.isVisible()
     finally:
-        editor.close()
-        flush_deleted()
+        overlays.close()
+        overlays.backend.release()
+        overlays.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

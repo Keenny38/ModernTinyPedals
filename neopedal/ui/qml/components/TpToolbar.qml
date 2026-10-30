@@ -8,8 +8,8 @@ import QtQuick.Layouts
 // Layout.fillWidth so it gets what is left.
 //   TpToolbar {
 //       Layout.fillWidth: true
-//       TpAction { text: i18n.tr("Import"); glyph: ""; priority: 2; onTriggered: function(source) { ... } }
-//       TpAction { text: i18n.tr("Export"); glyph: ""; priority: 1; onTriggered: backend.exportLaps() }
+//       TpAction { text: i18n.tr("Import"); glyph: theme.glyphs["import"]; priority: 2; onTriggered: function(source) { ... } }
+//       TpAction { text: i18n.tr("Export"); glyph: theme.glyphs.export; priority: 1; onTriggered: backend.exportLaps() }
 //   }
 Item {
     id: bar
@@ -24,7 +24,8 @@ Item {
     readonly property real moreWidth: Math.round(size === "sm" ? theme.controlHeightSm : theme.controlHeight)
 
     implicitHeight: Math.round(size === "sm" ? theme.controlHeightSm : theme.controlHeight)
-    implicitWidth: fullWidth
+    // Whole pixels: a layout giving a fractional width rounded down would leave less than the full row (texts lost)
+    implicitWidth: Math.ceil(fullWidth)
     Layout.minimumWidth: moreWidth
     property real fullWidth: 0
     // Button width of each action with its text & icon only, measured by measure() (one hidden probe button)
@@ -107,14 +108,23 @@ Item {
             next[moved] = 2
             menuShown = true
         }
-        if (JSON.stringify(next) !== JSON.stringify(modes))
+        if (!sameModes(next, modes))
             modes = next
+    }
+    function sameModes(a, b) {
+        if (a.length !== b.length)
+            return false
+        for (var i = 0; i < a.length; ++i)
+            if (a[i] !== b[i])
+                return false
+        return true
     }
     function modeOf(index) {
         return index < modes.length ? modes[index] : 0
     }
 
-    onWidthChanged: fit()
+    // Resize: fitted once per event loop turn (every width change of a drag would run fit(), on every bar)
+    onWidthChanged: fitLater.restart()
     onActionsChanged: fitLater.restart()
     Component.onCompleted: { measure(); fit() }
     // Own objects in data: the default property (actions) would take them otherwise
@@ -160,11 +170,11 @@ Item {
                 visible: bar.overflowing
                 size: bar.size
                 flat: true
-                glyph: ""  // more
+                glyph: theme.glyphs.more
                 fallback: "⋯"
                 tip: i18n.tr("More actions")
                 checked: overflowMenu.visible
-                onClicked: overflowMenu.popup(more, 0, more.height + 4)
+                onClicked: overflowMenu.toggleBelow(more, bar.alignRight)  // second click closes it
             }
         },
         TpMenu {

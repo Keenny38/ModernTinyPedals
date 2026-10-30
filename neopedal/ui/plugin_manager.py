@@ -25,7 +25,7 @@ from __future__ import annotations
 import html
 import os
 
-from PySide6.QtCore import QRectF, Qt, QUrl
+from PySide6.QtCore import QFile, QRectF, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFontMetricsF, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -61,7 +61,7 @@ from ..plugin_loader import (
 )
 from ..setting import cfg
 from . import status_color
-from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseDialog, CompactButton, UIScaler, confirm_action, singleton_dialog
 from .toast import show_toast
 
 COLUMNS = ("Plugin", "Status", "Enabled")
@@ -168,21 +168,27 @@ class PluginManager(BaseDialog):
         warning = QLabel(tr("Plugins run as normal Python code, only install plugins from trusted sources."))
         warning.setWordWrap(True)
 
-        button_toggle = CompactButton(tr("Enable / Disable"))
+        # Buttons named after what they do to the selected plugin (Enable or Disable), off without selection
+        self.button_toggle = button_toggle = CompactButton(tr("Enable"))
         button_toggle.clicked.connect(self.toggle_selected)
-        button_trust = CompactButton(tr("Trust..."))
+        self.button_trust = button_trust = CompactButton(tr("Trust Plugin…"))
+        button_trust.setToolTip(tr("Review the plugin code files and fingerprint, then allow it to run"))
         button_trust.clicked.connect(self.trust_selected)
-        button_reload = CompactButton(tr("Reload Code"))
+        self.button_reload = button_reload = CompactButton(tr("Reload Code"))
         button_reload.clicked.connect(self.reload_selected)
-        button_install = CompactButton(tr("Install..."))
+        self.button_uninstall = button_uninstall = CompactButton(tr("Uninstall…"))
+        button_uninstall.setToolTip(tr("Move the plugin files to the recycle bin (restart to unload it)"))
+        button_uninstall.clicked.connect(self.uninstall_selected)
+        button_install = CompactButton(tr("Install…"))
         button_install.clicked.connect(self.install)
         button_folder = CompactButton(tr("Open Folder"))
         button_folder.clicked.connect(self.open_folder)
         button_close = CompactButton(tr("Close"))
         button_close.clicked.connect(self.reject)
+        self.table.itemSelectionChanged.connect(self.refresh_buttons)
 
         layout_button = QHBoxLayout()
-        for button in (button_toggle, button_trust, button_reload, button_install, button_folder):
+        for button in (button_toggle, button_trust, button_reload, button_uninstall, button_install, button_folder):
             layout_button.addWidget(button)
         layout_button.addStretch(1)
         layout_button.addWidget(button_close)
@@ -195,6 +201,18 @@ class PluginManager(BaseDialog):
         layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
         self.setLayout(layout)
         self.refresh()
+        self.refresh_buttons()
+
+    def refresh_buttons(self):
+        """Buttons of selected plugin: Enable or Disable as its state, Trust only while not trusted"""
+        name = self.selected_name()
+        loaded = bool(name) and name in wctrl.names
+        enabled = bool(cfg.user.setting.get(name, {}).get("enable", False)) if name else False
+        self.button_toggle.setText(tr("Disable") if enabled else tr("Enable"))
+        self.button_toggle.setEnabled(loaded)
+        self.button_trust.setEnabled(bool(name) and plugin_status_kind(name)[0] == "untrusted")
+        self.button_reload.setEnabled(loaded)
+        self.button_uninstall.setEnabled(bool(name))
 
     def plugin_names(self) -> list[str]:
         loaded = [name for name in wctrl.names if name.startswith(PLUGIN_PREFIX)]
@@ -240,6 +258,7 @@ class PluginManager(BaseDialog):
         wctrl.toggle(name)
         app_signal.refresh.emit(True)
         self.refresh()
+        self.refresh_buttons()
 
     def reload_selected(self):
         name = self.selected_name()
@@ -247,7 +266,7 @@ class PluginManager(BaseDialog):
             return
         error = reload_plugin(name)
         if error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Plugin reloaded with error:<br>{tr(error)}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Plugin reloaded with error:<br>{html.escape(tr(error))}"))
         self.refresh()
         self.show_detail()
 
@@ -261,12 +280,12 @@ class PluginManager(BaseDialog):
             files = plugin_code_files(path)
             digest = plugin_digest(path)
         except OSError as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to read plugin:<br>{error}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to read plugin:<br>{html.escape(str(error))}"))
             return
         file_list = "<br>".join(html.escape(file) for file in files) or "-"
         plugin_name = html.escape(name[len(PLUGIN_PREFIX):])
         if not self.confirm_operation(
-            tr("Trust..."),
+            tr("Trust Plugin…"),
             (
                 "Plugins run as normal Python code with full access to your computer."
                 f"<br>Only trust <b>{plugin_name}</b> if you reviewed its code or trust its author."
@@ -278,24 +297,56 @@ class PluginManager(BaseDialog):
         try:
             trust_plugin(name, expected_digest=digest)  # refuse code changed after confirmation
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save plugin trust:<br>{error}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save plugin trust:<br>{html.escape(str(error))}"))
             return
         if name in wctrl.names:
             load_error = reload_plugin(name)
             if load_error:
-                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{tr(load_error)}"))
+                QMessageBox.warning(
+                    self, tr("Error"), trm(f"Plugin loaded with error:<br>{html.escape(tr(load_error))}"))
         self.refresh()
         self.show_detail()
+        self.refresh_buttons()
+
+    def uninstall_selected(self):
+        """Plugin files moved to the recycle bin after confirmation (never deleted for good), disabled first;
+        unloaded at next start"""
+        name = self.selected_name()
+        if not name:
+            return
+        path = plugin_path(name)
+        plugin_name = html.escape(name[len(PLUGIN_PREFIX):])
+        if not confirm_action(
+            self, tr("Uninstall Plugin"),
+            trm(f"Move plugin <b>{plugin_name}</b> to the recycle bin?<br><br>"
+                "It stops once NeoPedal restarts. Restore it from the recycle bin to install it again."),
+            tr("Uninstall"), danger=True,
+        ):
+            return
+        if name in wctrl.names and cfg.user.setting.get(name, {}).get("enable", False):
+            wctrl.toggle(name)  # overlay closed now, setting saved off
+            app_signal.refresh.emit(True)
+        if not os.path.exists(path) or not QFile.moveToTrash(path):
+            QMessageBox.warning(self, tr("Error"), trm(
+                f"Unable to move plugin <b>{plugin_name}</b> to the recycle bin. Remove it from the plugins folder."))
+            return
+        show_toast(self, trm(f"Plugin <b>{plugin_name}</b> moved to the recycle bin, restart NeoPedal to unload it."))
+        self.refresh()
+        self.refresh_buttons()
 
     def install(self):
-        filename, _ = QFileDialog.getOpenFileName(self, tr("Install..."), "", "Zip (*.zip)")
+        from .quick import last_folder  # picker started in the folder of the last package installed
+
+        filename, _ = QFileDialog.getOpenFileName(self, tr("Install…"), last_folder.start_folder("plugin_install"),
+                                                  "Zip (*.zip)")
         if filename:
+            last_folder.remember("plugin_install", filename)
             self.install_file(filename)
 
     def install_file(self, filename: str):
         """Install plugin package file, after confirmation"""
         if not self.confirm_operation(
-            tr("Install..."),
+            tr("Install…"),
             "Plugins run as normal Python code, only install plugins from trusted sources.<br><br>Install plugin?",
         ):
             return
@@ -303,10 +354,10 @@ class PluginManager(BaseDialog):
             name = install_plugin_package(filename)
             trust_plugin(name)  # installing is confirmed by user above
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to install plugin:<br>{error}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to install plugin:<br>{html.escape(str(error))}"))
             return
-        show_toast(
-            self, trm(f"Plugin <b>{name[len(PLUGIN_PREFIX):]}</b> installed, restart NeoPedal to load it."))
+        plugin_name = html.escape(name[len(PLUGIN_PREFIX):])
+        show_toast(self, trm(f"Plugin <b>{plugin_name}</b> installed, restart NeoPedal to load it."))
         self.refresh()
 
     @staticmethod

@@ -96,7 +96,7 @@ class Realtime(ModernOverlay):
     def paint_static(self, painter: QPainter):
         theme = self.theme
         if self.wcfg["show_background"]:
-            panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+            panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         zones = self.zones
         for index, rect in enumerate(self.leds):
             radius = min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0)

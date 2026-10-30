@@ -31,6 +31,7 @@ from typing import Any
 from pyRfactor2SharedMemory.rF2MMap import MAX_VEHICLES
 
 from ..calculation import (
+    engine_power,
     hypotenuse,
     lap_progress_distance,
     mean,
@@ -202,9 +203,14 @@ class ElectricMotor(_reader.ElectricMotor, DataAdapter):
         """Motor water temperature (Celsius)"""
         return rmnan(self.shmm.rf2TeleVeh(index).mElectricBoostWaterTemperature)
 
+    def power(self, index: int | None = None) -> float:
+        """Motor power deployed (kW), 0 while regenerating"""
+        tele = self.shmm.rf2TeleVeh(index)
+        return engine_power(rmnan(tele.mElectricBoostMotorTorque), rmnan(tele.mElectricBoostMotorRPM))
+
     def regeneration_level(self, index: int | None = None) -> float:
-        """Regeneration level (kW)"""
-        return 0.0
+        """Regeneration power (kW), not available"""
+        return -1.0
 
     def state_of_charge(self, index: int | None = None) -> float:
         """Battery state of charge as shown by game (percent, 0-100)
@@ -509,6 +515,10 @@ class Session(_reader.Session, DataAdapter):
     def pre_race(self) -> bool:
         """Before race starts (green flag)"""
         return self.shmm.rf2ScorInfo.mGamePhase <= 4
+
+    def before_formation(self) -> bool:
+        """Before formation lap starts (cars on the grid, amounts of race start)"""
+        return self.shmm.rf2ScorInfo.mGamePhase < 3
 
     def green_flag(self) -> bool:
         """Green flag (race starts)"""

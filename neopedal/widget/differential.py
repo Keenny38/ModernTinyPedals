@@ -221,7 +221,8 @@ class DiffLockingTimer:
             self._min_locking = locking
             self._timer = elapsed_time
         elif elapsed_time - self._timer > self._cooldown:
-            self._min_locking = 1  # reset
+            self._min_locking = locking  # reset: minimum restarts from current locking (no flash to 100%)
+            self._timer = elapsed_time
         elif self._timer > elapsed_time:  # timer correction
             self._timer = elapsed_time
         return self._min_locking

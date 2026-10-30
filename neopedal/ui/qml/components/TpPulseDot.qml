@@ -5,7 +5,7 @@ Rectangle {
     id: dot
     property bool pulsing: false  // state to pulse for (page shown & animations on checked here)
     property real low: 0.35  // opacity at bottom of a pulse
-    property int pulseDuration: 700  // each half of a pulse (ms)
+    property int pulseDuration: theme.pulseDuration  // each half of a pulse (ms), one rhythm everywhere
     property int pulseEasing: Easing.InOutSine
 
     width: theme.em * 0.6

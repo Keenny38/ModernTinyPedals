@@ -31,13 +31,18 @@ from functools import partial
 from time import monotonic, perf_counter
 from typing import NamedTuple
 
+from .log_handler import ErrorThrottle
+
 logger = logging.getLogger(__name__)
 
 RESOLVED_HOLD = 300.0  # seconds a resolved local address is reused (re-resolved after failure)
 UNRESOLVED_HOLD = 5.0  # seconds before probing again when nothing answered (game not running)
+UNRESOLVED_WARN_SECONDS = 60.0  # "unable to resolve" warned this often at most (game closed: every request fails)
 MAX_BODY = 16 * 1024 * 1024  # response body size limit (bytes), larger response handled as invalid
-_resolved_hosts: dict[tuple[str, int], tuple[str, float]] = {}  # (host, port): (address, expiry time)
+# (host, port): (address, expiry time, resolved): resolved False while nothing answered (game not running)
+_resolved_hosts: dict[tuple[str, int], tuple[str, float, bool]] = {}
 _resolved_lock = threading.Lock()
+_unresolved_warning = ErrorThrottle(UNRESOLVED_WARN_SECONDS)
 
 
 def is_local_host(host: str) -> bool:
@@ -59,14 +64,20 @@ def _store_hostname(host: str, port: int, resolved: str) -> str:
     hold = RESOLVED_HOLD if resolved else UNRESOLVED_HOLD
     address = resolved or host
     with _resolved_lock:
-        _resolved_hosts[(host, port)] = (address, monotonic() + hold)
+        _resolved_hosts[(host, port)] = (address, monotonic() + hold, bool(resolved))
     return address
 
 
 def forget_hostname(host: str, port: int) -> None:
-    """Drop cached address of host (connection failed), next request probes again"""
+    """Drop cached address of host (connection failed), next request probes again
+
+    An unresolved entry (nothing answered) is kept until its UNRESOLVED_HOLD expires: the failed connection
+    only tells again that the game does not run, probing (event loop, 3 connections) at every request is useless.
+    """
     with _resolved_lock:
-        _resolved_hosts.pop((host, port), None)
+        cached = _resolved_hosts.get((host, port))
+        if cached is not None and cached[2]:
+            del _resolved_hosts[(host, port)]
 
 
 def clear_resolved_hosts() -> None:
@@ -369,6 +380,7 @@ async def localhost_resolve(hostnames: set[str], port: int, timeout: float = 3) 
                 latency * 1000000 // 1 / 1000,
             )
             return host
-    logger.warning("RestAPI: unable to resolve local hostname")
+    # Game closed: every request of pages ends here, warned once a period (log & bug report never flooded)
+    _unresolved_warning.log(logger, "RestAPI: unable to resolve local hostname (game not running?)", exc_info=False)
     return ""
 

@@ -61,6 +61,31 @@ def test_live_stream_penalties_of_each_driver():
     assert results.get(b"Luk Poe") is LMUResults.DEFAULT  # penalties not counted as incidents
 
 
+def track_line(points: str, resolution: str, et: str) -> bytes:
+    return (b'<TrackLimits Driver="Luk Poe" ID="41" Lap="5" WarningPoints="2.75" CurrentPoints="' + points.encode()
+            + b'" Resolution="' + resolution.encode() + b'" et="' + et.encode() + b'">x</TrackLimits>')
+
+
+def test_track_limits_points_reset_by_penalty():
+    """Shared memory points of another car stay at 2.75 after the drive through: server line gives 0"""
+    results = LMUResults()
+    assert results.cut_points(b"Luk Poe", 2.5) == 2.5  # no stream line: shared memory
+    results.update(track_line("2.75", "4", "1500.0"))
+    assert results.cut_points(b"Luk Poe", 2.5) == 2.75  # server line newer
+    assert results.cut_points(b"Luk Poe", 2.75) == 2.75
+    results.update(track_line("0", "2", "1520.1") + b"\n" + track_line("0", "2", "1520.1"))
+    for _ in range(3):  # shared memory stuck at 2.75 through the penalty
+        assert results.cut_points(b"Luk Poe", 2.75) == 0.0
+    assert results.get(b"Luk Poe")["track_cut"] == 3  # cut counter unchanged
+    assert results.cut_points(b"Luk Poe", 0.25) == 0.25  # shared memory changed after: newest value
+    assert results.cut_points(b"Luk Poe", 0.25) == 0.25
+    results.update(track_line("0.5", "4", "1600.0"))
+    assert results.cut_points(b"Luk Poe", 0.25) == 0.5
+    assert results.cut_points(b"Nobody", 1.0) == 1.0
+    results.clear()
+    assert results.cut_points(b"Luk Poe", 2.75) == 2.75
+
+
 def test_pit_stops_cell_shows_penalty(ui_env, bundled_fonts):
     from neopedal.setting import cfg
     from neopedal.widget._modern.table import BADGE

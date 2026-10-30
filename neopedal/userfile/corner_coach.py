@@ -52,6 +52,7 @@ BRAKE_LOOKBACK = 200.0  # meters before reference braking point where braking fo
 JUMP_AHEAD = 150.0  # meters, car moving farther in one update moved elsewhere (garage, reset)
 JUMP_BACK = 30.0  # meters, same backward (smaller moves back are position corrections, ignored)
 OUTWARD_SPAN = 25.0  # meters before & after a map corner giving the outside of its bend
+CLOSED_GAP = 100.0  # meters, track map whose last point is this close to its first is a closed circuit
 
 Points = Sequence[tuple[float, float]] | None  # recorded track map nodes: world positions, or distances & elevations
 
@@ -180,7 +181,11 @@ class ReferenceCorners:
     def poll(self, trace: ReferenceTrace | None, folder: str, coordinates: Points = None,
              elevations: Points = None) -> bool:
         """Update with current reference trace, its track folder & recorded track map (see prepare_reference), True if
-        reference changed"""
+        reference changed
+
+        Previous reference kept while a new lap of the same track is prepared (new record): the loader gives no
+        trace (None) first once track or layout changed.
+        """
         reference = self.reference
         if trace is None:
             self._job = self._job_trace = None
@@ -190,7 +195,7 @@ class ReferenceCorners:
         job = self._job
         if job is not None and self._job_trace is trace:
             if not job.done():
-                return self.set_reference(None)
+                return False
             self._job = None
             if not job.cancelled():  # cancelled: thread ended by an overlay closing, prepared again below
                 error = job.exception()
@@ -202,7 +207,7 @@ class ReferenceCorners:
             return self.set_reference(None)
         self._job_trace = trace
         self._job = executor().submit(prepare_reference, self.filepath, trace, folder, coordinates, elevations)
-        return self.set_reference(None)
+        return False
 
     def set_reference(self, reference: CoachReference | None) -> bool:
         if reference is self.reference:
@@ -295,9 +300,10 @@ class CornerTracker:
             moved = self.offset(distance, last)
             if -JUMP_BACK < moved < 0:  # position correction: wait until car is past last position again
                 return
-            if not 0 <= moved < JUMP_AHEAD:  # car moved elsewhere
+            if not 0 <= moved < JUMP_AHEAD:  # car moved elsewhere (reset, garage): last corner driven forgotten too
                 self.finish(valid=False)
                 self.clear()
+                self.last = None
                 last = math.nan
         self.last_distance = distance
         index = self.next_corner(distance)
@@ -394,10 +400,15 @@ def place_map_corners(track_name: str, coordinates: Sequence[tuple[float, float]
         return NO_MAP_CORNERS
     distances, xs, ys = geometry
     found, numbered = track_corners(track_name, distances, xs, ys)
+    # Closed circuit: points before & after apex taken around the line (corner near start line)
+    gap = math.hypot(xs[0] - xs[-1], ys[0] - ys[-1]) if xs else 0.0
+    length = distances[-1] + gap if xs and gap < CLOSED_GAP else 0.0
     corners = []
     for corner in found:
         # Bend bulges outward from chord between points before & after apex
         before, after = corner.distance - OUTWARD_SPAN, corner.distance + OUTWARD_SPAN
+        if length > 2 * OUTWARD_SPAN:
+            before, after = before % length, after % length
         mid_x = (interpolate(distances, xs, before) + interpolate(distances, xs, after)) / 2
         mid_y = (interpolate(distances, ys, before) + interpolate(distances, ys, after)) / 2
         out_x, out_y = corner.x - mid_x, corner.y - mid_y

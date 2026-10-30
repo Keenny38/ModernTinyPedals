@@ -38,7 +38,7 @@ from PySide6.QtGui import QColor, QPainter
 
 from ..module_info import minfo
 from ._base import Overlay
-from ._race_aids import HiddenPreview, finite
+from ._race_aids import HiddenPreview, finite, other_level
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import SpotterConfig
@@ -82,7 +82,7 @@ class SpotterState(NamedTuple):
 NO_STATE = SpotterState()
 
 
-def side_overlap(cars, length: float, nearby: float, critical: float) -> tuple[Side, Side]:
+def side_overlap(cars, length: float, nearby: float, critical: float, min_side: float = 0.0) -> tuple[Side, Side]:
     """Overlap on left & right side, from relative positions of cars (meters, -x left, -y ahead)
 
     Args:
@@ -90,13 +90,15 @@ def side_overlap(cars, length: float, nearby: float, critical: float) -> tuple[S
         length: car length.
         nearby: lateral distance (center to center) under which a car is alongside.
         critical: lateral distance under which car alongside is critical.
+        min_side: lateral distance under which a car is in player lane (just ahead or behind, not alongside).
     """
     half = length / 2
     left_top = right_top = 1.0
     left_bottom = right_bottom = 0.0
     left_gap = right_gap = nearby
     for pos_x, pos_y in cars:
-        if not (finite(pos_x) and finite(pos_y)) or abs(pos_x) > nearby or abs(pos_y) >= length:
+        if (not (finite(pos_x) and finite(pos_y)) or not min_side <= abs(pos_x) <= nearby
+                or abs(pos_y) >= length):
             continue
         top = (max(-half, pos_y - half) + half) / length  # overlapped part of player car
         bottom = (min(half, pos_y + half) + half) / length
@@ -176,7 +178,7 @@ class SpotterMixin:
         if self.last_version != version:
             self.last_version = version
             cars = tuple(self.nearby_cars())
-            sides = side_overlap(cars, self.length, self.nearby, self.critical)
+            sides = side_overlap(cars, self.length, self.nearby, self.critical, self.min_side)
             if self.clear_duration:
                 for index, (old, new) in enumerate(zip(self.sides, sides)):
                     if new.lit:
@@ -204,12 +206,14 @@ class SpotterMixin:
 
     @staticmethod
     def nearby_cars():
-        """Relative position of other cars on track (garage left out)"""
+        """Relative position of other cars: garage & cars stopped in pit lane (pit boxes beside lane) left out, cars
+        moving in pit lane kept (pit exit blend line, player in pit lane), also cars on another road level (bridge,
+        crossing) left out"""
         vehicles = minfo.vehicles
         return (
             (car.relativeRotatedPositionX, car.relativeRotatedPositionY)
             for car in islice(vehicles.dataSet, vehicles.totalVehicles)
-            if not car.isPlayer and car.inPit != 2
+            if not (car.isPlayer or car.inPit == 2 or (car.inPit and car.speed < 1) or other_level(car))
         )
 
 

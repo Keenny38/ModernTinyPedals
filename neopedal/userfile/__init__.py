@@ -66,8 +66,12 @@ def app_path(filepath: str) -> str:
 
 
 def set_user_data_path(filepath: str) -> str:
-    """Set user data path (relative to APP root folder), create if not exist"""
+    """Set user data path (relative to APP root folder), create if not exist; empty if invalid, or an existing
+    file (never opened as folder: "Open folder" would run it)"""
     full_path = app_path(filepath)
+    if os.path.exists(full_path) and not os.path.isdir(full_path):
+        logger.error("%s is not a folder", filepath)
+        return ""
     if not os.path.exists(full_path):
         logger.info("%s folder does not exist, attempt to create", filepath)
         try:
@@ -106,6 +110,25 @@ def replace_retry(src: str, dst: str, attempts: int = REPLACE_ATTEMPTS) -> None:
             if attempt >= attempts:
                 raise
             time.sleep(REPLACE_RETRY_DELAY * attempt)
+
+
+def sync_folder(path: str) -> None:
+    """Flush folder entries to disk: files written without fsync (see atomic_replace) named for good
+
+    Nothing on Windows (a folder cannot be opened), errors ignored (files are already in the OS cache).
+    """
+    if PLATFORM.WINDOWS:
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 def atomic_replace(path: str, data: bytes, *, verify: bool = False, fsync: bool = True) -> None:
@@ -180,6 +203,8 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
 
     Data is written to a temporary file first, flushed to disk, then replaces target file,
     so existing file is never left half-written or empty (crash, power loss, full disk, locked file).
+    Without raise_error, the file's `failed` attribute tells after the with block whether data was
+    discarded (never log "saved" inside the block: the target is replaced only once it ends).
 
     Args:
         filename: target file name (with path).
@@ -193,14 +218,18 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
         logger.error("USERDATA: failed saving %s: %s", filename, error)
         if raise_error:
             raise
-        yield io.StringIO()  # discard data
+        discarded = io.StringIO()  # discard data
+        discarded.failed = True  # type: ignore[attr-defined]
+        yield discarded
         return
+    file.failed = False  # type: ignore[attr-defined]
     try:
         with file:
             yield file
             flush_to_disk(file)
         replace_retry(temp_filename, filename)
     except OSError as error:
+        file.failed = True  # type: ignore[attr-defined]
         logger.error("USERDATA: failed saving %s: %s", filename, error)
         with suppress(OSError):
             os.remove(temp_filename)
@@ -251,14 +280,17 @@ def encode_text(text: str, newline: str | None = None) -> bytes:
     return text.encode("utf-8")
 
 
-def write_verified_bytes(filename: str, data: bytes, raise_error: bool = False) -> bool:
+def write_verified_bytes(filename: str, data: bytes, raise_error: bool = False, fsync: bool = True) -> bool:
     """Write file atomically, verified by reading bytes back before replacing target
+
+    Args:
+        fsync: flush data to disk before replacing target (False for a cache written often).
 
     Returns:
         True if saved & verified. Error logged (and raised if raise_error) otherwise.
     """
     try:
-        atomic_replace(filename, data, verify=True)
+        atomic_replace(filename, data, verify=True, fsync=fsync)
         return True
     except OSError as error:
         logger.error("USERDATA: failed saving %s: %s", filename, error)
@@ -269,7 +301,7 @@ def write_verified_bytes(filename: str, data: bytes, raise_error: bool = False) 
 
 def write_json(
     filename: str, data: Any, indent: int | str | None = None, newline: str | None = None,
-    raise_error: bool = False, **kwargs: Any,
+    raise_error: bool = False, fsync: bool = True, **kwargs: Any,
 ) -> bool:
     """Write json file atomically in one write, verified by reading bytes back
 
@@ -277,12 +309,15 @@ def write_json(
     encodes in pure Python with many small writes. Output is byte identical to json.dump with
     same arguments to a text file opened with same newline mode.
 
+    Args:
+        fsync: flush data to disk before replacing target (False for a cache written often).
+
     Raises:
         TypeError, ValueError: data not serializable (file untouched).
         OSError: unable to save file (logged), only if raise_error.
     """
     text = json.dumps(data, indent=indent, **kwargs)
-    return write_verified_bytes(filename, encode_text(text, newline), raise_error)
+    return write_verified_bytes(filename, encode_text(text, newline), raise_error, fsync)
 
 
 def set_relative_path(filepath: str) -> str:

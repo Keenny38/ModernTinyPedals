@@ -30,19 +30,14 @@ def state(monkeypatch):
 def test_notify_change_wakes_waiters_and_subscribers(state):
     from neopedal import overlay_signal
 
-    emitted = []
-
-    def on_activity():
-        emitted.append(1)
-
-    overlay_signal.activity.connect(on_activity)
+    assert not hasattr(overlay_signal, "activity")  # never emitted from data threads (audit BUG-014): no Qt signal
     wake = threading.Event()
     state.subscribe(wake)
     try:
         version = state.version
         assert not state.wait_change(0.01, since=version)  # nothing changed: timed out
         state.notify_change()
-        assert state.version == version + 1 and wake.is_set() and emitted
+        assert state.version == version + 1 and wake.is_set()
         assert state.wait_change(5, since=version)  # change since version read: at once
         assert state.wait_change(5, wake) and not wake.is_set()  # kept set until consumed, then cleared
         start = time.monotonic()
@@ -54,7 +49,6 @@ def test_notify_change_wakes_waiters_and_subscribers(state):
         assert state.wait_change(5, wake) and time.monotonic() - start < 2
     finally:
         state.unsubscribe(wake)
-        overlay_signal.activity.disconnect(on_activity)
     state.notify_change()
     assert not wake.is_set()  # unsubscribed
 

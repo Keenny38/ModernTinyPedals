@@ -60,20 +60,19 @@ Item {
         id: exportMenu
         width: Math.max(implicitWidth, theme.em * 17)
         Action { text: i18n.tr("Copy to Clipboard"); onTriggered: replays.copyIncidents() }
-        Action { text: i18n.tr("Export CSV..."); onTriggered: replays.exportIncidents() }
-        onClosed: exportButton.forceActiveFocus()
+        Action { text: i18n.tr("Export CSV…"); onTriggered: replays.exportIncidents() }
     }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.padCard
         anchors.topMargin: 0
-        spacing: theme.em * 0.5
+        spacing: theme.space3
 
         // Kind filter, my car, export, previous / next incident
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             TpSegmented {
                 visible: root.counts.all > 0
                 name: i18n.tr("Incidents")
@@ -94,19 +93,19 @@ Item {
                 visible: replays.playerName !== ""
                 text: i18n.tr("My car")
                 tip: i18n.tr("Incidents of %1 only").arg(replays.playerName)
+                checkable: false  // follows backend
                 checked: replays.mineOnly
-                onToggled: replays.setMineOnly(checked)
+                onClicked: replays.setMineOnly(!replays.mineOnly)
             }
             TpButton {
                 id: exportButton
-                glyph: ""  // export
+                glyph: theme.glyphs.export
                 fallback: "CSV"
                 flat: true
                 tip: i18n.tr("Copy or export incidents shown")
                 enabled: root.counts.shown > 0
                 checked: exportMenu.visible
-                onClicked: exportMenu.visible ? exportMenu.close()  // right aligned: never cut by window
-                                              : exportMenu.popup(exportButton, exportButton.width - exportMenu.width, exportButton.height + 4)
+                onClicked: exportMenu.toggleBelow(exportButton, true)  // right aligned: never cut by window
             }
             TpButton {
                 glyph: ""  // chevron up
@@ -211,7 +210,7 @@ Item {
                     width: Math.max(0, Math.min(timeline.xOf(timeline.now), timeline.pad + timeline.railWidth) - timeline.pad)
                     height: parent.height
                     radius: parent.radius
-                    color: theme.tint(theme.accent, 0.45)
+                    color: theme.tint(theme.accent, "outline")
                 }
             }
             Repeater {  // time ticks: fixed items, values follow zoom (no delegate made again on wheel or drag)
@@ -227,6 +226,7 @@ Item {
                         x: -width / 2
                         y: timeline.railY + theme.space4
                         text: tick.visible ? playhead.format(tick.value) : ""
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
@@ -244,6 +244,7 @@ Item {
                         x: -width / 2
                         y: timeline.railY - theme.em * 0.55 - height
                         text: parent.modelData.lap
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
@@ -352,11 +353,12 @@ Item {
                 radius: height / 2
                 color: theme.raised
                 border.width: 1
-                border.color: timeline.hoverKey !== "" ? theme.accent : theme.border
+                border.color: timeline.hoverKey !== "" ? theme.strokeStrong : theme.border
                 Text {
                     id: hoverText
                     anchors.centerIn: parent
                     text: timeline.hoverKey !== "" ? timeline.labelOf(timeline.hoverKey) : playhead.format(timeline.hoverTime)
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
@@ -484,13 +486,14 @@ Item {
                     spacing: theme.space4
                     Text {
                         text: row.timeText
+                        textFormat: Text.PlainText
                         color: theme.dimOn(rowBack.color)
                         font.features: { "tnum": 1 }
                     }
                     Icon {  // same shapes as the timeline markers without icon font
                         glyph: row.wall ? "" : ""  // warning (wall), lightning (cars)
                         fallback: row.wall ? "■" : "●"
-                        size: theme.em * 0.9
+                        size: theme.iconSm
                         color: row.wall ? theme.warning : theme.loss
                     }
                     ColumnLayout {
@@ -514,7 +517,7 @@ Item {
                                 visible: row.focused !== ""
                                 glyph: ""  // camera
                                 fallback: "◉"
-                                size: theme.em * 0.8
+                                size: theme.iconSm
                                 color: theme.accent
                             }
                             Item { Layout.fillWidth: true }
@@ -524,6 +527,7 @@ Item {
                             visible: text !== ""
                             text: row.driverCar !== "" || row.otherCar !== ""
                                   ? (row.driverCar || "?") + (row.wall ? "" : "  ↔  " + (row.otherCar || "?")) : ""
+                            textFormat: Text.PlainText
                             color: theme.dimOn(rowBack.color)
                             font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
@@ -544,6 +548,7 @@ Item {
                             id: mergedText
                             anchors.centerIn: parent
                             text: "×" + row.count
+                            textFormat: Text.PlainText
                             color: theme.dimOn(theme.hover)
                             font.pointSize: theme.fontCaption
                             font.features: { "tnum": 1 }
@@ -579,7 +584,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             visible: root.counts.all > 0
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             Text { text: i18n.tr("Seconds Before"); color: theme.text }
             NumberField {
                 id: secondsBox

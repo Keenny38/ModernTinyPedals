@@ -126,11 +126,14 @@ class StrategyInput:
     lap_offset: int = 0  # race under way: plan laps done (formation included)
     clock_offset: float = 0.0  # race under way: race clock at plan start (seconds)
     stops_done: int = 0  # race under way: stops done
+    out_lap: bool = False  # race under way: plan starts on the out lap of a stop (pit lap consumption)
     driver_start: int = 1  # driver of first stint
     driver_stints_done: int = 0  # stints driven by driver_start in current turn
     stint_seconds_done: float = 0.0  # time driven in current stint (driver limit)
     driver_seconds_done: tuple[float, ...] = ()  # driving time done by each driver
     driver_names: tuple[str, ...] = ()  # name of each driver (LMU team), race under way: driver of each stint
+    # Driver planned for each stint (1 to drivers, 0 = chosen by the plan), race under way: from stint in progress
+    stint_drivers: tuple[int, ...] = ()
     next_stop_extra: float = 0.0  # seconds added to the next stop of the plan (race under way: pending repair)
 
 
@@ -615,7 +618,7 @@ class _Run:
     __slots__ = (
         "setup", "laps", "strategy", "stints", "usage", "reserve", "capacity", "amounts",
         "drivers", "driven", "max_total", "min_total", "cut_by_tyres", "fuel_lap", "time_limit",
-        "constant", "fixed", "lap_estimate", "min_goal", "stint_extra",
+        "constant", "fixed", "lap_estimate", "min_goal", "max_goal", "stint_extra",
         "usage_factor", "units", "next_special", "wear_units", "tyre_laps", "lap_seconds",
         "fuel_in_tank", "others_need", "time_allowed", "laps_fitting", "stint_length", "next_driver",
     )
@@ -637,9 +640,16 @@ class _Run:
         self.cut_by_tyres = tyre_cut(setup)
         self.time_limit = setup.race_minutes * 60
         self.min_goal = self.min_total  # minimum driving times asked (driver issues)
+        self.max_goal = self.max_total  # maximum driving times asked (driver issues)
+        if maximum_time_short(setup, laps.end - laps.first):
+            # Maximums add up to less than the race: planned without them (else one-lap stints once
+            # every driver ran out of time), still checked (driver issues)
+            self.max_total = []
         short = minimum_time_short(setup, laps.end - laps.first)
         strategy.drivers_short = short
-        if short > EPSILON:  # minimums can't all fit in the race: planned without them
+        if short > EPSILON or any(planned_drivers(setup)[1:]):
+            # Minimums can't all fit in the race, or drivers planned for stints: planned without them
+            # (still checked: driver issues)
             self.min_total = []
 
     def load(self, amounts: dict[str, float]) -> None:
@@ -828,6 +838,8 @@ def _next_driver_function(run: _Run) -> Callable[[int, int, float], int]:
         for candidate in order:
             if candidate != driver and candidate <= len(min_total) and driven[candidate - 1] < min_total[candidate - 1] - EPSILON:
                 return candidate
+        if driver <= len(min_total) and driven[driver - 1] < min_total[driver - 1] - EPSILON:
+            return driver  # only one short of minimum: handing over would cost it a lap to a forced stint
         stint_time = laps_fitting(lap, end - lap, True) * lap_estimate
         best, best_left = order[0], -inf
         for candidate in order:
@@ -895,6 +907,7 @@ def _pit_crew(run: _Run) -> Callable[[int, float, int, int], tuple[dict[str, flo
     end, pit_factor = run.laps.end, run.laps.pit_factor
     units, usage_factor, others_need, next_driver = run.units, run.usage_factor, run.others_need, run.next_driver
     drivers, stints_per_driver = run.drivers, max(setup.stints_per_driver, 1)
+    strategy, planned = run.strategy, planned_drivers(setup)
 
     def refuel(lap: int, clock: float, driver: int, turn_stints: int) -> tuple[dict[str, float], int, int]:
         added = {"fuel": 0.0, "energy": 0.0}
@@ -903,10 +916,14 @@ def _pit_crew(run: _Run) -> Callable[[int, float, int, int], tuple[dict[str, flo
             want = to_finish * per_lap + reserve[name] - amounts[name]
             added[name] = min(max(want, 0.0), capacity[name] - amounts[name])
             amounts[name] += added[name]
-        # Next driver: after stints_per_driver stints, or when another driver needs driving time
+        # Next driver: planned for next stint, else after stints_per_driver stints, or when another driver
+        # needs driving time
         turn_stints += 1
         new_driver = driver
-        if drivers > 1 and (turn_stints >= stints_per_driver or others_need(driver) > EPSILON):
+        next_stint = len(strategy.stints)
+        if next_stint < len(planned) and planned[next_stint]:
+            new_driver = planned[next_stint]
+        elif drivers > 1 and (turn_stints >= stints_per_driver or others_need(driver) > EPSILON):
             new_driver = next_driver(driver, lap, clock)
         if new_driver != driver:
             turn_stints = 0
@@ -955,7 +972,7 @@ def _drive_race(run: _Run, full: dict[str, float]) -> tuple[float, int]:
     stint_extra = run.stint_extra
     pace_changes = setup.tyre_deg > 0 and not setup.stop_extra_seconds  # changes proposed (no tyre plan)
     while lap < end:
-        after_stop = bool(strategy.stops)
+        after_stop = bool(strategy.stops) or (setup.out_lap and not strategy.stints)
         stint_extra[0] = stint_extra_seconds(setup, len(strategy.stints), tread)
         stint = stint_length(lap, clock, driver, len(strategy.stints), after_stop, stint_done,
                              tyre_life(setup, tread, set_laps) if cut_by_tyres else inf)
@@ -1016,7 +1033,7 @@ def _drive_race(run: _Run, full: dict[str, float]) -> tuple[float, int]:
 def _driver_issues(run: _Run) -> list[tuple[int, str]]:
     """Drivers above their total driving time allowed ("max") or below the time to reach ("min")"""
     issues: list[tuple[int, str]] = []
-    driven, max_total, min_total = run.driven, run.max_total, run.min_goal
+    driven, max_total, min_total = run.driven, run.max_goal, run.min_goal
     if not max_total and not min_total:
         return issues
     for index in range(run.drivers):
@@ -1082,6 +1099,20 @@ def minimum_time_short(setup: StrategyInput, plan_laps: int) -> float:
     else:
         available = max(plan_laps, 0) * setup.laptime
     return max(sum(short for _, short in shorts) - available, 0.0)
+
+
+def maximum_time_short(setup: StrategyInput, plan_laps: int) -> bool:
+    """Whether every driver has a maximum driving time and they add up to less than the race:
+    race time left (time race) or laps at race pace (lap race)"""
+    drivers = max(setup.drivers, 1)
+    maximums = setup.driver_max_minutes[:drivers]
+    if len(maximums) < drivers or not all(minutes > 0 for minutes in maximums):
+        return False
+    done = setup.driver_seconds_done
+    left = sum(max(minutes * 60 - (done[index] if index < len(done) else 0.0), 0.0)
+               for index, minutes in enumerate(maximums))
+    race = setup.race_minutes * 60 if setup.race_minutes > 0 else max(plan_laps, 0) * setup.laptime
+    return left < race - EPSILON
 
 
 def stint_limit(setup: StrategyInput) -> int:
@@ -1502,6 +1533,9 @@ class RaceState(NamedTuple):
     penalties: int = 0  # penalties to serve (drive through, stop & go: one pit lane pass each)
     penalty_seconds: float = 0.0  # stop & go time of the penalty to serve
     repair_seconds: float = 0.0  # repair pending at the next stop
+    # Race laps done at each stop seen changing tyres (empty: tyres of the start still on), None = a stop was
+    # not seen (tyre changes unknown: the plan is used)
+    tyre_stop_laps: tuple[int, ...] | None = None
 
     def replan_key(self) -> tuple:
         """What plans the rest of the race again: lap, stop, penalties, repair"""
@@ -1585,8 +1619,12 @@ def remaining_input(setup: StrategyInput, base: Strategy, state: RaceState) -> S
             stint_start = base.first_lap
         in_stint = max(done - stint_start, 0) * setup.laptime
     seconds_done[min(driver, drivers) - 1] += in_stint
-    # Laps on tyres of now (laps per set): since last stop done changing tyres in the plan, else start
-    tyre_stops = [stop.lap for stop in base.stops[:max(state.stops_done, 0)] if stop.tyres]
+    # Laps on tyres of now (laps per set): since the last stop seen changing tyres (every stop seen), else since
+    # the last stop done changing tyres in the plan, else start
+    if state.tyre_stop_laps is not None:
+        tyre_stops = [formation + lap for lap in state.tyre_stop_laps]
+    else:
+        tyre_stops = [stop.lap for stop in base.stops[:max(state.stops_done, 0)] if stop.tyres]
     tyre_laps_done = max(done - tyre_stops[-1], 0) if tyre_stops else setup.tyre_laps_done + done
     extra_laps = setup.extra_laps
     if setup.race_minutes > 0:
@@ -1609,10 +1647,12 @@ def remaining_input(setup: StrategyInput, base: Strategy, state: RaceState) -> S
         minimum_stops=max(setup.minimum_stops - state.stops_done, 0),
         stop_extra_seconds=setup.stop_extra_seconds[state.stops_done:],
         stint_pace=setup.stint_pace[state.stops_done:],
+        stint_drivers=setup.stint_drivers[state.stops_done:],
         extra_laps=extra_laps,
         lap_offset=done,
         clock_offset=lap_clock,
         stops_done=state.stops_done,
+        out_lap=state.stops_done > 0 and state.last_stop_lap >= 0 and formation + state.last_stop_lap == done,
         driver_start=driver,
         driver_stints_done=turn,
         stint_seconds_done=in_stint,
@@ -1763,6 +1803,36 @@ def driver_table_text(rows) -> str:
     return ",".join(f"{pace:g}:{minimum:g}:{maximum:g}" for pace, minimum, maximum in rows)
 
 
+def planned_drivers(setup: StrategyInput) -> tuple[int, ...]:
+    """Driver planned for each stint of the plan, 0 = chosen by the plan (out of range: 0)"""
+    drivers = max(setup.drivers, 1)
+    if drivers < 2:
+        return ()
+    return tuple(number if 0 < number <= drivers else 0 for number in (int(value) for value in setup.stint_drivers))
+
+
+def parse_stint_drivers(text: str) -> tuple[int, ...]:
+    """Driver planned for each stint saved as text "2,0,1" (0 = chosen by the plan), wrong values 0"""
+    numbers = []
+    for item in str(text).split(",")[:MAX_STOPS + 1] if text else ():
+        try:
+            number = int(item)
+        except ValueError:
+            number = 0
+        numbers.append(number if 0 < number <= MAX_DRIVERS else 0)
+    while numbers and not numbers[-1]:
+        numbers.pop()
+    return tuple(numbers)
+
+
+def stint_drivers_text(numbers) -> str:
+    """Driver planned for each stint as text (stints chosen by the plan at the end left out)"""
+    numbers = [int(number) if 0 < int(number) <= MAX_DRIVERS else 0 for number in numbers]
+    while numbers and not numbers[-1]:
+        numbers.pop()
+    return ",".join(str(number) for number in numbers)
+
+
 def driver_fields(setup: StrategyInput, rows) -> StrategyInput:
     """Input with driver table (pace, min, max of each driver), for drivers taking turns"""
     rows = list(rows)[:setup.drivers] if setup.drivers > 1 else []
@@ -1804,6 +1874,8 @@ def strategy_input_from_values(values: dict, stop_extra_seconds: tuple[float, ..
     drivers = max(int(number("input_drivers")), 1)
     table = values.get("input_driver_table", "")
     names = values.get("input_driver_names", "")
+    planned = values.get("input_stint_drivers", "")
+    stint_drivers = parse_stint_drivers(planned) if isinstance(planned, str) and drivers > 1 else ()
     setup = StrategyInput(
         laptime=number("input_lap_time"),
         race_minutes=0.0 if lap_race else number("input_race_minutes"),
@@ -1835,6 +1907,8 @@ def strategy_input_from_values(values: dict, stop_extra_seconds: tuple[float, ..
         if isinstance(names, str) and names.strip() else (),
         driver_change_seconds=number("input_driver_change_seconds"),
         stints_per_driver=max(int(number("input_stints_per_driver")), 1),
+        stint_drivers=stint_drivers,
+        driver_start=stint_drivers[0] if stint_drivers and 0 < stint_drivers[0] <= drivers else 1,
         fuel_effect=number("input_fuel_effect"),
         # Track evolution & lap time change of the forecast temperature (lap time per °C x °C per hour)
         track_evolution=number("input_track_evolution") + number("input_temp_effect") * number("input_temp_slope"),

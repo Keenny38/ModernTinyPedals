@@ -118,7 +118,8 @@ def read_entry(folder: str) -> TrashEntry | None:
         filename = str(info["filename"])
         deleted = float(info["deleted"])
         references = info.get("references", {})
-    except (OSError, ValueError, TypeError, KeyError):
+    # RecursionError: nested too deeply; OverflowError: integer too large for a float (edited file)
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, OverflowError):
         return None
     if (os.path.basename(filename) != filename or not filename.lower().endswith(FileExt.JSON)
             or not os.path.isfile(os.path.join(folder, filename))):

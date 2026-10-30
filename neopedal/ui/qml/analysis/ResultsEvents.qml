@@ -12,9 +12,10 @@ Item {
 
     readonly property bool replay: (backend.sessionHeader.replay || "") !== ""
 
+    // Purple is kept for best times (as overlays): track limits in warning, told apart by their icon & letter
     function kindColor(kind) {
-        return kind === "contact" ? theme.loss : kind === "penalty" ? theme.warning
-             : kind === "track_limits" ? theme.purple : theme.dimText
+        return kind === "contact" ? theme.loss : kind === "penalty" || kind === "track_limits" ? theme.warning
+             : theme.dimText
     }
     // Without icon font: a letter of the kind (shape of the event told without its color too)
     function kindLetter(kind) {
@@ -36,7 +37,7 @@ Item {
                     i18n.tr("All") + "  " + (counts[0] || 0),
                     i18n.tr("Contacts") + "  " + (counts[1] || 0),
                     i18n.tr("Penalties") + "  " + (counts[2] || 0),
-                    i18n.tr("Track limits") + "  " + (counts[3] || 0),
+                    i18n.tr("Track Limits") + "  " + (counts[3] || 0),
                     i18n.tr("Chat") + "  " + (counts[4] || 0),
                 ]
                 currentIndex: backend.eventKind
@@ -46,8 +47,9 @@ Item {
             Item { Layout.fillWidth: true }
             TpSwitch {
                 text: i18n.tr("Car picked only")
+                checkable: false  // state of backend shown (binding never broken by the click)
                 checked: backend.eventMine
-                onToggled: backend.setEventMine(checked)
+                onClicked: backend.setEventMine(!backend.eventMine)
             }
         }
 
@@ -118,12 +120,13 @@ Item {
                     Text {
                         Layout.preferredWidth: theme.em * 4.6
                         text: row.clock
+                        textFormat: Text.PlainText
                         color: theme.dimOn(surface.color)
                         font.features: { "tnum": 1 }
                         horizontalAlignment: Text.AlignRight
                     }
                     TpIconTile {
-                        size: Math.round(theme.em * 1.6)
+                        size: Math.round(theme.iconLg)
                         glyph: row.glyph
                         fallbackText: events.kindLetter(row.kind)
                         tint: row.tone
@@ -131,6 +134,7 @@ Item {
                     Text {
                         Layout.preferredWidth: Math.min(implicitWidth, events.width * 0.45)
                         text: row.title
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.weight: row.mine ? Font.Bold : Font.DemiBold
                         elide: Text.ElideRight
@@ -138,6 +142,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         text: row.detail
+                        textFormat: Text.PlainText
                         color: theme.dimOn(surface.color)
                         elide: Text.ElideRight
                     }

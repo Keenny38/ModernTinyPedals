@@ -142,14 +142,19 @@ def test_track_clock_names_every_sunlight_phase(widgets, monkeypatch):
 def test_modern_engine_and_pedal_reset_peaks(widgets, monkeypatch):
     engine = widgets("engine")
     engine.max_power_kw = 513.0
+    engine.ema_power = 400.0
     engine.post_update()
-    assert engine.max_power_kw == 0.0 and engine.ema_power == 0.0
+    assert engine.max_power_kw == 513.0 and engine.ema_power == 0.0  # peak kept across pauses (pit stops)
+    engine.vehicle_reset()
+    assert engine.max_power_kw == 0.0  # found again for next car or session
     pedal = widgets("pedal", show_brake=True, show_brake_filtered=True, show_brake_pressure=True)
     reader(monkeypatch, "brake", "pressure", (0.2, 0.2, 0.2, 0.2))
     reader(monkeypatch, "inputs", "brake_raw", 1.0)
     pedal.timerEvent(None)
     assert pedal.state[pedal.keys.index("brake")][0] == 1.0  # full pedal, was 80% of a 1.0 start peak
-    pedal.post_update()
+    pedal.post_update()  # paused (pit stop): peak kept
+    assert pedal.max_brake_pressure == pytest.approx(0.8)
+    pedal.vehicle_reset()  # next car or session
     assert pedal.max_brake_pressure == 0.01
 
 

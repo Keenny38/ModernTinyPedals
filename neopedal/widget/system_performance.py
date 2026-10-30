@@ -53,6 +53,37 @@ class AppMemory:
         return self.used
 
 
+class CpuAverage:
+    """CPU use (percent) averaged over samples, started from first reading (full value at once, not risen from 0)"""
+
+    __slots__ = ("ema", "value")
+
+    def __init__(self, samples: int):
+        self.ema = calc.ema_filter(samples)
+        self.value: float | None = None
+
+    def update(self, reading: float) -> float:
+        value = self.value
+        self.value = reading if value is None else self.ema(value, reading)
+        return self.value
+
+
+def start_cpu_readings(process: psutil.Process):
+    """Next system & app CPU readings measured from now (first app reading of psutil is always 0, first system
+    reading measured since a call long ago)"""
+    psutil.cpu_percent()
+    process.cpu_percent()
+
+
+def fit_number(value: float, width: int, decimals: int) -> str:
+    """Number right aligned in width characters, fewer decimals when too wide (never cut)"""
+    text = f"{value:.{decimals}f}"
+    while len(text) > width and decimals > 0:
+        decimals -= 1
+        text = f"{value:.{decimals}f}"
+    return text.rjust(width)
+
+
 def app_cpu_percent(process: psutil.Process, cpu_count: int) -> float:
     """App CPU use, share of every core (0 to 100%)
 
@@ -130,40 +161,40 @@ class Realtime(Overlay):
                 column=self.wcfg["display_order_neopedal"],
             )
 
-        self.calc_ema = calc.ema_filter(self.wcfg["average_samples"])
+        self.cpu_system = CpuAverage(self.wcfg["average_samples"])
+        self.cpu_app = CpuAverage(self.wcfg["average_samples"])
 
         # Last data
         self.app_info = psutil.Process(os.getpid())
         self.app_memory = AppMemory(self.app_info)
         self.cpu_count = os.cpu_count() or 1
+        start_cpu_readings(self.app_info)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         if self.wcfg["show_system_performance"]:
-            sys_cpu_ema = self.calc_ema(self.bar_system.last, psutil.cpu_percent())
+            sys_cpu_ema = self.cpu_system.update(psutil.cpu_percent())
             self.update_system(self.bar_system, sys_cpu_ema, self.prefix_sys)
 
         if self.wcfg["show_neopedal_performance"]:
-            app_cpu_ema = self.calc_ema(self.bar_app.last, app_cpu_percent(self.app_info, self.cpu_count))
+            app_cpu_ema = self.cpu_app.update(app_cpu_percent(self.app_info, self.cpu_count))
             self.update_app(self.bar_app, app_cpu_ema, self.prefix_app)
 
     # GUI update methods
     def update_system(self, target, data, prefix):
         """System performance"""
-        if target.last != data:
-            target.last = data
-            memory_used = psutil.virtual_memory().used / 1024 / 1024 / 1024
-            cpu = f"{data:>4.2f}"
-            mem = f"{memory_used:>4.1f}"
-            target.text = f"{prefix}{cpu:>4.4}%{mem:>5.5}GB"
+        memory_used = psutil.virtual_memory().used / 1024 / 1024 / 1024
+        text = f"{prefix}{fit_number(data, 4, 2)}%{fit_number(memory_used, 5, 1)}GB"
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
     def update_app(self, target, data, prefix):
         """APP performance"""
-        if target.last != data:
-            target.last = data
-            memory_used = self.app_memory.megabytes()
-            cpu = f"{data:>4.2f}"
-            mem = f"{memory_used:>4.1f}"
-            target.text = f"{prefix}{cpu:>4.4}%{mem:>5.5}MB"
+        memory_used = self.app_memory.megabytes()
+        text = f"{prefix}{fit_number(data, 4, 2)}%{fit_number(memory_used, 5, 1)}MB"
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()

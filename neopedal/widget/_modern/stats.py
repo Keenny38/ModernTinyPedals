@@ -37,6 +37,8 @@ from .draw import bar, panel, rounded
 
 MARK_SIZE = 0.32  # colored mark before label, in unit
 MARK_GAP = 0.3
+BADGE_PAD = 0.3  # class badge before secondary text: inner padding & gap after it, in unit
+BADGE_GAP = 0.35
 
 
 class Stat(NamedTuple):
@@ -48,6 +50,7 @@ class Stat(NamedTuple):
     role: str = "value"  # value font role
     accent: QColor | None = None  # small colored mark before label
     sub_sample: str = ""  # widest secondary text, for sizing
+    badge_sample: str = ""  # widest class badge before secondary text, for sizing (see Value.badge)
 
 
 class Value(NamedTuple):
@@ -60,6 +63,8 @@ class Value(NamedTuple):
     sub_color: QColor | None = None
     bar: float = -1.0  # 0-1 progress under value, -1 = none
     bar_color: QColor | None = None
+    badge: str = ""  # class badge before secondary text (alias on badge_color)
+    badge_color: QColor | None = None
 
 
 class StatSlot(NamedTuple):
@@ -80,12 +85,13 @@ class StatsMixin:
     slots: tuple[StatSlot, ...]
     stats_vertical: bool
 
-    def build_stats(self: Any, stats: list[Stat], vertical: bool = False, show_labels: bool = True,
+    def build_stats(self: Any, stats: list[Stat], vertical: bool = False, show_labels: bool | None = None,
                     show_sub: bool = False, value_align: Any = None, columns: int = 0,
                     top: float | None = None, min_width: float = 0.0) -> tuple[float, float]:
         """Stat geometry, returns content size (width, height)
 
         Args:
+            show_labels: stat labels shown, None: "show_caption" option (see ModernOverlay.caption_shown).
             columns: horizontal layout, stats per row (0 = all on one row).
             top: top of first stat (default: panel padding).
             min_width: horizontal layout, stretch columns to at least this content width.
@@ -94,16 +100,18 @@ class StatsMixin:
         pad = unit * 0.3
         if top is None:
             top = pad
+        if show_labels is None:
+            show_labels = self.caption_shown()
         self.stats_vertical = vertical
         self.stats_align = value_align
         slots = []
         if not stats:
             self.slots = ()
-            return pad * 2, top + pad
+            return pad * 2 + min_width, top + pad
         if vertical:
             label_w = max(self.label_width(s) for s in stats) if show_labels else 0
             value_w = max(self.text_width(s.role, s.sample) for s in stats)
-            sub_w = max((self.text_width("small", s.sub_sample or s.sample) for s in stats), default=0) if show_sub else 0
+            sub_w = max((self.sub_width(s) for s in stats), default=0) if show_sub else 0
             row_h = unit * 1.45
             gap = unit * 0.5
             inner_pad = unit * 0.45
@@ -134,7 +142,7 @@ class StatsMixin:
                 widths[column],
                 self.label_width(stat) if show_labels else 0,
                 self.text_width(stat.role, stat.sample),
-                self.text_width("small", stat.sub_sample) if show_sub else 0,
+                self.sub_width(stat, stat.sub_sample) if show_sub else 0,
             )
         widths = [width + inner_pad * 2 for width in widths]
         extra = min_width - sum(widths)
@@ -163,7 +171,7 @@ class StatsMixin:
         """Panel, labels, dividers"""
         theme = self.theme
         if show_panel:
-            panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+            panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         vertical = self.stats_vertical
         divider = theme.tint(theme.text, 26)
         unit = self.unit
@@ -192,6 +200,31 @@ class StatsMixin:
                 else:
                     self.draw_text(painter, label, text, "label", theme.text_muted, LEFT if vertical else CENTER)
 
+    def sub_width(self: Any, stat: Stat, default: str | None = None) -> float:
+        """Width of secondary text, class badge before it included"""
+        sample = stat.sub_sample or (stat.sample if default is None else default)
+        width = self.text_width("small", sample)
+        return width + self.badge_width(stat.badge_sample) if stat.badge_sample else width
+
+    def badge_width(self: Any, text: str) -> float:
+        """Width of class badge before secondary text (see Value.badge), gap after it included"""
+        return self.text_width("small", text) + self.unit * (BADGE_PAD * 2 + BADGE_GAP)
+
+    def draw_sub_badge(self: Any, painter: QPainter, rect: QRectF, value: Value):
+        """Class badge, then secondary text (centered together, left in vertical layout)"""
+        unit = self.unit
+        badge_w = self.text_width("small", value.badge) + unit * BADGE_PAD * 2
+        sub_w = self.text_width("small", value.sub) if value.sub else 0.0
+        total = badge_w + (unit * BADGE_GAP + sub_w if value.sub else 0.0)
+        left = rect.left() if self.stats_vertical else max(rect.center().x() - total / 2, rect.left())
+        height = min(rect.height(), unit * 0.82)
+        box = QRectF(left, rect.center().y() - height / 2, badge_w, height)
+        self.draw_badge(painter, box, value.badge, value.badge_color)
+        if value.sub:
+            left = box.right() + unit * BADGE_GAP
+            sub = QRectF(left, rect.top(), max(rect.right() - left, 0), rect.height())
+            self.draw_text(painter, sub, value.sub, "small", value.sub_color or self.theme.text_dim, LEFT)
+
     def draw_stats(self: Any, painter: QPainter, values: tuple[Value, ...]):
         """Values of current update"""
         theme = self.theme
@@ -202,7 +235,9 @@ class StatsMixin:
                 box = slot.box if vertical else slot.box.adjusted(self.unit * 0.12, self.unit * 0.12, -self.unit * 0.12, -self.unit * 0.12)
                 rounded(painter, box, self.radius(0.3), value.fill)
             self.draw_text(painter, slot.value, value.text, slot.stat.role, value.color or theme.text, align)
-            if value.sub and slot.sub.width() > 0:
+            if value.badge and value.badge_color is not None and slot.sub.width() > 0:
+                self.draw_sub_badge(painter, slot.sub, value)
+            elif value.sub and slot.sub.width() > 0:
                 self.draw_text(painter, slot.sub, value.sub, "small", value.sub_color or theme.text_dim,
                                LEFT if vertical else CENTER)
             if value.bar >= 0:

@@ -102,8 +102,8 @@ def test_race_gap_sign_and_interval_without_lap_time(ui_env, bundled_fonts):
     sample_cars, context = sample(widget)
     car = next(car for car in sample_cars.vehicles if car.positionInClass > 1)
     assert widget.gap_cell(car, context).text.startswith("+")
-    car.gapBehindLeaderInClass = car.gapBehindLeader = 2  # laps behind
-    assert widget.gap_cell(car, context).text == "+2L"
+    car.gapBehindLeaderInClass = car.gapBehindLeader = 2  # laps behind: no sign, as the interval column
+    assert widget.gap_cell(car, context).text == "2L"
     practice = Context(in_race=False, player=context.player, player_pit_request=False)
     car.bestLapTime = -1.0
     assert widget.extra_cell("time_interval", car, practice, {}).text == DASH
@@ -246,6 +246,66 @@ def test_race_gaps_from_timing_points():
     assert not ahead.times and time_behind(ahead, progress, now) is None
 
 
+def test_race_gap_of_car_closer_than_a_timing_point():
+    """Car ahead past the point but not the next one yet (cars 0.1 s apart): timed up to its last update, never the
+    estimate fallback (values jumped between two methods)"""
+    from neopedal.module.module_vehicles import TIMING_POINTS, PointTimes, time_behind
+
+    ahead = PointTimes()
+    speed = 1 / 60  # laps per second: a timing point every 0.6 s
+    for step in range(99):
+        now = step * 0.2
+        ahead.update(5.0 + now * speed, now)
+    progress_ahead = 5.0 + now * speed
+    behind = progress_ahead - 0.1 * speed  # 0.1 s behind
+    assert int(behind * TIMING_POINTS) == int(progress_ahead * TIMING_POINTS)  # next point not passed by car ahead
+    assert time_behind(ahead, behind, now) == pytest.approx(0.1, abs=0.005)
+    assert time_behind(ahead, progress_ahead + 0.001, now) is None  # not passed yet
+
+
+def test_race_gaps_overall_and_class_timed_the_same_way(monkeypatch):
+    """Overall gaps (game estimate before) and class gaps (timed) agree: same pair of cars, same interval"""
+    output = practice_field([0.0] * 4, ["Hyper", "LMP2", "LMP2", "LMP2"])
+    output.leaderIndex = 0
+    speed = 1 / 60
+    starts = [5.30, 5.20, 5.19, 4.10]  # car 3 lapped
+    monkeypatch.setattr(module_vehicles, "_point_times", {})
+    for step in range(100):
+        now = step * 0.2
+        for index, start in enumerate(starts):
+            progress = start + now * speed
+            output.dataSet[index].totalLapProgress = progress
+            module_vehicles._point_times.setdefault(index, module_vehicles.PointTimes()).update(progress, now)
+    estimate = module_vehicles.calc_time_gap_behind
+    monkeypatch.setattr(module_vehicles, "calc_time_gap_behind", lambda ahead, behind, lap_diff: (
+        estimate(ahead, behind, lap_diff) if abs(lap_diff) >= 1 else pytest.fail("timed gap expected")))
+    module_vehicles.update_race_gaps(output, 99 * 0.2)
+    cars = output.dataSet[:4]
+    assert cars[0].gapBehindNext == cars[0].gapBehindLeader == cars[0].gapBehindNextInClass == 0.0  # leader
+    assert cars[1].gapBehindNext == pytest.approx(6.0, abs=0.01)  # 0.1 lap behind car ahead overall
+    assert cars[2].gapBehindNext == pytest.approx(cars[2].gapBehindNextInClass) == pytest.approx(0.6, abs=0.01)
+    assert cars[2].gapBehindLeader == pytest.approx(6.6, abs=0.01)
+    assert cars[2].gapBehindLeader == cars[1].gapBehindLeader + cars[2].gapBehindNext  # adds up exactly
+    assert cars[2].gapBehindLeaderInClass == pytest.approx(0.6, abs=0.01)
+    assert cars[3].gapBehindNext == cars[3].gapBehindNextInClass == 1 and cars[3].gapBehindLeader == 1  # laps
+
+
+def test_race_gap_to_leader_is_sum_of_intervals(monkeypatch):
+    """Car ahead lost time since it passed the point (screenshot: interval 3.6, gaps +3.2 & +6.2): gap to leader
+    is gap of car ahead + interval, not timed apart at another point"""
+    output = practice_field([0.0] * 3, ["LMP2"] * 3)
+    output.leaderIndex = 0
+    for index, progress in enumerate((5.60, 5.55, 5.50)):
+        output.dataSet[index].totalLapProgress = progress
+    gaps = {(0, 1): 3.2, (1, 2): 3.6, (0, 2): 6.2}  # timed apart: 3.2 + 3.6 != 6.2
+    monkeypatch.setattr(module_vehicles, "race_gap", lambda cars, total, ahead, index, now: gaps.get((ahead, index), 0.0))
+    module_vehicles.update_race_gaps(output, 100.0)
+    cars = output.dataSet[:3]
+    assert [car.gapBehindNext for car in cars] == pytest.approx([0.0, 3.2, 3.6])
+    assert [car.gapBehindLeader for car in cars] == pytest.approx([0.0, 3.2, 6.8])
+    assert [car.gapBehindLeaderInClass for car in cars] == pytest.approx([0.0, 3.2, 6.8])
+
+
 def test_time_column_colors_and_energy_decimals(ui_env, bundled_fonts):
     from neopedal.setting import cfg
     from neopedal.widget._modern.drivers import Context
@@ -262,12 +322,12 @@ def test_time_column_colors_and_energy_decimals(ui_env, bundled_fonts):
     practice = Context(in_race=False, player=context.player, player_pit_request=False)
     car.classBestLapTime = car.classBestLap = car.bestLapTime
     assert widget.laptime_cell(car, practice).color == theme.best  # class best lap outside race
-    assert widget.row_style.energy_cell(0.4567).text == "45.7%"  # standings: one decimal by default
-    cfg.user.setting["standings"]["decimal_places_energy_remaining"] = 0
-    plain = new_table(cfg, "standings")
-    assert plain.row_style.energy_cell(0.4567).text == "46%"
+    assert widget.row_style.energy_cell(0.4567).text == "46%"  # no decimal by default, as relative & rivals
+    cfg.user.setting["standings"]["decimal_places_energy_remaining"] = 1
+    fine = new_table(cfg, "standings")
+    assert fine.row_style.energy_cell(0.4567).text == "45.7%"
     widget.deleteLater()
-    plain.deleteLater()
+    fine.deleteLater()
 
 
 def test_lap_sectors_as_game_live_timing():
@@ -325,8 +385,8 @@ def test_running_lap_clock():
 
 def test_laptime_cell_parts(ui_env, bundled_fonts):
     from neopedal.setting import cfg
+    from neopedal.widget._modern.base import laptime_text
     from neopedal.widget._modern.drivers import Context, delta_text, lap_trend, running_text
-    from neopedal.widget._modern.rows import laptime_text
     from neopedal.widget._modern.table import LAPTIME
 
     assert delta_text(0.345) == "+0.345" and delta_text(12.345) == "+12.3"
@@ -343,7 +403,8 @@ def test_laptime_cell_parts(ui_env, bundled_fonts):
     car.lapStartTime = 100.0
     after_line = [widget.laptime_cell(car, Context(True, context.player, False, now=100.0 + seconds)).text
                   for seconds in (1.0, 5.0, 9.0)]
-    assert after_line == [laptime_text(car.lastLapTime), "+0.250", "0:09.0"]  # lap, delta, then running time
+    # Lap, delta, then running time (other car of standings: whole seconds)
+    assert after_line == [laptime_text(car.lastLapTime), "+0.250", "0:09"]
     car.lapStartTime = 0.0
     best = car.sectors.best
     car.sectors.last = (best[0], best[1], best[2] + 1.0)
@@ -366,13 +427,13 @@ def test_laptime_cell_parts(ui_env, bundled_fonts):
     cell = widget.laptime_cell(car, context)
     assert cell.color == theme.negative and not cell.text.startswith("*")  # invalid lap in red
     car.lapStartTime = 100.0
-    assert widget.laptime_cell(car, Context(True, context.player, False, now=183.47)).text == "1:23.5"  # running
+    assert widget.laptime_cell(car, Context(True, context.player, False, now=183.47)).text == "1:23"  # running
     assert widget.laptime_cell(car, Context(True, context.player, False, now=104.0)).text != "0:04.0"  # result first
     assert widget.table.columns[[column.key for column in widget.table.columns].index("laptime")].width < \
         widget.time_width + widget.unit * 1.2  # one time slot & trend arrow
     cfg.user.setting["standings"]["show_running_lap_time"] = False
     result = new_table(cfg, "standings")
-    assert result.laptime_cell(car, Context(True, context.player, False, now=183.47)).text != "1:23.5"
+    assert result.laptime_cell(car, Context(True, context.player, False, now=183.47)).text not in ("1:23", "1:23.5")
     car.isValidLap = True
     in_turn = [result.laptime_cell(car, Context(True, context.player, False, now=now)).text for now in (1.0, 5.0)]
     assert in_turn == [laptime_text(car.lastLapTime), "+0.250"]  # no running time: lap time & delta in turn

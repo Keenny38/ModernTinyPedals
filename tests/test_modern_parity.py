@@ -169,7 +169,7 @@ def test_race_plan_live_replan(widgets, monkeypatch):
         calls.append(live)
         widget.live = live_plan
 
-    monkeypatch.setattr(race_plan, "read_live", lambda *args: LiveRead(None, False, ""))
+    monkeypatch.setattr(race_plan, "read_live", lambda *args, **kwargs: LiveRead(None, False, ""))
     monkeypatch.setattr(widget, "replan", replan)
     reader(monkeypatch, "lap", "completed_laps", 12)
     update(widget)
@@ -295,8 +295,8 @@ def test_restyled_widgets_show_unmapped_colors():
     black_box = modern_module("black_box").Realtime.options
     assert "background_color" not in black_box and "font_color_temperature" in black_box
     assert "throttle_color" not in black_box and "font_name" not in black_box
-    pace_notes = modern_module("pace_notes").Realtime.options
-    assert "background_color" not in pace_notes and "font_name" not in pace_notes
+    pace_notes = modern_module("pace_notes").Realtime.options  # modern card (track notes design)
+    assert "background_color_pace_notes" not in pace_notes and "font_name" not in pace_notes
 
 
 # --- Gauges: third spring & brake input marks
@@ -304,10 +304,10 @@ def test_suspension_third_spring_mark(widgets, monkeypatch):
     reader(monkeypatch, "wheel", "third_spring_deflection", (25.0, 25.0, 50.0, 50.0))
     widget = widgets("suspension_position", show_third_spring_position_mark=True, position_maximum_range=100)
     update(widget)
-    assert [tile.mark for tile in widget.state] == [0.25, 0.25, 0.5, 0.5]
+    assert [tile.mark for tile in widget.state[0]] == [0.25, 0.25, 0.5, 0.5]  # state: tiles, maximum ranges
     widget = widgets("suspension_position", show_third_spring_position_mark=False)
     update(widget)
-    assert all(tile.mark == -1 for tile in widget.state)
+    assert all(tile.mark == -1 for tile in widget.state[0])
 
 
 def test_brake_pressure_input_mark(widgets, monkeypatch):

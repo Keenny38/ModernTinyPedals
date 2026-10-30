@@ -20,6 +20,7 @@
 Force Widget
 """
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from .. import units
@@ -203,20 +204,20 @@ class Realtime(Overlay):
             gf_lat = round(minfo.force.latGForceRaw, 2)
             self.update_gf_lat(self.bar_gforce_lat, gf_lat)
 
-        # Downforce ratio
+        # Downforce ratio (NaN: not provided by game, n/a)
         if self.wcfg["show_downforce_ratio"]:
-            df_ratio = round(rmnan(minfo.force.downForceRatio) * 100, 2)
-            self.update_df_ratio(self.bar_df_ratio, df_ratio)
+            df_ratio = minfo.force.downForceRatio
+            self.update_df_ratio(self.bar_df_ratio, round(df_ratio * 100, 2) if isfinite(df_ratio) else None)
 
         # Front downforce
         if self.wcfg["show_front_downforce"]:
-            df_front = round(rmnan(minfo.force.downForceFront))
-            self.update_df_front(self.bar_df_front, df_front)
+            df_front = minfo.force.downForceFront
+            self.update_df_front(self.bar_df_front, round(df_front) if isfinite(df_front) else None)
 
         # Rear downforce
         if self.wcfg["show_rear_downforce"]:
-            df_rear = round(rmnan(minfo.force.downForceRear))
-            self.update_df_rear(self.bar_df_rear, df_rear)
+            df_rear = minfo.force.downForceRear
+            self.update_df_rear(self.bar_df_rear, round(df_rear) if isfinite(df_rear) else None)
 
         # Estimated static weight
         if self.wcfg["show_estimated_static_weight"]:
@@ -270,24 +271,27 @@ class Realtime(Overlay):
         """Downforce ratio"""
         if target.last != data:
             target.last = data
-            text_ratio = f"{data:.2f}"
-            target.text = f"{text_ratio:.5}%"
+            if data is None:
+                target.text = TEXT_NA
+            else:
+                text_ratio = f"{data:.2f}"
+                target.text = f"{text_ratio:.5}%"
             target.update()
 
     def update_df_front(self, target, data):
         """Downforce front"""
         if target.last != data:
             target.last = data
-            target.text = f"F{abs(data):5.0f}"
-            target.bg = self.bar_style_df_front[data < 0]
+            target.text = TEXT_NA if data is None else f"F{abs(data):5.0f}"
+            target.bg = self.bar_style_df_front[data is not None and data < 0]
             target.update()
 
     def update_df_rear(self, target, data):
         """Downforce rear"""
         if target.last != data:
             target.last = data
-            target.text = f"R{abs(data):5.0f}"
-            target.bg = self.bar_style_df_rear[data < 0]
+            target.text = TEXT_NA if data is None else f"R{abs(data):5.0f}"
+            target.bg = self.bar_style_df_rear[data is not None and data < 0]
             target.update()
 
     def update_weight(self, target, data):

@@ -32,6 +32,7 @@ from PySide6.QtCore import QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
 from ...i18n import tr_overlay as tr
+from ...userfile import custom_image, game_images  # modules: logo loader & game pictures replaced by tests
 from .base import CENTER, DASH, LEFT, RIGHT
 from .draw import accent_edge, readable_on, rounded, triangle
 
@@ -582,26 +583,24 @@ class TableMixin:
         (cars of a brand share it). On screen, file lookup & reading run on logo loader thread: null until
         ready, then table repainted (see logos_arrived). Off screen (preview, test render), done at once.
         """
-        from ...userfile.custom_image import LOGO_LOADER, brand_logo_image
-        from ...userfile.game_images import images
-
         files = self.__dict__.setdefault("_logo_files", {})
         pixmaps = self.__dict__.setdefault("_logo_cache", {})
         found = files.get((brand, vehicle))
-        version = images.version
+        version = game_images.images.version
         if found is None or (not found[0] and found[1] != version):
             args = (self.cfg.path.brand_logo, brand, self.theme.surface.lightness() > 128, vehicle,
                     width, height, 2.0)  # sharp on high DPI screen
             if self.isVisible():
-                done, value = LOGO_LOADER.result(("brand", *args, version),
-                                                 lambda: brand_logo_image(*args))
+                loader = custom_image.LOGO_LOADER
+                done, value = loader.result(("brand", *args, version),
+                                            lambda: custom_image.brand_logo_image(*args))
                 if not done:  # initials meanwhile (no logo found before either)
-                    self.__dict__["_logos_waited"] = LOGO_LOADER.finished
+                    self.__dict__["_logos_waited"] = loader.finished
                     self.watch_logos()
                     return QPixmap()
                 path, image = value if value is not None else ("", None)
             else:
-                path, image = brand_logo_image(*args)
+                path, image = custom_image.brand_logo_image(*args)
             found = files[(brand, vehicle)] = (path, version)
             if path and path not in pixmaps:
                 pixmaps[path] = QPixmap.fromImage(image) if image is not None and not image.isNull() else QPixmap()
@@ -609,10 +608,8 @@ class TableMixin:
 
     def logos_arrived(self: Any) -> bool:
         """Logo waited for by last paint may be ready (logo loader finished a job since): paint again"""
-        from ...userfile.custom_image import LOGO_LOADER
-
         waited = self.__dict__.get("_logos_waited")
-        if waited is None or waited == LOGO_LOADER.finished:
+        if waited is None or waited == custom_image.LOGO_LOADER.finished:
             return False
         del self.__dict__["_logos_waited"]
         return True

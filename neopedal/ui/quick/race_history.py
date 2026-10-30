@@ -311,8 +311,7 @@ class HistoryTeam(RaceBase):
     def addSelectedLaps(self):
         """Average of selected valid laps filled in"""
         selected = [self.history_data[index] for index in sorted(self.selected_indexes())]
-        if not selected:
-            self.host.warn(tr("No data selected."))
+        if not selected:  # key pressed with nothing selected: buttons are disabled, nothing to tell
             return
         used = [lap for lap in selected if lap.isValidLap]
         skipped = len(selected) - len(used)
@@ -345,17 +344,24 @@ class HistoryTeam(RaceBase):
     def delete_laps(self, indexes: set[int] | None):
         """Delete laps (indexes in history data), or whole history (None), after confirmation"""
         dataset = self.history_data
-        if indexes is not None and not indexes:
-            self.host.warn(tr("No data selected."))
+        if indexes is not None and not indexes:  # Delete key with nothing selected: button disabled
             return
         removed = [lap for index, lap in enumerate(dataset) if indexes is None or index in indexes]
-        kept_index = [index for index in range(len(dataset)) if indexes is not None and index not in indexes]
-        kept = [dataset[index] for index in kept_index]
         if not removed:
             return
         message = (trm(f"Delete <b>{len(removed)}</b> lap(s) from consumption history?")
-                   if indexes is not None else tr("<b>Delete whole consumption history?</b>"))
-        if not self.host.confirm(message + "<br><br>" + trm("This cannot be undone!")):
+                   if indexes is not None else tr("Delete the whole consumption history?"))
+        removed_ids = {id(lap) for lap in removed}
+        self.host.ask(message + "<br><br>" + trm("This cannot be undone!"),
+                      lambda: self.delete_laps_now(removed_ids, indexes is None), tr("Delete"), danger=True)
+
+    def delete_laps_now(self, removed_ids: set[int], everything: bool):
+        """Laps deleted (confirmed): laps of ids from history shown now (laps added meanwhile kept)"""
+        dataset = self.history_data
+        removed = [lap for lap in dataset if everything or id(lap) in removed_ids]
+        kept_index = [index for index in range(len(dataset)) if not everything and id(dataset[index]) not in removed_ids]
+        kept = [dataset[index] for index in kept_index]
+        if not removed:
             return
         if self.live_source:
             filename, extension = api.read.session.combo_name(), FileExt.CONSUMPTION
@@ -415,6 +421,7 @@ class HistoryTeam(RaceBase):
             self.team_status_changed()
             return
         self.show_team_stints(stints, self.unit_fuel(capacity) if capacity else 0.0)
+        self.keep_team_names()  # drivers of team stints
         self.team_status = trm("Updated from game at {}").replace("{}", clock_seconds(), 1)
         self.team_status_changed()
 

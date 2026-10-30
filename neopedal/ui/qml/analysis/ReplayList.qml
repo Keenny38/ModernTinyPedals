@@ -63,12 +63,12 @@ Item {
             onTriggered: replays.showInFolder(root.menuKey)
         }
         Action {
-            text: root.menuMany ? i18n.tr("Export %1 Replays...").arg(replays.checkedCount) : i18n.tr("Export Replay...")
+            text: root.menuMany ? i18n.tr("Export %1 Replays…").arg(replays.checkedCount) : i18n.tr("Export Replay…")
             enabled: replays.replayFolder !== "" && !replays.copying
             onTriggered: replays.exportReplays(root.menuKey)
         }
         Action {
-            text: i18n.tr("Rename Replay...")
+            text: i18n.tr("Rename Replay…")
             enabled: replays.replayFolder !== "" && !root.menuMany
             onTriggered: replays.renameReplay(root.menuKey)
         }
@@ -77,8 +77,9 @@ Item {
             onTriggered: replays.toggleProtected(root.menuKey)
         }
         MenuSeparator {}
-        Action {
-            text: root.menuMany ? i18n.tr("Delete %1 Replays...").arg(replays.checkedCount) : i18n.tr("Delete Replay...")
+        TpMenuItem {  // Delete key on the list does the same
+            text: root.menuMany ? i18n.tr("Delete %1 Replays…").arg(replays.checkedCount) : i18n.tr("Delete Replay…")
+            shortcut: i18n.tr("Del")
             enabled: replays.replayFolder !== "" && (root.menuMany || !root.menuProtected) && !replays.trashing
             onTriggered: replays.deleteReplays(root.menuKey)
         }
@@ -88,7 +89,7 @@ Item {
     TpMenu {
         id: moreMenu
         Action {
-            text: replays.checkedCount > 1 ? i18n.tr("Export %1 Replays...").arg(replays.checkedCount) : i18n.tr("Export Replay...")
+            text: replays.checkedCount > 1 ? i18n.tr("Export %1 Replays…").arg(replays.checkedCount) : i18n.tr("Export Replay…")
             enabled: replays.replayFolder !== "" && replays.selectedReplay !== "" && !replays.copying
             onTriggered: replays.exportReplays(replays.selectedReplay)
         }
@@ -99,12 +100,12 @@ Item {
         }
         MenuSeparator {}
         Action {
-            text: i18n.tr("Delete Replays Older Than...")
+            text: i18n.tr("Delete Replays Older Than…")
             enabled: replays.replayFolder !== "" && replays.replayCount > 0 && !replays.trashing
             onTriggered: replays.deleteOlderThan()
         }
         Action {
-            text: i18n.tr("Keep Only Latest Replays...")
+            text: i18n.tr("Keep Only Latest Replays…")
             enabled: replays.replayFolder !== "" && replays.replayCount > 0 && !replays.trashing
             onTriggered: replays.keepLatest()
         }
@@ -133,11 +134,11 @@ Item {
             count: replays.replayCount > 0 ? replays.replaysSummary : ""
             busy: replays.loading
             TpButton {
-                glyph: ""  // add
+                glyph: theme.glyphs.add
                 fallback: "+"
                 text: root.roomy ? i18n.tr("Add") : ""
                 tip: replays.replayFolder !== "" ? i18n.tr("Add replay files (.Vcr) to the game replay folder, or drop them on the page")
-                                                 : i18n.tr("Replay folder unknown: start LMU once so the page lists its replays.")
+                                                 : i18n.tr("Replay folder unknown: start LMU once so the page lists its replays")
                 enabled: replays.replayFolder !== "" && !replays.copying
                 flat: true
                 size: "sm"
@@ -145,7 +146,7 @@ Item {
                 Accessible.name: i18n.tr("Add")
             }
             TpButton {
-                glyph: ""  // delete
+                glyph: theme.glyphs.delete
                 fallback: "✕"
                 tip: (replays.checkedCount > 1 ? i18n.tr("Move selected replays to the recycle bin")
                                                : i18n.tr("Move replay to the recycle bin")) + " (" + i18n.tr("Delete") + ")"
@@ -156,13 +157,13 @@ Item {
             }
             TpButton {
                 id: moreButton
-                glyph: ""  // more
+                glyph: theme.glyphs.more
                 fallback: "⋯"
                 tip: i18n.tr("Export, protect, clean up the replay folder")
                 flat: true
                 size: "sm"
                 checked: moreMenu.visible
-                onClicked: moreMenu.visible ? moreMenu.close() : moreMenu.popup(moreButton, 0, moreButton.height + 4)
+                onClicked: moreMenu.toggleBelow(moreButton)
             }
             TpButton {
                 id: sortButton
@@ -173,7 +174,7 @@ Item {
                 flat: true
                 size: "sm"
                 checked: sortMenu.visible
-                onClicked: sortMenu.visible ? sortMenu.close() : sortMenu.popup(sortButton, 0, sortButton.height + 4)
+                onClicked: sortMenu.toggleBelow(sortButton)
                 TpMenu {
                     id: sortMenu
                     Instantiator {
@@ -195,7 +196,7 @@ Item {
         // Replays being copied to game folder, files being moved to the recycle bin
         FileProgress {
             visible: replays.copying
-            text: replays.copyKind === "export" ? i18n.tr("Exporting replays...") : i18n.tr("Copying replays...")
+            text: replays.copyKind === "export" ? i18n.tr("Exporting replays…") : i18n.tr("Copying replays…")
             progress: replays.copyProgress
             stopText: i18n.tr("Stop Copy")
             onStopped: replays.cancelCopy()
@@ -203,7 +204,7 @@ Item {
         FileProgress {
             objectName: "trashProgress"
             visible: replays.trashing
-            text: i18n.tr("Moving to the recycle bin...")
+            text: i18n.tr("Moving to the recycle bin…")
             progress: replays.trashProgress
             stopText: i18n.tr("Stop")
             onStopped: replays.cancelTrash()
@@ -218,7 +219,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 8
                 searchDelay: 200
-                placeholderText: i18n.tr("Search replays: track, event...")
+                placeholderText: i18n.tr("Search replays: track, event…") + "   /"
                 onSearchChanged: function(text) { replays.setSearch(text) }
                 onExitField: list.forceActiveFocus()
                 Keys.onEscapePressed: { clearSearch(); list.forceActiveFocus() }
@@ -227,7 +228,7 @@ Item {
             }
             TpSegmented {
                 name: i18n.tr("Session")
-                options: [i18n.tr("All"), i18n.tr("Practice"), i18n.tr("Qualify"), i18n.tr("Race")]
+                options: [i18n.tr("All"), i18n.tr("Practice"), i18n.tr("Qualifying"), i18n.tr("Race")]  // SESSION_FILTER_LABELS
                 currentIndex: replays.sessionFilter
                 maxWidth: root.width * 0.58
                 onActivated: function(index) { replays.setSessionFilter(index) }
@@ -249,20 +250,21 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: i18n.tr("Selected") + "  " + replays.checkedSummary
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.weight: Font.DemiBold
                     font.features: { "tnum": 1 }
                     elide: Text.ElideRight
                 }
                 TpButton {
-                    glyph: ""  // delete
+                    glyph: theme.glyphs.delete
                     text: i18n.tr("Delete")
                     flat: true
                     size: "sm"
                     onClicked: replays.deleteReplays(replays.selectedReplay)
                 }
                 TpButton {
-                    glyph: ""  // cancel
+                    glyph: theme.glyphs.remove
                     fallback: "✕"
                     flat: true
                     size: "sm"
@@ -294,7 +296,8 @@ Item {
             Keys.onEscapePressed: replays.selectReplay(replays.selectedReplay)
             Keys.onPressed: function(event) {
                 if (event.matches(StandardKey.SelectAll)) { replays.selectAllReplays(); event.accepted = true }
-                else if (event.key === Qt.Key_Menu && replays.selectedReplay !== "") {  // menu of the selected replay
+                else if ((event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier))
+                         && replays.selectedReplay !== "") {  // menu of the selected replay (Menu key, Shift+F10)
                     var index = replays.replayIndex(replays.selectedReplay)
                     var item = index >= 0 ? list.itemAtIndex(index) : null
                     if (item) root.openRowMenu(item.key, item.isProtected, item.checked && replays.checkedCount > 1,
@@ -314,7 +317,7 @@ Item {
                 width: ListView.view.width
                 height: section !== "" ? Math.round(theme.rowCompact) : 0
                 visible: section !== ""
-                color: theme.base
+                color: theme.surfaceCard  // sticky over the rows: the card surface they scroll on
                 TpSectionLabel {
                     anchors.left: parent.left
                     anchors.leftMargin: theme.space2
@@ -412,7 +415,7 @@ Item {
                             visible: row.isProtected || starArea.containsMouse || rowArea.containsMouse
                             glyph: row.isProtected ? "" : ""  // star
                             fallback: row.isProtected ? "★" : "☆"
-                            size: theme.em * 0.85
+                            size: theme.iconSm
                             color: row.isProtected ? theme.gold : starArea.containsMouse ? theme.text : theme.dimText
                         }
                         MouseArea {
@@ -432,7 +435,7 @@ Item {
                     ResultsBadge {
                         code: row.code !== "" ? row.code.split(" ")[0] : (row.session.charAt(0) || "?")
                         implicitWidth: Math.round(theme.em * 2.6)
-                        implicitHeight: Math.round(theme.em * 2.3)
+                        implicitHeight: Math.round(theme.controlHeight)
                     }
                     GameLogo {  // circuit logo of game
                         source: row.trackLogo
@@ -445,6 +448,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             text: row.track
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
@@ -452,6 +456,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             text: [row.event, row.eventType, row.sessionLabel].filter(function(part) { return part !== "" }).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: theme.dimOn(surface.color)
                             font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
@@ -461,7 +466,7 @@ Item {
                         visible: row.hasResults
                         glyph: ""  // flag
                         fallback: "⚑"
-                        size: theme.em * 0.85
+                        size: theme.iconSm
                         color: theme.dimOn(surface.color)
                         ToolTip.visible: resultsArea.containsMouse
                         ToolTip.text: i18n.tr("Results of this session found")
@@ -474,12 +479,14 @@ Item {
                         Text {
                             Layout.alignment: Qt.AlignRight
                             text: row.date
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.features: { "tnum": 1 }
                         }
                         Text {
                             Layout.alignment: Qt.AlignRight
                             text: row.size
+                            textFormat: Text.PlainText
                             color: theme.dimOn(surface.color)
                             font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
@@ -502,44 +509,23 @@ Item {
             }
 
             // Empty list: game not answering, no replay saved, nothing matching filter (centered over the list)
-            Column {
+            TpStateView {
+                id: replayState
+                objectName: "replayListState"
                 parent: list
                 anchors.centerIn: parent
-                width: parent.width - theme.em * 4
-                visible: list.count === 0
-                spacing: theme.space5
-                TpLoadingState {  // asking game: spinner, never "no replay" while waiting
-                    width: parent.width
-                    visible: replays.loading && replays.replayCount === 0
-                    text: i18n.tr("Asking game...")
-                }
-                Icon {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    visible: !(replays.loading && replays.replayCount === 0)
-                    glyph: replays.replayCount > 0 ? "" : ""
-                    size: theme.em * 2.6
-                    color: theme.dimText
-                }
-                Text {
-                    width: parent.width
-                    visible: !(replays.loading && replays.replayCount === 0)
-                    text: replays.replayCount > 0 ? i18n.tr("No replay matches the search or filter.")
-                        : replays.gameState === "offline" ? i18n.tr("Start LMU to list the replays it saved.")
-                        : i18n.tr("No replay saved by the game yet.")
-                    color: theme.dimText
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                TpButton {
-                    objectName: "clearReplayFilters"
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    visible: replays.replayCount > 0
-                    text: i18n.tr("Clear Filters")
-                    onClicked: {
-                        searchField.clearSearch()
-                        replays.clearFilters()
-                        list.forceActiveFocus()
-                    }
+                loading: replays.loading && replays.replayCount === 0  // asking game: never "no replay" while waiting
+                empty: list.count === 0
+                loadingText: i18n.tr("Asking game…")
+                glyph: replays.replayCount > 0 ? "" : ""  // search, video
+                title: replays.replayCount > 0 ? i18n.tr("No replay matches the search or filter.")
+                     : replays.gameState === "offline" ? i18n.tr("Start LMU to list the replays it saved.")
+                     : i18n.tr("No replay saved by the game yet.")
+                actionText: replays.replayCount > 0 ? i18n.tr("Clear Filters") : ""
+                onAction: {
+                    searchField.clearSearch()
+                    replays.clearFilters()
+                    list.forceActiveFocus()
                 }
             }
         }
@@ -563,6 +549,7 @@ Item {
             spacing: theme.space4
             Text {
                 text: bar.text
+                textFormat: Text.PlainText
                 color: theme.text
                 elide: Text.ElideRight
                 Layout.maximumWidth: bar.width * 0.45  // bar always shown
@@ -575,6 +562,7 @@ Item {
             }
             Text {
                 text: Math.round(bar.progress * 100) + " %"
+                textFormat: Text.PlainText
                 color: theme.dimOn(bar.color)
                 font.features: { "tnum": 1 }
             }

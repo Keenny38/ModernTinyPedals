@@ -40,6 +40,7 @@ from .hotkey.common import (
     refresh_keystate,
     sort_key_codes,
 )
+from .hotkey.joystick import JOY_CODE_BASE, JOY_REFRESH_INTERVAL
 from .setting import cfg
 from .thread_guard import run_supervised, wait_stopped
 
@@ -108,12 +109,16 @@ class HotkeyControl:
         available_key_codes = sort_key_codes(available_commands.keys())
 
         get_key_state = get_key_state_function()
+        # Controller buttons are sampled (no 'pressed since last call' as keyboard keys have): checked at the
+        # device read rate, a tap released between two checks is kept latched and run once
+        get_key_state.latch_controller_buttons = True
+        interval = JOY_REFRESH_INTERVAL if any(_key >= JOY_CODE_BASE for _key in available_key_codes) else 0.2
         refresh_keystate(get_key_state)
         # Keys held at start are no new press: a hotkey reloading preset (thread started again by reload)
         # and still held once reloaded would run again, and again (preset cycled while key held)
         last_key_codes = tuple(_key for _key in available_key_codes if get_key_state(_key))
 
-        while not _event_wait(0.2):
+        while not _event_wait(interval):
             # Close & disable if no commands
             if not available_commands:
                 break

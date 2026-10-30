@@ -22,12 +22,15 @@ Lap viewer track notes (part of LapViewerBackend, QML backend.trackNotes): notes
 
 Notes are the track notes file of the track (Track Notes overlay reads the same file while driving): a note added in
 the viewer shows in game, notes written for the overlay show in the viewer. Pit lane notes (#pit tag) left out.
+The track notes editor may change the same file: a note added, changed or removed here is applied to the file as it
+is now (read again if changed since read), never to an older copy (see update).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
@@ -99,6 +102,21 @@ def file_time(path: str) -> float:
 
 def is_pit_note(note: dict) -> bool:
     return TAG_PITNOTES in str(note.get(COLUMN_TAGS, ""))
+
+
+def replace_note(note: dict, text: str) -> Callable[[list[dict]], list[dict] | None]:
+    """Change of notes: text of note set (empty text removes it). Note found by its content, not its place: notes
+    read again meanwhile may have moved it. None if it is not there anymore"""
+
+    def change(notes: list[dict]) -> list[dict] | None:
+        position = next((index for index, other in enumerate(notes) if other == note), -1)
+        if position < 0:
+            return None
+        if not text:
+            return notes[:position] + notes[position + 1:]
+        return [{**other, COLUMN_TRACKNOTE: text} if index == position else other for index, other in enumerate(notes)]
+
+    return change
 
 
 class TrackNotes(PagePart):
@@ -190,9 +208,8 @@ class TrackNotes(PagePart):
             text = " ".join(text.split())[:MAX_NOTE_LENGTH]
             if not text:
                 return True
-            notes = [*self._notes, {COLUMN_DISTANCE: distance, COLUMN_TRACKNOTE: text, COLUMN_COMMENT: "",
-                                    COLUMN_TAGS: ""}]
-            return self.save(notes)
+            note = {COLUMN_DISTANCE: distance, COLUMN_TRACKNOTE: text, COLUMN_COMMENT: "", COLUMN_TAGS: ""}
+            return self.update(lambda notes: [*notes, note]) is not False
 
         self.ask(trm(f"Note at {distance_text(distance)} (shown on every lap of this track & by Track Notes overlay):"),
                  "", saving)
@@ -206,22 +223,36 @@ class TrackNotes(PagePart):
 
         def saving(text: str) -> bool:
             text = " ".join(text.split())[:MAX_NOTE_LENGTH]
-            if not text:
-                return self.save([other for position, other in enumerate(self._notes) if position != index])
-            return self.save([{**other, COLUMN_TRACKNOTE: text} if position == index else other
-                              for position, other in enumerate(self._notes)])
+            return self.update(replace_note(note, text)) is not False  # note gone meanwhile: input closed, told
 
         self.ask(tr("Note text (empty to remove):"), str(note.get(COLUMN_TRACKNOTE, "")), saving)
 
     @Slot(int)
     def remove(self, index: int):
         if 0 <= index < len(self._notes):
-            self.save([note for position, note in enumerate(self._notes) if position != index])
+            self.update(replace_note(self._notes[index], ""))
+
+    def update(self, change: Callable[[list[dict]], list[dict] | None]) -> bool | None:
+        """Notes changed & saved: True if saved, False if not (input kept open), None if the changed note is gone.
+        File changed by another editor (track notes editor, overlay file copied) since read: read again first,
+        change applied to its notes (theirs kept, never overwritten). change returns None when its note is not
+        there anymore: nothing written, told"""
+        track = self._track
+        if not track:
+            return False
+        if file_time(notes_path(track)) != self._time:
+            self.read(track)
+        notes = change(list(self._notes))
+        if notes is None:
+            self._page.set_status(tr("Note changed in another editor meanwhile: notes read again"))
+            self.place()
+            return None
+        return self.save(notes)
 
     def ask(self, label: str, text: str, saving):
-        from .._common import TextInputDialog
+        from . import dialogs
 
-        TextInputDialog(self._page._window, tr("Track Note"), label, saving, text).show()
+        dialogs.ask_text(self._page._window, tr("Track Note"), label, saving, text)
 
     def save(self, notes: list[dict]) -> bool:
         """Write notes file (sorted by distance), True if saved"""

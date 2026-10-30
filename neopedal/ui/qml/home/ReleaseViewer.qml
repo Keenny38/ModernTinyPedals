@@ -52,22 +52,12 @@ Rectangle {
         anchors.margins: theme.padPage
         spacing: theme.space3
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.space2
-            Text {
-                Layout.fillWidth: true
-                text: viewer.entry !== null ? viewer.entry.caption : ""
-                color: theme.text
-                font.pointSize: theme.fontHeading
-                font.weight: Font.DemiBold
-                elide: Text.ElideRight
-            }
-            Text {
-                text: (viewer.current + 1) + " / " + viewer.list.length
-                color: theme.dimText
-                font.features: { "tnum": 1 }
-            }
+        TpCardHeader {  // popup header: caption, image n / count, steps, open, close
+            level: "popup"
+            title: viewer.entry !== null ? viewer.entry.caption : ""
+            count: (viewer.current + 1) + " / " + viewer.list.length
+            closable: true
+            onClosed: viewer.close()
             TpButton {
                 glyph: ""  // chevron left
                 fallback: "‹"
@@ -83,16 +73,10 @@ Rectangle {
                 onClicked: viewer.step(1)
             }
             TpButton {
-                glyph: ""  // open in new window
+                glyph: theme.glyphs.openExternal
                 fallback: "↗"
                 tip: i18n.tr("Open in image viewer")
                 onClicked: if (viewer.entry !== null) backend.openImage(viewer.entry.url)
-            }
-            TpButton {
-                glyph: ""  // close
-                fallback: "✕"
-                tip: i18n.tr("Close")
-                onClicked: viewer.close()
             }
         }
 
@@ -125,7 +109,8 @@ Rectangle {
                 visible: full.status !== Image.Ready
                 color: theme.dimText
                 text: viewer.info.status === "failed" ? i18n.tr("Image not available, click to open it online")
-                                                      : i18n.tr("Loading image...")
+                                                      : i18n.tr("Loading image…")
+                textFormat: Text.PlainText
                 MouseArea {
                     anchors.fill: parent
                     enabled: viewer.info.status === "failed"

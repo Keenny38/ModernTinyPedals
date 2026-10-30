@@ -75,7 +75,8 @@ def test_parse_sha256():
 
 
 @pytest.fixture
-def file_server():
+def file_server(monkeypatch):
+    """Local http server of files (path: content), allowed as update host (only https GitHub hosts in app)"""
     files = {}
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -90,7 +91,9 @@ def file_server():
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield files, f"http://127.0.0.1:{server.server_port}"
+    base = f"http://127.0.0.1:{server.server_port}"
+    monkeypatch.setattr(update, "is_allowed_url", lambda url: url.startswith(f"{base}/"))
+    yield files, base
     server.shutdown()
     server.server_close()
 

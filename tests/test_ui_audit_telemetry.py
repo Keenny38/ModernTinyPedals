@@ -101,7 +101,7 @@ def test_track_picker_reached_with_tab_and_lap_list_keys(opener, warnings):  # n
 def test_trashed_lap_named_in_toast_with_undo(opener, warnings):  # noqa: F811
     dialog = opener()
     view, backend = dialog.view, dialog.backend
-    toast = named(view, "lapToast")
+    toast = named(view, "bridgeToast")  # page toast of TpDialogHost
     rows = [entry.file.path for entry in backend.entries]
     trashed = []
     backend.lapsTrashed.connect(lambda count, label: trashed.append((count, label)))
@@ -146,7 +146,12 @@ def test_math_editor_keeps_typed_changes(opener, warnings):  # noqa: F811
     wait(0.4)
     discard = view.rootObject().findChild(QObject, "mathDiscardDialog")
     assert discard.property("visible") and editor.property("visible")
-    evaluate(view, discard, "accept()")
+    # Save, Discard or Cancel (as every editor): no expression typed, nothing to save
+    assert discard.property("applyEnabled") is False
+    evaluate(view, discard, "apply()")
+    wait(0.4)
+    assert discard.property("visible") and editor.property("visible")
+    evaluate(view, discard, "discard()")
     wait(0.4)
     assert not editor.property("visible")
 

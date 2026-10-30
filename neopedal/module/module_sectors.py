@@ -26,6 +26,7 @@ from .. import realtime_state
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import SectorData, minfo
+from ..userfile.data_saver import queue_save
 from ..userfile.sector_best import merge_sector_best, read_sector_best_file, save_sector_best_file
 from ..validator import generator_init, is_same_session, session_token, valid_sectors
 from ._base import PENDING_CHECK, WAIT_STATE_CHANGE, DataModule, PendingLap, data_stamp
@@ -120,14 +121,17 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 merge_sector_best(output_session.sectorBestTB, output_session.sectorBestPB, *saved[:2])
                 merge_sector_best(output_alltime.sectorBestTB, output_alltime.sectorBestPB, *saved[2:])
         if readable:
-            save_sector_best_file(
+            # Written on the data saver thread: copies of the best sectors (lists updated in place meanwhile)
+            queue_save(
+                save_sector_best_file,
                 filepath=filepath,
                 filename=combo_name,
                 session_id=session_id,
-                session_best_tb=output_session.sectorBestTB,
-                session_best_pb=output_session.sectorBestPB,
-                alltime_best_tb=output_alltime.sectorBestTB,
-                alltime_best_pb=output_alltime.sectorBestPB,
+                session_best_tb=tuple(output_session.sectorBestTB),
+                session_best_pb=tuple(output_session.sectorBestPB),
+                alltime_best_tb=tuple(output_alltime.sectorBestTB),
+                alltime_best_pb=tuple(output_alltime.sectorBestPB),
+                sync=lap_state.sync_save,  # module stopping or player inactive: written at once
             )
             lap_state.delayed_save = False
 
@@ -226,6 +230,10 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             last_sector2 = api.read.timing.last_sector2()
             # Lap finished: game last lap data still of lap before (sector index reported first) never taken as S3
             if sector_idx == 0 and lap_sector2 > 0 and abs(last_sector2 - lap_sector2) > 0.001:
+                laptime_valid = -1.0
+            # Loaded in sector 1 (nothing recorded yet): lap finished before load (pit lane visit, track limits
+            # unknown, such as in lap before going back to garage) never taken as S3
+            if sector_idx == 0 and last_sector_idx < 0:
                 laptime_valid = -1.0
             # Lap finished (S3): still lap in progress until game updates lap start time, else lap before
             if s3_lap_stime == lap_stime:

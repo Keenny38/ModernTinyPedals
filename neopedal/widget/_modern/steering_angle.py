@@ -33,7 +33,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import minfo
-from .base import ModernOverlay, display_order_options
+from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class Realtime(StatsMixin, ModernOverlay):
     def radius_text(self, angle: float) -> str:
         """Turning radius of front wheel angle"""
         radius = calc.sym_max(self.unit_dist(calc.turning_radius(angle, self.wheelbase) * 0.001), 9999)
-        return f"{radius:+.0f}{self.symbol_dist}"
+        return f"{radius:+z.0f}{self.symbol_dist}"
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -102,14 +102,15 @@ class Realtime(StatsMixin, ModernOverlay):
         values = []
         for key in self.keys:
             if key == "steering_angle":
-                values.append(Value(f"{steer:+.0f}°"))
+                values.append(Value(f"{steer:+z.0f}°"))
             elif key == "front_wheel_angle":
-                values.append(Value(f"{wheel:+.1f}°"))
+                values.append(Value(f"{wheel:+z.1f}°"))
             elif key == "steering_ratio":
-                values.append(Value(f"{abs(calc.steering_ratio(steer, wheel)):.2f}"[:4] + ":1", theme.text_dim))
+                ratio = calc.steering_ratio(steer, wheel)
+                values.append(Value(f"{ratio:.1f}:1" if ratio else DASH, theme.text_dim))
             elif key == "ackermann_percentage":
                 percent = calc.ackermann_percentage(wheels.toeAngle[0], wheels.toeAngle[1], self.wheeltrack_front, self.wheelbase)
-                values.append(Value(f"{0.0 if abs(percent) > 9.99 else percent:+.0%}", theme.warning))
+                values.append(Value(f"{0.0 if abs(percent) > 9.99 else percent:+z.0%}", theme.warning))
             elif key == "slip_angle_difference":
                 self.ema_slip += 0.2 * (wheels.slipAngleDifference - self.ema_slip)
                 if self.ema_slip > wcfg["minimum_understeer_slip_angle_difference"]:
@@ -118,10 +119,10 @@ class Realtime(StatsMixin, ModernOverlay):
                     color = theme.blue
                 else:
                     color = None
-                values.append(Value(f"{self.ema_slip:+.1f}°", color, theme.tint(color, 55) if color is not None else None))
+                values.append(Value(f"{self.ema_slip:+z.1f}°", color, theme.tint(color, 55) if color is not None else None))
             elif key == "yaw_rate":
                 yaw = -wheels.yawRate if wcfg["show_inverted_yaw_rate_sign"] else wheels.yawRate
-                values.append(Value(f"{calc.degrees(yaw):+.0f}°/s"))
+                values.append(Value(f"{calc.degrees(yaw):+z.0f}°/s"))
             elif key == "turning_radius":
                 values.append(Value(self.radius_text(wheel), theme.text_dim))
             elif key == "turning_radius_under_slip_angle":

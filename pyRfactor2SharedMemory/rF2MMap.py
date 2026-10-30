@@ -10,6 +10,7 @@ Cross-platform Linux support (by Bernat)
 from __future__ import annotations
 
 import ctypes
+import gc
 import logging
 import mmap
 import platform
@@ -40,6 +41,21 @@ logger = logging.getLogger(get_root_logger_name())
 
 def no_update() -> None:
     """Update placeholder while mmap is not created (None: unknown whether data changed)"""
+
+
+def close_mmap(mmap_buffer: mmap.mmap, name: str) -> bool:
+    """Close mmap, once more after a garbage collection if a ctypes view of it is only kept alive by a
+    reference cycle (direct access), returns True if closed"""
+    for collected in (False, True):
+        try:
+            mmap_buffer.close()
+            logger.info("sharedmemory: CLOSED: %s", name)
+            return True
+        except BufferError:  # exported buffer (struct from_buffer) still referenced
+            if not collected:
+                gc.collect()
+    logger.error("sharedmemory: buffer error while closing %s", name)
+    return False
 
 
 def platform_mmap(name: str, size: int, pid: str = "") -> mmap.mmap:
@@ -133,11 +149,7 @@ class MMapControl:
         """
         self.data = self._struct.from_buffer_copy(self._mmap_buffer)
         self._version = None
-        try:
-            self._mmap_buffer.close()
-            logger.info("sharedmemory: CLOSED: %s", self._mmap_name)
-        except BufferError:
-            logger.error("sharedmemory: buffer error while closing %s", self._mmap_name)
+        close_mmap(self._mmap_buffer, self._mmap_name)
         self.update = no_update  # unassign update method (for proper garbage collection)
 
     def set_scratch(self, scratch: bytearray) -> None:

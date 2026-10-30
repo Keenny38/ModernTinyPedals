@@ -398,7 +398,8 @@ def fix_sections(sections: Sequence[Section], toggles: Mapping[str, str], depend
     Args:
         sections: automatic sections.
         toggles: section toggle -> on/off option leading that section instead.
-        dependencies: option -> on/off option it is used with ("" if none).
+        dependencies: option -> on/off option it is used with ("" if none), on/off option -> itself: leads a
+            section of its own, after the section it was cut in.
     """
     moved_toggles = {right for wrong, right in toggles.items() if any(s.toggle == wrong for s in sections)}
     result: list[Section] = []
@@ -414,6 +415,11 @@ def fix_sections(sections: Sequence[Section], toggles: Mapping[str, str], depend
         if index < 0:
             continue
         section = result[index]
+        if control == key:  # on/off option of its own item
+            if section.toggle != key:
+                result[index] = section._replace(keys=tuple(k for k in section.keys if k != key))
+                result.insert(index + 1, Section(ITEM_PREFIX + key, (key,), key, _toggle_item(key)))
+            continue
         if control:
             target = next((i for i, other in enumerate(result) if other.toggle == control), -1)
             holder = next((i for i, other in enumerate(result) if control in other.keys), -1)

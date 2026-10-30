@@ -40,6 +40,13 @@ from .stats import Stat, StatsMixin, Value
 if TYPE_CHECKING:
     from ...template.widget_config_types import PitStopEstimateConfig
 
+VALUE_CHARS = 6  # characters of value sample ("888.88"), sign not counted
+VALUE_MAX = 99999.0  # larger values capped (still fit without decimals)
+DECIMAL_KEYS = (
+    "pass_duration", "pit_timer", "stop_duration", "minimum_total_duration", "actual_relative_refill",
+    "total_relative_refill", "estimated_laps", "estimated_minutes",
+)
+
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
@@ -47,7 +54,7 @@ class Realtime(StatsMixin, ModernOverlay):
     wcfg: PitStopEstimateConfig
 
     options = (
-        "font_size", "additional_pitstop_time", "lengthy_stop_duration_threshold",
+        "font_size", "show_caption", "additional_pitstop_time", "lengthy_stop_duration_threshold",
         "decimal_places_pass_duration", "decimal_places_pit_timer", "decimal_places_stop_duration",
         "decimal_places_minimum_total_duration", "show_relative_refilling", "decimal_places_actual_relative_refill",
         "decimal_places_total_relative_refill", "show_estimated_laps_and_minutes", "decimal_places_estimated_laps",
@@ -74,6 +81,10 @@ class Realtime(StatsMixin, ModernOverlay):
         width, height = self.build_stats(stats, columns=4)
         self.set_size(width, height)
         self.minimum_total = 0.0
+        # Options read once (not on every update)
+        self.decimals = {key: max(int(wcfg[f"decimal_places_{key}"]), 0) for key in DECIMAL_KEYS}
+        self.lengthy_stop = wcfg["lengthy_stop_duration_threshold"]
+        self.additional_time = wcfg["additional_pitstop_time"]
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -82,8 +93,13 @@ class Realtime(StatsMixin, ModernOverlay):
         self.draw_stats(painter, self.state)
 
     def number(self, key: str, value: float, sign: str = "") -> str:
-        """Value with decimal places option"""
-        return f"{value:{sign}.{max(int(self.wcfg[f'decimal_places_{key}']), 0)}f}"
+        """Value with decimal places option, without decimals when too long for its tile (24 h race refill)"""
+        value = calc.sym_max(value, VALUE_MAX)
+        decimals = self.decimals[key]
+        text = f"{value:{sign}.{decimals}f}"
+        if decimals and len(text) > VALUE_CHARS + len(sign):
+            return f"{value:{sign}.0f}"
+        return text
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -92,10 +108,11 @@ class Realtime(StatsMixin, ModernOverlay):
         abs_refill = api.read.vehicle.absolute_refill()
         pass_time = minfo.mapping.pitPassTime
         pit_timer = player_vehicle().pitTimer.elapsed
-        lengthy = stop_time >= self.wcfg["lengthy_stop_duration_threshold"]
-        if not api.read.vehicle.in_pits() or self.minimum_total < pass_time:
+        lengthy = stop_time >= self.lengthy_stop
+        # Kept during a stop (stop time counts down), updated in garage (session start, new track)
+        if not api.read.vehicle.in_pits() or api.read.vehicle.in_garage() or self.minimum_total < pass_time:
             if stop_time > 0:
-                self.minimum_total = stop_time + pass_time + self.wcfg["additional_pitstop_time"]
+                self.minimum_total = stop_time + pass_time + self.additional_time
             else:
                 self.minimum_total = pass_time
         energy = minfo.energy.available

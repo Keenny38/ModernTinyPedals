@@ -7,7 +7,6 @@ import time
 from array import array
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
@@ -219,14 +218,10 @@ def test_delete_laps_to_trash_with_locked_file(tmp_path, monkeypatch):
 
 
 def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
-    from neopedal.ui import lap_library as library_page
-
     library = open_library(viewer)
-    library.add_to_viewer([library.tree.topLevelItem(0)])
-    paths = library.lap_paths([library.tree.topLevelItem(0)])
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
-    monkeypatch.setattr(library_page, "show_toast", lambda *args, **kwargs: None)
+    group = library.model.rows[0]["key"]
+    library.addRow(group)
+    paths = library.lap_paths([group])
     monkeypatch.setattr(lap_library, "RENAME_RETRIES", 1)
     real_replace = os.replace
 
@@ -236,44 +231,40 @@ def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
         real_replace(source, target)
 
     monkeypatch.setattr(os, "replace", replace)
-    library.tree.topLevelItem(0).setSelected(True)
-    library.delete()  # was: exception out of the slot, first files gone, viewer not told
+    library.select(group, "set")
+    library.deleteSelected()  # was: exception out of the slot, first files gone, viewer not told
     wait_library(library)  # files moved on a worker thread
     monkeypatch.setattr(os, "replace", real_replace)
-    assert warnings and "file in use" in warnings[0]
+    assert "file in use" in library.property("problem")
     assert [entry.file.path for entry in viewer.backend.external] == [paths[0]]  # deleted one forgotten only
-    assert library.tree.topLevelItem(0).childCount() == 1 and library.button_undo.isVisibleTo(library)
-    library.undo_delete()
+    assert library.model.rows[0]["count"] == 1 and viewer.backend.undoText != ""
+    viewer.backend.undoDelete()  # lap viewer undo (page toast, Ctrl+Z)
     wait_library(library)
-    assert library.tree.topLevelItem(0).childCount() == 2 and not library.button_undo.isVisibleTo(library)
+    assert library.model.rows[0]["count"] == 2 and viewer.backend.undoText == ""
     assert all(os.path.exists(path) for path in paths)
-    library.close()
 
 
 def test_library_import_is_page_job(viewer, monkeypatch, tmp_path):  # noqa: F811
-    from neopedal.ui import lap_library as library_page
-    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend, lap_library_panel
 
     log = tmp_path / "Monza run.ld"
     write_logger_ld(str(log), logger_channels(), venue="Monza")
-    monkeypatch.setattr(library_page.QFileDialog, "getOpenFileNames",
+    monkeypatch.setattr(lap_library_panel.QFileDialog, "getOpenFileNames",
                         staticmethod(lambda *args, **kwargs: ([str(log)], "")))
     page = viewer.backend
     library = open_library(viewer)
-    library.import_logs()
+    library.importLogs()
     assert page.exports._imports == 1 and page.loading  # page close lets it finish, busy indicator shown
     assert "MoTeC import" in [handle.name for handle, *_ in page._jobs]
     assert "MoTeC import" in lap_backend.EXPORT_JOBS  # app exit waits for it
     page.wait_jobs()
     wait_library(library)
-    assert page.exports._imports == 0 and library.top_items()[0].text(0) == "Monza run"
+    assert page.exports._imports == 0 and library.model.rows[0]["title"] == "Monza run"
     assert not page.external  # library import: laps not added to viewer
-    library.import_logs()
-    library.close()
-    library.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    page.wait_jobs()  # library gone before import ended: nothing to update
-    assert page.exports._imports == 0
+    library.importLogs()
+    library.closed()  # panel closed before import ended: listed again when opened
+    page.wait_jobs()
+    assert page.exports._imports == 0 and not library.property("importing")
 
 
 def test_import_stopped_with_worker(backend, monkeypatch, tmp_path):  # noqa: F811

@@ -41,7 +41,7 @@ from PySide6.QtGui import QImage, QPalette
 from ... import regex_pattern as rxp
 from ...api_control import api
 from ...const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
-from ...const_file import FileExt, ImageFile
+from ...const_file import FileExt, FontFile, ImageFile
 from ...formatter import format_module_name, strip_filename_extension
 from ...i18n import LANGUAGES, current_language, language_pack, load_translation, trm
 from ...i18n.options import LABEL_LANGUAGES, load_data
@@ -59,7 +59,7 @@ from .preview_provider import STORE
 logger = logging.getLogger(__name__)
 
 # Steps: key, sidebar label, title, subtitle, glyph (Segoe Fluent Icons / MDL2 Assets)
-STEP_WELCOME, STEP_GAME, STEP_UNITS, STEP_LOOK, STEP_OVERLAYS, STEP_READY = range(6)
+STEP_WELCOME, STEP_GAME, STEP_UNITS, STEP_LOOK, STEP_OVERLAYS, STEP_STREAM, STEP_READY = range(7)
 STEPS = (
     ("welcome", "Welcome", "Welcome to NeoPedal",
      "A few questions to get you started. Every choice can be changed later.", "\uE774"),  # globe
@@ -71,6 +71,8 @@ STEPS = (
      "Colors of the app window and of the in-game overlays.", "\uE7F4"),  # monitor
     ("overlays", "Overlays", "Preset and overlays",
      "A preset stores the layout and options of all overlays.", "\uE81E"),  # layers
+    ("stream", "Streaming", "Streaming (optional)",
+     "Show your overlays on stream: a browser source in OBS, Streamlabs, XSplit or vMix.", "\uE93E"),  # streaming
     ("ready", "Ready", "Ready to race",
      "Check your choices, then finish to start the overlays.", "\uE73E"),  # check
 )
@@ -209,7 +211,7 @@ def read_preset(filename: str) -> dict:
     try:
         with open(f"{cfg.path.settings}{filename}", encoding="utf-8") as file:
             data = json.load(file)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:  # RecursionError: nested too deeply
         logger.info("SETUP: unable to read preset %s: %s", filename, error)
         return {}
     return data if isinstance(data, dict) else {}
@@ -238,7 +240,8 @@ class SetupBackend(PageBackend):
     stepChanged = Signal()
     navigationChanged = Signal()  # step or preset name changed: Next & Finish enabled or not
     languageChanged = Signal()
-    choicesChanged = Signal()
+    choicesChanged = Signal()  # window & overlay themes, colorblind, font, units
+    afterSetupChanged = Signal()  # streaming & after setup choices, layout address copied
     gamesChanged = Signal()
     presetChanged = Signal()
     tilesChanged = Signal()
@@ -266,6 +269,11 @@ class SetupBackend(PageBackend):
         self._game_picked = False  # user choice wins over detected game
         self._running: set[str] = set()
         self._units = unit_system(cfg.user.setting.get("units", {}))
+        # Streaming step & what Finish does next (see SetupChoices)
+        self._stream = bool(cfg.user.config["stream_overlay"].get("enable_stream_overlay", False))
+        self._stream_url = ""  # layout address copied (Streaming step)
+        self._open_screen = True
+        self._test_screen = True
         # Presets: loaded first, then by date
         loaded = cfg.filename.setting
         names = cfg.preset_files()
@@ -453,6 +461,11 @@ class SetupBackend(PageBackend):
     @Property(bool, notify=choicesChanged)
     def modernFont(self) -> bool:
         return self._modern_font
+
+    @Property(str, constant=True)
+    def modernFontName(self) -> str:
+        """Value font of modern design (modern_font_name option), shown in the modern font switch"""
+        return cfg.user.config["overlay_style"].get("modern_font_name") or FontFile.MODERN_FAMILY
 
     @Slot(bool)
     def setModernFont(self, enabled: bool):
@@ -800,6 +813,55 @@ class SetupBackend(PageBackend):
         if name == THEME_SAMPLE and filename == self.preset_file():
             self.themeSamplesChanged.emit()
 
+    # Streaming & after setup
+    @Property(bool, notify=afterSetupChanged)
+    def stream(self) -> bool:
+        return self._stream
+
+    @Slot(bool)
+    def setStream(self, enabled: bool):
+        if enabled != self._stream:
+            self._stream = enabled
+            self.afterSetupChanged.emit()
+
+    @Property(str, notify=afterSetupChanged)
+    def streamUrl(self) -> str:
+        """Layout address copied (empty until copied: the address carries an access token made on demand)"""
+        return self._stream_url
+
+    @Slot()
+    def copyStreamUrl(self):
+        """Address of the layout source (every overlay, 16:9) copied for the streaming software"""
+        from PySide6.QtGui import QGuiApplication
+
+        from ...stream_overlay import LAYOUT, streamoverlay
+
+        self._stream_url = streamoverlay.url(f"/{LAYOUT}", "crop=16:9")
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._stream_url)
+        self.afterSetupChanged.emit()
+
+    @Property(bool, notify=afterSetupChanged)
+    def openScreenView(self) -> bool:
+        return self._open_screen
+
+    @Slot(bool)
+    def setOpenScreenView(self, enabled: bool):
+        if enabled != self._open_screen:
+            self._open_screen = enabled
+            self.afterSetupChanged.emit()
+
+    @Property(bool, notify=afterSetupChanged)
+    def testOnScreen(self) -> bool:
+        return self._test_screen
+
+    @Slot(bool)
+    def setTestOnScreen(self, enabled: bool):
+        if enabled != self._test_screen:
+            self._test_screen = enabled
+            self.afterSetupChanged.emit()
+
     # Summary
     @Property(list, notify=stepChanged)
     def summary(self) -> list[dict]:
@@ -807,7 +869,7 @@ class SetupBackend(PageBackend):
         units_text = f"{units['label']} ({', '.join(units['units'])})" if units else ""
         overlay = self.tr(self._overlay_theme)
         if self._colorblind:
-            overlay = f"{overlay} · {self.tr('Colorblind safe colors')}"
+            overlay = f"{overlay} · {self.tr('Colorblind Colors')}"
         if self.newPreset:
             preset = f"{self.new_preset_name()} ({self.tr('new')})"
         else:
@@ -823,6 +885,8 @@ class SetupBackend(PageBackend):
             {"label": self.tr("Preset to use"), "value": preset, "step": STEP_OVERLAYS, "glyph": "\uE838"},
             {"label": self.tr("Overlays"), "value": ", ".join(labels) or self.tr("None"), "step": STEP_OVERLAYS,
              "glyph": "\uE81E"},
+            {"label": self.tr("Streaming"), "value": self.tr("On") if self._stream else self.tr("Off"),
+             "step": STEP_STREAM, "glyph": "\uE93E"},
         ]
 
     @Property(str, constant=True)
@@ -852,4 +916,7 @@ class SetupBackend(PageBackend):
             colorblind=self._colorblind,
             units=self._units,
             disabled=tuple(name for name in self._names if name not in checked),
+            stream=self._stream,
+            open_screen_view=self._open_screen,
+            test_on_screen=self._test_screen,
         )

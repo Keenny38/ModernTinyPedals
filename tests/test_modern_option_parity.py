@@ -213,4 +213,5 @@ def test_options_page_places_new_options(ui_env):
     assert relative.section_of["number_of_delta_laptime"].title == "Delta Lap Time"
     assert relative.section_of["show_energy_per_lap_average"].title == "Energy per Lap"
     rivals = build_layout("rivals", cfg.user.setting["rivals"])
-    assert rivals.section_of["show_driver_badge"].title == "Driver & Safety Rank"
+    assert "display_order_driver_badge" in rivals.keys and "show_driver_badge" not in rivals.keys
+    assert relative.section_of["show_class_name"].title == "Class"

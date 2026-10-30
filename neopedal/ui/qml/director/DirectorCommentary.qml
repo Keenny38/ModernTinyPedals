@@ -11,11 +11,6 @@ Item {
 
     property int tab: 0
 
-    component SmallText: Text {
-        color: theme.dimText
-        font.pointSize: theme.fontCaption
-        elide: Text.ElideRight
-    }
     // Lists of this screen: keyboard reachable, Enter kept by the list (not the page's "take best")
     component KeyList: ListView {
         activeFocusOnTab: true
@@ -33,7 +28,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.padCard
-        spacing: theme.em * 0.5
+        spacing: theme.space3
 
         TpSegmented {
             objectName: "commentaryTabs"
@@ -80,7 +75,7 @@ Item {
                         objectName: "exportButton"
                         flat: true
                         size: "sm"
-                        glyph: ""  // export
+                        glyph: theme.glyphs.export
                         fallback: "CSV"
                         enabled: feed.count > 0
                         tip: i18n.tr("Export Events") + " (CSV)"
@@ -139,28 +134,31 @@ Item {
                         RowLayout {
                             anchors.fill: parent
                             anchors.rightMargin: theme.space2
-                            spacing: theme.em * 0.5
+                            spacing: theme.space3
                             TpClassStrip { tint: entry.classColor }
                             Text {
                                 Layout.preferredWidth: theme.em * 3.6
                                 text: entry.timeText
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(entryBack.color)
                                 font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                             }
-                            Icon { glyph: entry.glyph; color: theme.tone(entry.tone); size: theme.em * 0.95 }
+                            Icon { glyph: entry.glyph; color: theme.tone(entry.tone); size: theme.iconSm }
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 0
                                 Text {
                                     Layout.fillWidth: true
                                     text: entry.title
+                                    textFormat: Text.PlainText
                                     // Event of the past (replay): dim text, never faded
                                     color: entry.live ? theme.text : theme.dimOn(entryBack.color)
                                     font.weight: entry.unseen ? Font.Bold : Font.DemiBold
                                     elide: Text.ElideRight
                                 }
-                                SmallText {
+                                TpText {
+                                    role: "caption"
                                     Layout.fillWidth: true
                                     color: theme.dimOn(entryBack.color)
                                     text: entry.kindText + (entry.detail !== "" ? "  ·  " + entry.detail : "")
@@ -189,10 +187,10 @@ Item {
                             }
                         }
                     }
-                    EmptyState {
+                    TpStateView {
                         parent: feed
                         anchors.centerIn: parent
-                        visible: feed.count === 0
+                        empty: feed.count === 0
                         compact: true
                         glyph: ""  // history
                         title: i18n.tr("No events yet")
@@ -229,14 +227,14 @@ Item {
                     required property string trendText
                     readonly property bool current: ListView.isCurrentItem && battles.activeFocus
                     width: ListView.view.width - (battles.ScrollBar.vertical.visible ? battles.ScrollBar.vertical.width : 0)
-                    height: Math.round(theme.em * 3.6)
+                    height: Math.round(theme.rowTall)
                     Accessible.role: Accessible.ListItem
                     Accessible.name: "P" + fight.position + ", " + fight.ahead + ", " + fight.behind + ", " + fight.gap
                                      + (fight.onAir ? ", " + i18n.tr("On Air") : "")
                     Rectangle {  // card; on air: loss tint & thicker frame, both kept while hovered
                         id: fightBack
                         anchors.fill: parent
-                        radius: theme.radiusMd
+                        radius: theme.radiusLg
                         color: fight.onAir ? Qt.tint(theme.raised, theme.tint(theme.loss, fightArea.containsMouse ? "selected" : theme.tintSubtle * 1.4))
                              : fightArea.containsMouse ? theme.hover : theme.raised
                         border.width: fight.onAir ? 2 : 1
@@ -253,25 +251,26 @@ Item {
                     }
                     RowLayout {
                         anchors.fill: parent
-                        anchors.rightMargin: theme.em * 0.5
-                        spacing: theme.em * 0.5
+                        anchors.rightMargin: theme.space3
+                        spacing: theme.space3
                         TpClassStrip { tint: fight.classColor }
                         ColumnLayout {
                             Layout.preferredWidth: theme.em * 3.2
                             spacing: 0
                             Text {
                                 text: "P" + fight.position
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.weight: Font.Bold
                                 font.pointSize: theme.fontSubtitle
                             }
-                            SmallText { Layout.fillWidth: true; text: fight.carClass; color: theme.dimOn(fightBack.color) }
+                            TpText { role: "caption"; Layout.fillWidth: true; text: fight.carClass; color: theme.dimOn(fightBack.color) }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 0
-                            Text { Layout.fillWidth: true; text: fight.ahead; color: theme.text; elide: Text.ElideRight }
-                            Text { Layout.fillWidth: true; text: fight.behind; color: theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            Text { Layout.fillWidth: true; text: fight.ahead; color: theme.text; elide: Text.ElideRight; textFormat: Text.PlainText }
+                            Text { Layout.fillWidth: true; text: fight.behind; color: theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight; textFormat: Text.PlainText }
                         }
                         ColumnLayout {
                             spacing: 0
@@ -282,30 +281,32 @@ Item {
                                     visible: fight.trend !== 0
                                     glyph: fight.trend < 0 ? "" : ""
                                     fallback: fight.trend < 0 ? "▼" : "▲"
-                                    size: theme.em * 0.75
+                                    size: theme.iconXs
                                     color: fight.trend < 0 ? theme.loss : theme.gain
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Text {
                                     text: fight.gap
+                                    textFormat: Text.PlainText
                                     color: fight.gapTone !== "" ? theme.tone(fight.gapTone) : theme.text
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
                                 }
                             }
-                            SmallText {
+                            TpText {
+                                role: "caption"
                                 Layout.alignment: Qt.AlignRight
                                 color: theme.dimOn(fightBack.color)
                                 text: (fight.trendText !== "" ? fight.trendText + "  ·  " : "") + fight.duration
-                                font.features: { "tnum": 1 }
+                                tabular: true
                             }
                         }
                     }
                 }
-                EmptyState {
+                TpStateView {
                     parent: battles
                     anchors.centerIn: parent
-                    visible: battles.count === 0
+                    empty: battles.count === 0
                     compact: true
                     glyph: ""  // pulse
                     title: i18n.tr("No battle right now")
@@ -332,21 +333,21 @@ Item {
                     required property string bestDriver
                     required property int battles
                     width: ListView.view.width - (classList.ScrollBar.vertical.visible ? classList.ScrollBar.vertical.width : 0)
-                    height: Math.round(theme.em * 3.6)
-                    radius: theme.radiusMd
+                    height: Math.round(theme.rowTall)
+                    radius: theme.radiusLg
                     border.width: 1
                     border.color: theme.border
                     color: theme.raised
                     RowLayout {
                         anchors.fill: parent
-                        anchors.rightMargin: theme.em * 0.5
-                        spacing: theme.em * 0.5
+                        anchors.rightMargin: theme.space3
+                        spacing: theme.space3
                         TpClassStrip { tint: classRow.classColor }
                         ColumnLayout {
                             Layout.preferredWidth: theme.em * 5
                             spacing: 0
-                            Text { Layout.fillWidth: true; text: classRow.name; color: theme.text; font.weight: Font.Bold; elide: Text.ElideRight }
-                            SmallText { Layout.fillWidth: true; text: i18n.tr("%1 cars").arg(classRow.count) }
+                            Text { Layout.fillWidth: true; text: classRow.name; color: theme.text; font.weight: Font.Bold; elide: Text.ElideRight; textFormat: Text.PlainText }
+                            TpText { role: "caption"; Layout.fillWidth: true; text: i18n.tr("%1 cars").arg(classRow.count) }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -354,10 +355,12 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: (classRow.leaderNumber !== "" ? "#" + classRow.leaderNumber + " " : "") + classRow.leader
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 elide: Text.ElideRight
                             }
-                            SmallText {
+                            TpText {
+                                role: "caption"
                                 Layout.fillWidth: true
                                 text: i18n.tr("Best Lap") + " " + classRow.bestLap + (classRow.bestDriver !== "" ? " · " + classRow.bestDriver : "")
                             }
@@ -371,10 +374,10 @@ Item {
                         }
                     }
                 }
-                EmptyState {
+                TpStateView {
                     parent: classList
                     anchors.centerIn: parent
-                    visible: classList.count === 0
+                    empty: classList.count === 0
                     compact: true
                     glyph: ""  // car
                     title: i18n.tr("No driver in session")
@@ -430,7 +433,7 @@ Item {
                     RowLayout {
                         anchors.fill: parent
                         anchors.rightMargin: theme.space3
-                        spacing: theme.em * 0.5
+                        spacing: theme.space3
                         TpClassStrip { tint: pitRow.classColor }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -438,10 +441,12 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: (pitRow.number !== "" ? "#" + pitRow.number + " " : "") + pitRow.driver
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 elide: Text.ElideRight
                             }
-                            SmallText {
+                            TpText {
+                                role: "caption"
                                 Layout.fillWidth: true
                                 text: pitRow.inPit ? pitRow.status : pitRow.lastStop
                                 color: pitRow.inPit ? theme.text : theme.dimOn(pitBack.color)
@@ -453,23 +458,25 @@ Item {
                             Text {
                                 Layout.alignment: Qt.AlignRight
                                 text: i18n.tr("%1 stops").arg(pitRow.stops)
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.pointSize: theme.fontSmall
                                 font.features: { "tnum": 1 }
                             }
-                            SmallText {
+                            TpText {
+                                role: "caption"
                                 Layout.alignment: Qt.AlignRight
                                 color: theme.dimOn(pitBack.color)
                                 text: pitRow.stint >= 0 ? i18n.tr("Stint %1 laps").arg(pitRow.stint) : ""
-                                font.features: { "tnum": 1 }
+                                tabular: true
                             }
                         }
                     }
                 }
-                EmptyState {
+                TpStateView {
                     parent: pitList
                     anchors.centerIn: parent
-                    visible: pitList.count === 0
+                    empty: pitList.count === 0
                     compact: true
                     glyph: ""  // car
                     title: i18n.tr("No pit stop yet")

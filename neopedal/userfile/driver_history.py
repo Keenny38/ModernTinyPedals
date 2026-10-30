@@ -52,6 +52,7 @@ SESSION_GROUPS: tuple[tuple[int, ...], ...] = ((), (0, 1, 3), (2,), (4,))
 TEXT_FIELDS = ("vehicle_class", "game_version", "compound")
 # Fields of newer records written only when known (older records & lines stay as they were)
 KNOWN_FIELDS = {"wetness": -1.0, "track_temp": 0.0, "start_position": 0, "online": -1}
+MAX_RECORD_TIME = 4_102_444_800.0  # Unix time of year 2100: later record time (milliseconds, garbage) invalid
 WET_THRESHOLD = 0.05  # road wetness (fraction) from which a lap counts as wet: damp road laps far from dry ones
 TAIL_BYTES = 64 * 1024  # end of file read for last record (hundreds of records)
 CHECK_BYTES = 512  # start of file & bytes before end of parsed lines compared: file only appended since
@@ -115,7 +116,7 @@ def parse_record(data: object) -> SessionRecord | None:
         values[name] = type(default)(value)
     time_value = data.get("time")
     if (isinstance(time_value, bool) or not isinstance(time_value, (int, float)) or not math.isfinite(time_value)
-            or time_value <= 0):
+            or not 0 < time_value < MAX_RECORD_TIME):
         return None
     return SessionRecord(time=float(time_value), track=track, vehicle=vehicle, **values)
 
@@ -144,7 +145,7 @@ def parse_lines(data: bytes) -> list[SessionRecord]:
             continue
         try:
             record = parse_record(json.loads(line))
-        except ValueError:  # half written line, edited file
+        except (ValueError, RecursionError):  # half written line, edited file, nested too deeply
             continue
         if record is not None:
             records.append(record)
@@ -263,7 +264,7 @@ def latest_record(lines: Iterable[bytes]) -> SessionRecord | None:
     for line in lines:
         try:
             record = parse_record(json.loads(line.decode("utf-8", errors="replace")))
-        except ValueError:  # half written line, cut line, empty line
+        except (ValueError, RecursionError):  # half written line, cut line, empty line, nested too deeply
             continue
         if record is not None and (latest is None or record.time >= latest.time):
             latest = record

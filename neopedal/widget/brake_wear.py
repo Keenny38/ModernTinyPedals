@@ -22,6 +22,7 @@ Brake Wear Widget
 
 from typing import TYPE_CHECKING
 
+from ..const_common import TEXT_NA
 from ..module_info import minfo
 from ._data import brake_wear_data
 from ._wear import WearSections
@@ -49,6 +50,9 @@ class Realtime(WearSections):
         self.threshold_remaining = min(max(self.wcfg["warning_threshold_remaining"], 0), 100) * 0.01
         self.set_wear_sections(SECTIONS)
         self.shown = tuple(self.wcfg[f"show_{option}"] for _, option in SECTIONS)  # read on every update
+        self.shown_bars = tuple(  # (bars, style) of shown sections
+            (getattr(self, f"bars_{name}"), getattr(self, f"bar_style_{name}"))
+            for (name, _), shown in zip(SECTIONS, self.shown) if shown)
         self.thresholds = tuple(
             self.wcfg[f"warning_threshold_{name}"] for name in ("remaining", "wear", "laps", "minutes"))
 
@@ -64,7 +68,14 @@ class Realtime(WearSections):
         for idx in range(4):
             # Millimeters (above failure thickness) or percent
             (failed, remaining, _, wear, wear_percent, live, live_percent, laps, minutes,
-             usable) = brake_wear_data(wheels, idx, thickness, laptime_pace)
+             usable, available) = brake_wear_data(wheels, idx, thickness, laptime_pace)
+
+            # No game data yet, spectated car
+            if not available:
+                for bars, style in self.shown_bars:
+                    if bars[idx].last is not None:
+                        self.set_unavailable(bars[idx], style)
+                continue
 
             # Remaining brake thickness
             if show_remaining:
@@ -73,8 +84,9 @@ class Realtime(WearSections):
                 else:
                     threshold_remaining = self.threshold_remaining * 100
                 target = self.bars_remain[idx]
-                if target.last != remaining:  # drawn again once changed
+                if target.last != (remaining, failed):  # drawn again once changed
                     self.set_wear(target, remaining, self.bar_style_remain, remaining <= threshold_remaining, failed)
+                    target.last = (remaining, failed)  # failure shown even if nothing left before
 
             # Wear differences
             if show_wear_difference:
@@ -99,3 +111,11 @@ class Realtime(WearSections):
                 target = self.bars_mins[idx]
                 if target.last != minutes:  # drawn again once changed
                     self.set_wear(target, minutes, self.bar_style_mins, minutes <= warn_minutes)
+
+    @staticmethod
+    def set_unavailable(target, style):
+        """Wheel value not available, shown as at start"""
+        target.last = None
+        target.text = TEXT_NA
+        target.fg = style[0]
+        target.update()

@@ -275,15 +275,13 @@ def test_import_foreign_laps(backend, tmp_path):
     assert headers
     groups = lap_library.list_imported(backend.folder)
     assert [name for name, _ in groups] == ["Teammate"]
-    from neopedal.ui.lap_library import LapLibrary
-
-    backend.openLibrary()  # imported laps library: group of another driver's laps told apart
     from tests.test_lap_library import wait_library
 
-    library = next(widget for widget in backend._window.findChildren(LapLibrary))
+    library = backend.library  # imported laps library panel: group of another driver's laps told apart
+    library.open()
     wait_library(library)  # imported laps listed in background
-    assert library.tree.topLevelItem(0).text(library.COL_DRIVER) == "foreign laps"
-    library.close()
+    assert library.model.rows[0]["driver"] == "foreign laps"
+    library.closed()
     backend.exports.import_folder(str(other), background=False)  # imported again: same group, nothing copied twice
     groups = lap_library.list_imported(backend.folder)
     assert [name for name, _ in groups] == ["Teammate"] and len(groups[0][1]) == 1

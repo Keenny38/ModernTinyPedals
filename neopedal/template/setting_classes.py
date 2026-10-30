@@ -22,21 +22,62 @@ Default classes template
 
 from types import MappingProxyType
 
+# Primary preset by session of a class: loaded before the class preset ("preset", every session)
+SESSION_PRESET_KEYS = MappingProxyType({
+    "practice": "preset_practice",
+    "qualify": "preset_qualify",
+    "race": "preset_race",
+})
+CLASS_PRESET_KEYS = ("preset", *SESSION_PRESET_KEYS.values())
+
 CLASSINFO_DEFAULT = MappingProxyType({
     "alias": "???",
     "color": "#0044AA",
     "preset": "",
+    "preset_practice": "",
+    "preset_qualify": "",
+    "preset_race": "",
+})
+
+
+def session_name(session_type: int) -> str:
+    """Session of primary class presets ("practice", "qualify", "race") of game session type, "" if unknown
+
+    Test day counts as practice, warmup as race (race setup & strategy overlays).
+    """
+    if session_type in (0, 1):
+        return "practice"
+    if session_type == 2:
+        return "qualify"
+    if session_type in (3, 4):
+        return "race"
+    return ""
+
+# Endurance class colors (WEC): Hypercar red, GT3 green, GTE orange
+CLASS_COLORS = MappingProxyType({
+    "Hyper": "#E21E19",
+    "Hypercar": "#E21E19",
+    "LMGT3": "#009639",
+    "GT3": "#009639",
+    "GTE": "#F08C00",
+})
+# Default class colors before setting version 2.51.6: replaced once by CLASS_COLORS if never changed
+FORMER_DEFAULT_COLORS = MappingProxyType({
+    "Hyper": "#FF4400",
+    "Hypercar": "#FF4400",
+    "GTE": "#00CC44",
+    "GT3": "#229900",
 })
 
 CLASSES_DEFAULT = {
     "Hyper": {
         "alias": "HY",
-        "color": "#FF4400",
+        "color": CLASS_COLORS["Hypercar"],
         "preset": "",
     },
     "Hypercar": {
         "alias": "HY",
-        "color": "#FF4400",
+        "color": CLASS_COLORS["Hypercar"],
         "preset": "",
     },
     "LMP1": {
@@ -61,12 +102,17 @@ CLASSES_DEFAULT = {
     },
     "GTE": {
         "alias": "GTE",
-        "color": "#00CC44",
+        "color": CLASS_COLORS["GTE"],
         "preset": "",
     },
     "GT3": {
         "alias": "GT3",
-        "color": "#229900",
+        "color": CLASS_COLORS["GT3"],
+        "preset": "",
+    },
+    "LMGT3": {
+        "alias": "GT3",
+        "color": CLASS_COLORS["LMGT3"],
         "preset": "",
     },
     "DPi": {
@@ -85,3 +131,5 @@ CLASSES_DEFAULT = {
         "preset": "",
     },
 }
+for _info in CLASSES_DEFAULT.values():
+    _info.update((key, "") for key in SESSION_PRESET_KEYS.values())

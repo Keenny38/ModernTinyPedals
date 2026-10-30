@@ -10,6 +10,8 @@ import "../components"
 Item {
     id: root
 
+    TpLapTime { id: markProbe; visible: false }  // room of record mark: Best header lines up with times
+
     // Read once here (rows bind to these, not to the backend: one evaluation per change, not one per row)
     readonly property bool hasEnergy: replays.hasEnergy
     readonly property bool inSession: replays.inSession
@@ -32,7 +34,7 @@ Item {
             onTriggered: replays.watchCar(root.menuKey)
         }
         Action {
-            text: i18n.tr("Go to Lap...")
+            text: i18n.tr("Go to Lap…")
             enabled: replays.replayActive
             onTriggered: replays.goToLap(root.menuKey)
         }
@@ -47,7 +49,7 @@ Item {
         anchors.fill: parent
         anchors.margins: theme.padCard
         anchors.topMargin: 0
-        spacing: theme.em * 0.5
+        spacing: theme.space3
 
         // Classes: click to see one class only
         ListView {
@@ -90,7 +92,8 @@ Item {
             TpHeaderCell { text: i18n.tr("Pos"); Layout.preferredWidth: root.posWidth; align: Qt.AlignHCenter }
             TpHeaderCell { text: i18n.tr("Driver"); Layout.fillWidth: true }
             TpHeaderCell { text: i18n.tr("Laps"); Layout.preferredWidth: theme.em * 2.4; align: Qt.AlignRight }
-            TpHeaderCell { text: i18n.tr("Best"); Layout.preferredWidth: theme.em * 4.9; align: Qt.AlignRight }
+            TpHeaderCell { text: i18n.tr("Best"); Layout.preferredWidth: theme.em * 5.6; align: Qt.AlignRight
+                           rightPadding: markProbe.markRoom }
             TpHeaderCell { text: i18n.tr("Last"); visible: root.wide; Layout.preferredWidth: theme.em * 4.9; align: Qt.AlignRight }
             TpHeaderCell { text: i18n.tr("Gap"); Layout.preferredWidth: theme.em * 4.6; align: Qt.AlignRight }
             TpHeaderCell { text: i18n.tr("Pit"); Layout.preferredWidth: theme.em * 3.2; align: Qt.AlignHCenter }
@@ -156,7 +159,7 @@ Item {
                 ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
-                height: Math.round(theme.em * 2.9)
+                height: Math.round(theme.row)
                 Accessible.role: Accessible.ListItem
                 Accessible.name: [row.position > 0 ? "P" + row.position : "", row.number !== "" ? "#" + row.number : "", row.driver,
                                   row.onCamera ? i18n.tr("Camera on This Car") : "", row.status].filter(function(part) { return part !== "" }).join(", ")
@@ -168,6 +171,7 @@ Item {
                     hovered: rowArea.containsMouse
                     selected: row.selected
                     emphasized: row.player
+                    striped: row.index % 2 === 1  // timing table: odd rows striped
                 }
                 FocusRing { target: rowBack; visible: row.selected && list.activeFocus }
 
@@ -196,7 +200,8 @@ Item {
                         Layout.preferredWidth: root.posWidth
                         Text {
                             width: parent.width
-                            text: row.position > 0 ? row.position : "-"
+                            text: row.position > 0 ? row.position : "—"
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.weight: Font.Bold
                             font.features: { "tnum": 1 }
@@ -227,6 +232,7 @@ Item {
                                     id: numberText
                                     anchors.centerIn: parent
                                     text: row.number
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.pointSize: theme.fontCaption
                                     font.weight: Font.DemiBold
@@ -236,6 +242,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: row.driver
+                                textFormat: Text.PlainText
                                 color: row.onCamera ? theme.accent : theme.text
                                 font.weight: row.player || row.onCamera ? Font.DemiBold : Font.Normal
                                 elide: Text.ElideRight
@@ -264,6 +271,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: row.carClass + (row.vehicle !== "" ? "  ·  " + row.vehicle : "")
                                       + (row.penalties > 0 ? "  ·  " + i18n.tr("Penalties") + " " + row.penalties : "")
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(rowBack.color)
                                 font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
@@ -273,38 +281,22 @@ Item {
                     Text {
                         Layout.preferredWidth: theme.em * 2.4
                         text: row.laps
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.features: { "tnum": 1 }
                         horizontalAlignment: Text.AlignRight
                     }
-                    Item {  // fastest of class: purple, bold & ◆ mark (colorblind)
-                        Layout.preferredWidth: theme.em * 4.9
-                        Layout.preferredHeight: bestText.implicitHeight
-                        Text {
-                            anchors.right: bestText.left
-                            anchors.rightMargin: theme.space1
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: row.fastest && row.best !== ""
-                            text: "◆"
-                            color: theme.purple
-                            font.pointSize: theme.fontSmall
-                        }
-                        Text {
-                            id: bestText
-                            anchors.right: parent.right
-                            width: Math.min(implicitWidth, parent.width)
-                            text: row.best
-                            color: row.fastest ? theme.purple : theme.text
-                            font.weight: row.fastest ? Font.DemiBold : Font.Normal
-                            font.features: { "tnum": 1 }
-                            horizontalAlignment: Text.AlignRight
-                            elide: Text.ElideLeft
-                        }
+                    TpLapTime {  // fastest of class: purple & ◆ mark right of the time (shared record mark)
+                        Layout.preferredWidth: theme.em * 5.6
+                        Layout.preferredHeight: implicitHeight
+                        text: row.best
+                        record: row.fastest && row.best !== "" ? "session" : ""
                     }
                     Text {
                         visible: root.wide
                         Layout.preferredWidth: theme.em * 4.9
                         text: row.last
+                        textFormat: Text.PlainText
                         color: theme.dimOn(rowBack.color)
                         font.features: { "tnum": 1 }
                         horizontalAlignment: Text.AlignRight
@@ -312,6 +304,7 @@ Item {
                     Text {
                         Layout.preferredWidth: theme.em * 4.6
                         text: row.gap
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.features: { "tnum": 1 }
                         horizontalAlignment: Text.AlignRight
@@ -320,6 +313,7 @@ Item {
                     Text {
                         Layout.preferredWidth: theme.em * 3.2
                         text: row.pits
+                        textFormat: Text.PlainText
                         color: theme.dimOn(rowBack.color)
                         font.features: { "tnum": 1 }
                         horizontalAlignment: Text.AlignHCenter
@@ -344,6 +338,7 @@ Item {
                             }
                             Text {
                                 text: row.energy
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.features: { "tnum": 1 }
                                 anchors.verticalCenter: parent.verticalCenter
@@ -379,9 +374,10 @@ Item {
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 2
-                                Icon { glyph: ""; fallback: "!"; size: theme.em * 0.7; color: theme.loss; anchors.verticalCenter: parent.verticalCenter }  // lightning
+                                Icon { glyph: ""; fallback: "!"; size: theme.iconXs; color: theme.loss; anchors.verticalCenter: parent.verticalCenter }  // lightning
                                 Text {
                                     text: row.incidents
+                                    textFormat: Text.PlainText
                                     color: theme.loss
                                     font.pointSize: theme.fontCaption
                                     font.weight: Font.DemiBold
@@ -400,7 +396,7 @@ Item {
                             visible: row.onCamera
                             glyph: ""  // camera
                             fallback: "◉"
-                            size: theme.em * 0.9
+                            size: theme.iconSm
                             color: theme.accent
                         }
                         TpButton {  // shown on the selected or hovered row (kept by pooled rows)
@@ -424,7 +420,7 @@ Item {
                 anchors.centerIn: parent
                 loading: list.count === 0 && root.inSession
                 empty: list.count === 0 && !root.inSession
-                loadingText: i18n.tr("Asking game...")
+                loadingText: i18n.tr("Asking game…")
                 glyph: ""  // people
                 text: i18n.tr("Standings show once a session or a replay is loaded in the game.")
             }

@@ -33,6 +33,7 @@ import re
 import shutil
 import tempfile
 import time
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Protocol
@@ -70,7 +71,7 @@ from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile.lap_cache import load_cached_lap
 from ...userfile.lap_library import import_foreign_job
-from ...userfile.lap_offset import aligned_on, is_recorded
+from ...userfile.lap_offset import OFFSET_INFO, aligned_on, is_recorded
 from ...userfile.motec_ld import export_lap_job, import_ld_job
 from ...userfile.telemetry_lap import (
     IMPORT_FOLDER,
@@ -89,7 +90,7 @@ from ...userfile.telemetry_lap import (
     share_lap_job,
 )
 from ..lap_viewer import CHANNEL_MAP, Channel, LapEntry, PlotLap, channel_title, format_laptime, lap_label
-from . import lap_map
+from . import dialogs, lap_map, last_folder
 from .corner_report import build_report
 from .formatting import day_month_year_minutes
 from .lap_base import COLOR_GAIN, COLOR_LOSS, PagePart, weak_host
@@ -114,6 +115,11 @@ REPORT_PDF_MAP = 560  # map picture largest side on PDF page (fits on a landscap
 DELTA_BEST_BACKUPS = 5  # dated backups kept of delta best files replaced by a lap (first backup kept apart)
 IMPORT_STOPPED = "import stopped, file too big or unreadable"  # import job without result (worker process died)
 NO_LAP_TIME = "no lap time"  # delta best not written: too few timed samples
+# File pickers starting in the last folder of their kind (see last_folder)
+PICK_ADD = "lap_add"  # Add File: laps, MoTeC logs
+PICK_IMPORT_FOLDER = "lap_import_folder"  # laps of another driver's folder
+PICK_EXPORT = "lap_export"  # MoTeC, CSV, report, picture exports
+PICK_SHARE = "lap_share"  # shared lap files
 
 
 def backup_delta_best(target: str):
@@ -261,6 +267,30 @@ class LapExports(PagePart):
         """Import jobs running (busy indicator)"""
         return self._imports > 0
 
+    def save_name(self, title: str, name: str, file_filter: str, default: str = "") -> str:
+        """File chosen in a save picker of exports, started in the last export folder (else default, else the
+        telemetry folder), "" if cancelled; its folder starts the next export"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self._page.widget, title, last_folder.start_path(PICK_EXPORT, name, default or self._page.folder),
+            file_filter)
+        last_folder.remember(PICK_EXPORT, filename)
+        return filename
+
+    def report(self, text: str, error: bool = False, path: str = "", progress: bool = False):
+        """Result of an export: toast of the shown page (Show in Folder for a file or folder written, errors in red),
+        the status line keeps progress only (progress: its export progress cleared); page not shown (tests,
+        closed meanwhile): status line as before"""
+        bridge = dialogs.page_bridge(self._page.widget)
+        if bridge is None:
+            self._page.set_status(text)
+            return
+        if progress:
+            self._page.set_status("")
+        from .replay_files import show_in_folder
+
+        bridge.show_toast(text, "error" if error else "success", action_text=tr("Show in Folder") if path else "",
+                          action=functools.partial(show_in_folder, path) if path else None)
+
     """Exports & imports of lap viewer page"""
 
     # Delta best: recorded lap as delta reference of Delta Best widgets (same file as module_delta)
@@ -388,10 +418,13 @@ class LapExports(PagePart):
                       f"<b>{html.escape(name)}</b>?")
         if current > 0:
             message += "<br>" + trm(f"Current delta best: {format_laptime(current)} (kept as backup file)")
-        from .._common import confirm_action
+        part = weakref.ref(self)  # asked in the page: written once confirmed (requests of a closed page cancelled)
+        dialogs.confirm(self._page.widget, tr("Delta Best"), message, tr("Use as Delta Best"),
+                        lambda chosen: chosen and (exports := part()) is not None
+                        and exports.write_delta_best(path, name, target, lap, lap_time))
 
-        if not confirm_action(self._page.widget, tr("Delta Best"), message, tr("Use as Delta Best")):
-            return
+    def write_delta_best(self, path: str, name: str, target: str, lap: LapData, lap_time: float):
+        """Lap aligned & written as delta best in background (confirmed)"""
         aligning = self.delta_best_source(path, lap)
 
         def writing() -> str:
@@ -415,8 +448,9 @@ class LapExports(PagePart):
     @Slot()
     def addFiles(self):
         filenames, _ = QFileDialog.getOpenFileNames(
-            self._page.widget, tr("Add File..."), self._page.folder,
+            self._page.widget, tr("Add File…"), last_folder.start_folder(PICK_ADD, self._page.folder),
             f"{tr('Laps')} (*.csv *.csv.gz *.ld);;NeoPedal Lap (*.csv *.csv.gz);;MoTeC i2 (*.ld)")
+        last_folder.remember(PICK_ADD, filenames[0] if filenames else "")
         logs = [filename for filename in filenames if filename.lower().endswith(".ld")]
         self._page.add_external([filename for filename in filenames if filename not in logs])
         if logs:  # MoTeC logs: complete laps converted to lap files in background
@@ -437,8 +471,10 @@ class LapExports(PagePart):
         if not self._page.shown_track():
             self._page.set_status(tr("No recorded lap. Enable the Recorder module, then drive a few laps."))
             return
-        source = QFileDialog.getExistingDirectory(self._page.widget, tr("Import Folder..."), os.path.expanduser("~"))
+        source = QFileDialog.getExistingDirectory(self._page.widget, tr("Import Folder…"),
+                                                  last_folder.start_folder(PICK_IMPORT_FOLDER))
         if source:
+            last_folder.remember(PICK_IMPORT_FOLDER, source)
             self.import_folder(source)
 
     def import_folder(self, source: str, background: bool = True):
@@ -474,7 +510,7 @@ class LapExports(PagePart):
             imported(import_foreign_job(self._page.folder, source, reference, vehicle_class))
             return
         self.run_import_job("Lap import", imported, import_foreign_job, self._page.folder, source, reference, vehicle_class)
-        self._page.set_status(trm(f"Importing laps from {name}..."), False)
+        self._page.set_status(trm(f"Importing laps from {name}…"), False)
 
     def run_import_job(self, name: str, done: Callable[[Any], None], function: Callable, *args):
         """Run import job in worker process (laps written to imported laps), counted while running: busy indicator
@@ -524,7 +560,7 @@ class LapExports(PagePart):
             return
         for filename in filenames:
             self.run_import_job("MoTeC import", functools.partial(imported, filename), import_ld_job, filename, folder)
-        self._page.set_status(trm(f"Importing MoTeC log: {html.escape(os.path.basename(filenames[0]))}..."), False)
+        self._page.set_status(trm(f"Importing MoTeC log: {html.escape(os.path.basename(filenames[0]))}…"), False)
 
     # Export
     @Slot(str)
@@ -533,17 +569,17 @@ class LapExports(PagePart):
         path = path or self._page.reference_key
         if not path or (path in self._lap_cache and self._lap_cache[path] is None):  # unreadable lap
             return
-        filename, _ = QFileDialog.getSaveFileName(
-            self._page.widget, tr("Export MoTeC..."), lap_stem(path) + ".ld", "MoTeC i2 (*.ld)")
+        filename = self.save_name(tr("Export MoTeC…"), os.path.basename(lap_stem(path)) + ".ld", "MoTeC i2 (*.ld)",
+                                  os.path.dirname(path))
         if not filename:
             return
 
         def exported(error):
             self._exports -= 1
             if error == "":
-                self._page.set_status(trm(f"Exported: {os.path.basename(filename)}"))
+                self.report(trm(f"Exported: {html.escape(os.path.basename(filename))}"), path=filename)
             else:  # None: job failed (logged)
-                self._page.set_status(trm(f"Unable to export lap: {error or tr('Unknown error')}"))
+                self.report(trm(f"Unable to export lap: {html.escape(error or tr('Unknown error'))}"), True)
 
         self._exports += 1
         venue = os.path.basename(os.path.dirname(path)).split(" - ")[0]
@@ -556,22 +592,41 @@ class LapExports(PagePart):
         if not path or (path in self._lap_cache and self._lap_cache[path] is None):  # unreadable lap
             return
         low, high = sorted((self._page.data.distance_at_x(start), self._page.data.distance_at_x(end)))
-        filename, _ = QFileDialog.getSaveFileName(
-            self._page.widget, tr("Export MoTeC..."), f"{lap_stem(path)} {low:.0f}-{high:.0f}m.ld", "MoTeC i2 (*.ld)")
+        passage = self.file_passage(path, low, high)
+        if passage is None:
+            self._page.set_status(tr("Passage crosses the start of the log: not exported"))
+            return
+        low, high = passage
+        filename = self.save_name(tr("Export MoTeC…"), f"{os.path.basename(lap_stem(path))} {low:.0f}-{high:.0f}m.ld",
+                                  "MoTeC i2 (*.ld)", os.path.dirname(path))
         if not filename:
             return
 
         def exported(error):
             self._exports -= 1
             if error == "":
-                self._page.set_status(trm(f"Exported: {os.path.basename(filename)}"))
+                self.report(trm(f"Exported: {html.escape(os.path.basename(filename))}"), path=filename)
             else:  # None: job failed (logged)
-                self._page.set_status(trm(f"Unable to export lap: {error or tr('Unknown error')}"))
+                self.report(trm(f"Unable to export lap: {html.escape(error or tr('Unknown error'))}"), True)
 
         self._exports += 1
         venue = os.path.basename(os.path.dirname(path)).split(" - ")[0]
         self._page.run_process_job("MoTeC export", exported, export_lap_job, self._page.folder, path, filename, venue,
                                    (low, high))
+
+    def file_passage(self, path: str, low: float, high: float) -> tuple[float, float] | None:
+        """Passage of shown reference lap in distances of its file (imported lap shown aligned: offset taken off),
+        None if it crosses the start of the file"""
+        shown = next((plot.data for plot in self._page.data.laps if plot.key == path), None)
+        raw = self._lap_cache.get(path)
+        if shown is None or raw is None or shown is raw:
+            return low, high
+        shift = (float(shown.meta.get(OFFSET_INFO, 0.0) or 0.0) - float(raw.meta.get(OFFSET_INFO, 0.0) or 0.0))
+        length = max(raw.distance, default=0.0)
+        if not shift or length <= 0:
+            return low, high
+        low, high = (low - shift) % length, (high - shift) % length
+        return (low, high) if low < high else None
 
     @Slot(str)
     def shareLap(self, path: str = ""):
@@ -581,20 +636,21 @@ class LapExports(PagePart):
         if not path or not os.path.isfile(path):
             return
         filename, _ = QFileDialog.getSaveFileName(
-            self._page.widget, tr("Share Lap..."), os.path.join(share_folder(), shared_lap_name(path)),
+            self._page.widget, tr("Share Lap…"), last_folder.start_path(PICK_SHARE, shared_lap_name(path), share_folder()),
             f"{tr('NeoPedal Lap')} (*.csv.gz)")
         if not filename:
             return
+        last_folder.remember(PICK_SHARE, filename)
         if not filename.lower().endswith(".csv.gz"):
             filename = filename.removesuffix(".gz").removesuffix(".csv") + ".csv.gz"
 
         def shared(error):
             self._exports -= 1
             if error == "":
-                self._page.set_status(trm(f"Lap saved to share: <b>{html.escape(os.path.basename(filename))}</b> · "
-                                          "send this file, the other driver adds it with Add File..."))
+                self.report(trm(f"Lap saved to share: <b>{html.escape(os.path.basename(filename))}</b> · "
+                                "send this file, the other driver adds it with Add File…"), path=filename)
             else:  # None: job failed (logged)
-                self._page.set_status(trm(f"Unable to share lap: {html.escape(error or tr('Unknown error'))}"))
+                self.report(trm(f"Unable to share lap: {html.escape(error or tr('Unknown error'))}"), True)
 
         self._exports += 1
         self._page.run_process_job("lap share", shared, share_lap_job, path, filename, driver_name())
@@ -605,8 +661,10 @@ class LapExports(PagePart):
         paths = [entry.file.path for entry in self._page.entries] if whole_track else self._page.ordered_checked()
         if not paths:
             return
-        folder = QFileDialog.getExistingDirectory(self._page.widget, tr("Export MoTeC..."), self._page.folder)
+        folder = QFileDialog.getExistingDirectory(self._page.widget, tr("Export MoTeC…"),
+                                                  last_folder.start_folder(PICK_EXPORT, self._page.folder))
         if folder:
+            last_folder.remember(PICK_EXPORT, folder)
             self.export_many(paths, folder)
 
     def export_many(self, paths: list[str], folder: str, background: bool = True) -> int:
@@ -617,7 +675,7 @@ class LapExports(PagePart):
                  os.path.basename(os.path.dirname(path)).split(" - ")[0]) for path in paths]
         if not background:
             results = [export_lap_job(self._page.folder, path, target, venue) for path, target, venue in jobs]
-            self._page.set_status(self.export_message(folder, results))
+            self.report(self.export_message(folder, results), any(results), folder)
             return results.count("")
         errors: list[str] = []
         self._exports += len(jobs)
@@ -626,11 +684,11 @@ class LapExports(PagePart):
             self._exports -= 1
             errors.append(tr("Unknown error") if error is None else error)  # None: job failed (logged)
             if len(errors) < len(jobs):
-                self._page.set_status(trm(f"Exporting {len(errors)}/{len(jobs)} laps..."), False)
+                self._page.set_status(trm(f"Exporting {len(errors)}/{len(jobs)} laps…"), False)
             else:
-                self._page.set_status(self.export_message(folder, errors))
+                self.report(self.export_message(folder, errors), any(errors), folder, progress=True)
 
-        self._page.set_status(trm(f"Exporting 0/{len(jobs)} laps..."), False)
+        self._page.set_status(trm(f"Exporting 0/{len(jobs)} laps…"), False)
         for path, target, venue in jobs:
             self._page.run_process_job("MoTeC export", exported, export_lap_job, self._page.folder, path, target, venue)
         return 0
@@ -650,8 +708,7 @@ class LapExports(PagePart):
         if not self._page.data.laps:
             self._page.set_status(tr("Check laps to export first."))
             return
-        default = os.path.join(self._page.folder, f"{self._page.shown_track() or 'laps'}.csv")
-        filename, _ = QFileDialog.getSaveFileName(self._page.widget, tr("Export CSV..."), default, "CSV (*.csv)")
+        filename = self.save_name(tr("Export CSV…"), f"{self._page.shown_track() or 'laps'}.csv", "CSV (*.csv)")
         if filename:
             self.write_csv(filename, background=True)
 
@@ -670,8 +727,8 @@ class LapExports(PagePart):
         if not self._page.data.laps:
             self._page.set_status(tr("Check laps to export first."))
             return
-        default = os.path.join(self._page.folder, f"{self._page.shown_track() or 'laps'} - {tr('Time')}.csv")
-        filename, _ = QFileDialog.getSaveFileName(self._page.widget, tr("Export CSV..."), default, "CSV (*.csv)")
+        filename = self.save_name(tr("Export CSV…"), f"{self._page.shown_track() or 'laps'} - {tr('Time')}.csv",
+                                  "CSV (*.csv)")
         if filename:
             self.write_csv(filename, background=True, time_base=True)
 
@@ -706,9 +763,9 @@ class LapExports(PagePart):
             def written(error):
                 self._exports -= 1
                 if error is None or error:  # None: job failed (logged)
-                    self._page.set_status(trm(f"Unable to export lap: {html.escape(error or tr('Unknown error'))}"))
+                    self.report(trm(f"Unable to export lap: {html.escape(error or tr('Unknown error'))}"), True)
                 else:
-                    self._page.set_status(trm(f"Exported: {name}"))
+                    self.report(trm(f"Exported: {name}"), path=filename)
 
             self._exports += 1
             self._page.run_process_job("CSV export", written, export_series_csv, filename, header, start, last, series,
@@ -716,7 +773,7 @@ class LapExports(PagePart):
             return True
         error = export_series_csv(filename, header, start, last, series, decimal, step)
         if error:
-            self._page.set_status(trm(f"Unable to export lap: {error}"))
+            self.report(trm(f"Unable to export lap: {html.escape(error)}"), True)
             return False
         return True
 
@@ -816,9 +873,8 @@ class LapExports(PagePart):
         if not self.corner_report(None):
             self._page.set_status(tr("No corner to report: check laps with speed recorded."))
             return
-        default = os.path.join(self._page.folder, f"{self._page.shown_track() or 'laps'} - {tr('Corners')}.html")
-        filename, _ = QFileDialog.getSaveFileName(self._page.widget, tr("Export Corner Report..."), default,
-                                                  "HTML (*.html);;PDF (*.pdf)")
+        filename = self.save_name(tr("Export Corner Report…"), f"{self._page.shown_track() or 'laps'} - {tr('Corners')}.html",
+                                  "HTML (*.html);;PDF (*.pdf)")
         if filename:
             self.write_report(filename)
 
@@ -841,9 +897,9 @@ class LapExports(PagePart):
                     file.write(report)
         except OSError as error:
             logger.error("LAP VIEWER: unable to export %s: %s", filename, error)
-            self._page.set_status(trm(f"Unable to export lap: {error}"))
+            self.report(trm(f"Unable to export lap: {html.escape(str(error))}"), True)
             return False
-        self._page.set_status(trm(f"Exported: {html.escape(os.path.basename(filename))}"))
+        self.report(trm(f"Exported: {html.escape(os.path.basename(filename))}"), path=filename)
         return True
 
     @Slot("QVariant")
@@ -851,20 +907,19 @@ class LapExports(PagePart):
         """Save page picture (charts, map) to PNG file"""
         if not isinstance(image, QImage) or image.isNull():
             return
-        default = os.path.join(self._page.folder, f"{self._page.shown_track() or 'laps'}.png")
-        filename, _ = QFileDialog.getSaveFileName(self._page.widget, tr("Export Picture..."), default, "PNG (*.png)")
+        filename = self.save_name(tr("Export Picture…"), f"{self._page.shown_track() or 'laps'}.png", "PNG (*.png)")
         if filename:
             if image.save(filename, b"PNG"):
-                self._page.set_status(trm(f"Exported: {html.escape(os.path.basename(filename))}"))
+                self.report(trm(f"Exported: {html.escape(os.path.basename(filename))}"), path=filename)
             else:
-                self._page.set_status(trm(f"Unable to save picture: {html.escape(os.path.basename(filename))}"))
+                self.report(trm(f"Unable to save picture: {html.escape(os.path.basename(filename))}"), True)
 
     @Slot("QVariant")
     def copyImage(self, image):
         """Page picture to clipboard (paste in Discord...)"""
         if isinstance(image, QImage) and not image.isNull():
             QApplication.clipboard().setImage(image)
-            self._page.set_status(tr("Picture copied to clipboard."))
+            self.report(tr("Picture copied"))
 
     @Slot(float, float)
     def exportPassageCsv(self, start: float, end: float):
@@ -874,7 +929,7 @@ class LapExports(PagePart):
             self._page.set_status(tr("Check laps to export first."))
             return
         low, high = sorted((self._page.data.distance_at_x(start), self._page.data.distance_at_x(end)))
-        default = os.path.join(self._page.folder, f"{self._page.shown_track() or 'laps'} {low:.0f}-{high:.0f}m.csv")
-        filename, _ = QFileDialog.getSaveFileName(self._page.widget, tr("Export CSV..."), default, "CSV (*.csv)")
+        filename = self.save_name(tr("Export CSV…"), f"{self._page.shown_track() or 'laps'} {low:.0f}-{high:.0f}m.csv",
+                                  "CSV (*.csv)")
         if filename:
             self.write_csv(filename, "", low, high, background=True)

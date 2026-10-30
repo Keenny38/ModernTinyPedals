@@ -21,7 +21,7 @@ from neopedal.process import driver_ranks as dr
 from neopedal.process import results_file as rf
 from neopedal.process import results_index as ri
 from neopedal.setting import cfg
-from neopedal.ui.quick import stats_analysis, stats_card, stats_common, stats_overview
+from neopedal.ui.quick import formatting, stats_analysis, stats_card, stats_common, stats_overview
 from neopedal.userfile import driver_history, pb_code
 from neopedal.userfile.driver_history import SessionRecord, parse_record, record_line, session_record
 from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
@@ -174,7 +174,7 @@ def test_rivals_of_race_people_of_class_only():
 
 
 # --- Pure helpers
-def test_helpers_versions_laptimes_places():
+def test_helpers_versions_laptimes_places(monkeypatch):
     assert stats_common.version_key("1.415") < stats_common.version_key("1.42") < stats_common.version_key("2.0")
     assert stats_common.version_key("beta")[0] == -1
     assert stats_common.parse_laptime("1:52.300") == pytest.approx(112.3)
@@ -186,8 +186,12 @@ def test_helpers_versions_laptimes_places():
     assert stats_common.places_gained(race._replace(finish=2), summary(class_grid=2)) is None
     assert stats_common.online_value(race, summary(setting="Race Weekend")) == 0
     assert stats_common.online_value(race._replace(online=1), None) == 1
+    monkeypatch.setattr(formatting, "fahrenheit", lambda: False)
     assert stats_common.conditions_text(HISTORY[2]).startswith("Wet road 40 %")
+    assert stats_common.conditions_text(HISTORY[2]).endswith("Track Temp 18 °C")
     assert stats_common.conditions_text(HISTORY[4]) == ""
+    monkeypatch.setattr(formatting, "fahrenheit", lambda: True)  # user temperature unit (audit F5)
+    assert stats_common.conditions_text(HISTORY[2]).endswith("Track Temp 64 °F")
 
 
 def test_race_record_streak_and_places():
@@ -301,7 +305,7 @@ def test_sessions_rows_linked_to_chart(stats):
     assert [point["session"] for point in points] == [3, 2, 1, 0]
     assert sessions[1]["wet"] and sessions[1]["online"] == 1 and sessions[1]["gained"] == "+3"
     assert sessions[1]["gainedColor"] == "gain" and "Start P8 · finish P5 (+3)" in sessions[1]["tip"]
-    assert "Wet road 40 % · Track 18 °C · Wet" in sessions[1]["tip"]
+    assert "Wet road 40 % · Track Temp 18 °C · Wet" in sessions[1]["tip"]
     assert points[2]["wet"] and "Wet road" in points[2]["tip"]
 
 
@@ -453,13 +457,14 @@ def test_page_new_parts_without_qml_warnings(page, monkeypatch):  # noqa: F811
         backend = page.backend
         backend.reload_stats()
         settle(backend)
-        for step in (lambda: backend.selectTrack(SPA), lambda: backend.selectRow(OREGA),
+        for step in (lambda: backend.selectTrack(SPA), lambda: backend.setStatsTab(1), lambda: backend.selectRow(OREGA),
                      lambda: backend.set_goal(f"{SPA}|{OREGA}", 121.0), lambda: backend.setConditionFilter(2),
                      lambda: backend.clearFilters(), lambda: backend.setGroupByClass(True),
                      lambda: backend.setSearch("ore"), lambda: backend.setClassFilter("LMP2_ELMS"),
                      lambda: backend.setSearch(""), lambda: backend.setClassFilter(""),
                      lambda: backend.selectTrack(""), lambda: backend.setUpcomingEnabled(True),
-                     lambda: backend.setActivityYear(1), lambda: page.resize(860, 640), lambda: page.resize(1400, 860)):
+                     lambda: backend.setActivityYear(1), lambda: page.resize(860, 640), lambda: page.resize(1400, 860),
+                     lambda: backend.setStatsTab(0)):  # Progression tab, then Overview (cards kept once made)
             step()
             settle(backend)
             for _ in range(3):

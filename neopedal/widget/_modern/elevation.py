@@ -39,6 +39,7 @@ from ...demo_state import drawing_demo
 from ...i18n import tr_overlay as tr
 from ...module_info import NO_TRACK_MAP, TrackMap, minfo
 from ...userfile.corner_coach import MapCorners, map_corners
+from ..elevation import profile_x
 from .base import CENTER, LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
@@ -124,8 +125,11 @@ class Realtime(ModernOverlay):
             if corners is not None and corners is not self.map_corners:
                 self.map_corners = corners
                 self.redraw_static()
-        progress = api.read.lap.progress()
-        x = self.chart.left() + self.chart.width() * min(max(progress, 0.0), 1.0) if progress == progress else self.chart.left()
+        if self.xs:  # on profile scale (map nodes from first node), else lap progress
+            x = self.plot.left() + profile_x(api.read.lap.distance(), *self.distance_scale, self.plot.width())
+        else:
+            progress = api.read.lap.progress()
+            x = self.chart.left() + self.chart.width() * min(max(progress, 0.0), 1.0) if progress == progress else self.chart.left()
         reading = ""
         if self.show_reading:
             reading = f"{self.unit_dist(api.read.vehicle.position_vertical()):.1f}{self.symbol_dist}"
@@ -191,7 +195,7 @@ class Realtime(ModernOverlay):
     def paint_static(self, painter: QPainter):
         wcfg = self.wcfg
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         chart = self.chart
         rounded(painter, chart, self.radius(0.3), theme.tint(theme.surface_alt, 200))
         header = self.header

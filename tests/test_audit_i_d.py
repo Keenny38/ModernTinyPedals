@@ -47,8 +47,8 @@ def test_timing_cell_texts_and_tones():
     from neopedal.ui.quick.director_timing import timing_cell, timing_cells
 
     assert timing_cell(timing_row(), "tyres") == {"text": "", "tone": "", "tyres": ["S", "M"]}
-    assert timing_cell(timing_row(bestTone="fastest"), "best") == {"text": "◆ 1:30.000", "tone": "fastest"}
-    assert timing_cell(timing_row(bestTone="gain"), "best") == {"text": "● 1:30.000", "tone": "gain"}
+    assert timing_cell(timing_row(bestTone="fastest"), "best") == {"text": "1:30.000 ◆", "tone": "fastest"}  # mark after
+    assert timing_cell(timing_row(bestTone="gain"), "best") == {"text": "1:30.000 ●", "tone": "gain"}
     assert timing_cell(timing_row(bestTone="yellow"), "best") == {"text": "1:30.000", "tone": "yellow"}
     assert timing_cell(timing_row(), "driver") == {"text": "Driver 1", "tone": ""}
     # Battle: trend arrow, accent unless the gap has its own color (no tone mark)
@@ -88,7 +88,7 @@ def test_timing_rows_carry_cells_of_shown_columns(director_page):  # noqa: F811
     assert len(model.rows[1]["cells"]) == len(shown)
     assert texts(1)[shown.index("driver")] == "Driver 2" and texts(1)[shown.index("penalties")] == "1"
     assert texts(1)[shown.index("interval")].endswith("+0.8") and model.rows[1]["battle"]
-    assert texts(0)[shown.index("best")].startswith("◆ ")  # best of class mark
+    assert texts(0)[shown.index("best")].endswith(" ◆")  # best of class mark
     # Column moved, shown, hidden, other view: cells follow at once (no wait for the next game answer)
     timing.moveTimingColumn(shown.index("driver"), 0)
     assert texts(1)[0] == "Driver 2"
@@ -132,7 +132,7 @@ def test_timing_table_cells_drawn_from_cells_role(director_page):  # noqa: F811
         assert interval.property("text") == model.rows[1]["cells"][shown.index("interval")]["text"]
         assert QColor(interval.property("color")) == QColor(theme.property("accent"))  # battle without gap tone
         best = cells("best")[0]
-        assert best.property("text").startswith("◆ ")
+        assert best.property("text").endswith(" ◆")
         assert QColor(best.property("color")) == QColor(theme.property("purple"))
         assert cells("penalties")[1].property("text") == "1"
         backend.timing.moveTimingColumn(shown.index("driver"), 0)

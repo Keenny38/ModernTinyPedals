@@ -89,7 +89,6 @@ class Realtime(Overlay):
             fg_color=self.wcfg["font_color_toe_angle"],
             bg_color=self.wcfg["background_color_toe_angle"],
             count=4,
-            last=0,
         )
         self.set_grid_layout_quad(
             layout=layout_toe,
@@ -100,6 +99,7 @@ class Realtime(Overlay):
             column=1,
         )
         self.calc_ema_toe = calc.ema_filter(self.wcfg["toe_angle_smoothing_samples"])
+        self.ema_toe = [0.0] * 4  # smoothed readings (bar last: shown value)
 
         # Total toe angle
         if self.wcfg["show_total_toe_angle"]:
@@ -116,13 +116,13 @@ class Realtime(Overlay):
                 fg_color=self.bar_style_total[0],
                 bg_color=self.wcfg["background_color_total_toe_angle"],
                 count=2,
-                last=0,
             )
             self.set_grid_layout_vert(
                 layout=layout_toe,
                 targets=self.bars_total,
             )
             self.calc_ema_total = calc.ema_filter(self.wcfg["total_toe_angle_smoothing_samples"])
+            self.ema_total = [0.0, 0.0]
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -130,30 +130,35 @@ class Realtime(Overlay):
 
         # Toe angle
         toe_angle_set = minfo.wheels.toeAngle
+        ema_toe = self.ema_toe
         for index, bar_toe in enumerate(self.bars_toe):
             if symmetric and index % 2:
                 toe_angle = -toe_angle_set[index]
             else:
                 toe_angle = toe_angle_set[index]
-            self.update_toe(bar_toe, self.calc_ema_toe(bar_toe.last, toe_angle))
+            ema_toe[index] = self.calc_ema_toe(ema_toe[index], toe_angle)
+            self.update_toe(bar_toe, round(ema_toe[index], self.decimals_toe))
 
         # Total toe angle
         if self.wcfg["show_total_toe_angle"]:
-            self.update_total(self.bars_total[0], self.calc_ema_total(self.bars_total[0].last, minfo.wheels.frontToeAngleDifference))
-            self.update_total(self.bars_total[1], self.calc_ema_total(self.bars_total[1].last, minfo.wheels.rearToeAngleDifference))
+            ema_total = self.ema_total
+            ema_total[0] = self.calc_ema_total(ema_total[0], minfo.wheels.frontToeAngleDifference)
+            ema_total[1] = self.calc_ema_total(ema_total[1], minfo.wheels.rearToeAngleDifference)
+            self.update_total(self.bars_total[0], round(ema_total[0], self.decimals_total))
+            self.update_total(self.bars_total[1], round(ema_total[1], self.decimals_total))
 
     # GUI update methods
     def update_toe(self, target, data):
-        """Toe angle data"""
+        """Toe angle data (rounded as shown: repaint only on visible change, no "-0.00")"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.{self.decimals_toe + 1}f}"[:3 + self.decimals_toe].rstrip(".")
+            target.text = f"{data:+z.{self.decimals_toe}f}"[:3 + self.decimals_toe].rstrip(".")
             target.update()
 
     def update_total(self, target, data):
-        """Total toe angle data"""
+        """Total toe angle data (rounded as shown, color from shown sign)"""
         if target.last != data:
             target.last = data
-            target.text = f"{abs(data):.{self.decimals_total + 1}f}"[:2 + self.decimals_total].rstrip(".")
+            target.text = f"{abs(data):.{self.decimals_total}f}"[:2 + self.decimals_total].rstrip(".")
             target.fg = self.bar_style_total[data > 0]
             target.update()

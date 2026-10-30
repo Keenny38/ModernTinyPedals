@@ -20,7 +20,8 @@
 Tyre pressure Widget, modern design
 
 Pressure per tyre (blue while carcass is cold, orange once hot), deviation from highest
-average pressure under it, compound badges between left and right tyres.
+average pressure under it (averages restart on leaving pits: other tyres), compound badges between left and
+right tyres.
 """
 
 from __future__ import annotations
@@ -75,6 +76,11 @@ class Realtime(QuadMixin, ModernOverlay):
         """Average pressures restart from next reading (new session, other tyres)"""
         self.averages = [0.0] * 4
 
+    def vehicle_reset(self):
+        """Compounds read again, average pressures restart (followed car changed, session changed, back to garage)"""
+        self.compounds.reset()
+        self.post_update()
+
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)
 
@@ -91,7 +97,10 @@ class Realtime(QuadMixin, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         theme = self.theme
+        was_in_pits = self.compounds.last_in_pits  # pit state of last update (-1 none), updated by compounds
         self.compounds.update()
+        if was_in_pits > 0 and not self.compounds.last_in_pits:  # left pits: tyres may have changed
+            self.post_update()
         pressures = api.read.tyre.pressure()
         carcass = api.read.tyre.carcass_temperature()
         peak = max(self.averages)
@@ -100,7 +109,7 @@ class Realtime(QuadMixin, ModernOverlay):
             hot = carcass[index] >= self.hot_temp
             sub = ""
             if self.show_deviation:
-                sub = f"±{self.number(peak - self.averages[index])}"
+                sub = self.number(peak - self.averages[index])  # unsigned: never below 0
                 average = self.averages[index]  # first reading: average starts from it, not from 0
                 self.averages[index] = self.ema_pressure(average, pressures[index]) if average > 0 else pressures[index]
             tiles.append(Tile((self.number(pressures[index]),), colors=(theme.orange if hot else theme.lap_behind,),

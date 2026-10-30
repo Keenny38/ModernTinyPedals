@@ -64,7 +64,7 @@ class Realtime(StatsMixin, ModernOverlay):
         if wcfg["show_roll_angle_difference"]:
             stats.append(Stat("difference", "Diff", sample))
         if wcfg["show_roll_angle_ratio"]:
-            stats.append(Stat("ratio", "Ratio", "88.8" + self.percent))
+            stats.append(Stat("ratio", "Ratio", ("88." + "8" * self.decimals if self.decimals else "100") + self.percent))
         stats = self.display_ordered(stats, names={
             "front": "roll_angle_front", "rear": "roll_angle_rear", "difference": "roll_angle_difference",
             "ratio": "roll_angle_ratio",
@@ -96,7 +96,7 @@ class Realtime(StatsMixin, ModernOverlay):
         values = []
         for key in self.keys:
             if key == "ratio":
-                values.append(Value(f"{self.ratio * 100:.1f}{self.percent}", self.theme.text_dim))
+                values.append(Value(f"{self.ratio * 100:.{self.decimals}f}{self.percent}", self.theme.text_dim))
             else:
-                values.append(Value(f"{angles[key]:+.{self.decimals}f}{self.sign}"))
+                values.append(Value(f"{angles[key]:+z.{self.decimals}f}{self.sign}"))
         self.refresh(tuple(values))

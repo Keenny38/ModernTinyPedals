@@ -1,10 +1,10 @@
-"""Key bindings page: list, enable toggle, preset names, clear all, key binding input (capture, duplicates, preset)"""
+"""Hotkeys page: list, enable switch, preset names, clear all, key capture (keys, controller buttons, held modifiers,
+duplicates, preset), app keys kept while capturing, global hotkeys off only while capturing"""
 
 import json
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QTimerEvent
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QCoreApplication, QEvent
 
 from neopedal.const_app import PLATFORM
 from neopedal.setting import cfg
@@ -12,45 +12,40 @@ from neopedal.template.setting_shortcuts import SHORTCUTS_PRESET
 
 
 @pytest.fixture
-def page(ui_env, monkeypatch):
-    """Key bindings page, hotkey control & config saving recorded"""
-    from neopedal.ui import hotkey_view
+def backend(ui_env, monkeypatch):
+    """Hotkeys page backend (shown), hotkey control & config saving recorded"""
+    from neopedal.ui.quick import hotkey_backend
 
     calls = []
     for action in ("reload", "enable", "disable"):
-        monkeypatch.setattr(type(hotkey_view.kctrl), action, lambda self, _action=action: calls.append(_action))
+        monkeypatch.setattr(type(hotkey_backend.kctrl), action, lambda self, _action=action: calls.append(_action))
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: calls.append("save"))
-    widget = hotkey_view.HotkeyList(None)
-    yield widget, calls
-    widget.deleteLater()
+    page = hotkey_backend.HotkeyBackend(None)
+    page.page_shown()
+    yield page, calls
+    page.release()
+    page.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def items(widget):
-    from neopedal.ui.hotkey_view import HotkeyConfigItem
-
-    found = {}
-    for row in range(widget.listbox_hotkey.count()):
-        item_widget = widget.listbox_hotkey.itemWidget(widget.listbox_hotkey.item(row))
-        if isinstance(item_widget, HotkeyConfigItem):
-            found[item_widget.option_name] = (widget.listbox_hotkey.item(row), item_widget)
-    return found
+def rows(page) -> dict[str, dict]:
+    return {row["key"]: row for row in page.model.rows if not row["header"]}
 
 
-def test_list_and_enable_toggle(page):
-    widget, calls = page
-    assert len(items(widget)) == len(cfg.user.shortcuts)
+def test_list_and_enable_switch(backend):
+    page, calls = backend
+    assert len(rows(page)) == len(cfg.user.shortcuts) == page.totalCount
     cfg.application["enable_global_hotkey"] = False
-    widget.refresh()
-    assert not widget.listbox_hotkey.isEnabled() and not widget.button_toggle.isChecked()
-    widget.button_toggle.setChecked(True)  # user enables
-    assert cfg.application["enable_global_hotkey"] is True and "reload" in calls
-    widget.refresh()
-    assert widget.listbox_hotkey.isEnabled()
+    page.refresh()
+    assert not page.enabled
+    page.startCapture("overlay_lock")  # list disabled: no capture
+    assert page.captureKey == ""
+    page.setEnabled(True)  # user switch
+    assert cfg.application["enable_global_hotkey"] is True and "reload" in calls and page.enabled
 
 
-def test_preset_names_checked(page):
-    widget, _ = page
+def test_preset_names_checked(backend):
+    page, calls = backend
     name = next(iter(SHORTCUTS_PRESET))
     with open(f"{cfg.path.settings}race.json", "w", encoding="utf-8") as file:
         json.dump({}, file)
@@ -58,154 +53,206 @@ def test_preset_names_checked(page):
     other = list(SHORTCUTS_PRESET)[1]
     cfg.user.shortcuts[other]["preset"] = "deleted"
     cfg.application["enable_global_hotkey"] = True
-    widget.refresh()
-    found = items(widget)
-    assert found[name][0].text().endswith(": race")
-    assert found[other][0].text().endswith(": -") and cfg.user.shortcuts[other]["preset"] == ""  # missing file
+    page.refresh()
+    found = rows(page)
+    assert found[name]["preset"] == "race" and found[name]["isPreset"]
+    assert found[other]["preset"] == "" and cfg.user.shortcuts[other]["preset"] == ""  # missing file
+    assert "save" in calls
 
 
-def test_clear_all(page, monkeypatch):
-    widget, calls = page
+def test_clear_all_with_undo(backend):
+    page, calls = backend
+    cfg.application["enable_global_hotkey"] = True
     option = next(iter(cfg.user.shortcuts))
-    cfg.user.shortcuts[option]["bind"] = "CTRL+F1"
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
-    widget.reset_hotkey()
+    cfg.user.shortcuts[option]["bind"] = "ctrl+f1"
+    page.refresh()
+    notices = []
+    page.notice.connect(lambda text, undoable: notices.append((text, undoable)))
+    page.clearAll()  # no question: undone from the toast
     assert all(not options["bind"] for options in cfg.user.shortcuts.values())
-    assert items(widget)[option][1].button_config.text().strip() != "CTRL + F1" and "reload" in calls
+    assert rows(page)[option]["binding"] == "" and "reload" in calls and notices[-1][1] and page.canUndo
+    page.undo()
+    assert cfg.user.shortcuts[option]["bind"] == "ctrl+f1" and not page.canUndo
 
 
 @pytest.fixture
-def binding(page, monkeypatch):
-    """Key binding input of first preset shortcut, pressed keys scripted"""
-    from neopedal.ui import hotkey_view
+def capture(backend, monkeypatch):
+    """Key capture of first preset shortcut, pressed keys scripted"""
+    from neopedal.ui.quick import hotkey_backend
 
+    page, calls = backend
     keys = []
-    monkeypatch.setattr(hotkey_view, "set_hotkey", lambda get_state: tuple(keys))
-    monkeypatch.setattr(hotkey_view.PLATFORM, "WINDOWS", True)
+    monkeypatch.setattr(hotkey_backend, "set_hotkey", lambda get_state: tuple(keys))
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    monkeypatch.setattr(hotkey_backend.PLATFORM, "WINDOWS", True)
+    cfg.application["enable_global_hotkey"] = True
     name = next(iter(SHORTCUTS_PRESET))
     cfg.user.shortcuts[name]["bind"] = ""
-    reloaded = []
-    dialog = hotkey_view.ConfigHotkey(None, option_name=name, hotkey_name="", reload_func=lambda: reloaded.append(1))
-    dialog.show()
-    yield dialog, keys, name, reloaded
-    if dialog.__dict__:
-        dialog.close()
+    page.refresh()
+    page.startCapture(name)
+    assert page.captureKey == name and page.capturing
+    yield page, keys, name, calls
+    page.cancelCapture()
 
 
-def test_key_capture_and_save(binding):
-    dialog, keys, name, reloaded = binding
+def test_key_capture_and_save(capture):
+    page, keys, name, _ = capture
     keys.extend(("CTRL", "F5"))
-    dialog.timerEvent(QTimerEvent(0))
-    assert dialog.temp_hotkey == "CTRL+F5" and "F5" in dialog.hotkey_entry.text()
-    dialog.preset_selector.setCurrentIndex(0)
-    dialog.saving()
+    page.read_keys()
+    assert page.capturedBinding == "CTRL+F5" and "F5" in page.captureText
+    page.setPresetIndex(0)
+    page.saveCapture()
     assert cfg.user.shortcuts[name]["bind"] == "CTRL+F5" and cfg.user.shortcuts[name]["preset"] == ""
-    assert reloaded  # list item updated
+    assert page.captureKey == "" and not page.capturing
+    assert rows(page)[name]["binding"] == "Ctrl + F5"  # list updated
 
 
-def test_duplicate_key_asks(binding, monkeypatch):
-    dialog, keys, name, _ = binding
+def test_duplicate_key_shown_before_saving(capture):
+    page, keys, name, _ = capture
     other = next(option for option in cfg.user.shortcuts if option != name)
     cfg.user.shortcuts[other]["bind"] = "ALT+F9"
-    monkeypatch.setattr(QMessageBox, "question",
-                        staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Cancel))
     keys.extend(("ALT", "F9"))
-    dialog.timerEvent(QTimerEvent(0))
-    dialog.saving()  # cancelled: kept open, not saved
-    assert cfg.user.shortcuts[name]["bind"] == "" and dialog.__dict__
-    dialog.reset()
-    assert dialog.temp_hotkey == "" and dialog.preset_selector.currentIndex() == 0
+    page.read_keys()
+    assert page.captureConflict  # dialog names the action, its button says "Assign Anyway"
+    page.clearCapture()
+    assert page.capturedBinding == "" and page.presetIndex == 0 and page.captureConflict == ""
 
 
-def test_hidden_input_ignores_keys(binding):
-    dialog, keys, _, _ = binding
-    dialog.hide()
+def test_hidden_page_ignores_keys(capture):
+    page, keys, _, calls = capture
+    page.page_hidden()
+    assert not page.capturing and calls[-1] == "enable"  # global hotkeys back on, page left open behind
     keys.extend(("CTRL", "A"))
-    dialog.timerEvent(QTimerEvent(0))
-    assert dialog.temp_hotkey == ""
+    page.read_keys()
+    assert page.capturedBinding == ""
+    page.page_shown()
+    assert page.capturing and calls[-1] == "disable"
 
 
-def test_not_supported_text_on_linux(page, monkeypatch):
-    from neopedal.ui import hotkey_view
+def test_not_supported_text_on_linux(backend, monkeypatch):
+    from neopedal.ui.quick import hotkey_backend
 
-    monkeypatch.setattr(hotkey_view.PLATFORM, "WINDOWS", False)
-    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
-    assert "controller button" in dialog.hotkey_entry.text() and "not supported" in dialog.hotkey_entry.text()
-    dialog.close()
-    assert PLATFORM is hotkey_view.PLATFORM
+    page, _ = backend
+    monkeypatch.setattr(hotkey_backend.PLATFORM, "WINDOWS", False)
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    cfg.application["enable_global_hotkey"] = True
+    cfg.user.shortcuts["overlay_lock"]["bind"] = ""
+    page.startCapture("overlay_lock")
+    assert "controller button" in page.captureText and "not supported" in page.captureText
+    page.cancelCapture()
+    assert PLATFORM is hotkey_backend.PLATFORM
 
 
-def test_controller_button_held_at_start_ignored(page, monkeypatch):
+def test_controller_button_held_at_start_ignored(backend, monkeypatch):
     """Button box switch held in a position never taken as the pressed button, until released & pressed"""
     from neopedal.hotkey.joystick import joystick_code
-    from neopedal.ui import hotkey_view
+    from neopedal.ui.quick import hotkey_backend
 
+    page, _ = backend
     switch, button = joystick_code(0, 0), joystick_code(0, 9)
     pressed = {switch}
-    monkeypatch.setattr(hotkey_view, "get_key_state_function", lambda: lambda code: int(code in pressed))
-    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
-    dialog.show()
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: int(code in pressed))
+    cfg.application["enable_global_hotkey"] = True
+    cfg.user.shortcuts["overlay_lock"]["bind"] = ""
+    page.startCapture("overlay_lock")
     try:
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.temp_hotkey == ""
+        page.read_keys()
+        assert page.capturedBinding == ""
         pressed.add(button)
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.temp_hotkey == "joy1_button_10" and "Joy1 Button 10" in dialog.hotkey_entry.text()
+        page.read_keys()
+        assert page.capturedBinding == "joy1_button_10" and "Joy1 Button 10" in page.captureText
         pressed.clear()
-        dialog.timerEvent(QTimerEvent(0))  # switch released
+        page.read_keys()  # switch released
         pressed.add(switch)
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.temp_hotkey == "joy1_button_1"
+        page.read_keys()
+        assert page.capturedBinding == "joy1_button_1"
     finally:
-        dialog.close()
+        page.cancelCapture()
 
 
-def test_app_shortcuts_kept_from_app_while_capturing(page, monkeypatch):
+def test_app_shortcuts_kept_from_app_while_capturing(backend, monkeypatch):
     """Ctrl+K, Ctrl+1, Alt, Enter... go to key capture only (any combination bindable), Esc still closes"""
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QKeyEvent
 
-    from neopedal.ui import hotkey_view
+    from neopedal.ui.quick import hotkey_backend
 
-    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
+    page, _ = backend
     capturing = [True]
-    monkeypatch.setattr(hotkey_view.ConfigHotkey, "capturing_keys", lambda self: capturing[0])
+    monkeypatch.setattr(hotkey_backend.HotkeyBackend, "capturing_keys", lambda self: capturing[0])
 
     def filtered(event_type, key, modifiers=Qt.KeyboardModifier.NoModifier):
-        return dialog.eventFilter(None, QKeyEvent(event_type, key, modifiers))
+        return page.eventFilter(None, QKeyEvent(event_type, key, modifiers))
 
+    ctrl = Qt.KeyboardModifier.ControlModifier
+    assert filtered(QEvent.Type.ShortcutOverride, Qt.Key.Key_K, ctrl)
+    assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
+    assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_Return)
+    assert filtered(QEvent.Type.KeyRelease, Qt.Key.Key_Alt)
+    assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_Escape)
+    capturing[0] = False  # message box over it, or other window active
+    assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
+
+
+def test_capturing_keys_needs_page_window_active(backend, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from neopedal.ui.quick import hotkey_backend
+
+    page, _ = backend
+    window = QWidget()
+    page._window = lambda: window
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    cfg.application["enable_global_hotkey"] = True
+    page.startCapture("overlay_lock")
     try:
-        ctrl = Qt.KeyboardModifier.ControlModifier
-        assert filtered(QEvent.Type.ShortcutOverride, Qt.Key.Key_K, ctrl)
-        assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
-        assert filtered(QEvent.Type.KeyPress, Qt.Key.Key_Return)
-        assert filtered(QEvent.Type.KeyRelease, Qt.Key.Key_Alt)
-        assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_Escape)
-        capturing[0] = False  # message box over it, or other window active
-        assert not filtered(QEvent.Type.KeyPress, Qt.Key.Key_1, ctrl)
+        monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: window))
+        assert page.capturing_keys()
+        monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: None))
+        assert not page.capturing_keys()
     finally:
-        dialog.close()
+        page.cancelCapture()
+        window.deleteLater()
 
 
-def test_held_modifiers_shown_while_waiting_for_key(page, monkeypatch):
-    from neopedal.ui import hotkey_view
+def test_held_modifiers_shown_while_waiting_for_key(backend, monkeypatch):
+    from neopedal.ui.quick import hotkey_backend
 
+    page, _ = backend
     pressed = set()
-    monkeypatch.setattr(hotkey_view, "get_key_state_function", lambda: lambda code: int(code in pressed))
-    monkeypatch.setattr(hotkey_view, "held_modifiers",
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: int(code in pressed))
+    monkeypatch.setattr(hotkey_backend, "held_modifiers",
                         lambda get_state: [name for name, code in (("ctrl", 17), ("shift", 16)) if get_state(code)])
-    monkeypatch.setattr(hotkey_view, "set_hotkey", lambda get_state: ("ctrl", "", "", "f5") if get_state(116) else ())
-    dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)
-    dialog.show()
+    monkeypatch.setattr(hotkey_backend, "set_hotkey", lambda get_state: ("ctrl", "", "", "f5") if get_state(116) else ())
+    cfg.application["enable_global_hotkey"] = True
+    cfg.user.shortcuts["overlay_lock"]["bind"] = ""
+    page.startCapture("overlay_lock")
     try:
         pressed.update((17, 16))
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.hotkey_entry.text() == "Ctrl + Shift + ..." and dialog.temp_hotkey == ""
+        page.read_keys()
+        assert page.captureText == "Ctrl + Shift + …" and page.capturedBinding == ""
         pressed.add(116)
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.temp_hotkey == "ctrl+f5"
+        page.read_keys()
+        assert page.capturedBinding == "ctrl+f5"
         pressed.clear()
-        dialog.timerEvent(QTimerEvent(0))
-        assert dialog.hotkey_entry.text() == "Ctrl + F5"  # captured combo kept once released
+        page.read_keys()
+        assert page.captureText == "Ctrl + F5"  # captured combo kept once released
     finally:
-        dialog.close()
+        page.cancelCapture()
+
+
+def test_hotkeys_disabled_only_while_capturing(backend, monkeypatch):
+    from neopedal.ui.quick import hotkey_backend
+
+    page, calls = backend
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    cfg.application["enable_global_hotkey"] = True
+    calls.clear()
+    page.startCapture("overlay_lock")
+    assert calls == ["disable"]
+    page.page_hidden()  # page left open behind another page
+    assert calls == ["disable", "enable"]
+    page.page_shown()
+    assert calls[-1] == "disable"
+    page.cancelCapture()
+    assert calls[-1] == "enable"

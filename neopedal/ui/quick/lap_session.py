@@ -73,7 +73,7 @@ def colored_triangles(xs: Sequence[float], ys: Sequence[float], words: Sequence[
 
 def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
     """Session chart in chart pixels, same look as former items: lines joining valid laps (1.5 px, color of item),
-    lap points (shown laps in their color, best gold, invalid hollow, outliers faded), fuel & tyre wear bars"""
+    lap points (shown laps in their color, best purple, invalid hollow, outliers faded), fuel & tyre wear bars"""
     count = max(len(laps), 1)
     pad_left, plot_width = view["padLeft"], view["width"] - view["padLeft"] - view["padRight"]
     top, bottom, low, high = view["top"], view["bottom"], view["low"], view["high"]
@@ -99,7 +99,7 @@ def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
 
     # Lap points: border ring & fill disc (fill none for invalid laps), in lap order (later laps on top)
     em, best, higher = view["em"], view["best"], bool(view.get("higherBetter"))
-    window, text, gold = QColor(view["window"]), QColor(view["text"]), QColor(view["gold"])
+    window, text, best_color = QColor(view["window"]), QColor(view["text"]), QColor(view["bestColor"])
     angles = [step / POINT_STEPS * math.tau for step in range(POINT_STEPS + 1)]
     cosines, sines = [math.cos(angle) for angle in angles], [math.sin(angle) for angle in angles]
     xs: list[float] = []
@@ -124,7 +124,7 @@ def session_shapes(laps: Sequence[dict], view: dict) -> dict[str, Vertices]:
         if not lap["time"] > 0:
             continue
         shown, valid = bool(lap["shown"]), bool(lap["valid"])
-        tone = QColor(lap["color"]) if shown else gold if valid and is_best(lap["time"], best, higher) else text
+        tone = QColor(lap["color"]) if shown else best_color if valid and is_best(lap["time"], best, higher) else text
         opacity = 0.4 if lap.get("outlier") else 1.0
         radius = em * (0.85 if shown else 0.6) / 2
         border = 1.5 if valid else 2.0

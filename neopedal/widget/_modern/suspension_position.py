@@ -20,15 +20,20 @@
 Suspension position Widget, modern design
 
 Suspension position per wheel with gauge (compression orange, extension blue), highlighted
-when beyond maximum position range, third spring position mark (front & rear).
+when beyond maximum position range, maximum position range line along outer edge, third spring
+position mark (front & rear).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QPainter
+
 from ...api_control import api
 from ...module_info import minfo
+from .draw import rounded
 from .gauge_quad import GaugeQuad
 
 if TYPE_CHECKING:
@@ -48,6 +53,41 @@ class Realtime(GaugeQuad):
 
     def setup(self):
         self.max_range = max(int(self.wcfg["position_maximum_range"]), 10)
+        self.show_maximum = self.wcfg["show_maximum_position_range"]
+
+    def paint(self, painter: QPainter):
+        tiles, maximums = self.state
+        self.draw_quads(painter, (tiles,))
+        if self.show_maximum:
+            self.draw_maximum_ranges(painter, maximums)
+
+    def draw_maximum_ranges(self, painter: QPainter, maximums: tuple[float, ...]):
+        """Maximum position range (0-1): line along tile outer edge (top front, bottom rear), growing outward
+        from car center as gauge"""
+        if not self.quad_slots:
+            return
+        height = max(self.unit * 0.12, 2.0)
+        inset = self.unit * 0.08
+        for wheel, (rect, level) in enumerate(zip(self.quad_slots[0].tiles, maximums)):
+            width = rect.width() * min(level, 1.0)
+            if width < 1:  # none (not recorded yet, or negative: too much packers)
+                continue
+            left = rect.left() if wheel % 2 else rect.right() - width
+            top = rect.top() + inset if wheel < 2 else rect.bottom() - inset - height
+            rounded(painter, QRectF(left, top, width, height), height / 2, self.theme.negative)
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        tiles = self.read()
+        if self.show_maximum:
+            maximums = tuple(max(value, 0.0) / self.max_range for value in minfo.wheels.maxSuspensionPosition)
+        else:
+            maximums = (0.0,) * 4
+        widths = [rect.width() for rect in self.quad_slots[0].tiles] if self.quad_slots else []
+        self.refresh_keyed((tiles, maximums), (
+            self.pixel_key(tiles, widths, "level", "mark"),
+            tuple(self.pixel_steps(level, width) for level, width in zip(maximums, widths)),
+        ))
 
     def read(self) -> tuple:
         theme = self.theme

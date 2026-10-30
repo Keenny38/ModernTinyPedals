@@ -15,7 +15,7 @@ from tests.test_lap_viewer_quick import backend  # noqa: F401
 # QML files of lap viewer page (backend context property is LapViewerBackend)
 LAP_VIEWER_QML = (
     "LapViewer", "CornerList", "GCircle", "LapFilter", "LapList", "MathChannels", "PlaybackBar", "RangeStats",
-    "SessionView", "SetupDiff", "ShowPicker", "SimpleView", "TraceChart", "XYView", "TrackMap", "RecentlyDeleted",
+    "SessionView", "CarSetupDiff", "ShowPicker", "SimpleView", "TraceChart", "XYView", "TrackMap", "RecentlyDeleted",
 )
 
 
@@ -27,6 +27,7 @@ def part_classes() -> dict:
     from neopedal.ui.quick.lap_corners import CornerTable
     from neopedal.ui.quick.lap_dashboard import DashboardTab
     from neopedal.ui.quick.lap_export import LapExports
+    from neopedal.ui.quick.lap_library_panel import ImportedLaps
     from neopedal.ui.quick.lap_map_marks import MapMarks
     from neopedal.ui.quick.lap_map_pointer import MapPointer
     from neopedal.ui.quick.lap_session import SessionTab
@@ -35,7 +36,7 @@ def part_classes() -> dict:
     return {"conditions": LapConditions, "dashboard": DashboardTab, "session": SessionTab,
             "math": MathChannels, "charts": ChartTools, "exports": LapExports,
             "cornerTable": CornerTable, "trackNotes": TrackNotes, "mapConsistency": MapConsistency,
-            "mapMarks": MapMarks, "mapPointer": MapPointer}
+            "mapMarks": MapMarks, "mapPointer": MapPointer, "library": ImportedLaps}
 
 
 def meta_names(cls) -> set[str]:

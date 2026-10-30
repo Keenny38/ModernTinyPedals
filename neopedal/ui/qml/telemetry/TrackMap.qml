@@ -12,8 +12,9 @@ import "../components"
 // Mouse over a line: same point shown in charts (cursor), click: position kept (charts & map), Ctrl+click a line:
 // lap highlighted. Zooming or moving the map zooms charts on the part of lap shown (Sync zoom), and back.
 // Corner label: hover for every lap in this corner, click to zoom & select it in corner table.
-// Keys: F fit, + / - zoom, arrows move, R turn, 1-9 coloring, B/C/S/O driving points, L slips, G off track,
-// X track limits, Z zones, T trail, M ruler, Esc.
+// Keys: F fit, + / - zoom, arrows move, Shift+R turn, 1-9 coloring, Shift+B/C/S/O driving points, Shift+L slips,
+// G off track, X track limits, Z zones, T trail, M ruler, Esc. B, L & R without Shift are left to charts (marker B,
+// loop A-B, reference lap): same keys, same actions wherever the focus is.
 FocusScope {
     id: root
 
@@ -268,6 +269,7 @@ FocusScope {
     function digitOf(event) { return KeyUtil.digitOf(event, Qt.platform.os) }
 
     Keys.onPressed: function(event) {
+        var shift = (event.modifiers & Qt.ShiftModifier) !== 0  // Shift+B / L / R: map (charts keep B, L & R)
         var digit = digitOf(event) - 1  // keys 1-9: coloring, before zoom (AZERTY 6 & 8 type - & _)
         if (digit >= 0 && digit < Math.min(modes.length, 9)) {
             backend.setMapMode(modes[digit][0])
@@ -276,12 +278,12 @@ FocusScope {
         }
         if (canvas.handleKey(event.key)) { event.accepted = true; return }  // + / - zoom, arrows move
         if (event.key === Qt.Key_F) canvas.reset(true)
-        else if (event.key === Qt.Key_R) backend.rotateMap()
-        else if (event.key === Qt.Key_B) togglePoint("brake")
+        else if (event.key === Qt.Key_R && shift) backend.rotateMap()
+        else if (event.key === Qt.Key_B && shift) togglePoint("brake")
         else if (event.key === Qt.Key_C) togglePoint("apex")
         else if (event.key === Qt.Key_S) togglePoint("exit")
         else if (event.key === Qt.Key_O) togglePoint("trackout")
-        else if (event.key === Qt.Key_L) togglePoint("slip")
+        else if (event.key === Qt.Key_L && shift) togglePoint("slip")
         else if (event.key === Qt.Key_G) togglePoint("offtrack")
         else if (event.key === Qt.Key_X) togglePoint("limit")
         else if (event.key === Qt.Key_Z) backend.setMapOption("zones", !(options.zones === true))
@@ -312,35 +314,35 @@ FocusScope {
     TpMenu {
         id: displayMenu
         onClosed: root.forceActiveFocus()
-        Action { text: i18n.tr("Sync zoom with charts"); checkable: true; checked: backend.mapFollow; onTriggered: root.setSync(checked) }
-        Action { text: i18n.tr("Follow vehicles"); checkable: true; checked: root.options.track === true; onTriggered: backend.setMapOption("track", checked) }
-        Action { text: i18n.tr("Auto orient"); checkable: true; checked: backend.mapAutoOrient; onTriggered: backend.setMapAutoOrient(checked) }
-        Action { text: i18n.tr("Turn map a quarter"); onTriggered: backend.rotateMap() }
+        Action { text: i18n.tr("Sync Zoom with Charts"); checkable: true; checked: backend.mapFollow; onTriggered: root.setSync(checked) }
+        Action { text: i18n.tr("Follow Cars"); checkable: true; checked: root.options.track === true; onTriggered: backend.setMapOption("track", checked) }
+        Action { text: i18n.tr("Auto Orient"); checkable: true; checked: backend.mapAutoOrient; onTriggered: backend.setMapAutoOrient(checked) }
+        Action { text: i18n.tr("Turn Map a Quarter"); onTriggered: backend.rotateMap() }
         MenuSeparator {}
-        Action { text: i18n.tr("Track limits"); checkable: true; checked: root.options.limits === true; onTriggered: backend.setMapOption("limits", checked) }
-        Action { text: i18n.tr("Pit lane"); checkable: true; checked: root.options.pit === true; onTriggered: backend.setMapOption("pit", checked) }
-        Action { text: i18n.tr("Braking points spread"); checkable: true; checked: root.options.spread === true; onTriggered: backend.setMapOption("spread", checked) }
+        Action { text: i18n.tr("Track Limits"); checkable: true; checked: root.options.limits === true; onTriggered: backend.setMapOption("limits", checked) }
+        Action { text: i18n.tr("Pit Lane"); checkable: true; checked: root.options.pit === true; onTriggered: backend.setMapOption("pit", checked) }
+        Action { text: i18n.tr("Braking Points Spread"); checkable: true; checked: root.options.spread === true; onTriggered: backend.setMapOption("spread", checked) }
         Action { text: i18n.tr("Minimap"); checkable: true; checked: root.options.minimap === true; onTriggered: backend.setMapOption("minimap", checked) }
-        Action { text: i18n.tr("Pedal zones"); checkable: true; checked: root.options.zones === true; onTriggered: backend.setMapOption("zones", checked) }
-        Action { text: i18n.tr("Cursor trail"); checkable: true; checked: root.options.trail === true; onTriggered: backend.setMapOption("trail", checked) }
-        Action { text: i18n.tr("Direction arrows"); checkable: true; checked: root.options.arrows === true; onTriggered: backend.setMapOption("arrows", checked) }
-        Action { text: i18n.tr("Sector times"); checkable: true; checked: root.options.sectors === true; onTriggered: backend.setMapOption("sectors", checked) }
-        Action { text: i18n.tr("Speed at points"); checkable: true; checked: root.options.values === true; onTriggered: backend.setMapOption("values", checked) }
-        Action { text: i18n.tr("Distance marks"); checkable: true; checked: root.options.distances === true; onTriggered: backend.setMapOption("distances", checked) }
-        Action { text: i18n.tr("Colorblind colors"); checkable: true; checked: root.options.colorblind === true; onTriggered: backend.setMapOption("colorblind", checked) }
+        Action { text: i18n.tr("Pedal Zones"); checkable: true; checked: root.options.zones === true; onTriggered: backend.setMapOption("zones", checked) }
+        Action { text: i18n.tr("Cursor Trail"); checkable: true; checked: root.options.trail === true; onTriggered: backend.setMapOption("trail", checked) }
+        Action { text: i18n.tr("Direction Arrows"); checkable: true; checked: root.options.arrows === true; onTriggered: backend.setMapOption("arrows", checked) }
+        Action { text: i18n.tr("Sector Times"); checkable: true; checked: root.options.sectors === true; onTriggered: backend.setMapOption("sectors", checked) }
+        Action { text: i18n.tr("Speed at Points"); checkable: true; checked: root.options.values === true; onTriggered: backend.setMapOption("values", checked) }
+        Action { text: i18n.tr("Distance Marks"); checkable: true; checked: root.options.distances === true; onTriggered: backend.setMapOption("distances", checked) }
+        Action { text: i18n.tr("Colorblind Colors"); checkable: true; checked: root.options.colorblind === true; onTriggered: backend.setMapOption("colorblind", checked) }
         Action { text: i18n.tr("Remove Kept Position"); enabled: backend.mapPin.x !== undefined; onTriggered: backend.clearPinned() }
         MenuSeparator {}
-        Action { text: i18n.tr("Export Map Picture..."); onTriggered: root.exportPicture(false) }
+        Action { text: i18n.tr("Export Map Picture…"); onTriggered: root.exportPicture(false) }
         Action { text: i18n.tr("Copy Map Picture"); onTriggered: root.exportPicture(true) }
     }
 
     // Driving point toggles: kind, button text (shape as on map), tooltip with key
     readonly property var pointToggles: [
-        ["brake", "◆ " + i18n.tr("Braking"), i18n.tr("Where each lap starts braking in each corner") + " (B)"],
+        ["brake", "◆ " + i18n.tr("Braking"), i18n.tr("Where each lap starts braking in each corner") + " (Shift+B)"],
         ["apex", "● " + i18n.tr("Apex"), i18n.tr("Minimum speed point of each lap in each corner") + " (C)"],
         ["exit", "▲ " + i18n.tr("Exit"), i18n.tr("Where each lap is back at full throttle after each apex") + " (S)"],
         ["trackout", "■ " + i18n.tr("Track-out"), i18n.tr("Where each lap comes closest to the outside edge after each apex (track limits needed)") + " (O)"],
-        ["slip", "○ " + i18n.tr("Lockups"), i18n.tr("Front wheel lockups under braking (ring), rear wheelspin on throttle (triangle) & bottoming (square)") + " (L)"],
+        ["slip", "○ " + i18n.tr("Lockups"), i18n.tr("Front wheel lockups under braking (ring), rear wheelspin on throttle (triangle) & bottoming (square)") + " (Shift+L)"],
         ["offtrack", "◇ " + i18n.tr("Off track"), i18n.tr("Where 2 wheels or more go on grass, dirt or gravel (laps recorded with this version)") + " (G)"],
         ["limit", "✕ " + i18n.tr("Limits"), i18n.tr("Where car goes beyond track edge, four wheels out (game track edges needed)") + " (X)"],
     ]
@@ -383,7 +385,7 @@ FocusScope {
                 tip: i18n.tr("Line coloring") + " (1-9)"
                 size: "sm"
                 checked: modeMenu.visible
-                onClicked: modeMenu.visible ? modeMenu.close() : modeMenu.popup(modeButton, 0, modeButton.height + theme.space1)
+                onClicked: modeMenu.toggleBelow(modeButton)
             }
             Repeater {
                 model: root.roomy ? root.pointToggles : []
@@ -406,7 +408,7 @@ FocusScope {
                 flat: true
                 size: "sm"
                 checked: pointsMenu.visible
-                onClicked: pointsMenu.visible ? pointsMenu.close() : pointsMenu.popup(pointsButton, 0, pointsButton.height + theme.space1)
+                onClicked: pointsMenu.toggleBelow(pointsButton)
             }
             TpButton {
                 glyph: ""  // ruler
@@ -433,9 +435,9 @@ FocusScope {
                 fallback: "⚙"
                 flat: true
                 size: "sm"
-                tip: i18n.tr("Map display") + "\n" + i18n.tr("Keys: F fit, +/- zoom, arrows move, R turn, 1-9 coloring, B C S O points, L lockups, G off track, X track limits, Z zones, T trail, M ruler")
+                tip: i18n.tr("Map display") + "\n" + i18n.tr("Keys (map clicked): F fit, +/- zoom, arrows move, Shift+R turn, 1-9 coloring, Shift+B C S O points, Shift+L lockups, G off track, X track limits, Z zones, T trail, M ruler")
                 checked: displayMenu.visible
-                onClicked: displayMenu.visible ? displayMenu.close() : displayMenu.popup(displayButton, 0, displayButton.height + theme.space1)
+                onClicked: displayMenu.toggleBelow(displayButton)
             }
             TpButton {
                 glyph: root.expanded ? "" : ""  // back to window, full screen
@@ -525,7 +527,7 @@ FocusScope {
                 compact: true
                 loading: !root.hasMap && backend.loading
                 empty: !root.hasMap && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE707"  // map pin
                 title: backend.legend.length === 0 ? i18n.tr("Select recorded laps to compare.") : i18n.tr("No position recorded")
             }
@@ -544,18 +546,18 @@ FocusScope {
                     GpuShape {
                         visible: root.options.pit === true
                         key: root.info.pit || ""
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.22 : 0.25)
+                        color: theme.tint(theme.text, "strong")
                         revision: backend.revision
                     }
                     // Circuit: road (between track limits if guessed), edge, sector lines
                     GpuShape {
                         key: root.info.edge || ""
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, root.info.limits ? (theme.dark ? 0.35 : 0.4) : (theme.dark ? 0.16 : 0.22))
+                        color: theme.tint(theme.text, root.info.limits ? "outline" : "selected")
                         revision: backend.revision
                     }
                     GpuShape {
                         key: root.info.road || ""
-                        color: theme.dark ? Qt.lighter(theme.base, 1.45) : Qt.darker(theme.base, 1.07)
+                        color: theme.mapRoad
                         revision: backend.revision
                     }
                     GpuShape {
@@ -567,7 +569,7 @@ FocusScope {
                     GpuShape {
                         visible: root.options.spread === true
                         key: root.info.spread || ""
-                        color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.brake : theme.loss, 0.3)
+                        color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.brake : theme.loss, "strong")
                         revision: backend.revision
                     }
                     // Chart markers A-B range & selected corner along reference line
@@ -578,7 +580,7 @@ FocusScope {
                     }
                     GpuShape {
                         key: root.info.selectedKey || ""
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.16)
+                        color: theme.tint(theme.text, "selected")
                         revision: backend.revision
                     }
                 }
@@ -596,6 +598,7 @@ FocusScope {
                             Text {
                                 x: 4; y: -height - 1
                                 text: modelData.label
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontTiny
                                 style: Text.Outline
@@ -611,7 +614,7 @@ FocusScope {
                     GpuShape {
                         visible: root.options.arrows === true
                         key: root.info.arrowsKey || ""
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
+                        color: theme.tint(theme.text, "strong")
                         revision: backend.revision
                     }
                     // Driving lines: faded when zoomed (zoomed part drawn over), or under colored line
@@ -654,12 +657,12 @@ FocusScope {
                             visible: root.options.zones === true && (root.highlightKey !== "" ? lap.lap === root.highlightKey : lap.reference)
                             GpuShape {
                                 key: lap.brakeZones
-                                color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.brake : theme.loss, 0.45)
+                                color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.brake : theme.loss, "outline")
                                 revision: backend.revision
                             }
                             GpuShape {
                                 key: lap.throttleZones
-                                color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.throttle : theme.gain, 0.45)
+                                color: theme.tint(root.mapLegend.zones ? root.mapLegend.zones.throttle : theme.gain, "outline")
                                 revision: backend.revision
                             }
                         }
@@ -717,14 +720,15 @@ FocusScope {
                         width: Math.min(noteText.implicitWidth, theme.em * 12) + theme.em * 0.8
                         height: noteText.implicitHeight + 4
                         radius: height / 2
-                        color: theme.tint(theme.window, 0.85)
+                        color: theme.surfaceFlyout
                         border.width: 1
-                        border.color: mapNoteArea.containsMouse ? theme.accent : theme.tint(theme.accent, 0.5)
+                        border.color: mapNoteArea.containsMouse ? theme.strokeStrong : theme.tint(theme.accent, "outline")
                         Text {
                             id: noteText
                             anchors.centerIn: parent
                             width: Math.min(implicitWidth, theme.em * 12)
                             text: "✎ " + modelData.text
+                            textFormat: Text.PlainText
                             elide: Text.ElideRight
                             color: theme.accent
                             font.pointSize: theme.fontCaption
@@ -755,18 +759,19 @@ FocusScope {
                         width: sectorRow.implicitWidth + theme.em * 0.8
                         height: sectorRow.implicitHeight + 4
                         radius: height / 2
-                        color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.82)
+                        color: theme.surfaceFlyout
                         border.width: 1
-                        border.color: theme.tint(theme.accent, 0.6)
+                        border.color: theme.tint(theme.accent, "outline")
                         Row {
                             id: sectorRow
                             anchors.centerIn: parent
-                            spacing: theme.em * 0.4
-                            Text { text: modelData.label; color: theme.accent; font.pointSize: theme.fontCaption; font.weight: Font.Bold }
-                            Text { visible: modelData.time !== ""; text: modelData.time; color: theme.text; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
+                            spacing: theme.space3
+                            Text { text: modelData.label; color: theme.accent; font.pointSize: theme.fontCaption; font.weight: Font.Bold; textFormat: Text.PlainText }
+                            Text { visible: modelData.time !== ""; text: modelData.time; color: theme.text; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                             Text {
                                 visible: modelData.delta !== ""
                                 text: modelData.delta
+                                textFormat: Text.PlainText
                                 color: root.tone(modelData.deltaColor, theme.dimText)
                                 font.pointSize: theme.fontCaption
                                 font.weight: Font.DemiBold
@@ -826,6 +831,7 @@ FocusScope {
                             y: canvas.ySign * modelData.y * speedLabels.pointScale - height / 2 + (modelData.order - 0.5) * height * 0.9
                             opacity: root.lapOpacity(modelData.lap)
                             text: modelData.value
+                            textFormat: Text.PlainText
                             color: modelData.color
                             style: Text.Outline
                             styleColor: theme.window
@@ -857,17 +863,18 @@ FocusScope {
                         width: cornerRow.implicitWidth + theme.em * 0.7
                         height: cornerRow.implicitHeight + 4
                         radius: height / 2
-                        color: cornerArea.containsMouse ? theme.raised : Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
+                        color: cornerArea.containsMouse ? theme.hover : theme.surfaceFlyout
                         border.width: selected ? 1.5 : 1
-                        border.color: cornerArea.containsMouse || selected ? theme.accent : Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.15)
+                        border.color: selected ? theme.accent : cornerArea.containsMouse ? theme.strokeStrong : theme.strokeSubtle
                         Row {
                             id: cornerRow
                             anchors.centerIn: parent
-                            spacing: theme.em * 0.3
-                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontCaption; font.weight: Font.Bold }
+                            spacing: theme.space2
+                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontCaption; font.weight: Font.Bold; textFormat: Text.PlainText }
                             Text {
                                 visible: modelData.delta !== ""
                                 text: modelData.delta
+                                textFormat: Text.PlainText
                                 color: root.tone(modelData.deltaColor, theme.dimText)
                                 font.pointSize: theme.fontCaption
                                 font.weight: Font.DemiBold
@@ -941,6 +948,7 @@ FocusScope {
                         x: -width / 2
                         y: car.size * 0.75
                         text: car.point ? car.point.slip || "" : ""
+                        textFormat: Text.PlainText
                         color: car.point ? car.lapColor : theme.text
                         style: Text.Outline
                         styleColor: theme.window
@@ -955,13 +963,14 @@ FocusScope {
                         width: gapText.implicitWidth + theme.em * 0.6
                         height: gapText.implicitHeight + 2
                         radius: height / 2
-                        color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
+                        color: theme.surfaceFlyout
                         border.width: 1
                         border.color: car.point ? car.lapColor : "transparent"
                         Text {
                             id: gapText
                             anchors.centerIn: parent
                             text: car.point ? car.point.gap : ""
+                            textFormat: Text.PlainText
                             color: car.point ? car.lapColor : theme.text
                             font.pointSize: theme.fontCaption
                             font.weight: Font.DemiBold
@@ -1043,6 +1052,7 @@ FocusScope {
                         color: theme.inkOn(theme.accentFill)
                         text: (Math.hypot(parent.b[0] - parent.a[0], parent.b[1] - parent.a[1]) * backend.distanceScale).toFixed(1)
                               .replace(".", theme.decimalPoint) + " " + backend.distanceUnit
+                        textFormat: Text.PlainText
                         font.weight: Font.Bold
                         font.features: { "tnum": 1 }
                     }
@@ -1067,13 +1077,14 @@ FocusScope {
                 width: placementText.implicitWidth + theme.em * 0.8
                 height: placementText.implicitHeight + theme.em * 0.4
                 radius: theme.radiusSm
-                color: Qt.rgba(theme.raised.r, theme.raised.g, theme.raised.b, 0.94)
+                color: theme.surfaceFlyout
                 border.width: 1
                 border.color: root.placement.out ? theme.warning : (root.placement.color || theme.border)
                 Text {
                     id: placementText
                     anchors.centerIn: parent
                     text: root.placement.text || ""
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
@@ -1098,7 +1109,7 @@ FocusScope {
                 width: side
                 height: side
                 radius: theme.radiusMd
-                color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
+                color: theme.surfaceFlyout
                 border.width: 1
                 border.color: theme.border
                 clip: true
@@ -1125,7 +1136,7 @@ FocusScope {
                     y: Math.min(y0, y1)
                     width: Math.max(Math.abs(x1 - x0), 3)
                     height: Math.max(Math.abs(y1 - y0), 3)
-                    color: theme.tint(theme.accent, 0.15)
+                    color: theme.tint(theme.accent, "selected")
                     border.width: 1.5
                     border.color: theme.accent
                     antialiasing: true  // smooth edges like in the layer (fractional place & border)
@@ -1161,6 +1172,7 @@ FocusScope {
                     id: tipText
                     anchors.centerIn: parent
                     text: root.hoverPoint ? root.hoverPoint.tip : ""
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.pointSize: theme.fontSmall
                     font.features: { "tnum": 1 }
@@ -1185,18 +1197,21 @@ FocusScope {
                     spacing: theme.space1
                     Text {
                         text: (root.card.title || "") + "  ·  " + (root.card.apex || "")
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.weight: Font.Bold
                     }
                     Text {
                         visible: (root.card.spread || "") !== ""
                         text: "◆ " + (root.card.spread || "")
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontCaption
                     }
                     Text {
                         visible: (root.card.widthTitle || "") !== ""
                         text: "↔ " + (root.card.widthTitle || "")
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontCaption
                     }
@@ -1205,19 +1220,21 @@ FocusScope {
                         Row {
                             spacing: theme.em * 0.5
                             ColorDot { color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontSmall; width: theme.em * 7.5; elide: Text.ElideRight }
-                            Text { text: modelData.time; color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 } }
+                            Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontSmall; width: theme.em * 7.5; elide: Text.ElideRight; textFormat: Text.PlainText }
+                            Text { text: modelData.time; color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                             Text {
                                 text: modelData.gap
+                                textFormat: Text.PlainText
                                 width: theme.em * 3
                                 color: root.tone(modelData.gapColor, theme.dimText)
                                 font.pointSize: theme.fontSmall
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
                             }
-                            Text { text: modelData.speeds; color: theme.dimText; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 } }
+                            Text { text: modelData.speeds; color: theme.dimText; font.pointSize: theme.fontCaption; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                             Text {
                                 text: "◆ " + modelData.brake + "  ▲ " + modelData.throttle
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontCaption
                                 font.features: { "tnum": 1 }
@@ -1225,6 +1242,7 @@ FocusScope {
                             Text {
                                 visible: (modelData.width || "") !== ""
                                 text: "↔ " + (modelData.width || "")
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontCaption
                                 font.features: { "tnum": 1 }
@@ -1246,7 +1264,7 @@ FocusScope {
                     required property var modelData
                     spacing: theme.space2
                     ColorDot { size: Math.round(theme.em * 0.6); color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontSmall }
+                    Text { text: modelData.label; color: theme.text; font.pointSize: theme.fontSmall; textFormat: Text.PlainText }
                 }
             }
             GradientLegend {
@@ -1267,6 +1285,7 @@ FocusScope {
                     visible: root.roomy && root.pointShown(modelData[0]) && (modelData[0] !== "trackout" || backend.hasLimits)
                              && (modelData[0] !== "offtrack" && modelData[0] !== "limit" || root.hasEvents(modelData[0]))
                     text: modelData[1] + " " + modelData[2]
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontCaption
                 }
@@ -1286,7 +1305,7 @@ FocusScope {
                             color: root.mapLegend.zones ? root.mapLegend.zones[modelData[0]] : theme.dimText
                             anchors.verticalCenter: parent.verticalCenter
                         }
-                        Text { text: modelData[1]; color: theme.text; font.pointSize: theme.fontCaption }
+                        Text { text: modelData[1]; color: theme.text; font.pointSize: theme.fontCaption; textFormat: Text.PlainText }
                     }
                 }
             }
@@ -1298,6 +1317,7 @@ FocusScope {
                     ColorDot { size: Math.round(theme.em * 0.5); color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         text: modelData.label + (modelData.limits > 0 ? "  ✕" + modelData.limits : "") + (modelData.offtrack > 0 ? "  ◇" + modelData.offtrack : "")
+                        textFormat: Text.PlainText
                         color: modelData.limits > 0 ? theme.warning : theme.dimText
                         font.pointSize: theme.fontCaption
                         font.features: { "tnum": 1 }
@@ -1310,13 +1330,14 @@ FocusScope {
                 Row {
                     spacing: theme.space2
                     ColorDot { size: Math.round(theme.em * 0.6); color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: modelData.label + "  " + modelData.count + "/" + (root.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 } }
+                    Text { text: modelData.label + "  " + modelData.count + "/" + (root.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontSmall; font.features: { "tnum": 1 }; textFormat: Text.PlainText }
                 }
             }
             Text {
                 visible: root.mode === "minisectors" && (root.mapLegend.ideal || "") !== ""
                 text: "★ " + i18n.tr("Ideal of shown laps:") + " " + (root.mapLegend.ideal || "")
-                color: theme.gold
+                textFormat: Text.PlainText
+                color: theme.purple  // ideal: best (★ too)
                 font.pointSize: theme.fontSmall
                 font.weight: Font.DemiBold
             }
@@ -1338,6 +1359,7 @@ FocusScope {
             Text {
                 visible: root.mode === "consistency"
                 text: root.mapLegend.text || ""
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 HoverHandler { id: spreadHover }
@@ -1359,6 +1381,7 @@ FocusScope {
                 visible: backend.limitsSource !== "" && root.options.limits !== false
                 text: "┆ " + (backend.limitsSource === "game" ? i18n.tr("Track edges from game")
                                                             : i18n.tr("Track edges estimated from laps"))
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontCaption
                 HoverHandler { id: limitsHover }
@@ -1390,7 +1413,7 @@ FocusScope {
         property string high: ""
         property var colors: []
         spacing: theme.space3
-        Text { text: scale.low; color: theme.text; font.pointSize: theme.fontSmall }
+        Text { text: scale.low; color: theme.text; font.pointSize: theme.fontSmall; textFormat: Text.PlainText }
         Rectangle {
             width: theme.em * 7
             height: theme.em * 0.5
@@ -1406,6 +1429,6 @@ FocusScope {
                 GradientStop { position: 1; color: scale.colors[scale.colors.length - 1] || "transparent" }
             }
         }
-        Text { text: scale.high; color: theme.text; font.pointSize: theme.fontSmall }
+        Text { text: scale.high; color: theme.text; font.pointSize: theme.fontSmall; textFormat: Text.PlainText }
     }
 }

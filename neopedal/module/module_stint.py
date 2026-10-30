@@ -36,6 +36,7 @@ from ..userfile.consumption_history import (
     rewrite_consumption_history,
     save_consumption_history_file,
 )
+from ..userfile.data_saver import queue_save
 from ..userfile.heatmap import select_compound_symbol
 from ..validator import generator_init
 from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, WAIT_STATE_CHANGE, DataModule
@@ -95,6 +96,21 @@ def prepend(dataset: deque, item) -> deque:
     return new_dataset
 
 
+def write_consumption_history(
+    output: HistoryInfo, filepath: str, combo_name: str, laps: tuple[ConsumptionDataSet, ...], version: int,
+) -> None:
+    """Write consumption history file (data saver thread), laps: history at version
+
+    Written without the lock (Race Calculator deleting laps on UI thread never waits for the disk).
+    """
+    save_consumption_history_file(dataset=laps, filepath=filepath, filename=combo_name)
+    with output.consumptionLock:
+        if output.consumptionDataVersion != version:
+            # Laps deleted meanwhile (saved by Race Calculator under the lock, maybe before this write):
+            # history of now written again, deleted laps never back in file
+            rewrite_consumption_history(output.consumptionDataSet, filepath, combo_name)
+
+
 @generator_init
 def record_consumption_history(output: HistoryInfo, filepath: str):
     """Update consumption history"""
@@ -105,29 +121,26 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
     combo_name = ""
     readable = True  # history file readable at load, False if not accessible (never saved over)
 
-    def save_data():
-        """History saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
+    def save_data(sync: bool = False):
+        """History saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving) on the data saver
+        thread; sync: written before returning (module stop, reset: history loaded back from file at once)"""
         nonlocal delayed_save, readable, next_checkpoint
         next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
-        with output.consumptionLock:
-            if not readable:  # not accessible at load: laps of file kept, added to recorded laps
-                saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
-                if readable:
+        if not readable:  # not accessible at load: laps of file kept, added to recorded laps
+            # Read before taking the lock (a slow read never blocks Race Calculator deleting laps on UI thread)
+            saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
+            if readable:
+                with output.consumptionLock:
                     output.consumptionDataSet = deque(merge_consumption_history(
                         output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
                     ), output.consumptionDataSet.maxlen)
                     output.consumptionDataVersion += 1
-            laps, version = tuple(output.consumptionDataSet), output.consumptionDataVersion
         delayed_save = False
         if not readable:
             return
-        # Written without the lock (Race Calculator deleting laps on UI thread never waits for the disk)
-        save_consumption_history_file(dataset=laps, filepath=filepath, filename=combo_name)
         with output.consumptionLock:
-            if output.consumptionDataVersion != version:
-                # Laps deleted meanwhile (saved by Race Calculator under the lock, maybe before this write):
-                # history of now written again, deleted laps never back in file
-                rewrite_consumption_history(output.consumptionDataSet, filepath, combo_name)
+            laps, version = tuple(output.consumptionDataSet), output.consumptionDataVersion
+        queue_save(write_consumption_history, output, filepath, combo_name, laps, version, sync=sync)
 
     while True:
         reset = yield None
@@ -136,7 +149,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
         if last_reset != reset:
             # Save data
             if delayed_save:
-                save_data()
+                save_data(sync=True)
 
             # Delay reset until driving (module stopping: data saved only)
             if reset is MODULE_STOP or not realtime_state.active:
@@ -165,8 +178,9 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
         ):
             continue
 
-        # Update consumption history
-        lap_number = api.read.lap.number()
+        # Update consumption history: number of the lap just completed (Lap time history shows completed laps + 1
+        # for the lap driven), scoring updated by now (2 s into lap)
+        lap_number = api.read.lap.completed_laps()
         if (
             output.consumptionDataSet[0].lapTimeLast != minfo.delta.lapTimeLast
             or output.consumptionDataSet[0].lapNumber != lap_number

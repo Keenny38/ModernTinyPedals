@@ -24,15 +24,15 @@ ComboBox {
     ToolTip.delay: theme.tipDelay
 
     background: Rectangle {
-        radius: theme.radiusMd
+        radius: theme.radiusSm
         color: box.hovered ? theme.hover : theme.raised
         border.width: box.visualFocus ? 1.5 : 1
-        border.color: box.popup.visible || box.visualFocus ? theme.accent : theme.border
+        border.color: box.popup.visible || box.visualFocus ? theme.accent : box.hovered ? theme.strokeStrong : theme.border
         Behavior on color { ColorAnimation { duration: theme.motionFast } }
     }
     contentItem: Row {
-        leftPadding: theme.em * 0.6
-        spacing: theme.em * 0.4
+        leftPadding: theme.space4
+        spacing: theme.space3
         Rectangle {
             visible: box.dotColor !== null
             width: Math.round(theme.em * 0.6)
@@ -48,6 +48,7 @@ ComboBox {
         }
         Text {
             text: box.displayText
+            textFormat: Text.PlainText
             color: theme.text
             elide: Text.ElideRight
             width: box.width - theme.em * 2.6 - (box.dotColor !== null ? theme.em : box.compounds ? theme.em * 1.5 : 0)
@@ -57,7 +58,7 @@ ComboBox {
     indicator: Icon {
         fallback: "▾"
         glyph: ""  // chevron down
-        size: theme.em * 0.7
+        size: theme.iconXs
         color: theme.dimText
         x: box.width - width - theme.em * 0.6
         y: (box.height - height) / 2
@@ -81,9 +82,10 @@ ComboBox {
         }
         background: Rectangle {
             radius: theme.radiusLg
-            color: theme.raised
+            color: theme.surfaceFlyout
             border.width: 1
-            border.color: theme.border
+            border.color: theme.strokeSubtle
+            TpShadow {}
         }
     }
     delegate: ItemDelegate {
@@ -94,10 +96,11 @@ ComboBox {
         readonly property string label: box.textRole !== "" && modelData !== null && typeof modelData === "object"
                                         ? String(modelData[box.textRole]) : String(modelData)
         width: ListView.view ? ListView.view.width : box.width
-        height: theme.em * 2.1
+        height: theme.rowCompact
+        verticalPadding: 0  // style padding (12) is taller than the row: content pushed down
         highlighted: box.highlightedIndex === index
         contentItem: Row {
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             Rectangle {
                 visible: box.dotColor !== null
                 width: Math.round(theme.em * 0.6)
@@ -113,6 +116,7 @@ ComboBox {
             }
             Text {
                 text: item.label
+                textFormat: Text.PlainText
                 color: theme.text
                 font.weight: box.currentIndex === item.index ? Font.DemiBold : Font.Normal
                 width: Math.max(0, Math.min(implicitWidth, item.availableWidth
@@ -122,7 +126,7 @@ ComboBox {
             }
         }
         background: Rectangle {
-            radius: theme.radiusMd
+            radius: theme.radiusSm
             color: item.highlighted ? theme.hover : "transparent"
         }
     }

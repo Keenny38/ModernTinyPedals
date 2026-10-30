@@ -39,11 +39,11 @@ Compare the result with the release notes. Full details: [Updates and Security](
 | Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `neopedal.exe`, in the program folder |
 | Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Dashboard HUD incidents | `%APPDATA%\NeoPedal` |
 
-Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
+Data folders can be moved with `Settings` > `User Path`, and opened with `Settings` > `Open Folder`.
 
 ### Import settings
 
-`Config` > `Import Settings...` takes the global settings of another copy of the app (an older version, another computer, a backup): choose its global settings folder (the one holding `config.json`, for example in `%APPDATA%` on Windows or `~/.config` on Linux). After you confirm, the app restarts and copies options, shortcuts, driver stats, language packs and Dashboard HUD incidents before loading them. The chosen folder is never changed, your current settings are set aside next to it (`NeoPedal.before-import-<date>`, never deleted), and they stay in place if the copy fails. On Linux, the data folder of the same name in `~/.local/share` is imported too.
+`Settings` > `Import Settings…` takes the global settings of another copy of the app (an older version, another computer, a backup): choose its global settings folder (the one holding `config.json`, for example in `%APPDATA%` on Windows or `~/.config` on Linux). After you confirm, the app restarts and copies options, shortcuts, driver stats, language packs and Dashboard HUD incidents before loading them. The chosen folder is never changed, your current settings are set aside next to it (`NeoPedal.before-import-<date>`, never deleted), and they stay in place if the copy fails. On Linux, the data folder of the same name in `~/.local/share` is imported too. Because the folder may come from someone else, some settings are never imported: the update source goes back to the official releases, LAN access, the Web Dashboard access code, the Stream Overlay access token and trusted plugins keep your current values, folders on a network path (`\\server\share`) go back to their default, and presets connecting to a game API on another computer connect to this one again. The log lists what was kept.
 
 Presets are separate files: drop them (`.json`) or a preset package (`.zip`) on the main window to add them.
 

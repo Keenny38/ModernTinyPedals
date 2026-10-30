@@ -112,7 +112,7 @@ LINE_SAME = 0.4  # meters off reference line counted as same line
 PEDAL_COLORS = {
     "throttle": QColor("#22C55E"), "brake": QColor("#EF4444"), "both": QColor("#F59E0B"), "coast": QColor("#9CA3AF"),
 }
-# Pedals told apart with red-green color blindness (map "Colorblind colors" option): blue throttle, orange brake
+# Pedals told apart with red-green color blindness (map "Colorblind Colors" option): blue throttle, orange brake
 PEDAL_COLORS_COLORBLIND = {
     "throttle": QColor("#3B82F6"), "brake": QColor("#F97316"), "both": QColor("#FACC15"), "coast": QColor("#9CA3AF"),
 }

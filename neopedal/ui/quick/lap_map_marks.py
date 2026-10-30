@@ -33,9 +33,10 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtCore import QObject
 
 from ...i18n import tr
+from ...process.results_text import sector_text
 from ...userfile.corner_analysis import CornerComparison, CornerStats, ResampledLap
 from ...userfile.telemetry_lap import LapData, sector_times
-from ..lap_viewer import CHANNEL_MAP, PlotLap, corner_label, distance_text, format_laptime, signed
+from ..lap_viewer import CHANNEL_MAP, PlotLap, corner_label, distance_text, signed
 from . import lap_map
 from .lap_base import COLOR_GAIN, COLOR_LOSS, PagePart, format_diff, weak_host
 
@@ -255,7 +256,7 @@ class MapMarks(PagePart):
             gap = compared_times[index] - reference_times[index] if reference_times and compared_times else None
             labels.append({
                 "x": x, "y": y, "label": f"S{index + 1}",
-                "time": format_laptime(reference_times[index]) if reference_times else "",
+                "time": sector_text(reference_times[index], "") if reference_times else "",
                 "delta": signed(gap, 3) if gap is not None else "",
                 "deltaColor": COLOR_LOSS if gap is not None and gap > 0.0005
                 else COLOR_GAIN if gap is not None and gap < -0.0005 else "",

@@ -43,12 +43,12 @@ TOKEN_COLORS = {
     "text_muted": "#888888",  # label, caption
     "text_faint": "#666666",  # placeholder, inactive
     "accent": "#00CCFF",  # player, selection, info
-    "positive": "#22CC22",  # gain, faster, ok
-    "negative": "#FF2200",  # loss, slower, danger
-    "warning": "#FFAA00",  # warning, attention
-    "caution": "#FFFF00",  # yellow flag, low
+    "positive": "#22CC22",  # gain, faster, personal best, ok
+    "negative": "#FF2200",  # loss, danger, invalid lap
+    "warning": "#FF6600",  # warning, attention, in pit lane (status color "warning" of app pages)
+    "caution": "#FFFF00",  # yellow flag, slower lap or sector, low
     "best": "#9900FF",  # session or class best (purple)
-    "orange": "#FF6600",
+    "orange": "#FF6600",  # orange hue (hot, rising), same color as warning
     "blue": "#0088FF",  # lapped car, cold
     "lap_ahead": "#FF4422",  # car one lap or more ahead
     "lap_behind": "#66CCFF",  # car one lap or more behind

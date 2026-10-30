@@ -93,7 +93,6 @@ class Realtime(Overlay):
             fg_color=self.wcfg["font_color_camber"],
             bg_color=self.wcfg["background_color_camber"],
             count=4,
-            last=0,
         )
         self.set_grid_layout_quad(
             layout=layout_camber,
@@ -104,6 +103,7 @@ class Realtime(Overlay):
             column=1,
         )
         self.calc_ema_camber = calc.ema_filter(self.wcfg["camber_smoothing_samples"])
+        self.ema_camber = [0.0] * 4  # smoothed readings (bar last: shown value)
 
         # Camber difference
         if self.wcfg["show_camber_difference"]:
@@ -116,38 +116,43 @@ class Realtime(Overlay):
                 fg_color=self.wcfg["font_color_camber_difference"],
                 bg_color=self.wcfg["background_color_camber_difference"],
                 count=2,
-                last=0,
             )
             self.set_grid_layout_vert(
                 layout=layout_camber,
                 targets=self.bars_cdiff,
             )
             self.calc_ema_cdiff = calc.ema_filter(self.wcfg["camber_difference_smoothing_samples"])
+            self.ema_cdiff = [0.0, 0.0]
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Camber
         camber_set = minfo.wheels.camberAngle
-        for camber, bar_camber in zip(camber_set, self.bars_camber):
-            self.update_camber(bar_camber, self.calc_ema_camber(bar_camber.last, camber))
+        ema_camber = self.ema_camber
+        for index, bar_camber in enumerate(self.bars_camber):
+            ema_camber[index] = self.calc_ema_camber(ema_camber[index], camber_set[index])
+            self.update_camber(bar_camber, round(ema_camber[index], self.decimals_camber))
 
         # Camber difference
         if self.wcfg["show_camber_difference"]:
-            self.update_cdiff(self.bars_cdiff[0], self.calc_ema_cdiff(self.bars_cdiff[0].last, minfo.wheels.frontCamberAngleDifference))
-            self.update_cdiff(self.bars_cdiff[1], self.calc_ema_cdiff(self.bars_cdiff[1].last, minfo.wheels.rearCamberAngleDifference))
+            ema_cdiff = self.ema_cdiff
+            ema_cdiff[0] = self.calc_ema_cdiff(ema_cdiff[0], minfo.wheels.frontCamberAngleDifference)
+            ema_cdiff[1] = self.calc_ema_cdiff(ema_cdiff[1], minfo.wheels.rearCamberAngleDifference)
+            self.update_cdiff(self.bars_cdiff[0], round(ema_cdiff[0], self.decimals_cdiff))
+            self.update_cdiff(self.bars_cdiff[1], round(ema_cdiff[1], self.decimals_cdiff))
 
     # GUI update methods
     def update_camber(self, target, data):
-        """Camber data"""
+        """Camber data (rounded as shown: repaint only on visible change)"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.{self.decimals_camber}f}"[:3 + self.decimals_camber]
+            target.text = f"{data:+z.{self.decimals_camber}f}"[:3 + self.decimals_camber]
             target.fg = self.bar_style_camber[data >= self.wcfg["positive_camber_threshold"]]
             target.update()
 
     def update_cdiff(self, target, data):
-        """Camber difference data"""
+        """Camber difference data (rounded as shown, no "-0.0")"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.{self.decimals_cdiff}f}"[:3 + self.decimals_cdiff]
+            target.text = f"{data:+z.{self.decimals_cdiff}f}"[:3 + self.decimals_cdiff]
             target.update()

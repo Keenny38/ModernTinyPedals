@@ -347,7 +347,9 @@ def test_summary_tiles(english, ui_env):
     from neopedal.ui.quick import results_backend as rb
 
     tiles = {tile["label"]: tile for tile in rb.summary_tiles(race())}
-    assert tiles["Position"]["value"] == "P1" and tiles["Position"]["tone"] == "gold"
+    # "P1/3": one position form for every page, race podium gold (silver P2, bronze P3: shared with Stats)
+    assert tiles["Position"]["value"] == "P1/3" and tiles["Position"]["tone"] == "gold"
+    assert tiles["Position"]["detail"] == "Hyper P1/2"  # multiclass: class & place in class, same form
     assert tiles["Grid"]["detail"] == "+1"
     assert tiles["Best Lap"]["value"] == "1:37.900" and tiles["Best Lap"]["tone"] == "purple"
     assert tiles["Contacts"]["detail"] == "1 car · 0 walls"
@@ -355,6 +357,7 @@ def test_summary_tiles(english, ui_env):
     carl = race()._replace(entries=tuple(entry._replace(player=entry.name == "Carl Slow") for entry in race().entries))
     tiles = {tile["label"]: tile for tile in rb.summary_tiles(carl)}
     assert (tiles["Position"]["value"], tiles["Position"]["detail"]) == ("DNF", "Suspension failure")
+    assert tiles["Position"]["tone"] == "loss"  # DNF & DQ: loss tone, as Stats
     assert tiles["Fastest Lap"]["detail"] == "Alice Driver"
     nobody = race()._replace(entries=tuple(entry._replace(player=False) for entry in race().entries))
     assert rb.summary_tiles(nobody)[0]["label"] == "Winner"
@@ -370,7 +373,7 @@ def test_lap_rows(english, ui_env):
     assert alice[1]["s1Tone"] == "purple" and alice[0]["s1Tone"] == ""
     assert alice[0]["usageText"] == "4.0 %" and alice[0]["wearText"] == "98 %"
     bob = rb.lap_rows(result, result.entries[1])
-    assert bob[1]["timeTone"] == "dim" and bob[1]["timeText"] == "-"
+    assert bob[1]["timeTone"] == "dim" and bob[1]["timeText"] == "—"  # missing value of every page
     assert bob[2]["pit"] and bob[2]["compound"] == "Hard" and bob[2]["timeTone"] == "gain"  # own best
     stats = {tile["label"]: tile["value"] for tile in rb.lap_stats(result, result.entries[0])}
     assert stats["Best Lap"] == "1:37.900" and stats["Theoretical Best"] == "1:37.900"
@@ -467,12 +470,12 @@ def test_backend_sessions(backend, english):
     assert backend.sessionHeader["title"] == "24 Heures du Mans"
     assert backend.classificationModel.rowCount() == 3
     assert backend.selectedEntry == "0"  # player
-    assert backend.lapModel.rowCount() == 3 and backend.lapColumns == {"usage": True, "wear": True}
+    assert backend.lapModel.rowCount() == 3 and backend.lapColumns == {"usage": True, "wear": True, "telemetry": False}
     assert len(backend.positions["series"]) == 3
     assert backend.eventModel.rowCount() == 5
     backend.setHideEmpty(False)
     assert backend.shownCount == 3
-    backend.setKindFilter(3)  # practice
+    backend.setKindFilter(1)  # practice
     assert backend.shownCount == 2 and backend.selectedKey.endswith(PRACTICE_NAME)
     assert not backend.isRace and backend.positions["series"] == []
     backend.setKindFilter(0)
@@ -488,7 +491,7 @@ def test_backend_sessions(backend, english):
 def test_backend_car_and_filters(backend, english):
     backend.selectEntry("1")
     assert backend.selectedEntry == "1" and backend.driverInfo["name"] == "Bob Racer"
-    assert backend.lapColumns == {"usage": False, "wear": False}
+    assert backend.lapColumns == {"usage": False, "wear": False, "telemetry": False}
     rows = backend.classificationModel.rows
     assert [row["selected"] for row in rows] == [False, True, False]
     backend.selectEntry("99")  # unknown car ignored
@@ -581,7 +584,7 @@ def test_page_loads(results_folder, english):
         viewer.backend.setClassFilter("Hyper")
         viewer.resize(700, 600)
         wait_until(lambda: False, 0.05)
-        viewer.backend.setKindFilter(3)
+        viewer.backend.setKindFilter(1)
         wait_until(lambda: False, 0.05)
         assert viewer.view.status() == QQuickWidget.Status.Ready
         viewer.close()

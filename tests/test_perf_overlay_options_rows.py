@@ -69,7 +69,7 @@ def check_shown_rows(page, listing) -> int:
         if row["row"] == "header":
             assert row["title"] in texts, (row["title"], texts)
         elif row["row"] == "option":
-            assert row["label"] in texts, (row["label"], texts)
+            assert (row["marked"] or row["label"]) in texts, (row["label"], texts)  # searched words in bold
             numbers = of_type(items, "NumberField")
             fields = of_type(items, "TpTextField")
             combos = of_type(items, "TpCombo")
@@ -182,7 +182,8 @@ def check_reused_fields(page):
     field.forceActiveFocus()
     QTest.keyClick(page.view, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
     QTest.keyClicks(page.view, "Q")
-    assert field.property("text") == "Q" and page.backend.value(overlay, option) != "Q"
+    # Typed text taken at each key (as on the Settings page: unsaved changes bar & Ctrl+S see it)
+    assert field.property("text") == "Q" and page.backend.value(overlay, option) == "Q"
     listing.setProperty("contentY", listing.property("originY"))  # row released & reused
     QTest.qWait(50)
     flush()

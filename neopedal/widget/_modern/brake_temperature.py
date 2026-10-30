@@ -76,6 +76,11 @@ class Realtime(QuadMixin, ModernOverlay):
         """Average restarts from next braking (new session, other vehicle)"""
         self.averages = [0.0] * 4
 
+    def vehicle_reset(self):
+        """Average & brake heatmap of the previous car not kept (followed car changed)"""
+        self.post_update()
+        self.last_in_pits = -1  # heatmap matched again to vehicle on next update
+
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)
 

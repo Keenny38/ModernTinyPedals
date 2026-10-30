@@ -208,7 +208,7 @@ def test_switched_overlay_leaves_state_filter(page):
 # --- Favorites & recently edited
 def test_favorites_marked_kept_in_config_and_filtered(page):
     told = []
-    page.countsChanged.connect(lambda: told.append(1))
+    page.filterCountsChanged.connect(lambda: told.append(1))  # favorites chip count
     page.toggleFavorite("fuel")
     page.toggleFavorite("relative")
     page.toggleFavorite("nothing")  # unknown overlay ignored
@@ -568,7 +568,7 @@ def test_qml_page_with_favorites_counts_badges_and_screen_view(view, monkeypatch
     view.backend.setViewMode(VIEW_SCREEN)
     settle()
     assert not view.view.errors()
-    assert "Layout Editor" in item_texts(view.view)
+    assert "Snap" in item_texts(view.view)  # screen view toolbar (snapping, background)
     view.backend.setViewMode(VIEW_LIST)
     settle()
     texts = item_texts(view.view)

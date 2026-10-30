@@ -412,6 +412,7 @@ class MapView(BackendBase):
             return
         self._map_angle = self.map_angle(road)
         self._road = lap_map.rotate_line(road, self._map_angle)
+        self._road_numbered = official is None and bool(outline)
         self._map_lines = [(self.turned_line(lap, line), lap) for line, lap in lines]
         geometry = self._geometry
         self._pit = [  # pit lane parts (game gives pit entry & exit roads apart)
@@ -468,7 +469,7 @@ class MapView(BackendBase):
             ],
             "arrowsKey": self.prefix + "map|arrows",
             "rangeKey": self.prefix + "map|range", "selectedKey": self.prefix + "map|selected",
-            "ticks": self.map_ticks(self.guide_line()),
+            "ticks": self.distance_marks(),
             "limits": limits is not None,
             "minX": min(xs), "minY": min(ys), "maxX": max(xs), "maxY": max(ys),
             "corners": self._map_marks.corner_points(),
@@ -488,6 +489,11 @@ class MapView(BackendBase):
     def road_key(road: lap_map.MapLine) -> tuple:
         """Circuit line told apart from another (turned like map)"""
         return (len(road.xs), road.xs[0], road.ys[0], road.xs[-1], road.ys[-1]) if road.xs else ()
+
+    def distance_marks(self) -> list[dict]:
+        """Distance marks along guide line, none along circuit of track map file (no meters)"""
+        line = self.guide_line()
+        return [] if line is self._road and self._road_numbered else self.map_ticks(line)
 
     @staticmethod
     def map_ticks(line: lap_map.MapLine) -> list[dict]:

@@ -475,7 +475,9 @@ def test_lap_list_shows_sessions(open_viewer):
     backend = open_viewer().backend
     rows = backend.lap_model.rows
     sessions = [row for row in rows if row["kind"] == "session"]
-    assert [row["title"] for row in sessions] == ["Race  03/10 15:56", "Practice  03/10 14:00"]
+    from neopedal.ui.quick.formatting import day_month  # day & month in language format (03/10, 10/3 in US English)
+
+    assert [row["title"] for row in sessions] == [f"Race  {day_month(base)} 15:56", f"Practice  {day_month(base)} 14:00"]
     race, practice = sessions
     assert race["time"] == "1:29.500" and race["count"] == 2 and race["info"] == "Porsche 963"
     practice_laps = [row for row in rows if row["session"] == practice["session"] and row["kind"] == "lap"]

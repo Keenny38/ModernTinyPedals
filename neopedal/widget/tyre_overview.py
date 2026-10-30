@@ -40,6 +40,8 @@ from ..template.widget.black_box_ui import parse_compound_targets, pressure_targ
 from ..userfile.heatmap import select_compound_symbol
 from ._base import Overlay
 from ._common import tyre_punctured
+from ._data import shown_temperature
+from ._modern.draw import readable_on
 from ._modern.quad import heat_color
 from ._modern.rows import compound_badge
 from ._modern.wheels import TyreCompounds
@@ -56,7 +58,7 @@ PRESSURE_LOW, PRESSURE_OK, PRESSURE_HIGH = -1, 0, 1
 
 
 class WheelCard(NamedTuple):
-    """Values of one tyre card (one update)"""
+    """Values of one tyre card (one update), rounded as shown: card drawn again only once a text changes"""
 
     compound: str = ""  # compound symbol ("" unknown or not shown)
     compound_color: QColor | None = None
@@ -69,6 +71,18 @@ class WheelCard(NamedTuple):
     remaining: float = -1.0  # tread left (percent), -1 unknown
     wear: float = 0.0  # tread worn per lap (percent)
     laps: float = -1.0  # estimated laps left on this tread, -1 unknown
+
+
+def shown_wear(value: float) -> float:
+    """Wear per lap rounded as shown (2 decimals), wear under 0.005 kept above 0 (shown 0.00, not as none)"""
+    return round(value, 2) or (0.001 if value > 0 else 0.0)
+
+
+def shown_laps(value: float) -> float:
+    """Laps left rounded as shown: 1 decimal under 10, whole laps under 100, 100 for 99+ (-1 unknown kept)"""
+    if value >= 100:
+        return 100.0
+    return round(value, 0) if value >= 10 else round(value, 1)
 
 
 def temperature_valid(value: float) -> bool:
@@ -126,11 +140,13 @@ class TyreOverviewMixin:
         self.warn_remaining = float(wcfg["warning_threshold_remaining"])
         self.warn_laps = float(wcfg["warning_threshold_laps"])
         self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
+        self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0  # unit degrees per Celsius
         self.sign = "°" if wcfg["show_degree_sign"] else ""
         pressure_unit = self.cfg.units["tyre_pressure_unit"]
         self.unit_pres = units.set_unit_pressure(pressure_unit)
         self.symbol_pres = units.set_symbol_pressure(pressure_unit)
         self.pressure_decimals = 0 if pressure_unit == "kPa" else 1 if pressure_unit == "psi" else 2
+        self.pressure_steps = self.unit_pres(1.0) * 10 ** self.pressure_decimals  # shown steps per kPa
         self.compounds = TyreCompounds(
             wcfg["enable_heatmap_auto_matching"], wcfg["heatmap_name"], wcfg["enable_heatmap_from_optimal_temperature"])
         # Pressure target range per wheel (kPa, entered in kPa, psi or bar), compound one if set
@@ -145,6 +161,10 @@ class TyreOverviewMixin:
         }
         self.targets = [front, front, rear, rear]
         self.target_names: tuple[str, ...] = ()
+
+    def vehicle_reset(self):
+        """Compounds read again (followed car changed while spectating, session changed, back to garage)"""
+        self.compounds.reset()
 
     def compound_target(self, name: str, rear: bool) -> tuple[float, float]:
         """Pressure range of compound (symbol or full name, "symbol:R" for rear), default range if none"""
@@ -177,27 +197,30 @@ class TyreOverviewMixin:
             locking = minfo.wheels.lockingTreadWear
         wheels = minfo.wheels
         parts = 3 if self.ico else 1
+        scale = self.temp_scale
+        steps = self.pressure_steps
         cards = []
         for index in range(4):
             name = names[index] if index < len(names) else ""
             badge = compound_badge(name) if self.show_compound and name else None
-            temps = tuple(round(value) for value in surface[index * parts:index * parts + parts]) if surface else ()
+            temps = tuple(shown_temperature(value, scale)
+                          for value in surface[index * parts:index * parts + parts]) if surface else ()
             pressure = pressures[index] if index < len(pressures) else 0.0
             card = WheelCard(
                 compound=badge[0] if badge else "",
                 compound_color=badge[1] if badge else None,
                 alert=tyre_alert(detached[index], puncture[index], locking[index], self.flat_threshold),
                 temps=temps,
-                carcass=round(carcass[index]) if carcass else NO_READING,
-                inner=round(inner[index]) if inner else NO_READING,
-                pressure=pressure,
+                carcass=shown_temperature(carcass[index], scale) if carcass else NO_READING,
+                inner=shown_temperature(inner[index], scale) if inner else NO_READING,
+                pressure=round(pressure * steps, 0) / steps,  # state from pressure read (not rounded)
                 pressure_state=pressure_state(pressure, self.targets[index]) if self.use_target else PRESSURE_OK,
             )
             if self.need_wear:
                 remaining = wheels.currentTreadDepth[index]
                 wear = wheels.estimatedValidTreadWear[index]  # valid laps only (no pit, no off track)
                 laps = min(max(remaining, 0) / wear, 999.0) if wear > 0 else -1.0
-                card = card._replace(remaining=remaining, wear=wear, laps=laps)
+                card = card._replace(remaining=round(remaining, 0) + 0.0, wear=shown_wear(wear), laps=shown_laps(laps))
             cards.append(card)
         return tuple(cards)
 
@@ -266,7 +289,6 @@ class Realtime(TyreOverviewMixin, ClassicCells, Overlay):
         self.colors = option_colors(wcfg, "font_color_caption", "background_color_caption", "font_color_value",
                                     "background_color_value", "font_color_warning", "tyre_pressure_low_color",
                                     "tyre_pressure_high_color")
-        self.dark_text = QColor("#000000")
 
         # Config canvas
         self.resize(round(card_w * 2 + gap), round(card_h * 2 + gap))
@@ -304,7 +326,7 @@ class Realtime(TyreOverviewMixin, ClassicCells, Overlay):
             cell = QRectF(rect.left() + width * part, rect.top(), width, rect.height())
             fill = self.heat(index, value)
             self.draw_cell(painter, cell, self.temperature_text(value),
-                           self.dark_text if fill is not None else self.colors["font_color_value"],
+                           readable_on(fill) if fill is not None else self.colors["font_color_value"],
                            fill or self.colors["background_color_value"])
 
     def draw_layers(self, painter: QPainter, rect: QRectF, index: int, card: WheelCard):

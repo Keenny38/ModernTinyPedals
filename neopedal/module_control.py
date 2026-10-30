@@ -360,16 +360,17 @@ class ModuleControl:
         Args:
             name: selected module name, all modules if not set.
             discard: discard data of module not saved yet (data reset), modules only.
-            wait: selected module only, wait until stopped (bounded). Default: only if current thread
-                runs no event loop (quit, tests, other thread), else stopping polled by timer (GUI kept
-                running while module saves), and module started again only once stopped.
+            wait: wait until stopped (bounded). Selected module default: only if current thread runs no
+                event loop (quit, tests, other thread), else stopping polled by timer (GUI kept running
+                while module saves), and module started again only once stopped. All modules default:
+                wait (quit, unload), see disable_all for the polled path.
         """
         if name:
             if wait is None:
                 wait = not event_loop_running()
             self.__close_selected(name, discard, wait)
         else:
-            self.__close_enabled(discard)
+            self.__close_enabled(discard, wait is None or wait)
 
     def stop_all(self, discard: bool = False):
         """Signal all active modules to stop without waiting (reload: GUI & event loop kept running)
@@ -555,10 +556,10 @@ class ModuleControl:
         logger.info("ENABLED: all %s(s)", self.type_id)
 
     def disable_all(self):
-        """Disable all modules"""
+        """Disable all modules, never waits for module stop work (saving) on GUI thread (stopping polled)"""
         for _name in self._imported_modules:
             cfg.user.setting[_name]["enable"] = False
-        self.close()
+        self.close(wait=not event_loop_running())
         cfg.save()
         logger.info("DISABLED: all %s(s)", self.type_id)
 
@@ -620,8 +621,9 @@ class ModuleControl:
         if name.startswith(PLUGIN_PREFIX):
             PLUGIN_ERRORS[name] = f"{type(error).__name__}: {error}"
 
-    def __close_enabled(self, discard: bool = False):
-        """Close all enabled module, stop all first then wait (bounded, shared deadline) until closed"""
+    def __close_enabled(self, discard: bool = False, wait: bool = True):
+        """Close all enabled module, stop all first then wait (bounded, shared deadline) until closed,
+        or if not wait (GUI thread) poll stopping ones by timer as __close_selected does"""
         self._start_pending.clear()  # never started after closed
         self._demand_ready = False
         stopping = []
@@ -629,13 +631,19 @@ class ModuleControl:
         self._batch += 1
         try:
             for _name in tuple(self._active_modules):
-                timeout = max(timeout, self.__stop_timeout(_name))
+                module_timeout = self.__stop_timeout(_name)
+                timeout = max(timeout, module_timeout)
                 target = self.__stop_selected(_name, discard)
                 if target is not None:
-                    stopping.append(target)
+                    if wait or target[1]():
+                        stopping.append(target)
+                    else:  # stop work left (saving), polled
+                        self.__add_stopping(_name, target, module_timeout)
         finally:
             self._batch -= 1
         self.__changed()
+        if not wait:
+            return
         if self._stopping:  # signalled by stop_all earlier (quit during reload)
             stopping.extend(self._stopping.values())
             self._stopping.clear()

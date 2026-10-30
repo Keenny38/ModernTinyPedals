@@ -36,7 +36,7 @@ AbstractButton {
             height: theme.em * 1.3
             radius: height / 2
             anchors.verticalCenter: parent.verticalCenter
-            color: control.checked ? (control.hovered ? Qt.darker(theme.accentFill, 1.07) : theme.accentFill)
+            color: control.checked ? (control.hovered ? theme.accentHover : theme.accentFill)
                  : (control.hovered ? theme.hover : theme.raised)
             border.width: control.checked ? 0 : 1
             border.color: theme.border
@@ -48,13 +48,14 @@ AbstractButton {
                 radius: width / 2
                 anchors.verticalCenter: parent.verticalCenter
                 x: control.checked ? parent.width - width - theme.em * 0.2 : theme.em * 0.2
-                color: control.checked ? "white" : theme.dimText
+                color: control.checked ? theme.accentInk : theme.dimText
                 Behavior on x { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
             }
         }
         Text {
             id: label
             text: control.text
+            textFormat: Text.PlainText
             color: theme.text
             width: Math.max(0, Math.min(implicitWidth, control.width - track.width - theme.em * 0.5))  // cut when squeezed
             elide: control.wrap ? Text.ElideNone : Text.ElideRight

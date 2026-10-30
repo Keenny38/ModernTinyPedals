@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING
 
 from .. import calculation as calc
 from ..api_control import api
-from ..const_common import MAX_SECONDS
+from ..const_common import MAX_SECONDS, TEXT_PLACEHOLDER
 from ..module_info import minfo
-from ._columns import DriverTable, lap_time_key, pit_time_key
+from ._columns import DriverTable, lap_time_key, pit_time_key, pit_time_shown
 from ._common import player_vehicle
 from ._painter import DeltaLapTime
 
@@ -41,6 +41,7 @@ class Realtime(DriverTable):
     """Draw widget"""
 
     wcfg: "StandingsConfig"
+    shown_state = 0  # row states: 0 shown, 1 class separator, 2 hidden
 
     def __init__(self, config, widget_name):
         # Assign base setting
@@ -185,7 +186,7 @@ class Realtime(DriverTable):
                     lap_key = pit_time_key(veh_info.inPit, veh_info.pitTimer.elapsed)
                     is_class_best = False
                 elif in_race or self.wcfg["show_best_laptime"]:
-                    if veh_info.pitTimer.pitting:
+                    if pit_time_shown(veh_info):
                         lap_key = pit_time_key(veh_info.inPit, veh_info.pitTimer.elapsed)
                         is_class_best = False
                     else:
@@ -233,12 +234,14 @@ class Realtime(DriverTable):
     # Additional methods
     def toggle_visibility(self, target, state):
         """Hide bar if unavailable"""
+        separator = state == 1 and self.show_class_separator
+        if separator:  # gap between classes: cleared at every update (values of row drawn before)
+            target.clear()
         target.update()
         if target.state == state:
             return
         target.state = state
-        if state == 1 and self.show_class_separator:  # draw gap
-            target.clear()
+        if separator:  # draw gap
             target.setFixedHeight(self.height_gap)
             target.show()
         else:
@@ -251,7 +254,7 @@ class Realtime(DriverTable):
         if time == 0 and player_best > 0:
             return self.wcfg["time_gap_leader_text"]
         if time < 0 or player_best < 1:  # no time set
-            return "0.0"
+            return TEXT_PLACEHOLDER
         return round(time, self.gap_decimals)
 
     def gap_key_race(self, gap_behind, position):

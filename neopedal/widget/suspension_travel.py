@@ -380,10 +380,11 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_travel(self, target, data):
-        """Suspension travel data"""
-        if target.last != data:
-            target.last = data
-            target.text = f"{data:.2f}"[:4].strip(".")
+        """Suspension travel data, repainted on text change only"""
+        text = travel_text(data)
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
     def update_ratio(self, target, data):
@@ -392,3 +393,12 @@ class Realtime(Overlay):
             target.last = data
             target.text = f"{data:.0%}"
             target.update()
+
+
+def travel_text(value: float) -> str:
+    """Value rounded to fit 4 characters (2 decimals at most), never -0.00"""
+    for decimals in (2, 1):
+        text = f"{value:z.{decimals}f}"
+        if len(text) <= 4:
+            return text
+    return f"{value:z.0f}"

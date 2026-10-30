@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -45,10 +46,12 @@ from urllib.parse import quote
 
 from ..process import game_images as gi
 from ..setting import cfg
+from ..validator import avoid_reserved_filename
 from . import atomic_replace, read_json, write_json
 
 CATALOG_FILE = "catalog.json"
 MAX_PICTURE_BYTES = 8_000_000
+STATUS_TOO_LARGE = 413  # answer above size limit, see game_rest.STATUS_TOO_LARGE (module imported when needed)
 RETRY_GAME = 60.0  # seconds before asking a game that did not answer again
 RETRY_MISSING = 7 * 86400.0  # seconds before asking again a picture game does not have
 QUEUE_WAIT = 30.0  # seconds, fetch thread wakes up to read game lists when game starts
@@ -59,17 +62,35 @@ LOGO_KINDS = (gi.BRAND, gi.BRAND_DARK, gi.TRACK_LOGO)
 logger = logging.getLogger(__name__)
 
 
-def fetch_from_game(resource: str) -> tuple[int, bytes]:
-    """Status & body of game web server answer, (0, b"") if game does not answer"""
+def fetch_from_game(resource: str, max_body: int | None = None) -> tuple[int, bytes]:
+    """Status & body of game web server answer, (0, b"") if game does not answer
+
+    Args:
+        max_body: largest body read (bytes), None for game_rest default; larger answer: (STATUS_TOO_LARGE, b"").
+    """
     from ..game_rest import GameConnection  # imported when first needed
 
     with GameConnection() as connection:
-        return connection.request("GET", resource)
+        if max_body is None:
+            return connection.request("GET", resource)
+        return connection.request("GET", resource, max_body=max_body)
 
 
 def safe_name(key: str) -> str:
-    """File name of picture key (brand, circuit or vehicle file name)"""
-    return _SAFE_NAME.sub("_", key).strip(" .") or "_"
+    """File name of picture key (brand, circuit or vehicle file name), never a Windows device name"""
+    return avoid_reserved_filename(_SAFE_NAME.sub("_", key).strip(" .")) or "_"
+
+
+def _timestamp(value: object) -> float:
+    """Time stamp of catalog value, 0.0 if not a finite non-negative number (an integer too large for a float
+    raises OverflowError: a catalog edited or corrupted must never stop every lookup)"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    try:
+        stamp = float(value)
+    except OverflowError:
+        return 0.0
+    return stamp if math.isfinite(stamp) and stamp >= 0 else 0.0
 
 
 class GameImages:
@@ -84,6 +105,7 @@ class GameImages:
         self._file_listeners: list[Callable[[str, str], None]] = []
         self._loaded_folder = ""
         self._catalog_read = False  # game lists read from game during this run
+        self._catalog_dirty = False  # pictures found missing while more fetches are queued: catalog saved once after
         self._game_retry = 0.0  # time game may be asked again (did not answer)
         self._catalog_retry = 0.0  # time game lists may be asked again (empty outside a session)
         self.vehicles: dict[str, gi.VehicleInfo] = {}  # vehicle name (lower case) -> car
@@ -126,8 +148,8 @@ class GameImages:
                 self.tracks.update((str(name), str(key)) for name, key in tracks.items() if key in gi.TRACK_KEYS)
             missing = data.get("missing", {})
             if isinstance(missing, dict):
-                self.missing.update((str(path), float(stamp)) for path, stamp in missing.items()
-                                    if isinstance(stamp, (int, float)))
+                self.missing.update((str(path), stamp) for path, stamp in
+                                    ((path, _timestamp(value)) for path, value in missing.items()) if stamp)
 
     def save_catalog(self) -> None:
         """Game lists & pictures game does not have, for next runs"""
@@ -138,11 +160,20 @@ class GameImages:
                 "missing": dict(sorted(self.missing.items())),
             }
         path = os.path.join(self.folder, CATALOG_FILE)
+        self._catalog_dirty = False
         try:
             os.makedirs(self.folder, exist_ok=True)
-            write_json(path, data, indent=1, raise_error=True, ensure_ascii=False)
+            write_json(path, data, indent=1, raise_error=True, ensure_ascii=False, fsync=False)  # cache, rebuilt
         except OSError:
             logger.warning("GAME IMAGES: catalog not saved in %s", self.folder)
+
+    def save_catalog_later(self) -> None:
+        """Catalog saved once no fetch is queued (a burst of pictures the game does not have: one write, not
+        one per picture), at once if nothing is queued"""
+        if self._jobs.empty():
+            self.save_catalog()
+        else:
+            self._catalog_dirty = True
 
     def set_vehicles(self, vehicles: list[gi.VehicleInfo]) -> None:
         """Cars of game lists (later names replace earlier ones, picture file kept if new one has none)"""
@@ -304,6 +335,8 @@ class GameImages:
             try:
                 job = self._jobs.get(timeout=QUEUE_WAIT)
                 if job is None:  # stop()
+                    if self._catalog_dirty:
+                        self.save_catalog()
                     return
             except queue.Empty:
                 job = None
@@ -312,6 +345,8 @@ class GameImages:
                     self.read_game_lists()
                 if job is not None:
                     self.fetch_picture(*job)
+                if self._catalog_dirty and self._jobs.empty():  # burst of missing pictures done
+                    self.save_catalog()
             except Exception:  # fetching stops for this job only
                 logger.exception("GAME IMAGES: fetch failed")
             finally:
@@ -339,7 +374,7 @@ class GameImages:
                 continue
             try:
                 data = json.loads(body)
-            except ValueError:
+            except (ValueError, RecursionError):  # RecursionError: nested too deeply
                 continue
             if route == gi.TRACKS_ROUTE:
                 tracks.update(gi.parse_tracks(data))
@@ -371,16 +406,17 @@ class GameImages:
             return False
         resource = gi.image_path(kind, key)
         # Percent-encoded (spaces, accented names): a non-ASCII path cannot be sent as is
-        status, body = fetch_from_game(quote(resource, safe="/="))
+        # Read up to MAX_PICTURE_BYTES (larger answer never read whole: STATUS_TOO_LARGE)
+        status, body = fetch_from_game(quote(resource, safe="/="), max_body=MAX_PICTURE_BYTES)
         if not self.game_answered(status):
             return False
         if status != 200 or not body or len(body) > MAX_PICTURE_BYTES or not body.startswith(PICTURE_SIGNATURES):
-            # Game has no such picture (not found, or not a picture): not asked again for a while;
+            # Game has no such picture (not found, too large, or not a picture): not asked again for a while;
             # server error or empty answer: asked again next time
-            if status == 404 or (status == 200 and body):
+            if status in (404, STATUS_TOO_LARGE) or (status == 200 and body):
                 with self._lock:
                     self.missing[resource] = time.time()
-                self.save_catalog()
+                self.save_catalog_later()
             return False
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)

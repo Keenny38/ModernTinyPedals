@@ -16,9 +16,9 @@ Rectangle {
     Layout.fillWidth: true
     implicitHeight: noticeRow.implicitHeight + theme.em * 0.9
     radius: theme.radiusLg
-    color: Qt.rgba(tone.r, tone.g, tone.b, theme.tintSubtle * 1.2)
+    color: theme.tint(tone, "subtle")
     border.width: 1
-    border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.55)
+    border.color: theme.tint(tone, "outline")
     Accessible.role: Accessible.StaticText
     Accessible.name: text
 
@@ -27,13 +27,14 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: theme.padCard
         anchors.rightMargin: theme.space3
-        spacing: theme.em * 0.5
+        spacing: theme.space3
         Icon { glyph: notice.glyph; fallback: notice.fallback; color: notice.tone }
         Text {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: theme.text
             text: notice.text
+            textFormat: Text.PlainText
         }
         TpButton {
             visible: notice.actionText !== ""

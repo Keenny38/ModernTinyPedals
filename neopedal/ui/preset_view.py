@@ -20,22 +20,23 @@
 Presets page: loaded preset & auto load, presets with tags & content, actions & details
 
 Qt Quick page (qml/Presets.qml), state & actions in quick/preset_backend.py. This page hosts the
-QML view and runs actions needing dialogs: preset packages, delete with undo, and the
-Transfer, Restore Backup, Trash & Compare pages. The QML page is created when first shown.
+QML view and runs actions needing file dialogs: preset packages, delete with undo. Compare, Transfer,
+Restore Backup & Recently Deleted are panels of the QML page. The QML page is created when first shown.
 """
 
 from __future__ import annotations
 
+import html
 import os
 import zipfile
 from contextlib import nullcontext
-from typing import Any
+from functools import partial
 
 import shiboken6
 from PySide6.QtCore import Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
 
 from .. import app_signal
 from ..const_file import ConfigType, FileExt
@@ -44,18 +45,28 @@ from ..setting import cfg
 from ..userfile.preset_package import export_preset_package, import_preset_package
 from ..userfile.preset_trash import TrashEntry, purge_trash
 from ._common import confirm_action, translate_filter
-from .preset_compare import PresetCompare
 from .preset_management import (
-    PresetTransfer,
-    PresetTrash,
-    RestoreBackup,
+    after_saving,
     restore_trashed_preset,
     trash_keep_days,
     trash_preset,
     update_preset_references,
 )
-from .quick.preset_backend import PRESET_FILES, PresetBackend
+from .quick import dialogs
+from .quick.preset_backend import PRESET_FILES, PRESET_FILES_WAIT, TRY_AGAIN, PresetBackend
+from .quick.preset_tools_backend import TRASH
 from .toast import show_toast
+
+
+def purge_old_trash() -> None:
+    """Presets deleted long ago removed from trash (startup), skipped if the trash page reads or restores
+    meanwhile: its own read purges as well"""
+    if not TRASH.acquire(blocking=False):
+        return
+    try:
+        purge_trash(cfg.path.settings, trash_keep_days())
+    finally:
+        TRASH.release()
 
 
 class PresetList(QWidget):
@@ -75,7 +86,7 @@ class PresetList(QWidget):
         self.shortcut_undo.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.shortcut_undo.setEnabled(False)
         # Presets deleted long ago removed from trash, once app is running
-        QTimer.singleShot(3000, self, lambda: purge_trash(cfg.path.settings, trash_keep_days()))
+        QTimer.singleShot(3000, self, purge_old_trash)
 
     def ensure_view(self) -> QQuickWidget | None:
         """QML page, created on first use"""
@@ -105,10 +116,16 @@ class PresetList(QWidget):
 
     def closeEvent(self, event):
         super().closeEvent(event)
-        if self.view is not None:  # QML gone before the backend it binds to
+        self.release_page()
+
+    def release_page(self):
+        """Page closed or released (see LazyPage.release): QML gone before the backend it binds to, then the
+        backend's jobs, timers & deferred work stopped"""
+        if self.view is not None:
             view, self.view = self.view, None
             view.setSource(QUrl())
             view.deleteLater()
+        self.backend.release()
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self, *_):
@@ -120,33 +137,30 @@ class PresetList(QWidget):
         """Confirm operation: Cancel, then the action button (see _common.confirm_action)"""
         return confirm_action(self, tr(title), trm(message), action_text or tr(title))
 
+    def ask(self, title: str, message: str, on_result):
+        """Confirmation over the page (QML dialog of its TpDialogHost), answer by callback: title translated,
+        message English (translated here)"""
+        dialogs.confirm(self, title, trm(message), title, on_result)
+
     def warn(self, text: str):
-        QMessageBox.warning(self, tr("Error"), text)
+        dialogs.alert(self, tr("Error"), text, "warning")
 
     def toast(self, text: str):
-        show_toast(self, text)
+        """Short notice in the toast of the page"""
+        self.backend.show_toast(text)
 
-    # Pages
-    def open_page(self, name: str, preset_filename: str = ""):
-        """Transfer, Restore Backup, Trash, or Compare (preset with loaded preset) page"""
-        if name == "compare":
-            compare = PresetCompare(self, preset_a=cfg.filename.setting, preset_b=preset_filename)
-            compare.show()
-            shown: Any = compare.shown_dialog()
-            if shown is not compare:  # comparison already open as page: shown instead, on the presets asked
-                shown.combo_a.setCurrentText(cfg.filename.setting)
-                if preset_filename:
-                    shown.combo_b.setCurrentText(preset_filename)
-        elif name == "transfer":
-            PresetTransfer(self).open()
-        elif name == "restore":
-            RestoreBackup(self).open()
-        elif name == "trash":
-            PresetTrash(self).open()
-        elif name == "folder":
+    def page_toast(self, text: str, error: bool = False, undo: bool = False):
+        """Toast of the page (TpDialogHost), Undo of the last delete"""
+        show_toast(self, text, level="error" if error else "",
+                   action_text=tr("Undo") if undo else "", action=self.backend.undoDelete if undo else None)
+
+    # Folder (other tools are panels of the page)
+    def open_page(self, name: str):
+        """Presets folder in file manager"""
+        if name == "folder":
             folder = os.path.abspath(cfg.path.settings)
-            if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
-                QMessageBox.warning(self, tr("Error"), trm(f"Cannot open folder:<br><b>{folder}</b>"))
+            if not os.path.isdir(folder) or not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):  # never a file
+                dialogs.alert(self, tr("Error"), trm(f"Cannot open folder:<br><b>{html.escape(folder)}</b>"), "warning")
 
     # Load & auto load
     def load_preset(self, name: str):
@@ -176,9 +190,9 @@ class PresetList(QWidget):
         try:
             count = export_preset_package(zip_filename, cfg.path.settings, preset_filename, notes_paths=notes_paths)
         except OSError as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to export package:<br>{error}"))
+            dialogs.alert(self, tr("Error"), trm(f"Unable to export package:<br>{html.escape(str(error))}"), "warning")
             return
-        show_toast(self, trm(f"Exported <b>{count}</b> file(s) to:<br>{zip_filename}"))
+        self.toast(trm(f"Exported <b>{count}</b> file(s) to:<br>{html.escape(zip_filename)}"))
 
     def import_package(self):
         """Import preset package"""
@@ -202,6 +216,12 @@ class PresetList(QWidget):
             tr("Also import style presets (brakes, brands, classes, compounds, heatmap, tracks)?<br><br>"
             "This will <b>overwrite</b> your existing style presets."),
             tr("Import Style Presets"), cancel_text=tr("Keep My Style Presets"), danger=True)
+        if overwrite_styles:  # a running save finished first, waited off the UI thread (audit PERF-018)
+            after_saving(self.backend, partial(self._import_package_now, zip_filename, True))
+        else:
+            self._import_package_now(zip_filename, False)
+
+    def _import_package_now(self, zip_filename: str, overwrite_styles: bool):
         # Styles: saving paused across import (no save written over imported styles), then reloaded
         # in memory (also styles imported before an error), so later style saves keep imported ones
         try:
@@ -211,20 +231,23 @@ class PresetList(QWidget):
                     cfg.path.settings,
                     overwrite_styles=overwrite_styles,
                     notes_paths={"tracknotes": cfg.path.track_notes, "pacenotes": cfg.path.pace_notes},
+                    receiver=cfg.user.setting,  # local file & game connection options: yours kept
                 )
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             self.refresh()  # presets imported before error
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to import package:<br>{error}"))
+            dialogs.alert(self, tr("Error"), trm(f"Unable to import package:<br>{html.escape(str(error))}"), "warning")
             return
         self.refresh()
-        lines = [f"Presets: <b>{', '.join(name[:-5] for name in result.presets) or tr('none')}</b>"]
+        lines = [f"Presets: <b>{html.escape(', '.join(name[:-5] for name in result.presets)) or tr('none')}</b>"]
         if result.styles:
-            lines.append(f"Style presets: {', '.join(result.styles)} (reload preset to apply)")
+            lines.append(f"Style presets: {html.escape(', '.join(result.styles))} (reload preset to apply)")
         if result.notes:
             lines.append(f"Notes: {result.notes} file(s)")
         if result.skipped:
             lines.append(f"Skipped: {len(result.skipped)} file(s) (existing or not allowed)")
-        QMessageBox.information(self, tr("Import Package"), trm("<br>".join(lines)))
+        if result.kept:
+            lines.append(f"Kept yours: {len(result.kept)} local file & game connection option(s)")
+        dialogs.alert(self, tr("Import Package"), trm("<br>".join(lines)), "info")
 
     # Delete & undo
     def delete_preset(self, preset_filename: str) -> bool:
@@ -233,18 +256,23 @@ class PresetList(QWidget):
         if not os.path.exists(f"{cfg.path.settings}{preset_filename}"):  # already gone
             update_preset_references(preset_filename[:-len(FileExt.JSON)], "")
             return True
+        # Not being read by the page meanwhile; a slow read (disk, antivirus) never blocks the GUI for long
+        if not PRESET_FILES.acquire(timeout=PRESET_FILES_WAIT):
+            show_toast(self, tr(TRY_AGAIN), level="error")
+            return False
         try:
-            with PRESET_FILES:  # not being read by the page meanwhile
+            with TRASH:  # never during a purge or restore of the trash page
                 entry = trash_preset(preset_filename)
         except OSError as error:  # locked file (cloud sync, antivirus), permission
-            QMessageBox.warning(self, tr("Delete Preset"), trm(f"Unable to delete preset:<br>{error}"))
+            dialogs.alert(
+                self, tr("Delete Preset"), trm(f"Unable to delete preset:<br>{html.escape(str(error))}"), "warning")
             return False
+        finally:
+            PRESET_FILES.release()
         self.last_trashed = entry
         self.shortcut_undo.setEnabled(True)
         self.backend.deleted(True)
-        show_toast(
-            self, trm(f"Preset <b>{entry.name}</b> moved to trash"),
-            action_text=tr("Undo (Ctrl+Z)"), action=lambda: self.undo_delete(entry))
+        self.backend.show_toast(trm(f"Preset <b>{html.escape(entry.name)}</b> moved to trash"), undo=True)
         return True
 
     def undo_delete(self, entry: TrashEntry | None = None) -> bool:
@@ -261,9 +289,9 @@ class PresetList(QWidget):
         try:
             filename = restore_trashed_preset(entry)
         except OSError as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to restore preset:<br>{error}"))
+            dialogs.alert(self, tr("Error"), trm(f"Unable to restore preset:<br>{html.escape(str(error))}"), "warning")
             return False
         self.refresh()
         app_signal.refresh.emit(True)
-        show_toast(self, trm(f"Preset restored: <b>{filename[:-len(FileExt.JSON)]}</b>"))
+        self.toast(trm(f"Preset restored: <b>{html.escape(filename[:-len(FileExt.JSON)])}</b>"))
         return True

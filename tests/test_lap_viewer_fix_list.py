@@ -17,10 +17,10 @@ BASE = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
 
 
 def save(number: int, lap_time: float, timestamp: float, start: float, folder: str = "", combo: str = TRACK,
-         track: str = "Atlanta", vehicle: str = "Porsche 963") -> str:
+         track: str = "Atlanta", vehicle: str = "Porsche 963", session: str = "Practice") -> str:
     folder = folder or cfg.path.telemetry.rstrip("/")
     rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
-    info = {"kind": "lap", "session": "Practice", "vehicle": vehicle, "session_start": start, "track": track,
+    info = {"kind": "lap", "session": session, "vehicle": vehicle, "session_start": start, "track": track,
             "combo": combo, "track_length": 490.0}
     module_recorder.save_lap(f"{folder}/", combo, number, lap_time, rows, max_saved_laps=99, info=info,
                              timestamp=timestamp)

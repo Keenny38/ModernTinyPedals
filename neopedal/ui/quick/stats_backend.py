@@ -110,6 +110,8 @@ class DriverStatsBackend(StatsSharing, StatsEdits, StatsSelection, StatsOverview
         self._dirty = False  # files changed while page hidden
         self._hidden_since = 0.0  # monotonic time page was hidden (0: shown)
         self._theory_cache: dict[str, tuple[float, float]] = {}  # sector best file: modified time, value
+        self._sector_times: dict[str, float] = {}  # sector best files listed by the last reload (name: modified)
+        self._lap_folders: tuple[int, dict[str, int]] = (-1, {})  # recorded laps folders listed (see lap_folders)
         self._edits_undo: list[StatsEdit] = []
         self._edits_redo: list[StatsEdit] = []
         self._file_times = (0.0, 0.0)
@@ -139,6 +141,8 @@ class DriverStatsBackend(StatsSharing, StatsEdits, StatsSelection, StatsOverview
         self._activity: dict = {}
         self._activity_key: tuple = ()
         self._recent: list[dict] = []
+        self._weekly: dict = {}  # progress of the last days (made again when its key changed)
+        self._weekly_key: tuple = ()
         # Game results files: session of each record (classification, incidents, game version), driver card,
         # lap times missing from stats (read in background with session history)
         self.results: list[ri.ResultSummary] = []

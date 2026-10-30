@@ -4,15 +4,20 @@ import QtQuick.Layouts
 import "../components"
 
 // Find Option page: search all options (overlays, modules, preset, application) in any language,
-// group chips with counts, "Changed only" lists options set apart from default. Results show the
+// group chips with counts, "Changed Only" lists options set apart from default. Results show the
 // current value; on / off options switch in place. Keys: type to search, Down / Up move,
-// Enter opens the option, Space switches it, Menu key for more. Ctrl+Z / Ctrl+Y undo & redo switches
+// Enter opens the option, Space switches it, Menu key for more, Ctrl+F back to the search. Ctrl+Z / Ctrl+Y undo & redo switches
 // and resets (saved & applied again); the search field keeps its own undo while focused.
 TpPage {
     id: page
 
     Shortcut { sequence: "Ctrl+Z"; enabled: pageState.active && backend.canUndo; onActivated: backend.undo() }
     Shortcut { sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]; enabled: pageState.active && backend.canRedo; onActivated: backend.redo() }
+    Shortcut {  // search of this page, as on every page with a search
+        sequences: [StandardKey.Find]
+        enabled: pageState.active
+        onActivated: { search.forceActiveFocus(); search.selectAll() }
+    }
 
     function openCurrent() {
         results.forceLayout()  // search just flushed by Enter: rows not laid out yet
@@ -30,9 +35,9 @@ TpPage {
         anchors.margins: theme.padPage
         spacing: theme.space4
 
-        // Title (page title look of every page): what the list shows & how many
+        // Title (page title look of every page, page name as its window title & menu entry): how many options shown
         TpPageHeader {
-            title: backend.searching ? i18n.tr("Search results") : i18n.tr("All options")
+            title: i18n.tr("Find Option")
             count: "" + (backend.searching ? backend.foundCount : backend.optionCount)
         }
 
@@ -40,7 +45,7 @@ TpPage {
             id: search
             Layout.fillWidth: true
             focus: true
-            placeholderText: i18n.tr("Type option name, in any language (ex. font color speed)")
+            placeholderText: i18n.tr("Type option name, in any language (ex. font color speed)") + "   Ctrl+F"
             onSearchChanged: function(text) { backend.setSearch(text) }
             onExitField: results.forceActiveFocus()
             Keys.onReturnPressed: page.openCurrent()
@@ -52,10 +57,10 @@ TpPage {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.6
+            spacing: theme.space4
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.4
+                spacing: theme.space3
                 Repeater {
                     model: backend.groups
                     TpChip {
@@ -71,11 +76,11 @@ TpPage {
                 Layout.alignment: Qt.AlignTop
                 checkable: false
                 checked: backend.changedOnly
-                text: i18n.tr("Changed only")
+                text: i18n.tr("Changed Only")
                 tip: i18n.tr("Only options set apart from their default value")
                 onClicked: backend.setChangedOnly(!backend.changedOnly)
                 Accessible.role: Accessible.CheckBox
-                Accessible.name: i18n.tr("Changed only")
+                Accessible.name: i18n.tr("Changed Only")
                 Accessible.checked: backend.changedOnly
             }
         }
@@ -117,15 +122,18 @@ TpPage {
                 Keys.onSpacePressed: if (currentItem && currentItem.kind === "bool") backend.toggle(currentItem.key)
                 Keys.onMenuPressed: if (currentItem) page.openMenu(currentItem, currentItem.width / 2, currentItem.height / 2, currentItem)
                 Keys.onPressed: function(event) {
-                    // Type to search
-                    if (search.routeTyped(event))
+                    if (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier) && currentItem) {
+                        page.openMenu(currentItem, currentItem.width / 2, currentItem.height / 2, currentItem)
                         event.accepted = true
+                    } else if (search.routeTyped(event)) {  // type to search
+                        event.accepted = true
+                    }
                 }
             }
 
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
-                visible: results.count === 0
+                empty: results.count === 0
                 glyph: backend.searching ? "" : ""  // search, settings
                 title: !backend.searching ? i18n.tr("Find any option")
                      : backend.changedOnly && backend.searchText === "" ? i18n.tr("Every option has its default value")
@@ -146,17 +154,16 @@ TpPage {
             Text {
                 visible: backend.foundCount > backend.shownCount
                 text: i18n.trm(backend.shownCount + " shown")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.features: { "tnum": 1 }
             }
             Item { Layout.fillWidth: true }
-            Text {
+            TpText {
                 Layout.fillWidth: true
+                role: "caption"
                 horizontalAlignment: Text.AlignRight
                 text: i18n.tr("Enter opens the option, Space switches it on / off")
-                color: theme.dimText
-                font.pointSize: theme.fontSmall
-                elide: Text.ElideRight
             }
         }
     }
@@ -179,4 +186,7 @@ TpPage {
                 search.text = backend.searchText
         }
     }
+
+    // Dialogs & toasts asked by the backend (ui/quick/dialogs.py, ui/toast.show_toast)
+    TpDialogHost {}
 }

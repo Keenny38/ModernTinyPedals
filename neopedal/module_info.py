@@ -572,8 +572,8 @@ class PitTimer:
     Attributes:
         elapsed: Total time spent in pit.
         stopped: Total time spent while stopped in pit.
-        pitting: Is pitting in or out.
-        laps: Total laps done since last pit stop.
+        pitting: Is pitting in or out (in pit lane, or out lap of a pit visit seen by this timer).
+        laps: Total laps done since last pit stop (since first seen if no pit stop seen).
     """
 
     __slots__ = (
@@ -585,6 +585,7 @@ class PitTimer:
         "_pitstop_time",
         "_last_state",
         "_last_pit_lap",
+        "_pit_seen",
     )
 
     def __init__(self):
@@ -595,16 +596,19 @@ class PitTimer:
         self._pitin_time: float = 0.0
         self._pitstop_time: float = 0.0
         self._last_state: int = 0
-        self._last_pit_lap: int = 99999
+        self._last_pit_lap: int = 99999  # lap of last pit visit, else lap first seen (stint laps counted from it)
+        self._pit_seen: bool = False  # a pit visit set _last_pit_lap: its lap is a pitting (out) lap
 
     def update(self, in_pit: int, elapsed_time: float, laps_done: int, speed: float):
         """Calculate pit time
 
         Pit state: 0 = not in pit, 1 = in pit, 2 = in garage.
         """
-        # Reset if session changed
+        # Reset if session changed (or first seen): laps counted from here, no pit visit known
+        # (a car on its first lap, from the grid, is not on an out lap)
         if self._last_pit_lap > laps_done:
             self._last_pit_lap = laps_done
+            self._pit_seen = False
         # Pit status check
         if self._last_state != in_pit:
             self._last_state = in_pit
@@ -619,6 +623,7 @@ class PitTimer:
                 self.elapsed = 0.0
                 self.stopped = 0.0
                 self._last_pit_lap = laps_done
+                self._pit_seen = True
             # Calculating time while in pit
             else:
                 # Total elapsed time in pit
@@ -633,8 +638,9 @@ class PitTimer:
             # Pit state can desync, wait minimum 2 seconds before update
             if self.elapsed > 2 and self.stopped > 1:  # stop for more than 1 seconds
                 self._last_pit_lap = laps_done
-        # Check whether is pitting lap
-        self.pitting = (in_pit > 0 or laps_done == self._last_pit_lap)
+                self._pit_seen = True
+        # Check whether is pitting lap: out lap of a pit visit seen, never the first lap seen (grid start)
+        self.pitting = in_pit > 0 or (self._pit_seen and laps_done == self._last_pit_lap)
         self.laps = laps_done - self._last_pit_lap
 
 
@@ -669,6 +675,7 @@ class VehicleDataSet:
         "isYellow",
         "isValidLap",
         "isFinished",
+        "gapsFrozen",
         "inPit",
         "isClassFastestLastLap",
         "numPitStops",
@@ -678,8 +685,13 @@ class VehicleDataSet:
         "relativeStraightDistance",
         "worldPositionX",
         "worldPositionY",
+        "worldVelocityX",
+        "worldVelocityY",
+        "worldOrientationRadians",
+        "worldElevation",
         "relativeRotatedPositionX",
         "relativeRotatedPositionY",
+        "relativeElevation",
         "vehicleIntegrity",
         "incidents",
         "trackLimitsPoints",
@@ -727,6 +739,7 @@ class VehicleDataSet:
         self.isYellow: bool = False
         self.isValidLap: bool = False
         self.isFinished: bool = False
+        self.gapsFrozen: bool = False  # race gaps of finished car kept as they were at the line (see update_race_gaps)
         self.inPit: int = 0
         self.isClassFastestLastLap: bool = False
         self.numPitStops: int = 0
@@ -736,8 +749,13 @@ class VehicleDataSet:
         self.relativeStraightDistance: float = 0.0
         self.worldPositionX: float = 0.0
         self.worldPositionY: float = 0.0
+        self.worldVelocityX: float = 0.0  # m/s between last two telemetry samples (position extrapolated)
+        self.worldVelocityY: float = 0.0
+        self.worldOrientationRadians: float = 0.0  # yaw of last telemetry sample
+        self.worldElevation: float = 0.0  # vertical position (meters) of last telemetry sample
         self.relativeRotatedPositionX: float = 0.0
         self.relativeRotatedPositionY: float = 0.0
+        self.relativeElevation: float = 0.0  # meters above player (negative: below)
         self.vehicleIntegrity: float = 0.0
         self.incidents: int = 0
         self.trackLimitsPoints: float = 0.0  # LMU: track limits points of session
@@ -833,6 +851,7 @@ class ForceInfo:
         self.maxAvgLatGForce: float = 0.0
         self.maxLgtGForce: float = 0.0
         self.maxLatGForce: float = 0.0
+        # Downforce NaN: not provided by game (LMU: always 0 while driving, see module_force)
         self.downForceFront: float = 0.0
         self.downForceRear: float = 0.0
         self.downForceRatio: float = 0.0
@@ -1195,6 +1214,7 @@ class VehiclesInfo:
         "nearestYellowAhead",
         "nearestYellowBehind",
         "nearestBlueClass",
+        "nearestBlueGap",
         "leaderBestLapTime",
         "finishTimeOffset",
         "finishAsLap",
@@ -1220,7 +1240,8 @@ class VehiclesInfo:
         self.nearestTraffic: float = MAX_SECONDS
         self.nearestYellowAhead: float = MAX_METERS
         self.nearestYellowBehind: float = -MAX_METERS
-        self.nearestBlueClass: str = ""
+        self.nearestBlueClass: str = ""  # class of nearest car behind lapping player (any faster car outside race)
+        self.nearestBlueGap: float = MAX_SECONDS  # time gap (seconds) of that same car
         self.leaderBestLapTime: float = MAX_SECONDS
         self.finishTimeOffset: float = 0.0
         self.finishAsLap: bool = True

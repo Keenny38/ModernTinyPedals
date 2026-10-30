@@ -35,7 +35,7 @@ from ... import units
 from ...api_control import api
 from ...i18n import tr_overlay
 from ...module_info import minfo
-from ..weather import TrendTimer, laps_to_rubber, rubber_to_laps, wind_reading
+from ..weather import TrendTimer, laps_to_rubber, rubber_to_laps, wind_arrow_angle, wind_reading
 from .base import ModernOverlay
 from .draw import arrow
 from .stats import Stat, StatsMixin, Value
@@ -161,7 +161,9 @@ class Realtime(StatsMixin, ModernOverlay):
         """Wind speed text in speed unit, arrow angle of where wind blows relative to car
         (degrees clockwise from car front), None while calm"""
         speed, angle = wind_reading()
-        text = f"{self.unit_speed(speed):.0f} {self.symbol_speed}"
+        speed = self.unit_speed(speed)
+        angle = wind_arrow_angle(speed, angle)
+        text = f"{speed:.0f} {self.symbol_speed}"
         if angle is None:
             return text, None
         return text, round(angle / 5) * 5.0  # 5 degree steps

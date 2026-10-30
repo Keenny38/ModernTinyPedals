@@ -57,7 +57,8 @@ ColumnLayout {
                 verticalAlignment: Text.AlignVCenter
                 wrapMode: Text.Wrap
                 color: theme.dimText
-                text: shot.failed ? i18n.tr("Image not available, click to open it online") : i18n.tr("Loading image...")
+                text: shot.failed ? i18n.tr("Image not available, click to open it online") : i18n.tr("Loading image…")
+                textFormat: Text.PlainText
             }
         }
         Image {
@@ -92,6 +93,7 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: shot.caption !== ""
         text: shot.caption
+        textFormat: Text.PlainText
         color: theme.dimText
         font.pointSize: theme.fontSmall
         elide: Text.ElideRight

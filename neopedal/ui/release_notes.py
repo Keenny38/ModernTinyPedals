@@ -41,6 +41,7 @@ from PySide6.QtCore import QDate, QLocale, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QVBoxLayout
 
+from ..const_app import APP_NAME
 from ..const_file import ConfigType
 from ..i18n import current_language, tr
 from ..setting import cfg
@@ -54,7 +55,7 @@ from ..update import (
 )
 from ..version import __version__ as app_version
 from ..version_check import parse_version_string
-from ._common import BaseDialog, UIScaler, find_dialog_host
+from ._common import BaseDialog, UIScaler, find_dialog_host, page_host
 from .notification import download_progress_text
 
 if TYPE_CHECKING:
@@ -229,7 +230,7 @@ class ReleaseNotesDialog(BaseDialog):
         self.download_url = download_url  # else: download opened in browser (installer, or release page)
         self.portable = portable  # portable ZIP copy: updated by hand from release page
         self.installer = installer if self.can_install and not portable else None
-        self.set_utility_title(tr("Update Available") if prompt else tr("Release Notes"))  # page title
+        self.set_utility_title(tr("Update Available") if prompt else tr("What's New"))  # page title
         releases = [Release(version, date, notes)]
         releases.extend(Release(parse_version_string(entry.version), entry.date, entry.body) for entry in earlier)
         self.backend = ReleaseNotesBackend(
@@ -254,6 +255,10 @@ class ReleaseNotesDialog(BaseDialog):
             self.installer.progress.connect(self.download_progress)
             if self.installer.busy:  # page opened while downloading
                 self.download_state(True)
+
+    def shows_version(self, version: tuple[int, int, int]) -> bool:
+        """Notes opened for this version (page already open shown again instead of a new one)"""
+        return self.backend.first_version() == tuple(version)
 
     def showEvent(self, event):
         """Shown as page: page has its own Close button (Later kept when asking to install)"""
@@ -302,7 +307,7 @@ class ReleaseNotesDialog(BaseDialog):
         """Percent & size downloaded (busy bar while size is unknown)"""
         text = download_progress_text(received, total) if received else ""
         self.backend.set_progress(min(received / total, 1.0) if total > 0 else -1.0,
-                                  f"{tr('Downloading Update...')} {text}".strip())
+                                  f"{tr('Downloading Update…')} {text}".strip())
 
     def cancel_download(self):
         """Stop download, partial file removed"""
@@ -311,11 +316,25 @@ class ReleaseNotesDialog(BaseDialog):
             self.installer.cancel()
 
 
+def open_notes_page(parent, title: str, version: tuple[int, int, int]) -> ReleaseNotesDialog | None:
+    """What's New page of this title & version already open in app: shown again & returned (no second page
+    built, changelog read & cards made, to be thrown away), None if none"""
+    host = page_host(parent, ReleaseNotesDialog)
+    page = host.find_dialog_page(ReleaseNotesDialog.__name__, f"{title} - {APP_NAME}") if host is not None else None
+    if page is None or not isinstance(page.dialog, ReleaseNotesDialog) or not page.dialog.shows_version(version):
+        return None
+    host.show_page_widget(page)
+    return page.dialog
+
+
 def running_version_dialog(parent) -> ReleaseNotesDialog:
-    """What's new in running version (local changelog in app language, works offline)"""
+    """What's new in running version (local changelog in app language, works offline): the open page if any"""
     from .home_view import base_version, local_changelog
 
     version = base_version()
+    shown = open_notes_page(parent, tr("What's New"), parse_version_string(version))
+    if shown is not None:
+        return shown
     entries = local_changelog(current_language())
     entry = next((entry for entry in entries if entry.version == version), entries[0] if entries else None)
     if entry is None:

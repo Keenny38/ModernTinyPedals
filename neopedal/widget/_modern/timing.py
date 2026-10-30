@@ -30,11 +30,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
 from ...api_control import api
-from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...module_info import minfo
-from .base import ModernOverlay
+from .._common import SessionBestLap
+from .base import ModernOverlay, laptime_text, reference_accent
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -62,14 +61,14 @@ class Realtime(StatsMixin, ModernOverlay):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
         theme = self.theme
-        items = (
-            ("session_best", "Session", theme.best),
-            ("best", "Best", theme.positive),
-            ("last", "Last", theme.text_dim),
+        items = (  # reference laps: accents shared with deltabest extended & speed delta
+            ("session_best", "Session", reference_accent(theme, "session_best")),
+            ("best", "Best", reference_accent(theme, "best")),
+            ("last", "Last", reference_accent(theme, "last")),
             ("current", "Current", theme.text),
             ("estimated", "Estimate", theme.accent),
-            ("session_personal_best", "Session PB", theme.warning),
-            ("stint_best", "Stint", theme.orange),
+            ("session_personal_best", "Session PB", reference_accent(theme, "session_personal_best")),
+            ("stint_best", "Stint", reference_accent(theme, "stint_best")),
             ("average_pace", "Pace", theme.text_muted),
         )
         stats = [Stat(key, label, SAMPLE, "value", accent) for key, label, accent in items if wcfg[f"show_{key}"]]
@@ -78,11 +77,10 @@ class Realtime(StatsMixin, ModernOverlay):
         self.show_invalid = wcfg["show_invalid_lap_indicator"]
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
-        self.player_index = 0
-        self.laptime_session_best = MAX_SECONDS
+        self.session_best = SessionBestLap()
 
     def post_update(self):
-        self.laptime_session_best = MAX_SECONDS
+        self.session_best.reset()
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -96,20 +94,21 @@ class Realtime(StatsMixin, ModernOverlay):
         values = []
         for key in self.keys:
             if key == "session_best":
-                values.append(Value(laptime(self.session_best())))
+                best = self.session_best.update(self.wcfg["show_session_best_from_same_class_only"])
+                values.append(Value(laptime(best)))
             elif key == "best":
                 values.append(Value(laptime(minfo.delta.lapTimeBest)))
-            elif key == "last":
-                valid = minfo.delta.isValidLap
-                values.append(Value(laptime(minfo.delta.lapTimeLast), None if valid else theme.negative))
+            elif key == "last":  # invalid lap in red, as current lap (invalid lap indicator option)
+                invalid = self.show_invalid and not minfo.delta.isValidLap
+                values.append(Value(laptime(minfo.delta.lapTimeLast), theme.negative if invalid else None))
             elif key == "current":
+                text = laptime(minfo.delta.lapTimeCurrent, True)
                 if self.show_invalid and api.read.lap.invalidated():
-                    values.append(Value(laptime(minfo.delta.lapTimeCurrent), theme.negative,
-                                        theme.tint(theme.negative, 55)))
+                    values.append(Value(text, theme.negative, theme.tint(theme.negative, 55)))
                 else:
-                    values.append(Value(laptime(minfo.delta.lapTimeCurrent)))
+                    values.append(Value(text))
             elif key == "estimated":
-                values.append(Value(laptime(minfo.delta.lapTimeEstimated)))
+                values.append(Value(laptime(minfo.delta.lapTimeEstimated, True)))
             elif key == "session_personal_best":
                 values.append(Value(laptime(api.read.timing.best_laptime())))
             elif key == "stint_best":
@@ -118,21 +117,7 @@ class Realtime(StatsMixin, ModernOverlay):
                 values.append(Value(laptime(minfo.delta.lapTimePace)))
         self.refresh(tuple(values))
 
-    def session_best(self) -> float:
-        """Session best lap time, one vehicle checked per update"""
-        if (not self.wcfg["show_session_best_from_same_class_only"]
-                or api.read.vehicle.same_class(self.player_index)):
-            best = api.read.timing.best_laptime(self.player_index)
-            if 0 < best < self.laptime_session_best:
-                self.laptime_session_best = best
-        self.player_index += 1  # wrap after last car, never read one past it
-        if self.player_index >= api.read.vehicle.total_vehicles():
-            self.player_index = 0
-        return self.laptime_session_best
 
-
-def laptime(seconds: float) -> str:
-    """Lap time text"""
-    if 0 < seconds < MAX_SECONDS:
-        return calc.sec2laptime(seconds)
-    return TEXT_NOLAPTIME
+def laptime(seconds: float, running: bool = False) -> str:
+    """Lap time text (same format as every overlay), running: lap being driven"""
+    return laptime_text(seconds, running=running)

@@ -23,16 +23,20 @@ Each preset row tells its primary tags (car classes, tracks), lock, preset hotke
 how many overlays & modules it turns on. Preset files are read only when they changed (size & time
 cache), in background (rows show their last change only until read), and only while the page is shown:
 a refresh while hidden is done when the page shows again.
-Actions with dialogs (files, other pages) are run by the page hosting the backend.
+Actions with dialogs (files) are run by the page hosting the backend. Compare, transfer, backups & recently
+deleted presets are panels of the page, their state in parts (quick/preset_tools_backend.py: backend.compare...).
+Short notices go to the toast of the page (toastShown), with Undo after a delete.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from functools import partial
 from typing import Any, NamedTuple, Protocol
 
 from PySide6.QtCore import Property, QDateTime, QLocale, QObject, Signal, Slot
@@ -41,18 +45,27 @@ from ... import app_signal
 from ...const_app import VERSION
 from ...const_file import ConfigType, FileExt
 from ...formatter import strip_filename_extension
-from ...i18n import current_language, tr, trm
+from ...i18n import tr, trm
 from ...i18n.options import module_label
 from ...module_control import mctrl, wctrl
 from ...setting import cfg
+from ...template.setting_classes import CLASS_PRESET_KEYS, SESSION_PRESET_KEYS
 from ...template.setting_shortcuts import SHORTCUTS_PRESET
 from ...userfile.json_setting import create_backup_file, set_backup_timestamp
 from ...userfile.preset_trash import count_trash
 from ...validator import is_allowed_filename
 from ..module_view import sort_key
-from ..preset_management import apply_preset_name, check_preset_name
+from ..preset_management import after_saving, apply_preset_name, check_preset_name
+from .formatting import date_locale, format_date
 from .models import DictListModel
 from .page_backend import PageBackend
+from .preset_tools_backend import (
+    PresetBackupsBackend,
+    PresetCompareBackend,
+    PresetTransferBackend,
+    PresetTrashBackend,
+    plain,
+)
 
 SORT_RECENT = 0
 SORT_NAME = 1
@@ -64,21 +77,28 @@ ROLES = (
 MODE_NEW = ""
 MODE_DUPLICATE = "duplicate"
 MODE_RENAME = "rename"
+MODE_RESTORE = "restore"  # backup restored as a new preset
 # Held while the read job has a preset file open: moving or renaming it waits (Windows refuses to move an open file)
 PRESET_FILES = threading.Lock()
+# UI thread waits for a file being read at most this long (slow disk, antivirus), then asks to try again
+PRESET_FILES_WAIT = 2.0
+TRY_AGAIN = "Preset files are being read, please try again."
 
 
 class PresetHost(Protocol):
-    """Page hosting the backend: messages, files & other pages"""
+    """Page hosting the backend: messages, files & other pages
+
+    Optional: ask(title, message, on_result) confirmation over the page (answer by callback, else
+    confirm_operation answers at once), page_toast(text, error, undo) toast of the page.
+    """
 
     def confirm_operation(self, title: str = "Confirm", message: str = "") -> bool: ...
     def warn(self, text: str) -> None: ...
-    def toast(self, text: str) -> None: ...
     def delete_preset(self, preset_filename: str) -> bool: ...
     def undo_delete(self, entry: Any = None) -> bool: ...
     def export_package(self, preset_filename: str) -> None: ...
     def import_package(self) -> None: ...
-    def open_page(self, name: str, preset_filename: str = "") -> None: ...
+    def open_page(self, name: str) -> None: ...  # "folder": presets folder in file manager
 
 
 class Summary(NamedTuple):
@@ -163,13 +183,12 @@ def changed_text(modified: float, now: float | None = None) -> str:
         return tr("Yesterday")
     if days < 7:
         return trm(f"{days} days ago")
-    return QLocale(current_language()).toString(
-        QDateTime.fromSecsSinceEpoch(int(modified)).date(), QLocale.FormatType.ShortFormat)
+    return format_date(modified)  # date rule of every page (date_locale)
 
 
 def full_date(modified: float) -> str:
     """Date & time of last change: "Sunday, October 4, 2026 · 21:07" (app language)"""
-    locale = QLocale(current_language())
+    locale = date_locale()
     moment = QDateTime.fromSecsSinceEpoch(int(modified))
     return (f"{locale.toString(moment.date(), QLocale.FormatType.LongFormat)}  ·  "
             f"{locale.toString(moment.time(), QLocale.FormatType.ShortFormat)}")
@@ -181,29 +200,44 @@ def size_text(size: int) -> str:
     return trm(f"{size / 1024:.0f} KB")
 
 
+def trash_stamp(folder: str) -> int:
+    """Change time (ns) of the trash of the presets folder: an entry (folder) added, restored or purged changes it,
+    0 without trash"""
+    from ...userfile.preset_trash import trash_path
+
+    try:
+        return os.stat(trash_path(folder)).st_mtime_ns
+    except OSError:  # no trash yet
+        return 0
+
+
 def list_presets(folder: str) -> list[tuple[str, os.stat_result]]:
-    """Preset file names (with extension) & their stat, newest first (order of cfg.preset_files), each
-    file stat once"""
+    """Preset file names (with extension) & their stat, newest first (order of cfg.preset_files), read by one
+    directory scan: on Windows the listing carries each entry's stat (no call per file, audit PERF-048)"""
     found = []
     try:
-        names = os.listdir(folder)
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                filename = entry.name
+                name = filename[:-len(FileExt.JSON)]
+                if not filename.lower().endswith(FileExt.JSON) or not is_allowed_filename(name):
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                found.append((stat.st_mtime, name, filename, stat))
     except OSError:
         return []
-    for filename in names:
-        name = filename[:-len(FileExt.JSON)]
-        if not filename.lower().endswith(FileExt.JSON) or not is_allowed_filename(name):
-            continue
-        try:
-            stat = os.stat(os.path.join(folder, filename))
-        except OSError:
-            continue
-        found.append((stat.st_mtime, name, filename, stat))
     found.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [(filename, stat) for _, _, filename, stat in found]
 
 
 class References(NamedTuple):
-    """Primary preset tags by preset name: car classes (name, color), tracks (sorted), hotkey numbers"""
+    """Primary preset tags by preset name: car classes (name, color, session: "" every session, else "practice",
+    "qualify", "race"), tracks (sorted), hotkey numbers"""
 
     classes: dict[str, list[dict]]
     tracks: dict[str, list[str]]
@@ -218,8 +252,14 @@ def preset_references() -> References:
 
     classes: dict[str, list[dict]] = {}
     for class_name, data in cfg.user.classes.items():
+        if not isinstance(data, dict):
+            continue
+        color = str(data.get("color", ""))
         if preset := preset_of(data):
-            classes.setdefault(preset, []).append({"name": class_name, "color": str(data.get("color", ""))})
+            classes.setdefault(preset, []).append({"name": class_name, "color": color, "session": ""})
+        for session, key in SESSION_PRESET_KEYS.items():
+            if (session_preset := data.get(key)) and isinstance(session_preset, str):
+                classes.setdefault(session_preset, []).append({"name": class_name, "color": color, "session": session})
     tracks: dict[str, list[str]] = {}
     for track, data in cfg.user.tracks.items():
         if preset := preset_of(data):
@@ -245,6 +285,8 @@ class PresetBackend(PageBackend):
     filterChanged = Signal()
     selectionChanged = Signal()
     stateChanged = Signal()  # auto load, trash, undo
+    toastShown = Signal(str, bool, bool)  # plain text, error, Undo (last delete) offered
+    panelRequested = Signal(str, str)  # panel ("compare", "transfer", "restore", "trash") & preset file name
 
     def __init__(self, parent, host: PresetHost):
         super().__init__(parent, "Presets")
@@ -260,23 +302,36 @@ class PresetBackend(PageBackend):
         self._selected = ""
         self._active = False
         self._stale = True
+        # Trash change time the entries were counted at: a refresh while the trash did not change (overlay toggled,
+        # option saved) never scans it again (the presets are stat'ed: a file edited in place keeps folder times)
+        self._trash_stamp: int | None = None
         self._trash_count = 0
         self._can_undo = False
+        self._compare = PresetCompareBackend(self)
+        self._transfer = PresetTransferBackend(self)
+        self._backups = PresetBackupsBackend(self)
+        self._trash = PresetTrashBackend(self)
 
     # Reading
     def set_active(self, active: bool):
         """Page shown or hidden: presets read only while shown"""
         self._active = active
+        if active:
+            self._trash_stamp = None  # page shown: trash counted again
         if active and self._stale:
             self.refresh()
 
     def refresh(self):
-        """Presets, tags & loaded preset read again (later if page is hidden)"""
+        """Presets, tags & loaded preset read again (later if page is hidden); trash scanned only when it changed"""
         if not self._active:
             self._stale = True
             return
         self._stale = False
         folder = cfg.path.settings
+        stamp = trash_stamp(folder)
+        if stamp != self._trash_stamp:
+            self._trash_count = count_trash(folder)  # entries read & checked by Trash page only
+            self._trash_stamp = stamp
         references = preset_references()
         rows, times, summaries, missing = [], {}, {}, []
         for filename, stat in list_presets(folder):
@@ -294,7 +349,6 @@ class PresetBackend(PageBackend):
             self._read_summaries(missing)
         if self._selected not in times:
             self._selected = cfg.filename.setting if cfg.filename.setting in times else ""
-        self._trash_count = count_trash(folder)  # entries read & checked by Trash page only
         self.update_rows()
         self.presetsChanged.emit()
         self.selectionChanged.emit()
@@ -401,6 +455,22 @@ class PresetBackend(PageBackend):
     def presets(self) -> QObject:
         return self.model
 
+    @Property(QObject, constant=True)
+    def compare(self) -> QObject:
+        return self._compare
+
+    @Property(QObject, constant=True)
+    def transfer(self) -> QObject:
+        return self._transfer
+
+    @Property(QObject, constant=True)
+    def backups(self) -> QObject:
+        return self._backups
+
+    @Property(QObject, constant=True)
+    def trash(self) -> QObject:
+        return self._trash
+
     @Property(int, notify=presetsChanged)
     def presetCount(self) -> int:
         return len(self._rows)
@@ -443,7 +513,12 @@ class PresetBackend(PageBackend):
             "api": summary.api if summary else "",
             "date": full_date(modified),
             "size": size_text(size),
-            "classChoices": [name for name in cfg.user.classes if cfg.user.classes[name].get("preset") != row["name"]],
+            # Classes this preset can be set for, by session ("" every session)
+            "classChoices": {
+                session: [name for name, data in cfg.user.classes.items()
+                          if isinstance(data, dict) and data.get(key) != row["name"]]
+                for session, key in (("", "preset"), *SESSION_PRESET_KEYS.items())
+            },
             "trackChoices": sorted(
                 (track for track, data in cfg.user.tracks.items()
                  if isinstance(data, dict) and data.get("preset") != row["name"]),
@@ -529,29 +604,60 @@ class PresetBackend(PageBackend):
 
         if mode == MODE_RENAME:
             return filename[:-len(FileExt.JSON)]
+        if mode == MODE_RESTORE:
+            return self._backups.suggestName(filename)
         base = filename if mode == MODE_DUPLICATE and filename else f"{tr('New preset')}{FileExt.JSON}"
         return free_preset_name(cfg.path.settings, base)[:-len(FileExt.JSON)]
 
     @Slot(str, str, str, result=str)
     def applyName(self, mode: str, filename: str, name: str) -> str:
-        """Create, duplicate or rename preset: "" if done, else why not (translated)"""
-        if mode not in (MODE_NEW, MODE_DUPLICATE, MODE_RENAME):
+        """Create, duplicate, rename preset, or restore backup as preset: "" if done, else why not (translated)"""
+        if mode not in (MODE_NEW, MODE_DUPLICATE, MODE_RENAME, MODE_RESTORE):
             return ""
-        if mode and not self._known(filename):
+        if mode == MODE_RESTORE:
+            if not os.path.isfile(os.path.join(cfg.path.settings, filename)):
+                return tr("Preset not found, it may have been renamed or deleted.")
+        elif mode and not self._known(filename):
             return tr("Preset not found, it may have been renamed or deleted.")
         if mode == MODE_RENAME and filename in cfg.user.filelock:
             return tr("Unlock the preset to rename it.")
         entered_name = strip_filename_extension(name.strip(), FileExt.JSON)  # "Race.json" is "Race"
         if mode == MODE_RENAME and entered_name == filename[:-len(FileExt.JSON)]:
             return ""
-        with PRESET_FILES:  # file not being read meanwhile
-            error = apply_preset_name(name.strip(), mode, filename)
-        if not error:
-            self._selected = f"{entered_name}{FileExt.JSON}"
-            self.refresh()
-            verb = {MODE_NEW: "Preset created", MODE_DUPLICATE: "Preset duplicated", MODE_RENAME: "Preset renamed"}[mode]
-            self._host.toast(trm(f"{verb}: <b>{entered_name}</b>"))
-        return error
+        # Loaded preset being saved: its queued save is written first (waited off the UI thread), the name is
+        # checked now (dialog told at once), file work & its errors (toast) follow (audit PERF-018)
+        if mode in (MODE_DUPLICATE, MODE_RENAME) and cfg.is_loaded(filename) and cfg.is_saving:
+            error = check_preset_name(name.strip(), mode, filename)
+            if error:
+                return error
+            after_saving(self, partial(self._apply_name, mode, filename, name, entered_name, True))
+            return ""
+        return self._apply_name(mode, filename, name, entered_name, False)
+
+    def _apply_name(self, mode: str, filename: str, name: str, entered_name: str, deferred: bool) -> str:
+        """File work of applyName: "" if done, else why not (also shown in the toast when deferred)"""
+        # File not being read meanwhile; the UI never waits long for a slow disk: asked to try again instead
+        if not PRESET_FILES.acquire(timeout=PRESET_FILES_WAIT):
+            error = tr(TRY_AGAIN)
+        else:
+            try:
+                error = apply_preset_name(name.strip(), mode, filename)
+            finally:
+                PRESET_FILES.release()
+        if error:
+            if deferred:
+                self.show_toast(error, error=True)
+            return error
+        self._selected = f"{entered_name}{FileExt.JSON}"
+        self.refresh()
+        if mode == MODE_RESTORE:
+            self._backups.refresh()
+        verb = {
+            MODE_NEW: "Preset created", MODE_DUPLICATE: "Preset duplicated", MODE_RENAME: "Preset renamed",
+            MODE_RESTORE: "Preset restored",
+        }[mode]
+        self.show_toast(trm(f"{verb}: <b>{entered_name}</b>"))
+        return ""
 
     @Slot(str)
     def remove(self, filename: str):
@@ -576,22 +682,38 @@ class PresetBackend(PageBackend):
     def undoDelete(self):
         self._host.undo_delete()
 
+    def ask(self, title: str, message: str, on_result: Callable[[bool], object]):
+        """Confirmation (English message, translated by the host): over the page if the host can, answer by
+        callback (the page keeps running meanwhile)"""
+        ask = getattr(self._host, "ask", None)
+        if callable(ask):
+            ask(title, message, on_result)
+        else:
+            on_result(bool(self._host.confirm_operation(title, message)))
+
     @Slot(str)
     def toggleLock(self, filename: str):
         """Lock (changes never saved) or unlock preset, confirmed"""
         if not self._known(filename):
             return
         if filename in cfg.user.filelock:
-            if self._host.confirm_operation(tr("Unlock Preset"), f"Unlock <b>{filename}</b> preset?"):
-                cfg.user.filelock.pop(filename, None)
-                cfg.save(config_type=ConfigType.FILELOCK)
-                app_signal.refresh.emit(True)
+            self.ask(tr("Unlock Preset"), f"Unlock <b>{html.escape(filename)}</b> preset?",
+                     partial(self._set_lock, filename, False))
             return
-        message = f"Lock <b>{filename}</b> preset?<br><br>Changes to locked preset will not be saved."
-        if self._host.confirm_operation(tr("Lock Preset"), message):
+        message = (f"Lock <b>{html.escape(filename)}</b> preset?<br><br>"
+                   "Changes to locked preset will not be saved.")
+        self.ask(tr("Lock Preset"), message, partial(self._set_lock, filename, True))
+
+    def _set_lock(self, filename: str, lock: bool, confirmed: bool):
+        """Lock or unlock once confirmed (state checked again: changed while asked)"""
+        if not confirmed or (filename in cfg.user.filelock) == lock:
+            return
+        if lock:
             cfg.user.filelock[filename] = {"version": VERSION}
-            cfg.save(config_type=ConfigType.FILELOCK)
-            app_signal.refresh.emit(True)
+        else:
+            cfg.user.filelock.pop(filename, None)
+        cfg.save(config_type=ConfigType.FILELOCK)
+        app_signal.refresh.emit(True)
 
     @Slot(str)
     def backup(self, filename: str):
@@ -600,14 +722,13 @@ class PresetBackend(PageBackend):
             return
         extension = set_backup_timestamp()
         if create_backup_file(filename, cfg.path.settings, extension, show_log=True):
-            self._host.toast(trm(f"Backup saved as:<br><b>{filename}{extension}</b>"))
+            self.show_toast(trm(f"Backup saved as:<br><b>{filename}{extension}</b>"))
         else:
             self._host.warn(trm("Failed to create backup, please try again."))
 
     @Slot(str)
     def checkPreset(self, filename: str):
         """Unknown, invalid or out of range options of preset listed, then repaired if confirmed"""
-        from ...userfile.json_setting import save_and_verify_json_file
         from ...userfile.preset_check import check_preset_file
 
         if not self._known(filename):
@@ -618,24 +739,30 @@ class PresetBackend(PageBackend):
             self._host.warn(trm(f"<b>{filename}</b> not checked: {error}"))
             return
         if not changes:
-            self._host.toast(tr("No problem found"))
+            self.show_toast(tr("No problem found"))
             return
         shown = "<br>".join(f"• {change}" for change in changes[:25])
-        more = f"<br>... (+{len(changes) - 25})" if len(changes) > 25 else ""
+        more = f"<br>… (+{len(changes) - 25})" if len(changes) > 25 else ""
         if filename in cfg.user.filelock:
             self._host.warn(trm(f"<b>{filename}</b>: {len(changes)} option(s) to repair (locked preset, not "
                                 f"changed):<br><br>{shown}{more}"))
             return
-        if not self._host.confirm_operation(tr("Check Preset"), trm(
-                f"<b>{filename}</b>: {len(changes)} option(s) to repair (as loading it does):<br><br>{shown}{more}"
-                "<br><br>Save repaired preset?")):
+        self.ask(tr("Check Preset"), trm(
+            f"<b>{filename}</b>: {len(changes)} option(s) to repair (as loading it does):<br><br>{shown}{more}"
+            "<br><br>Save repaired preset?"), partial(self._save_repaired, filename, checked))
+
+    def _save_repaired(self, filename: str, checked: dict, confirmed: bool):
+        """Repaired preset saved once confirmed"""
+        from ...userfile.json_setting import save_and_verify_json_file
+
+        if not confirmed:
             return
         if filename == cfg.filename.setting:  # loaded preset: repaired when loaded, saved as shown
             saved = cfg.save(0) is not False
         else:
             saved = save_and_verify_json_file(checked, filename, cfg.path.settings)
         if saved:
-            self._host.toast(tr("Preset repaired"))
+            self.show_toast(tr("Preset repaired"))
         else:
             self._host.warn(trm("Failed to save preset, please try again."))
 
@@ -649,15 +776,33 @@ class PresetBackend(PageBackend):
         self._host.import_package()
 
     @Slot(str)
-    def compare(self, filename: str):
-        """Compare with loaded preset"""
+    def compareWith(self, filename: str):
+        """Compare panel: loaded preset with preset"""
         if self._known(filename):
-            self._host.open_page("compare", filename)
+            self.panelRequested.emit("compare", filename)
 
     @Slot(str)
     def openPage(self, name: str):
-        """Transfer, restore backup or trash page"""
-        self._host.open_page(name)
+        """Transfer, restore backup or recently deleted panel, presets folder"""
+        if name in ("compare", "transfer", "restore", "trash"):
+            self.panelRequested.emit(name, "")
+        else:
+            self._host.open_page(name)
+
+    # Notices
+    def show_toast(self, text: str, error: bool = False, undo: bool = False):
+        """Short notice in the toast of the page (host toast: TpDialogHost of the page), Undo offered for the
+        last delete. toastShown tells it too (markup dropped)."""
+        self.toastShown.emit(plain(text), error, undo)
+        page_toast = getattr(self._host, "page_toast", None)
+        if callable(page_toast):
+            page_toast(text, error, undo)
+
+    def update_trash_count(self, count: int):
+        """Recently deleted presets read again by the trash panel"""
+        if count != self._trash_count:
+            self._trash_count = count
+            self.stateChanged.emit()
 
     # Primary tags
     @Slot(str, str)
@@ -665,6 +810,19 @@ class PresetBackend(PageBackend):
         """Preset loaded automatically for car class (auto load)"""
         if self._known(filename) and class_name in cfg.user.classes:
             cfg.user.classes[class_name]["preset"] = filename[:-len(FileExt.JSON)]
+            cfg.save(config_type=ConfigType.CLASSES)
+            self.refresh()
+
+    @Slot(str, str, str)
+    def setPrimaryClassSession(self, filename: str, class_name: str, session: str):
+        """Preset loaded automatically for car class in session ("practice", "qualify", "race"), before the
+        track & class presets ("" session: class preset of every session)"""
+        key = SESSION_PRESET_KEYS.get(session, "preset") if session else "preset"
+        if (session and session not in SESSION_PRESET_KEYS) or not self._known(filename):
+            return
+        data = cfg.user.classes.get(class_name)
+        if isinstance(data, dict):
+            data[key] = filename[:-len(FileExt.JSON)]
             cfg.save(config_type=ConfigType.CLASSES)
             self.refresh()
 
@@ -684,6 +842,16 @@ class PresetBackend(PageBackend):
             cfg.save(config_type=ConfigType.CLASSES)
             self.refresh()
 
+    @Slot(str, str)
+    def removePrimaryClassSession(self, class_name: str, session: str):
+        """Class preset of session removed ("" session: class preset of every session)"""
+        key = SESSION_PRESET_KEYS.get(session, "") if session else "preset"
+        data = cfg.user.classes.get(class_name)
+        if key and isinstance(data, dict) and data.get(key):
+            data[key] = ""
+            cfg.save(config_type=ConfigType.CLASSES)
+            self.refresh()
+
     @Slot(str)
     def removePrimaryTrack(self, track: str):
         data = cfg.user.tracks.get(track)
@@ -698,11 +866,15 @@ class PresetBackend(PageBackend):
         name = filename[:-len(FileExt.JSON)]
         for config_type in (ConfigType.CLASSES, ConfigType.TRACKS):
             entries = getattr(cfg.user, config_type)
+            keys = CLASS_PRESET_KEYS if config_type == ConfigType.CLASSES else ("preset",)
             changed = False
             for data in entries.values():
-                if isinstance(data, dict) and data.get("preset") == name:
-                    data["preset"] = ""
-                    changed = True
+                if not isinstance(data, dict):
+                    continue
+                for key in keys:
+                    if data.get(key) == name:
+                        data[key] = ""
+                        changed = True
             if changed:
                 cfg.save(config_type=config_type)
         self.refresh()

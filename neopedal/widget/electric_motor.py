@@ -22,9 +22,9 @@ Electric motor Widget
 
 from typing import TYPE_CHECKING
 
-from .. import calculation as calc
 from .. import units
 from ..api_control import api
+from ..const_common import TEXT_PLACEHOLDER
 from ._base import Overlay
 
 if TYPE_CHECKING:
@@ -160,52 +160,53 @@ class Realtime(Overlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        emotor = api.read.emotor
         # Motor temperature
         if self.wcfg["show_motor_temperature"]:
-            temp_motor = round(api.read.emotor.motor_temperature(), 2)
-            self.update_motor(self.bar_motor, temp_motor)
+            self.update_motor(self.bar_motor, emotor.motor_temperature())
 
         # Water temperature
         if self.wcfg["show_water_temperature"]:
-            temp_water = round(api.read.emotor.water_temperature(), 2)
-            self.update_water(self.bar_water, temp_water)
+            self.update_water(self.bar_water, emotor.water_temperature())
 
         # Motor rpm
         if self.wcfg["show_rpm"]:
-            rpm = int(api.read.emotor.rpm())
-            self.update_rpm(self.bar_rpm, rpm)
+            self.update_rpm(self.bar_rpm, int(emotor.rpm()))
 
         # Motor torque
         if self.wcfg["show_torque"]:
-            torque = round(api.read.emotor.torque(), 2)
-            self.update_torque(self.bar_torque, torque)
+            self.update_text(self.bar_torque, f"{fitted(emotor.torque()):>6}Nm")
 
-        # Motor power
+        # Motor power (deployed)
         if self.wcfg["show_power"]:
-            power = round(calc.engine_power(
-                api.read.emotor.torque(), api.read.emotor.rpm()), 2)
-            self.update_power(self.bar_power, power)
+            power = fitted(self.unit_power(emotor.power()))
+            self.update_text(self.bar_power, f"{power:>6}{self.symbol_power}")
 
-        # Regeneration level
+        # Regeneration power, not available on rF2
         if self.wcfg["show_regeneration_level"]:
-            regen = round(api.read.emotor.regeneration_level(), 2)
-            self.update_regen(self.bar_regen, regen)
+            regen = emotor.regeneration_level()
+            regen_text = fitted(self.unit_power(regen)) if regen >= 0 else TEXT_PLACEHOLDER
+            self.update_text(self.bar_regen, f"{regen_text:>6}{self.symbol_power}")
 
     # GUI update methods
     def update_motor(self, target, data):
         """Motor temperature"""
-        if target.last != data:
-            target.last = data
-            target.text = f"M{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_motor[data >= self.wcfg["overheat_threshold_motor"]]
+        text = f"M{self.unit_temp(data):>6.1f}°"
+        hot = data >= self.wcfg["overheat_threshold_motor"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_motor[hot]
             target.update()
 
     def update_water(self, target, data):
         """Water temperature"""
-        if target.last != data:
-            target.last = data
-            target.text = f"W{self.unit_temp(data):>6.1f}°"
-            target.bg = self.bar_style_water[data >= self.wcfg["overheat_threshold_water"]]
+        text = f"W{self.unit_temp(data):>6.1f}°"
+        hot = data >= self.wcfg["overheat_threshold_water"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_water[hot]
             target.update()
 
     def update_rpm(self, target, data):
@@ -215,26 +216,14 @@ class Realtime(Overlay):
             target.text = f"{data:>5}rpm"
             target.update()
 
-    def update_torque(self, target, data):
-        """Motor torque"""
-        if target.last != data:
-            target.last = data
-            text = f"{data:>6.2f}"
-            target.text = f"{text:.6}Nm"
+    def update_text(self, target, text):
+        """Torque, power & regeneration: drawn again only when shown text changes"""
+        if target.last != text:
+            target.last = text
+            target.text = text
             target.update()
 
-    def update_power(self, target, data):
-        """Motor power"""
-        if target.last != data:
-            target.last = data
-            text = f"{self.unit_power(data):>6.2f}"
-            target.text = f"{text:.6}{self.symbol_power}"
-            target.update()
 
-    def update_regen(self, target, data):
-        """Motor regen level"""
-        if target.last != data:
-            target.last = data
-            text = f"{self.unit_power(data):>+6.2f}"
-            target.text = f"{text:.6}{self.symbol_power}"
-            target.update()
+def fitted(value: float, width: int = 6) -> str:
+    """Value with 2 decimals cut to width, without trailing point (-2301 Nm, not -2301.Nm)"""
+    return f"{value:z.2f}"[:width].rstrip(".")

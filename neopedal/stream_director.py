@@ -56,6 +56,7 @@ from .stream_director_feeds import (  # noqa: F401  (re-exported: stream_directo
     sections_json,
 )
 from .stream_director_page import DIRECTOR_HTML, director_html, tyre_badges  # noqa: F401  (re-exported)
+from .validator import load_json_strict
 
 # Graphics placed by the layout editor (element ids of the page)
 GRAPHIC_IDS = ("tower", "card", "battle", "train", "banners", "pitradar", "replay", "clock", "onboard", "quali", "map",
@@ -108,9 +109,13 @@ def demo_answer(preset: str | None = None) -> bytes:
 
 
 def save_layout(body: bytes, preset: str | None = None) -> dict[str, list[float]]:
-    """Layout sent by the editor (POST body JSON) for a preset (None: preset in use), sources told at once"""
+    """Layout sent by the editor (POST body JSON) for a preset (None: preset in use), sources told at once
+
+    Raises:
+        ValueError: invalid JSON (also nested too deeply, NaN), UnicodeDecodeError.
+    """
     chosen = preset if preset is not None else director_layout.active()
-    placements = director_layout.set(chosen, json.loads(body.decode("utf-8")) if body.strip() else {})
+    placements = director_layout.set(chosen, load_json_strict(body.decode("utf-8")) if body.strip() else {})
     director_feed.bump()
     return placements
 

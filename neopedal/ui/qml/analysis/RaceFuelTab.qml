@@ -18,17 +18,17 @@ Item {
     readonly property real inputsWidth: theme.em * 21
     readonly property color tyreColor: theme.seriesTyre
 
-    function fmt(value, decimals) {
-        return Number(value).toFixed(decimals).replace(".", theme.decimalPoint)
+    function fmt(value, decimals) {  // decimal separator of app language, typeset minus sign
+        return Number(value).toFixed(decimals).replace(".", theme.decimalPoint).replace("-", "−")
     }
 
-    component Note: Text {
+    component Note: TpText {  // help & detail lines (escaped text with <b>, <br>)
         Layout.fillWidth: true
         visible: text !== ""
-        color: theme.dimText
-        font.pointSize: theme.fontLabel
+        role: "caption"
         textFormat: Text.StyledText
         wrapMode: Text.Wrap
+        elide: Text.ElideNone
     }
 
     GridLayout {
@@ -111,7 +111,7 @@ Item {
                         RaceNumber { store: tab.store; key: "input_tank_capacity"; label: i18n.tr("Tank Capacity") }
                         TpKeyValue {
                             label: i18n.tr("F/E Ratio")
-                            value: tab.calc.fuelRatio || "-"
+                            value: tab.calc.fuelRatio || "—"
                             tip: i18n.tr("Fuel used per 1% of virtual energy")
                         }
                         Note { text: tab.notes.fillSource }
@@ -277,6 +277,7 @@ Item {
                                         visible: driverCell.column < 0
                                         anchors.centerIn: parent
                                         text: driverCell.driver + 1
+                                        textFormat: Text.PlainText
                                         color: theme.text
                                         font.weight: Font.DemiBold
                                     }
@@ -446,7 +447,7 @@ Item {
                             },
                             TpButton {  // LMU: refill of next stop written to the game pit menu
                                 size: "sm"
-                                enabled: planCard.plan.ready === true
+                                enabled: planCard.plan.ready === true && backend.pitMenuAvailable === true
                                 glyph: ""  // game
                                 text: i18n.tr("Pit Menu")
                                 tip: i18n.tr("Set the refill of the next stop in the game pit menu (LMU, in a session): fuel, or virtual energy of a car using it, as in the tank after the stop")
@@ -456,18 +457,18 @@ Item {
                                 id: exportButton
                                 size: "sm"
                                 enabled: planCard.plan.ready === true
-                                glyph: ""  // share
+                                glyph: theme.glyphs.export
                                 text: i18n.tr("Export")
                                 tip: i18n.tr("Pit stop plan as text, for Discord, as spreadsheet or image")
                                 checked: exportMenu.visible
-                                onClicked: exportMenu.popup(exportButton, 0, exportButton.height + 4)
+                                onClicked: exportMenu.toggleBelow(exportButton)
                                 TpMenu {
                                     id: exportMenu
                                     TpMenuItem { text: i18n.tr("Copy as Text"); onTriggered: backend.copyPlanText() }
                                     TpMenuItem { text: i18n.tr("Copy for Discord"); onTriggered: backend.copyPlanMarkdown() }
                                     MenuSeparator {}
-                                    TpMenuItem { text: i18n.tr("Export CSV..."); onTriggered: backend.exportPlanCsv() }
-                                    TpMenuItem { text: i18n.tr("Save Image..."); onTriggered: backend.savePlanImage() }
+                                    TpMenuItem { text: i18n.tr("Export CSV…"); onTriggered: backend.exportPlanCsv() }
+                                    TpMenuItem { text: i18n.tr("Save Image…"); onTriggered: backend.savePlanImage() }
                                     TpMenuItem { text: i18n.tr("Copy Picture"); onTriggered: backend.copyPlanImage() }
                                 }
                             }
@@ -540,6 +541,7 @@ Item {
                                     readonly property bool unused: column === 1 && !detailCard.details.fuelEnabled
                                                                    || column === 2 && !detailCard.details.energyEnabled
                                     text: column === 0 ? row.title : column === 1 ? row.fuel : column === 2 ? row.energy : row.unit
+                                    textFormat: Text.PlainText
                                     color: column === 3 || unused ? theme.dimText : theme.text
                                     font.weight: (column === 1 || column === 2) && !unused ? Font.DemiBold : Font.Normal
                                     font.features: { "tnum": 1 }

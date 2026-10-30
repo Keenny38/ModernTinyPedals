@@ -84,10 +84,13 @@ class Realtime(StatsMixin, ModernOverlay):
                 delta = force.deltaBrakingRate
                 if self.wcfg["show_delta_braking_rate_in_percentage"]:
                     delta = delta / force.maxBrakingRate if force.maxBrakingRate else 0.0
-                    text = f"{delta:+.0%}"
+                    text = f"{delta:+z.0%}"
+                    shown = round(delta * 100, 0)
                 else:
-                    text = f"{delta:+.2f}"
-                values.append(Value(text, theme.positive if delta > 0 else (theme.negative if delta < 0 else theme.text_dim)))
+                    text = f"{delta:+z.2f}"
+                    shown = round(delta, 2)
+                # Color of the value shown: neutral when shown as 0
+                values.append(Value(text, theme.positive if shown > 0 else (theme.negative if shown < 0 else theme.text_dim)))
             elif key == "front_wheel_lock_duration":
                 lock = max(minfo.wheels.lockingTime[:2])
                 values.append(Value(f"{lock:.1f}s", theme.negative if lock > 0 else theme.text_dim))

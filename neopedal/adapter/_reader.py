@@ -128,8 +128,15 @@ class ElectricMotor(ABC):
         """Motor water temperature (Celsius)"""
 
     @abstractmethod
+    def power(self, index: int | None = None) -> float:
+        """Motor power deployed (kW), 0 while regenerating
+
+        LMU: game electric power, rF2: torque x RPM.
+        """
+
+    @abstractmethod
     def regeneration_level(self, index: int | None = None) -> float:
-        """Regeneration level (kW)"""
+        """Regeneration power (kW), 0 while deploying, -1 if not available (rF2)"""
 
     @abstractmethod
     def state_of_charge(self, index: int | None = None) -> float:
@@ -389,6 +396,10 @@ class Session(ABC):
     @abstractmethod
     def pre_race(self) -> bool:
         """Before race starts (green flag)"""
+
+    @abstractmethod
+    def before_formation(self) -> bool:
+        """Before formation lap starts (cars on the grid, amounts of race start)"""
 
     @abstractmethod
     def green_flag(self) -> bool:

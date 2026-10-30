@@ -35,7 +35,7 @@ Card {
         x: section.pad
         y: section.pad
         width: (titleSwitch.visible ? titleSwitch.x - theme.space3 : section.width - section.pad * 2)
-        height: Math.round(theme.em * 1.9)
+        height: Math.round(theme.headerHeight)
         hoverEnabled: true
         focusPolicy: Qt.TabFocus
         onClicked: section.toggle()
@@ -54,7 +54,7 @@ Card {
         ToolTip.delay: theme.tipDelay
         HoverHandler { cursorShape: Qt.PointingHandCursor }
         background: Rectangle {
-            radius: theme.radiusMd
+            radius: theme.radiusSm
             color: titleRow.hovered ? theme.hover : "transparent"
             Behavior on color { ColorAnimation { duration: theme.motionFast } }
             FocusRing { visible: titleRow.visualFocus }
@@ -64,7 +64,7 @@ Card {
                 id: chevron
                 glyph: ""  // chevron right
                 fallback: section.collapsed ? "▸" : "▾"
-                size: theme.em * 0.7
+                size: theme.iconXs
                 color: theme.dimText
                 rotation: section.collapsed || !iconShown ? 0 : 90
                 anchors.verticalCenter: parent.verticalCenter
@@ -74,7 +74,7 @@ Card {
                 id: sectionIcon
                 glyph: section.glyph
                 color: theme.accent
-                size: theme.em * 0.95
+                size: theme.iconSm
                 x: chevron.width + theme.space3
                 anchors.verticalCenter: parent.verticalCenter
             }
@@ -84,6 +84,7 @@ Card {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - x
                 text: section.title
+                textFormat: Text.PlainText
                 color: theme.text
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
@@ -94,6 +95,7 @@ Card {
                     width: Math.max(0, titleText.width - x)
                     anchors.verticalCenter: parent.verticalCenter
                     text: section.summary
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     elide: Text.ElideRight
                 }

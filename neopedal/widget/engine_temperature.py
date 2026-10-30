@@ -232,7 +232,7 @@ class Realtime(Overlay):
             self.last_lap_stime = lap_stime
             new_lap = True
 
-        overheating = bool(self.wcfg["show_game_overheating_highlight"] and api.read.engine.overheating())
+        overheating = bool(self.wcfg["show_game_overheating_warning"] and api.read.engine.overheating())
 
         # Oil temperature
         if self.wcfg["show_oil_temperature"]:
@@ -271,20 +271,22 @@ class Realtime(Overlay):
     # GUI update methods
     def update_oil(self, target, data, overheating):
         """Oil temperature, overheat color above threshold or while game warns of overheating"""
-        if target.last != (data, overheating):
-            target.last = (data, overheating)
-            text_temp = f"{self.unit_temp(data):.3f}"
-            target.text = f"{text_temp:.5}°"
-            target.bg = self.bar_style_oil_temp[overheating or data >= self.wcfg["overheat_threshold_oil"]]
+        text = f"{self.unit_temp(data):.3f}"[:5] + "°"
+        hot = overheating or data >= self.wcfg["overheat_threshold_oil"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_oil_temp[hot]
             target.update()
 
     def update_water(self, target, data, overheating):
         """Water temperature, overheat color above threshold or while game warns of overheating"""
-        if target.last != (data, overheating):
-            target.last = (data, overheating)
-            text_temp = f"{self.unit_temp(data):.3f}"
-            target.text = f"{text_temp:.5}°"
-            target.bg = self.bar_style_water_temp[overheating or data >= self.wcfg["overheat_threshold_water"]]
+        text = f"{self.unit_temp(data):.3f}"[:5] + "°"
+        hot = overheating or data >= self.wcfg["overheat_threshold_water"]
+        if target.last != (text, hot):
+            target.last = (text, hot)
+            target.text = text
+            target.bg = self.bar_style_water_temp[hot]
             target.update()
 
     def update_rate(self, target, data):

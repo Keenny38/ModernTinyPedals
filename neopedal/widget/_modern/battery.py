@@ -32,6 +32,7 @@ from PySide6.QtGui import QPainter
 from ...api_control import api
 from ...module_info import minfo
 from .._common import warning_flash
+from ..battery import change_text, has_battery, has_last_lap
 from .base import DASH, ModernOverlay
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
@@ -98,13 +99,16 @@ class Realtime(StatsMixin, ModernOverlay):
         """Update when vehicle on track"""
         theme = self.theme
         hybrid = minfo.hybrid
-        if 0 <= minfo.delta.lapTimeCurrent < self.freeze_duration:
+        if 0 <= minfo.delta.lapTimeCurrent < self.freeze_duration and has_last_lap(hybrid):  # last full lap
             drain, regen = hybrid.batteryDrainLast, hybrid.batteryRegenLast
         else:
             drain, regen = hybrid.batteryDrain, hybrid.batteryRegen
         values = []
         for key in self.keys:
             if key == "charge":
+                if not has_battery(hybrid):  # car without hybrid system: no low battery warning
+                    values.append(Value(DASH, theme.text_faint))
+                    continue
                 charge = hybrid.batteryCharge
                 if charge >= self.wcfg["high_battery_threshold"]:
                     warning = 2
@@ -126,12 +130,16 @@ class Realtime(StatsMixin, ModernOverlay):
                 else:
                     values.append(Value(DASH, theme.text_faint))
             elif key == "drain":
-                values.append(Value(f"-{drain:.2f}"))
+                values.append(Value(change_text(drain, "-")))
             elif key == "regen":
-                values.append(Value(f"+{regen:.2f}"))
+                values.append(Value(change_text(regen, "+")))
             elif key == "net":
                 net = hybrid.batteryNetChange
-                values.append(Value(f"{net:+.2f}", theme.positive if net > 0 else (theme.negative if net < 0 else None)))
+                if not net:  # none until a full lap is recorded
+                    values.append(Value(DASH, theme.text_faint))
+                    continue
+                text = change_text(net, "")
+                values.append(Value(text, theme.positive if text[0] == "+" else (theme.negative if text[0] == "-" else None)))
             elif key == "timer":
                 values.append(Value(f"{hybrid.motorActiveTimer:.2f}s", theme.text_dim))
         state = tuple(values)

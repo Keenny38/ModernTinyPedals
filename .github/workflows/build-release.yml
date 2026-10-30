@@ -66,7 +66,7 @@ jobs:
         fi
 
     - name: Set up Python
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
       with:
         python-version: "3.13"
 
@@ -126,7 +126,7 @@ jobs:
         echo $sha256hash
 
     - name: Upload build
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: source
         path: NeoPedal-${{ needs.version.outputs.app_ver }}-source.zip
@@ -160,9 +160,9 @@ jobs:
         ref: ${{ needs.version.outputs.sha }}
         persist-credentials: false
 
-    # Same Python as one of the Checks matrix versions, pinned dependencies (requirements-build.txt)
+    # Same Python as one of the Checks matrix versions, pinned dependencies (requirements-build-lock.txt)
     - name: Set up Python 3.13 environment for Windows build
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
       with:
         python-version: "3.13"
         architecture: "x64"
@@ -170,10 +170,12 @@ jobs:
     - name: Set version
       run: python tools/next_version.py --write "$APP_VER"
 
+    # Every package & dependency pinned with the sha256 of its files (requirements-build-lock.txt, regenerated
+    # with the command written in requirements-build.txt): a file changed on PyPI never runs in this job.
+    # Wheels only (no build script runs), pip of setup-python kept as is (no unpinned upgrade).
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements-build.txt
+        python -m pip install --require-hashes --no-deps --only-binary :all: -r requirements-build-lock.txt
 
     # VR overlay in OpenXR games: native layer DLL (headers fetched at pinned commits, see CMakeLists.txt),
     # tested with a fake OpenXR runtime, then bundled in lib/openxr_layer_bundle by build_pyinstaller.py
@@ -252,7 +254,8 @@ jobs:
       shell: pwsh
       run: |
         $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-        if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+        # Preinstalled on the runner image, else pinned version (the package checks the installer checksum)
+        if (-not (Test-Path $iscc)) { choco install innosetup --version=6.7.1 -y --no-progress }
         & $iscc "/DAppVersion=$env:APP_VER" installer\neopedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Move-Item "./dist/NeoPedal-$env:APP_VER-windows-setup.exe" .
@@ -298,7 +301,7 @@ jobs:
           -DestinationPath "./NeoPedal-$env:APP_VER-setup.zip"
 
     # sha256sum format "<hash>  <file>" (two spaces), listed in release notes, checked by "sha256sum -c"
-    # & by the app updater (with the asset digest given by GitHub). The installer also gets its .sha256 file:
+    # & by app updaters before 0.28 (newer ones use the signed manifest). The installer also gets its .sha256 file:
     # apps up to 0.19 update only from a release with "<name>-windows-setup.exe" & "<name>-windows-setup.exe.sha256"
     - name: Check hash sum
       id: get_hash
@@ -313,7 +316,7 @@ jobs:
         echo $installer_hash
 
     - name: Upload build
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: windows
         path: |
@@ -321,12 +324,15 @@ jobs:
           NeoPedal-${{ needs.version.outputs.app_ver }}-windows-setup.exe
           NeoPedal-${{ needs.version.outputs.app_ver }}-windows-setup.exe.sha256
 
-  # Tag the tested commit and publish release with notes (the changelog)
+  # Tag the tested commit and publish release with notes (the changelog) & the signed manifest
   release:
     needs: [version, linux, windows]
     if: ${{ !inputs.test_build }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Release manifest signing key (secret RELEASE_SIGNING_KEY) belongs to the "release" environment, given to
+    # the signing step only. This job installs nothing but the hash-pinned signing dependency.
+    environment: release
     permissions:
       contents: write  # create the tag & the release
       id-token: write  # sign the build provenance (Sigstore)
@@ -342,7 +348,7 @@ jobs:
         persist-credentials: false
 
     - name: Download builds
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
       with:
         path: builds
         merge-multiple: true
@@ -356,6 +362,31 @@ jobs:
         (cd builds && sha256sum -c "NeoPedal-$APP_VER-windows-setup.exe.sha256")
         ls -l builds
 
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      with:
+        python-version: "3.13"
+
+    # cryptography (& its dependencies) pinned with the sha256 of its files, wheels only, before any secret
+    - name: Install signing dependencies
+      run: |
+        python -m pip install --require-hashes --no-deps --only-binary :all: -r requirements-sign-lock.txt
+
+    # NeoPedal-<version>-manifest.json (sha256 & size of each file, repository, tag, version) & its Ed25519
+    # signature (.sig), published with the files: apps since 0.28 install an official release only with a
+    # manifest signed by a key of neopedal/release_manifest.py. No key: the job fails, nothing is published.
+    - name: Sign release manifest
+      env:
+        RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        RELEASE_COMMIT: ${{ needs.version.outputs.sha }}
+      run: |
+        if [ -z "$RELEASE_SIGNING_KEY" ]; then
+          echo "::error::Secret RELEASE_SIGNING_KEY of the release environment is not set: apps refuse releases without a signed manifest"
+          exit 1
+        fi
+        python tools/sign_release.py "$APP_VER" --dist builds
+        python tools/sign_release.py "$APP_VER" --dist builds --verify
+
     # Signed proof that the files were built by this workflow from this commit, checked with
     # "gh attestation verify <file> --repo Keenny38/ModernTinyPedals"
     - name: Attest build provenance
@@ -364,6 +395,7 @@ jobs:
         subject-path: |
           builds/*.zip
           builds/*.exe
+          builds/*-manifest.json
 
     - name: Release notes from commits since previous release
       env:

@@ -12,7 +12,7 @@ TpPopup {
     id: popup
     objectName: "timingTable"
     modal: true
-    padding: theme.em * 0.9
+    padding: theme.padPopup
     anchors.centerIn: parent
     width: parent ? parent.width * 0.94 : theme.em * 60
     height: parent ? parent.height * 0.9 : theme.em * 40
@@ -62,7 +62,7 @@ TpPopup {
         shown: popup.visible
         keep: false  // rows of every car freed once closed
         sourceComponent: ColumnLayout {
-            spacing: theme.em * 0.5
+            spacing: theme.space3
 
             // Drawn under the cell text, made for their columns only (parent: the cell, its entry)
             Component {
@@ -151,17 +151,17 @@ TpPopup {
                     flat: true
                     glyph: ""  // list
                     text: i18n.tr("Columns")
-                    onClicked: columnMenu.popup(columnsButton, 0, columnsButton.height)
+                    onClicked: columnMenu.toggleBelow(columnsButton)  // second click closes it
                 }
                 TpButton {
-                    glyph: ""  // undo
+                    glyph: theme.glyphs.reset
                     fallback: "↺"
                     flat: true
                     tip: i18n.tr("Columns of this view by default")
                     onClicked: backend.timing.resetTimingColumns()
                 }
                 TpButton {
-                    glyph: ""  // close
+                    glyph: theme.glyphs.close
                     fallback: "✕"
                     flat: true
                     tip: i18n.tr("Close")
@@ -190,7 +190,7 @@ TpPopup {
                     Item {
                         id: titles
                         Layout.fillWidth: true
-                        implicitHeight: Math.round(theme.em * 2.0)
+                        implicitHeight: Math.round(theme.headerHeight)
                         Row {
                             x: theme.space4
                             height: parent.height
@@ -340,6 +340,7 @@ TpPopup {
                                         horizontalAlignment: align === "right" ? Text.AlignRight
                                                            : align === "center" ? Text.AlignHCenter : Text.AlignLeft
                                         text: entry.text || ""
+                                        textFormat: Text.PlainText
                                         color: key === "penalties" ? theme.inkOn(theme.lossFill)
                                              : entry.tone ? theme.tone(entry.tone)
                                              : key === "team" || key === "number" ? theme.dimOn(rowBack.color) : theme.text
@@ -362,6 +363,7 @@ TpPopup {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: text !== ""
                                 text: row.onAir ? "◉" : row.yellow ? "⚠" : ""
+                                textFormat: Text.PlainText
                                 color: row.onAir ? theme.loss : theme.text
                                 font.pointSize: theme.fontSmall
                             }

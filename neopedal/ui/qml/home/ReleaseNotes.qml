@@ -5,7 +5,9 @@ import "../components"
 
 // What's New page: version header & version menu (any version of the local changelog), search, contents chips
 // (versions or groups), notes as one list (version headers, group headings, cards, folds), download progress
-// & install actions. Screenshots open in the viewer (arrows browse, Esc closes). Ctrl+F searches.
+// & install actions (secondary ones in a "⋯" menu when room runs out: the main button keeps its text).
+// Screenshots open in the viewer (arrows browse, Esc closes). Ctrl+F searches. Try turns an overlay on, Undo in
+// the toast.
 TpPage {
     id: page
 
@@ -14,36 +16,43 @@ TpPage {
         if (row >= 0)
             notes.positionViewAtIndex(row, ListView.Beginning)
     }
+    function isFind(event) {
+        return event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier
+    }
 
-    Shortcut { sequence: "Ctrl+F"; enabled: pageState.active; onActivated: search.forceActiveFocus() }
+    // Ctrl+F searches the notes: taken before the app's own Ctrl+F shortcut (a QML Shortcut never fires in this
+    // page: the app window has the keyboard)
+    Keys.onShortcutOverride: function(event) {
+        if (isFind(event))
+            event.accepted = true
+    }
+    Keys.onPressed: function(event) {
+        if (isFind(event)) {
+            search.forceActiveFocus()
+            search.selectAll()
+            event.accepted = true
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.padPage
         spacing: theme.space3
 
-        // Version, its state, release date, version menu
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.space3
-            Text {
-                text: backend.title
-                color: theme.text
-                font.pointSize: theme.fontTitle
-                font.weight: Font.DemiBold
-                Accessible.role: Accessible.Heading
-                Accessible.name: text
-            }
-            Pill {
-                Layout.alignment: Qt.AlignVCenter
-                visible: backend.chip !== ""
-                text: backend.chip
-                tint: backend.chipNew ? theme.gain : theme.accent
-            }
-            Item { Layout.fillWidth: true }
+        // Version & its state, release date under it, version menu (title cut first on narrow windows)
+        TpPageHeader {
+            title: backend.title
+            subtitle: backend.detail
+            status: [
+                Pill {
+                    visible: backend.chip !== ""
+                    text: backend.chip
+                    tint: backend.chipNew ? theme.gain : theme.accent
+                }
+            ]
             TpCombo {
                 id: versionMenu
-                Layout.preferredWidth: theme.em * 13
+                Layout.preferredWidth: theme.em * 11
                 visible: count > 1
                 model: backend.versions
                 textRole: "label"
@@ -58,18 +67,29 @@ TpPage {
                 onActivated: function(index) { backend.showVersion(backend.versions[index].key) }
             }
         }
-        Text {
+        // Preference (kept out of the action row: room for the main button)
+        RowLayout {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: backend.detail
-            color: theme.dimText
-            elide: Text.ElideRight
+            spacing: theme.space3
+            Item { Layout.fillWidth: true }
+            TpSwitch {
+                objectName: "showAfterUpdateSwitch"
+                checkable: false
+                checked: backend.showAfterUpdate
+                text: i18n.tr("Show after each update")
+                tip: i18n.tr("What's new is shown once at the first start of a new version")
+                onClicked: backend.setShowAfterUpdate(!backend.showAfterUpdate)
+                Accessible.role: Accessible.CheckBox
+                Accessible.name: i18n.tr("Show after each update")
+                Accessible.checked: backend.showAfterUpdate
+            }
         }
 
         TpSearchField {
             id: search
+            objectName: "notesSearch"
             Layout.fillWidth: true
-            placeholderText: i18n.tr("Search the notes")
+            placeholderText: i18n.tr("Search the notes") + "   Ctrl+F"
             onSearchChanged: function(text) { backend.setSearch(text) }
             onExitField: notes.forceActiveFocus()
         }
@@ -157,6 +177,7 @@ TpPage {
                                 spacing: theme.space3
                                 Text {
                                     text: row.title
+                                    textFormat: Text.PlainText
                                     color: theme.accent
                                     font.pointSize: theme.fontLarge
                                     font.weight: Font.DemiBold
@@ -166,6 +187,7 @@ TpPage {
                                 Text {
                                     Layout.fillWidth: true
                                     text: row.subtitle
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     elide: Text.ElideRight
                                 }
@@ -196,6 +218,7 @@ TpPage {
                                 Layout.fillWidth: true
                                 visible: row.subtitle !== ""
                                 text: row.subtitle
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 elide: Text.ElideRight
                             }
@@ -209,9 +232,9 @@ TpPage {
                 }
             }
 
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
-                visible: notes.count === 0
+                empty: notes.count === 0
                 glyph: backend.searching ? "" : ""  // search, list
                 title: backend.searching ? i18n.tr("Nothing found in these notes") : i18n.tr("No release notes for this version.")
                 text: backend.searching ? i18n.tr("Check spelling, or try fewer or other words.") : ""
@@ -236,17 +259,17 @@ TpPage {
             spacing: theme.space3
             Text {
                 text: backend.progressText
+                textFormat: Text.PlainText
                 color: theme.text
                 font.features: { "tnum": 1 }
             }
-            ProgressBar {
+            TpSpinner { visible: backend.progress < 0 }  // size not known yet
+            TpMeter {
                 id: progress
                 Layout.fillWidth: true
-                from: 0
-                to: 1
+                visible: backend.progress >= 0
                 value: Math.max(backend.progress, 0)
-                indeterminate: backend.progress < 0
-                Accessible.name: i18n.tr("Download progress")
+                name: i18n.tr("Download progress")
                 Accessible.description: backend.progressText
             }
             TpButton {
@@ -256,38 +279,42 @@ TpPage {
             }
         }
 
+        // Secondary actions (into a "⋯" menu when room runs out), then the main ones, never squeezed
         RowLayout {
             Layout.fillWidth: true
             spacing: theme.space3
-            TpButton {
-                text: i18n.tr("View On GitHub")
-                glyph: ""  // globe
-                onClicked: backend.openGitHub()
+            TpToolbar {
+                objectName: "releaseActions"
+                Layout.fillWidth: true
+                alignRight: false
+                TpAction {
+                    name: "githubButton"
+                    text: i18n.tr("View On GitHub")
+                    glyph: ""  // globe
+                    fallback: "↗"
+                    priority: 1
+                    onTriggered: backend.openGitHub()
+                }
+                TpAction {
+                    name: "skipButton"
+                    shown: backend.skipVisible
+                    enabled: !backend.downloading
+                    text: i18n.tr("Skip This Version")
+                    tip: i18n.tr("Not shown again for this version, shown again for a newer one")
+                    onTriggered: backend.skip()
+                }
+                onMenuClosed: notes.forceActiveFocus()
             }
             TpButton {
-                visible: backend.skipVisible
-                enabled: !backend.downloading
-                text: i18n.tr("Skip This Version")
-                tip: i18n.tr("Not shown again for this version, shown again for a newer one")
-                onClicked: backend.skip()
-            }
-            TpSwitch {
-                checkable: false
-                checked: backend.showAfterUpdate
-                text: i18n.tr("Show after each update")
-                tip: i18n.tr("What's new is shown once at the first start of a new version")
-                onClicked: backend.setShowAfterUpdate(!backend.showAfterUpdate)
-                Accessible.role: Accessible.CheckBox
-                Accessible.name: i18n.tr("Show after each update")
-                Accessible.checked: backend.showAfterUpdate
-            }
-            Item { Layout.fillWidth: true }
-            TpButton {
+                objectName: "closeButton"
+                Layout.minimumWidth: implicitWidth
                 visible: backend.closeVisible
                 text: backend.closeText
                 onClicked: backend.close()
             }
             TpButton {
+                objectName: "installButton"
+                Layout.minimumWidth: implicitWidth
                 visible: backend.installVisible
                 enabled: !backend.downloading
                 accent: true
@@ -302,4 +329,7 @@ TpPage {
         id: viewer
         anchors.fill: parent
     }
+
+    // Dialogs & toasts asked by the backend (confirmations, alerts, messages with Undo)
+    TpDialogHost {}
 }

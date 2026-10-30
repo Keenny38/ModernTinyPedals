@@ -75,8 +75,7 @@ class Realtime(ModernOverlay):
         self.unit = max(size * 0.32, 6.0)  # small parts (labels, bars) follow a smaller unit
         self.add_font("gear", size / self.unit * 0.95, "bold", family="Barlow")
         self.add_font("speed", size / self.unit * 0.5, "bold")
-        self.add_font("value", 1.0, "semibold")
-        self.add_font("label", 0.8, "bold", spacing=106, caps=True)
+        self.add_design_fonts()  # value, label... at the smaller unit (same roles as every overlay)
         self.unit_speed = units.set_unit_speed(self.cfg.units["speed_unit"])
         self.symbol_speed = units.set_symbol_speed(self.cfg.units["speed_unit"])
         self.unit_fuel = units.set_unit_fuel(self.cfg.units["fuel_unit"])
@@ -180,7 +179,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.8), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for rect in (self.rect_rpm, self.rect_battery, self.rect_consumption):
             if not rect.isNull():
                 rounded(painter, rect, rect.height() / 2, theme.surface_raised)

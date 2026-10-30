@@ -77,7 +77,7 @@ def test_lap_race_and_tyre_life(calculator):
     calculator.set_values({"input_tread_start": 100, "input_wear_per_lap": 4.0})  # 25 laps tyre life
     assert detail(calculator, "total_needed")["fuel"].endswith("≈ 40")
     assert detail(calculator, "pit_stops")["fuel"].endswith("≈ 0")
-    assert detail(calculator, "one_less_stint")["fuel"] == "-"  # no stop: nothing to save
+    assert detail(calculator, "one_less_stint")["fuel"] == "—"  # no stop: nothing to save
     life = calculator.tyreLife
     assert float(life["laps"]) == pytest.approx(25.0)
     assert life["wearStint"] == "80.00 %"  # 20 whole laps
@@ -114,11 +114,11 @@ def test_lap_time_and_start_time_typed(calculator):
 
 def test_selected_history_averaged(calculator, host):  # noqa: F811
     calculator.clearLapSelection()
-    calculator.addSelectedLaps()  # nothing selected
-    assert len(host.warnings) == 1
+    calculator.addSelectedLaps()  # nothing selected (key pressed, button disabled): nothing told
+    assert len(host.warnings) == 0
     select(calculator, "10")  # invalid lap only
     calculator.addSelectedLaps()
-    assert len(host.warnings) == 2
+    assert len(host.warnings) == 1
     select(calculator, "12", "11", "10")
     calculator.addSelectedLaps()
     values = calculator.values
@@ -206,7 +206,7 @@ def test_key_figures_strategy_and_plan(calculator):
     assert tile(calculator, "stint")["value"] == "33 laps"
     assert tile(calculator, "refill")["value"] == "20.0 L"  # last stop is a splash, not a full tank
     assert not tile(calculator, "energy")["visible"]  # no energy used: energy tile & column muted
-    assert detail(calculator, "total_needed")["energy"] == "-" and not calculator.details["energyEnabled"]
+    assert detail(calculator, "total_needed")["energy"] == "—" and not calculator.details["energyEnabled"]
     assert [stop["lap"] for stop in calculator.timeline["stops"]] == [33]
     assert "Stop at lap 33" in calculator.summary["text"]
     plan = calculator.plan
@@ -316,7 +316,7 @@ def test_reset_to_zero(calculator):
     assert values["input_lap_time"] == 0 and values["input_fuel_per_lap"] == 0
     assert values["input_race_laps"] == 0 and values["input_pit_seconds"] == 0
     assert values["input_tread_start"] == 100  # new tyres
-    assert tile(calculator, "fuel")["value"] == "-" and not calculator.notes["fillSource"]
+    assert tile(calculator, "fuel")["value"] == "—" and not calculator.notes["fillSource"]
 
 
 def test_one_calculation_per_batch(calculator):
@@ -366,9 +366,9 @@ def test_empty_inputs_show_dashes(ui_env, monkeypatch, host):  # noqa: F811
     dialog = race_calculator.RaceCalculator(None)
     try:
         backend = dialog.backend
-        assert detail(backend, "total_needed")["fuel"] == "-"
-        assert tile(backend, "fuel")["value"] == "-"
-        assert backend.tyreLife["laps"] == "-"  # no wear entered
+        assert detail(backend, "total_needed")["fuel"] == "—"
+        assert tile(backend, "fuel")["value"] == "—"
+        assert backend.tyreLife["laps"] == "—"  # no wear entered
         assert not backend.timeline["ready"] and not backend.timeline["stops"]
         assert backend.history["empty"] and not backend.history["rows"]  # placeholder not shown
         assert not backend.plan["ready"]
@@ -462,7 +462,7 @@ def test_starting_fuel_clamped_in_one_calculation(calculator):
 def test_energy_only_page(calculator):
     set_race(calculator, laps=40, tank=0, fuel=0, energy=4.0)
     assert calculator.strategy.ready and not tile(calculator, "fuel")["visible"] and tile(calculator, "energy")["visible"]
-    assert detail(calculator, "total_needed")["fuel"] == "-"
+    assert detail(calculator, "total_needed")["fuel"] == "—"
     assert tile(calculator, "refill")["value"] == "60.0 %"
 
 

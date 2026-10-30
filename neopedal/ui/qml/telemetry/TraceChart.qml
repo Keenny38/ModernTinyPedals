@@ -9,7 +9,8 @@ import "../components"
 // panel menu: values fitted to visible part, drag a channel name: reorder, drag a channel lower edge: resize,
 // right-click: menu.
 // Keyboard: +/- zoom, left/right one recorded frame (Ctrl: farther, Shift: move view, while playing: 2 s),
-// Alt+left/right previous / next zoom, Home or 0 reset, [ ] previous / next corner, A / B markers,
+// Alt+left/right previous / next zoom, Home or 0 reset, [ ] previous / next corner, Shift+[ ] (or { }) previous / next
+// corner where time is lost (synthesis band), A / B markers,
 // Esc clear markers (then kept position), R reference = highlighted lap, Space play, L loop A-B, , . speed,
 // ? keyboard help.
 FocusScope {
@@ -51,7 +52,31 @@ FocusScope {
     readonly property bool zoomed: targetEnd - targetStart < maxX - 1
     // Simple view over charts: everything but lap chips hidden (chips shared by both views, same place), keys kept
     property bool chartsShown: true
-    readonly property real legendBottom: legendRow.y + legendRow.height
+    // Lap chips & synthesis band under them (same place in both views)
+    readonly property real legendBottom: summaryBand.y + summaryBand.height
+    // Synthesis band: compared lap gap & corners where it loses most time (backend.cornerTable.summary, read once
+    // per change); corner of it zoomed on (guided analysis, Shift+[ ] keys), -1 if none
+    readonly property var summary: backend.cornerTable.summary
+    property int lostIndex: -1
+    onSummaryChanged: {
+        var corners = summary.corners || []
+        if (lostIndex >= corners.length || summary.lapKey !== lostLap) lostIndex = -1
+        lostLap = summary.lapKey || ""
+    }
+    property string lostLap: ""  // compared lap of lost corners (another lap: none shown)
+    function showLost(index) {
+        var corners = summary.corners || []
+        if (index < 0 || index >= corners.length) return
+        lostIndex = index
+        var row = corners[index].index
+        backend.setSelectedCorner(row)
+        zoomRange(backend.cornerTable.range(row), 0.15)
+    }
+    function stepLost(direction) {
+        var count = (summary.corners || []).length
+        if (count === 0) return
+        showLost(lostIndex < 0 ? (direction > 0 ? 0 : count - 1) : (lostIndex + direction + count) % count)
+    }
     readonly property real labelWidth: theme.em * 7
     readonly property real gap: theme.em * 0.35
     property var panels: backend.panels
@@ -583,6 +608,7 @@ FocusScope {
     Connections {
         target: backend
         function onViewRestored(start, end) { chart.setView(start, end, false) }
+        function onLostCornersShown() { chart.lostIndex = -1; chart.lostLap = chart.summary.lapKey || ""; chart.showLost(0) }
         function onPageHidden() { chart.playing = false }  // no cursor update every frame while page is hidden
         function onTracksChanged() {  // markers A & B are distances of one circuit: cleared for another track
             var circuit = backend.currentTrack + "|" + backend.trackLabel  // label: circuit shown without track folder
@@ -679,6 +705,9 @@ FocusScope {
         else if (event.key === Qt.Key_Comma) changeSpeed(-1)
         else if (event.key === Qt.Key_Period) changeSpeed(1)
         else if (event.key === Qt.Key_Home || digitOf(event) === 0) resetView(true)
+        // Shift+[ ]: corners where time is lost (layouts typing { } there send those keys)
+        else if (event.key === Qt.Key_BraceRight || (event.key === Qt.Key_BracketRight && shift)) stepLost(1)
+        else if (event.key === Qt.Key_BraceLeft || (event.key === Qt.Key_BracketLeft && shift)) stepLost(-1)
         else if (event.key === Qt.Key_BracketRight) stepCorner(1)
         else if (event.key === Qt.Key_BracketLeft) stepCorner(-1)
         else if (event.key === Qt.Key_A) setMarker("A", cursorX)
@@ -737,6 +766,14 @@ FocusScope {
             }
         }
     }
+    // Synthesis band under lap chips: one row while laps are shown (see LapSummaryBand)
+    LapSummaryBand {
+        id: summaryBand
+        objectName: "summaryBand"
+        chart: chart
+        anchors { left: parent.left; right: parent.right; top: legendRow.bottom; leftMargin: chart.labelWidth }
+        anchors.topMargin: legendRow.height > 0 ? theme.space2 : 0
+    }
     // Delta measured against ideal lap: its time after lap chips
     Pill {
         parent: legendRow
@@ -786,7 +823,7 @@ FocusScope {
             onTriggered: backend.openReplay(chart.cursorX, chipMenu.lapKey)
         }
         Action {
-            text: i18n.tr("Setup Differences with Reference...")
+            text: i18n.tr("Setup Differences with Reference…")
             enabled: !chipMenu.reference
             onTriggered: chart.setupRequested(chipMenu.lapKey)
         }
@@ -798,8 +835,7 @@ FocusScope {
     Item {
         id: header
         visible: chart.chartsShown
-        anchors { left: parent.left; right: parent.right; top: legendRow.bottom; leftMargin: chart.labelWidth }
-        anchors.topMargin: legendRow.height > 0 ? theme.space2 : 0
+        anchors { left: parent.left; right: parent.right; top: summaryBand.bottom; leftMargin: chart.labelWidth }
         height: theme.em * 2
         Text {
             anchors.left: parent.left
@@ -810,6 +846,7 @@ FocusScope {
             text: !chart.hasCursor && panels.length
                 ? i18n.tr("Wheel: zoom · drag: move · click: keep position · right-click: menu · [ ]: corners · A/B: markers")
                 : ""
+            textFormat: Text.PlainText
             color: theme.dimText
         }
         Row {
@@ -823,6 +860,7 @@ FocusScope {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "×" + (chart.maxX / Math.max(chart.targetEnd - chart.targetStart, 1e-9)).toFixed(1).replace(".", theme.decimalPoint)
+                textFormat: Text.PlainText
                 color: theme.dimText
             }
             TpButton {
@@ -843,10 +881,13 @@ FocusScope {
         readonly property bool nothing: chart.chartsShown && (panels.length === 0 || chart.legendLaps.length === 0)
         loading: nothing && backend.loading
         empty: nothing && !backend.loading
-        loadingText: i18n.tr("Reading laps...")
+        loadingText: i18n.tr("Reading laps…")
         glyph: "\uE9D2"  // chart
         title: chart.legendLaps.length === 0 ? i18n.tr("Select recorded laps to compare.")
                                              : i18n.tr("Nothing picked: choose what is shown with Show")
+        // No lap shown: fastest lap against newest lap in one click
+        actionText: chart.legendLaps.length === 0 && backend.hasTrackLaps ? i18n.tr("Best vs Last Lap") : ""
+        onAction: backend.compareBestLast()
     }
 
     // Passage between markers A & B: time of each shown lap, gap to fastest
@@ -873,7 +914,8 @@ FocusScope {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: (modelData.best ? "★ " : "") + modelData.label + " " + modelData.time + " s"
-                    color: modelData.best ? theme.gold : theme.text
+                    textFormat: Text.PlainText
+                    color: modelData.best ? theme.purple : theme.text  // fastest of passage: best (★ too)
                     font.pointSize: theme.fontCaption
                     font.weight: modelData.best ? Font.Bold : Font.Normal
                     font.features: { "tnum": 1 }
@@ -882,6 +924,7 @@ FocusScope {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: modelData.gap !== ""
                     text: modelData.gap
+                    textFormat: Text.PlainText
                     color: theme.loss
                     font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
@@ -916,6 +959,7 @@ FocusScope {
                 x: Math.round(px) + 2
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
+                textFormat: Text.PlainText
                 color: sectorArea.containsMouse ? theme.accent : theme.text
                 font.pointSize: theme.fontCaption
                 font.weight: Font.Bold
@@ -939,6 +983,7 @@ FocusScope {
                 width: Math.min(implicitWidth, theme.em * 12)
                 anchors.verticalCenter: parent.verticalCenter
                 text: "✎ " + modelData.text
+                textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: noteArea.containsMouse ? theme.text : theme.accent
                 font.pointSize: theme.fontCaption
@@ -966,6 +1011,7 @@ FocusScope {
                 x: Math.round(px) + 2
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.label
+                textFormat: Text.PlainText
                 color: cornerArea.containsMouse ? theme.accent : theme.dimText
                 font.pointSize: theme.fontCaption
                 MouseArea {
@@ -1026,6 +1072,7 @@ FocusScope {
                         anchors { right: parent.right; top: parent.top }
                         visible: labelItem.roomy
                         text: labelItem.axis.highText
+                        textFormat: Text.PlainText
                         color: labelItem.valuesFitted ? theme.accent : theme.dimText
                         font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
@@ -1034,6 +1081,7 @@ FocusScope {
                         anchors { right: parent.right; bottom: parent.bottom }
                         visible: labelItem.roomy
                         text: labelItem.axis.lowText
+                        textFormat: Text.PlainText
                         color: labelItem.valuesFitted ? theme.accent : theme.dimText
                         font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }
@@ -1051,6 +1099,7 @@ FocusScope {
                             visible: y > theme.em * 1.1 && y + height < labelItem.height - theme.em * 1.1
                                      && (y + height < titleColumn.y - 2 || y > titleColumn.y + titleColumn.height + 2)
                             text: modelData.text
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontTiny
                             font.features: { "tnum": 1 }
@@ -1064,6 +1113,7 @@ FocusScope {
                         Text {
                             anchors.right: parent.right
                             text: labelItem.info.title
+                            textFormat: Text.PlainText
                             color: labelItem.info.available ? theme.text : theme.dimText
                             font.weight: Font.DemiBold
                             width: Math.min(implicitWidth, labels.width - theme.em)
@@ -1074,6 +1124,7 @@ FocusScope {
                             anchors.right: parent.right
                             visible: text !== "" && (chart.bubbleFits(index) || !chart.hasCursor)
                             text: labelItem.info.unit
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontCaption
                         }
@@ -1092,10 +1143,10 @@ FocusScope {
                             width: Math.min(parent.width, implicitWidth)
                             visible: labelItem.info.parts.length > 0
                             layoutDirection: Qt.RightToLeft
-                            spacing: theme.em * 0.3
+                            spacing: theme.space2
                             Repeater {
                                 model: labelItem.info.parts
-                                Text { text: modelData.label; color: modelData.color; font.pointSize: theme.fontTiny; font.weight: Font.DemiBold }
+                                Text { text: modelData.label; color: modelData.color; font.pointSize: theme.fontTiny; font.weight: Font.DemiBold; textFormat: Text.PlainText }
                             }
                         }
                         // Cursor values when bubble does not fit in panel
@@ -1226,8 +1277,7 @@ FocusScope {
                     x: visible ? Math.round(chart.xOf(value)) : 0
                     width: 1
                     height: plotArea.height
-                    color: theme.text
-                    opacity: 0.06
+                    color: theme.chartGrid
                 }
             }
 
@@ -1265,8 +1315,7 @@ FocusScope {
                     x: Math.round(px)
                     width: 1
                     height: plotArea.height
-                    color: theme.text
-                    opacity: 0.09
+                    color: theme.chartAxis
                 }
             }
 
@@ -1320,15 +1369,14 @@ FocusScope {
                                     y: Math.round(panel.ty - modelData.value * panel.sy)
                                     width: panel.width
                                     height: 1
-                                    color: theme.text
-                                    opacity: 0.07
+                                    color: theme.chartGrid
                                 }
                             }
                             // Lowest & highest value of laps (consistency band)
                             GpuShape {
                                 visible: panel.info.envelope !== ""
                                 key: panel.info.envelope
-                                color: theme.tint(theme.text, theme.dark ? 0.12 : 0.1)
+                                color: theme.tint(theme.text, "subtle")
                                 revision: backend.revision
                                 transform: Matrix4x4 {
                                     matrix: panel.lineMatrix(0, 0)
@@ -1360,6 +1408,7 @@ FocusScope {
                                 anchors.centerIn: parent
                                 visible: panel.info.note !== ""
                                 text: panel.info.note
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontSmall
                             }
@@ -1384,7 +1433,7 @@ FocusScope {
                         height: markerText.implicitHeight + 2
                         radius: height / 2
                         color: theme.accentFill
-                        Text { id: markerText; anchors.centerIn: parent; text: modelData; color: theme.inkOn(theme.accentFill); font.weight: Font.Bold; font.pointSize: theme.fontCaption }
+                        Text { id: markerText; anchors.centerIn: parent; text: modelData; color: theme.inkOn(theme.accentFill); font.weight: Font.Bold; font.pointSize: theme.fontCaption; textFormat: Text.PlainText }
                     }
                 }
             }
@@ -1422,9 +1471,9 @@ FocusScope {
                     width: valueColumn.width + theme.em * 0.6
                     height: valueColumn.height + theme.em * 0.25
                     radius: theme.radiusSm
-                    color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.88)
+                    color: theme.surfaceFlyout
                     border.width: 1
-                    border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.12)
+                    border.color: theme.strokeSubtle
                     // Rows placed by bindings, not Column / Row: positioners lay out after values change, while
                     // frame is drawn, which asks for a second frame each cursor move (playback stutters)
                     Item {
@@ -1450,6 +1499,7 @@ FocusScope {
                                 Text {
                                     visible: chart.markWidth > 0
                                     text: bubble.info.series[index] ? chart.lapMark(bubble.info.series[index].lap) : ""
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     font.pointSize: theme.fontCaption
                                     font.weight: Font.Bold
@@ -1460,6 +1510,7 @@ FocusScope {
                                     id: valueText
                                     x: chart.markWidth
                                     text: parent.entry ? parent.entry.text : ""
+                                    textFormat: Text.PlainText
                                     color: bubble.info.series[index] ? bubble.info.series[index].color : theme.text
                                     font.pointSize: theme.fontSmall
                                     font.weight: Font.DemiBold
@@ -1470,6 +1521,7 @@ FocusScope {
                                     x: valueText.x + valueText.implicitWidth + theme.em * 0.4
                                     visible: text !== ""
                                     text: parent.entry ? parent.entry.diff : ""
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     font.pointSize: theme.fontCaption
                                     font.features: { "tnum": 1 }
@@ -1513,11 +1565,13 @@ FocusScope {
                             chart.setView(pressStart + shift, pressEnd + shift, false)
                         }
                     }
-                    if (!chart.playing) chart.setCursor(chart.valueOf(mouse.x))
+                    if (!chart.playing && containsMouse) chart.setCursor(chart.valueOf(mouse.x))
                 }
                 onReleased: function(mouse) {
                     if (mouse.button === Qt.LeftButton && !moved) backend.setPinned(chart.valueOf(mouse.x))  // click: kept
                     moved = false
+                    // Drag released outside the plot: cursor back to kept position (never left past the view)
+                    if (!containsMouse && !chart.playing && !chartMenu.visible) chart.restoreCursor()
                 }
                 onExited: if (!pressed && !chart.playing && !chartMenu.visible) chart.restoreCursor()
                 onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) chart.resetView(true) }
@@ -1562,7 +1616,7 @@ FocusScope {
         Action { text: i18n.tr("Previous Zoom") + "  (Alt+←)"; enabled: chart.historyIndex > 0; onTriggered: chart.stepHistory(-1) }
         Action { text: i18n.tr("Next Zoom") + "  (Alt+→)"; enabled: chart.historyIndex < chart.viewHistory.length - 1; onTriggered: chart.stepHistory(1) }
         Action { text: i18n.tr("Reset Channel Heights"); onTriggered: backend.resetPanelWeights() }
-        Action { text: i18n.tr("Sync zoom with map"); checkable: true; checked: backend.mapFollow; onTriggered: backend.setMapFollow(checked) }
+        Action { text: i18n.tr("Sync Zoom with Map"); checkable: true; checked: backend.mapFollow; onTriggered: backend.setMapFollow(checked) }
         MenuSeparator {}
         // Values of panel right-clicked
         Action {
@@ -1591,7 +1645,7 @@ FocusScope {
             onTriggered: backend.trackNotes.edit(chart.trackNoteAt(chart.cursorX))
         }
         Action {
-            text: i18n.tr("Remove Track Note")
+            text: i18n.tr("Delete Track Note")
             enabled: chart.hasCursor && chart.trackNoteAt(chart.cursorX) >= 0
             onTriggered: backend.trackNotes.remove(chart.trackNoteAt(chart.cursorX))
         }
@@ -1616,6 +1670,7 @@ FocusScope {
                 x: visible ? Math.max(0, Math.min(chart.xOf(value) - width / 2, axis.width - width)) : 0
                 y: theme.em * 0.2
                 text: visible ? chart.axisText(value) : ""
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 font.features: { "tnum": 1 }

@@ -147,8 +147,10 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_susp(self, target, data, third, susp_max):
-        """Suspension position"""
-        if target.last != data:
+        """Suspension position, repainted on visible change only (text, bar, mark & max range length)"""
+        scale = target.width_scale
+        style = (data < 0, 0 < susp_max <= data, round(third * scale), round(susp_max * scale))
+        if target.changed(data, style):
             target.last = data
             target.input_color = self.susp_color[data < 0]
             if third != -1:
@@ -157,4 +159,6 @@ class Realtime(Overlay):
                 target.update_maxrange(susp_max)
                 if data >= susp_max:  # highlight when exceeded max range
                     target.input_color = target.maxrange_color
+            else:  # not recorded (yet) for this car or session: no line of previous one
+                target.update_maxrange(0)
             target.update_input(abs(data))

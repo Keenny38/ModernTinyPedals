@@ -26,6 +26,7 @@ case & accent folded, in English and in app language. Find Option page: Qt Quick
 
 from __future__ import annotations
 
+import heapq
 import re
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -106,16 +107,27 @@ def cached_index() -> list[OptionEntry]:
     return _cached_index[1]
 
 
-def match_score(entry: OptionEntry, words: tuple[str, ...]) -> int:
+def word_patterns(words: tuple[str, ...]) -> tuple[re.Pattern, ...]:
+    """Pattern of each search word starting a name word, compiled once per search (not once per entry)"""
+    return tuple(re.compile(rf"(^|[\s_]){re.escape(word)}") for word in words)
+
+
+def match_score(entry: OptionEntry, words: tuple[str, ...], patterns: tuple[re.Pattern, ...] | None = None) -> int:
     """Rank of a matching entry: words found in option name count more than words of overlay name,
-    a word starting a name word more than one inside it, the whole phrase most"""
+    a word starting a name word more than one inside it, the whole phrase most
+
+    Args:
+        patterns: word_patterns(words), compiled here if not given.
+    """
+    if patterns is None:
+        patterns = word_patterns(words)
     label = entry.label or entry.text
     score = 0
-    for word in words:
+    for word, pattern in zip(words, patterns):
         if word not in label:
             continue  # found in section name only
         score += 2
-        if re.search(rf"(^|[\s_]){re.escape(word)}", label):
+        if pattern.search(label):
             score += 2
         if label.startswith(word):
             score += 1
@@ -124,68 +136,80 @@ def match_score(entry: OptionEntry, words: tuple[str, ...]) -> int:
     return score
 
 
+def search_words(text: str) -> tuple[str, ...]:
+    """Search words of typed text (case & accents folded)"""
+    return tuple(sort_key(text).split())
+
+
+def matching_options(entries: list[OptionEntry], words: tuple[str, ...]) -> list[OptionEntry]:
+    """Options matching all words (any order), in index order (not ranked, see rank_options)"""
+    if not words:
+        return []
+    return [entry for entry in entries if all(word in entry.text for word in words)]
+
+
+def rank_options(found: list[OptionEntry], words: tuple[str, ...], limit: int = MAX_RESULTS) -> list[OptionEntry]:
+    """Matching options best first: best score, then closest name (fewest other words), index order kept among
+    equals; only the limit best are sorted (a heap over the thousands matching a short text), 0 for all"""
+    patterns = word_patterns(words)
+
+    def rank(item: tuple[int, OptionEntry]) -> tuple[int, int, int]:
+        position, entry = item
+        return -match_score(entry, words, patterns), len(entry.label.split()), position
+
+    numbered = list(enumerate(found))
+    if 0 < limit < len(numbered):
+        best = heapq.nsmallest(limit, numbered, key=rank)
+    else:
+        best = sorted(numbered, key=rank)
+    return [entry for _, entry in best]
+
+
 def search_options(entries: list[OptionEntry], text: str, limit: int = MAX_RESULTS) -> list[OptionEntry]:
     """Options matching all words (any order, case & accents ignored), best matches first
 
     Args:
         limit: most results returned, 0 for all.
     """
-    words = tuple(sort_key(text).split())
-    if not words:
-        return []
-    found = [entry for entry in entries if all(word in entry.text for word in words)]
-    # Best score first, then closest name (fewest other words), page order kept among equals
-    found.sort(key=lambda entry: (-match_score(entry, words), len(entry.label.split())))
-    return found[:limit] if limit > 0 else found
+    words = search_words(text)
+    return rank_options(matching_options(entries, words), words, limit)
 
 
 def open_option(parent, entry: OptionEntry):
     """Open settings page of option, scrolled to (or filtered on) the option
 
-    Global options: Config page. Overlay options: Overlay Options page (saving restarts the edited
-    overlays itself). Module & preset options: their config page, filtered on the option.
+    Global options & settings of the loaded preset (units, API options, pace notes, module options): Settings
+    page. Overlay options: Overlay Options page (saving restarts the edited overlays itself).
     """
-    if entry.config_type == ConfigType.CONFIG:
-        from .app_settings import open_app_settings
-
-        return open_app_settings(parent, entry.section, entry.key)
     if entry.config_type == ConfigType.WIDGET:
         from .overlay_options import open_overlay_options
 
         return open_overlay_options(parent, entry.section, entry.key)
+    from .app_settings import open_app_settings
 
-    from .config import UserConfig
-
-    dialog = UserConfig(
-        parent=parent,
-        key_name=entry.section,
-        preset_name=cfg.filename.setting,
-        config_type=entry.config_type,
-        user_setting=cfg.user.setting,
-        default_setting=cfg.default.setting,
-        reload_func=reload_function(entry),
-    )
-    dialog.open()
-    # Same config already open as page: that page is shown & filtered (new copy is deleted)
-    shown = dialog.shown_dialog() if isinstance(dialog, BaseDialog) else dialog
-    search = getattr(shown, "edit_search", None)
-    if search is not None:
-        search.setText(entry.key)
-    return shown
+    return open_app_settings(parent, entry.section, entry.key)
 
 
 def reload_function(entry: OptionEntry):
-    """Apply changes of edited section"""
+    """Apply changes of edited section: its overlay or module restarted, a global option applied by what reads
+    its section (window refreshed, overlays or a server restarted, else the whole app reloaded, see
+    app_settings.apply_saved_sections), another preset section reloads the app"""
     if entry.config_type == ConfigType.WIDGET:
         return lambda: wctrl.reload(entry.section)
     if entry.config_type == ConfigType.MODULE:
         return lambda: mctrl.reload(entry.section)
-    return lambda: loader.reload(reload_preset=entry.config_type == ConfigType.CONFIG)
+    if entry.config_type == ConfigType.CONFIG:
+        from .app_settings import apply_saved_sections
+
+        return apply_saved_sections({entry.section}, (f"{entry.section}/{entry.key}",))
+    return lambda: loader.reload(reload_preset=False)
 
 
 @singleton_dialog("option_finder")
 class OptionFinder(BaseDialog):
     """Find Option page"""
+
+    SINGLE_PAGE = True  # Ctrl+Shift+F again: the open page shown, no second page built to find it
 
     def __init__(self, parent):
         from .quick import create_quick_view

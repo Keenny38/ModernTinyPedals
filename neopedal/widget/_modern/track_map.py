@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
-from ...module_info import minfo, sector_color
+from ...module_info import NO_TRACK_MAP, minfo, sector_color
 from ..track_map import TrackMapMixin, device_point
 from .base import CENTER, ModernOverlay
 from .cars import car_colors, status_color
@@ -150,7 +150,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
 
         self.map_paths: tuple[QPainterPath, ...] = ()
         self.sector_paths: tuple[QPainterPath, ...] = ()
-        self.update_map(-1)
+        self.update_map(NO_TRACK_MAP.lastModified)
 
     def update_map(self, data):
         """Map update: paths & static layer"""
@@ -187,7 +187,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         safetycar = self.update_safetycar()
         show_duration = self.show_prediction and self.wcfg["show_pitstop_duration"]
         self.refresh_keyed(positions, (
-            self.vehicles_key(positions, ratio),
+            self.cars_key(positions, ratio, self.nearby),
             safetycar and device_point(*safetycar, ratio),
             tuple((device_point(pos_x, pos_y, ratio), show_duration and self.pitstop_duration_text(pit_time), auto)
                   for pos_x, pos_y, pit_time, auto in self.update_predictions()),
@@ -212,7 +212,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
     def paint_static(self, painter: QPainter):
         theme = self.theme
         if self.wcfg["show_background"]:
-            panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+            panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for pen in (self.pen_edge, self.pen_road):
             painter.setPen(pen)

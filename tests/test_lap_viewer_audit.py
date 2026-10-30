@@ -626,8 +626,9 @@ def test_help_lists_every_map_key():
     assert "1-8" not in help_text and "1-8 coloring" not in map_text and "G off track, X track limits" in map_text
     i18n.set_language("Français")
     try:
-        assert "1-9" in i18n.tr("Keys: F fit, +/- zoom, arrows move, R turn, 1-9 coloring, B C S O points, "
-                                "L lockups, G off track, X track limits, Z zones, T trail, M ruler")
+        assert "1-9" in i18n.tr("Keys (map clicked): F fit, +/- zoom, arrows move, Shift+R turn, 1-9 coloring, "
+                                "Shift+B C S O points, Shift+L lockups, G off track, X track limits, Z zones, T trail, "
+                                "M ruler")
     finally:
         i18n.set_language("English")
 

@@ -197,9 +197,11 @@ def test_number_field_decimal_comma_in_french(french, harness):
 # --- 5, 6, 7. Animations off honoured, ValueRow tip read from the row, no redeclared property
 def test_animations_follow_theme_and_small_fixes():
     assert "duration: theme.animate ? 650 : 0" in qml("ResultsPositions.qml")
-    replays = qml("ReplayList.qml")  # waiting for the game: shared spinner (runs only while the page is shown)
-    assert "TpLoadingState" in replays and "loops: Animation.Infinite" not in replays
-    assert "running: state.visible && pageState.active" in qml("TpLoadingState.qml")
+    replays = qml("ReplayList.qml")  # waiting for the game: shared state view (its spinner runs only while shown)
+    assert "TpStateView" in replays and "loading:" in replays and "loops: Animation.Infinite" not in replays
+    # Waiting state spins with the shared spinner, which turns only while its page is shown
+    assert "TpSpinner {" in qml("TpLoadingState.qml") and "BusyIndicator" not in qml("TpLoadingState.qml")
+    assert "running: visible && pageState.active" in qml("TpSpinner.qml")
     for name in ("SettingRow.qml", "OverlayOptionRow.qml"):
         text = qml(name)
         assert "duration: theme.animate ? 350 : 0" in text and "duration: theme.animate ? 700 : 0" in text, name
@@ -289,14 +291,16 @@ def test_pages_use_shared_components():
         text = qml(name)
         assert "function clock(" not in text and "LiveClock {" in text, name
     for name in ("BroadcastDirector.qml", "RaceResults.qml", "StreamOverlays.qml"):
-        assert "TpToast {" in qml(name) and "toastTimer" not in qml(name), name
+        text = qml(name)  # shared toast: its own TpToast, or the one of TpDialogHost (page toast)
+        assert ("TpToast {" in text or "TpDialogHost {}" in text) and "toastTimer" not in text, name
     for name in ("BroadcastDirector.qml", "DriverStats.qml", "ReplayView.qml", "RaceCalculator.qml",
                  "StreamOverlays.qml"):
         text = qml(name)
         # Status dot of its own, or Pill { dot: true; pulsing: ... } (TpPulseDot inside)
         assert "loops: 3" not in text and ("TpPulseDot {" in text or "pulsing:" in text), name
     stats = qml("DriverStats.qml")
-    assert "component EmptyState" not in stats and "StatsEmpty {" in stats
+    # Empty states of the cards (split into Stats*Card.qml files): shared TpStateView
+    assert "component EmptyState" not in stats and "TpStateView {" in qml("StatsProgressionCard.qml")
 
 
 # --- 10. Session tab statistics from backend, same numbers as the former QML code

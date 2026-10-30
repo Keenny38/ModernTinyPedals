@@ -14,7 +14,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 from test_lap_reference import SHEET
 
-from neopedal.const_common import MAX_SECONDS, TEXT_NOLAPTIME
+from neopedal.const_common import MAX_SECONDS
 from neopedal.setting import cfg
 from neopedal.ui.quick import stats_common, stats_edits, stats_selection, stats_table
 from neopedal.userfile import driver_history, driver_stats, lap_reference
@@ -262,7 +262,7 @@ def test_plurals_and_dates(backend, monkeypatch):
         assert date.startswith(("09/10/", "9/10/"))  # French day first
     finally:
         i18n.set_language("English")
-    assert stats_common.format_date(0) == "-"
+    assert stats_common.format_date(0) == "—"  # missing value of every page
 
 
 # --- Quick improvements & additions
@@ -319,7 +319,7 @@ def test_durations_and_derived_columns(backend, monkeypatch):
     assert text_of(backend, OREGA, "consumption") == "40.0"  # 20 L / 50 km
     assert text_of(backend, OREGA, "win_rate") == "25 %" and text_of(backend, OREGA, "penalty_rate") == "0.25"
     assert text_of(backend, OREGA, "avg_finish") == "2.0"
-    assert text_of(backend, "Hyper - Ferrari", "speed") == "-"
+    assert text_of(backend, "Hyper - Ferrari", "speed") == "—"
     monkeypatch.setitem(cfg.units, "speed_unit", "MPH")
     assert stats_common.header_label("speed") == "Avg. Speed (mph)"
     assert stats_common.derived_value("win_rate", {"races": 4, "wins": 1}) == 25  # no starts recorded
@@ -450,7 +450,7 @@ def test_theoretical_best_read_again_when_changed(backend, monkeypatch):
                           [40.0, 40.2, 40.3], [40.1, 40.5, 40.9])
     backend.reload_stats()
     assert text_of(backend, OREGA, "theory") == "2:00.500" and text_of(backend, OREGA, "potential") == "1.000"
-    assert text_of(backend, "Hyper - Ferrari", "theory") == TEXT_NOLAPTIME
+    assert text_of(backend, "Hyper - Ferrari", "theory") == "—"  # missing value of every page
     reads = []
     original = stats_table.load_theoretical_best
     monkeypatch.setattr(stats_table, "load_theoretical_best", lambda *args: reads.append(1) or original(*args))
@@ -701,12 +701,14 @@ def test_qml_page_loads(page):
     page.resize(1400, 860)
     page.show()
     page.backend.selectRow(OREGA)
+    page.backend.setStatsTab(2)  # Compare tab: lap time reference
     QCoreApplication.processEvents()
     texts = item_texts(page.view)
     assert "Lap Time Reference" in texts and "Progression" in texts and "2:01.500" in texts
     page.backend.selectTrack("")
     QCoreApplication.processEvents()
     assert "Levels, All Tracks" in item_texts(page.view)
+    page.backend.setStatsTab(0)
 
 
 def test_qml_page_translated(dialogs, monkeypatch):

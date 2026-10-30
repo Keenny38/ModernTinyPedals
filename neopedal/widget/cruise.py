@@ -138,8 +138,8 @@ class Realtime(Overlay):
         """Update when vehicle on track"""
         # Compass
         if self.wcfg["show_compass"]:
-            orientation = api.read.vehicle.orientation_yaw_radians()
-            self.update_compass(self.bar_compass, orientation)
+            heading = compass_heading(api.read.vehicle.orientation_yaw_radians())
+            self.update_compass(self.bar_compass, heading)
 
         # Elevation
         if self.wcfg["show_elevation"]:
@@ -161,8 +161,7 @@ class Realtime(Overlay):
         """Compass"""
         if target.last != data:
             target.last = data
-            degree = 180 - calc.degrees(data)
-            target.text = f"{degree:03.0f}°{calc.select_grade(COMPASS_BEARINGS, degree):>2}"
+            target.text = f"{data:03d}°{calc.select_grade(COMPASS_BEARINGS, data):>2}"
             target.update()
 
     def update_elevation(self, target, data):
@@ -185,3 +184,8 @@ class Realtime(Overlay):
             target.last = data
             target.text = f"{self.unit_dist(data):>6.0f}{self.symbol_dist}"
             target.update()
+
+
+def compass_heading(yaw: float) -> int:
+    """Compass heading in whole degrees, 0 to 359 (never 360 for north)"""
+    return round(180 - calc.degrees(yaw)) % 360

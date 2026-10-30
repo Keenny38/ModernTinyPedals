@@ -10,11 +10,11 @@ Rectangle {
     palette.button: theme.raised
     palette.buttonText: theme.text
     palette.highlight: theme.accentFill
-    palette.highlightedText: "white"
+    palette.highlightedText: theme.accentInk
     palette.mid: theme.border
     palette.midlight: theme.hover
     palette.dark: theme.accent
     palette.light: theme.raised
-    palette.toolTipBase: theme.raised
+    palette.toolTipBase: theme.surfaceFlyout
     palette.toolTipText: theme.text
 }

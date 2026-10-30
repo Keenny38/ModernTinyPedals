@@ -29,7 +29,7 @@ from __future__ import annotations
 from contextlib import suppress
 from functools import partial
 
-from PySide6.QtCore import QMetaObject, QUrl
+from PySide6.QtCore import QMetaObject
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QColorDialog, QDialog, QFileDialog, QMessageBox, QVBoxLayout
@@ -94,6 +94,10 @@ class OverlayOptions(BaseDialog):
         super().__init__(parent)
         self.set_utility_title(tr(TITLE))
         self.setMinimumSize(UIScaler.size(40), UIScaler.size(26))
+        from ..i18n.options import hold_help_cache
+
+        hold_help_cache()  # option help texts kept while this page is open, see app_settings.release_help_texts
+        self._help_held = True
         self.module_control = module_control
         self.backend = OverlayOptionsBackend(self, self, module_control)
         self.backend.stateChanged.connect(self.refresh_modified)
@@ -190,7 +194,7 @@ class OverlayOptions(BaseDialog):
         self.commit_edits()  # value typed but not entered (app quit keeps focus in field): asked to save too
         if self.is_modified():
             confirm = QMessageBox.question(
-                self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+                self, tr("Confirm"), tr("<b>Save changes before continuing?</b>"),
                 buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
                 | QMessageBox.StandardButton.Cancel)
             if confirm == QMessageBox.StandardButton.Cancel or (
@@ -203,10 +207,15 @@ class OverlayOptions(BaseDialog):
         self.backend.close()
         view, self.view = self.view, None  # type: ignore[assignment]
         if view is not None:  # closed twice (nested event loop while asking to save)
-            view.setSource(QUrl())  # QML gone before the backend it binds to
-        from ..i18n.options import clear_help_cache
+            # QML torn down by the event loop, not setSource(QUrl()) here: Qt's image reader thread may be in
+            # the Python preview provider waiting for the GIL this call holds (deadlock, see OverlayView)
+            view.hide()
+            view.deleteLater()
+        if self._help_held:  # option help texts freed once no option page is open (closed twice: once)
+            self._help_held = False
+            from .app_settings import release_help_texts
 
-        clear_help_cache()  # option help texts (several MB) read again by next page needing them
+            release_help_texts()
 
     def reject(self):
         """Esc: close, asking to save pending changes"""
@@ -214,7 +223,14 @@ class OverlayOptions(BaseDialog):
 
     # Backend host: dialogs, notices & applying
     def confirm(self, text: str) -> bool:
+        """Question answered now (Apply into another preset: Ctrl+S & closing wait for it)"""
         return self.confirm_operation(title="Confirm", message=text)
+
+    def ask(self, text: str, action_text: str, on_result):
+        """Question in the page (TpDialogHost), else a dialog: Cancel, then the action button"""
+        from .quick import dialogs
+
+        dialogs.confirm(self, tr("Confirm"), text, action_text, on_result)
 
     def pick_color(self, color: str) -> str:
         return pick_color(self, color)
@@ -233,6 +249,12 @@ class OverlayOptions(BaseDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return dialog.result_text()
         return None
+
+    def open_folder(self, folder: str):
+        """Folder of a path option in file manager (as on the Settings page)"""
+        from .settings_host import SettingsHostMixin
+
+        SettingsHostMixin.open_folder(self, folder)  # type: ignore[arg-type]
 
     def notify(self, text: str):
         show_toast(self, text)

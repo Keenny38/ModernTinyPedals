@@ -29,15 +29,17 @@ import json
 import logging
 import math
 import os
+import threading
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
-from PySide6.QtCore import QMetaObject, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QMetaObject, QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
 from .. import units
 from ..i18n import localized, tr, trm  # localized: shared with stream graphics
+from ..process.results_text import MINUS, laptime_text, number_text, signed_text
 from ..setting import cfg
 from ..userfile import atomic_replace, encode_text
 from ..userfile.motec_import import import_ld_file
@@ -209,9 +211,6 @@ FEET_PER_METER = 3.280839895
 MM_PER_INCH = 25.4
 
 
-def number_text(value: float, decimals: int = 0) -> str:
-    """Number with decimals, decimal separator of app language"""
-    return localized(f"{value:.{decimals}f}")
 
 
 def distance_unit() -> tuple[float, str]:
@@ -342,20 +341,20 @@ def shade(color: QColor, index: int, count: int) -> QColor:
 
 def format_value(value: float) -> str:
     """Cursor value, 2 decimals, none for whole numbers (gear), decimal separator of app language"""
-    text = f"{value:.2f}"
+    text = f"{round(value, 2) + 0.0:.2f}".replace("-", MINUS)  # typeset minus sign, no "-0"
     return text[:-3] if text.endswith(".00") else localized(text)
 
 
 def format_channel_value(channel: Channel, value: float) -> str:
     """Value of channel for cursor & axis labels: pedals & steering in percent, signed deltas"""
     if channel.fixed_range in PERCENT_RANGES:
-        return f"{value * 100:.0f}%"
+        return f"{number_text(value * 100)}%"
     if channel.column == "delta":
-        return localized(f"{value:+.3f}")
+        return signed(value, 3)
     if channel.column == "delta_rate":
-        return localized(f"{value:+.2f}")
+        return signed(value, 2)
     if channel.column in INTEGER_CHANNELS:
-        return f"{value:.0f}"
+        return number_text(value)
     return format_value(value)
 
 
@@ -364,54 +363,150 @@ def format_axis_value(channel: Channel, value: float, span: float) -> str:
     if channel.fixed_range in PERCENT_RANGES or channel.column in DELTA_CHANNELS or channel.column in INTEGER_CHANNELS:
         return format_channel_value(channel, value)
     if span >= 20:
-        return f"{value:.0f}"
+        return number_text(value)
     if span >= 2:
         return number_text(value, 1)
     return number_text(value, 2)
 
 
 def format_laptime(seconds: float) -> str:
-    """Lap time text, "-" if unknown"""
-    if seconds <= 0:
-        return "-"
-    minutes, seconds = divmod(round(seconds, 3), 60)  # rounded first: 119.9996 is 2:00.000, not 1:60.000
-    return f"{int(minutes)}:{seconds:06.3f}" if minutes else f"{seconds:.3f}"
+    """Lap time text m:ss.sss, same as every app page (0:59.123), missing text if unknown"""
+    return laptime_text(seconds)
 
 
 def load_visible_channels(folder: str) -> list[str]:
-    """Visible channels saved in telemetry folder"""
+    """Visible channels saved in telemetry folder (settings a page keeps in memory first, see load_viewer_setting)"""
     try:
-        with open(os.path.join(folder, VIEWER_SETTING), encoding="utf-8") as file:
-            columns = json.load(file).get("channels", [])
+        columns = load_viewer_setting(folder).get("channels", [])
         columns = [column for column in columns if column in CHANNEL_MAP]
         return columns or list(DEFAULT_CHANNELS)
-    except (OSError, ValueError, AttributeError):
+    except (TypeError, AttributeError):  # not a list of names
         return list(DEFAULT_CHANNELS)
 
 
-def load_viewer_setting(folder: str) -> dict:
-    """Lap viewer settings (visible channels, corner sensitivity) saved in telemetry folder"""
+SETTING_WRITE_DELAY = 300  # ms, viewer setting changes merged into one file write (each lap check & option saves)
+
+
+def read_viewer_setting(folder: str) -> dict:
+    """Lap viewer settings file of telemetry folder read (empty if none or damaged)"""
     try:
         with open(os.path.join(folder, VIEWER_SETTING), encoding="utf-8") as file:
             setting = json.load(file)
         return setting if isinstance(setting, dict) else {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         return {}
+
+
+def write_viewer_setting(folder: str, text: bytes) -> None:
+    """Settings file written atomically (temporary file renamed: a crash while writing never leaves a broken file),
+    not flushed to disk (a flush took 20 ms to hundreds of ms on a busy disk; preferences lost by a power cut come
+    back to defaults)"""
+    try:
+        atomic_replace(os.path.join(folder, VIEWER_SETTING), text, fsync=False)
+    except OSError as error:
+        logger.warning("LAP VIEWER: unable to save setting: %s", error)
+
+
+class ViewerSettings(QObject):
+    """Lap viewer settings of a telemetry folder kept in memory while a page uses them (one writer: the page),
+    written on a thread once a moment after the last change
+
+    Saving read the file twice & wrote it on the UI thread at each lap check & each option (growing file: a lap
+    selection per track, pins, math channels). Reads come from memory (same values before the write).
+    """
+
+    def __init__(self, folder: str):
+        super().__init__()
+        self.folder = folder
+        self.users = 0  # pages using these settings (see acquire_viewer_settings)
+        self._lock = threading.Lock()
+        self._write_lock = threading.Lock()  # one file write at a time, newest text written last
+        self.setting = read_viewer_setting(folder)
+        self._pending: bytes | None = None  # settings text to write
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(SETTING_WRITE_DELAY)
+        self._timer.timeout.connect(self.flush)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self.setting)
+
+    def update(self, values: dict) -> None:
+        """Values changed, file written a moment later (changes meanwhile merged)"""
+        with self._lock:
+            self.setting.update(values)
+        self._timer.start()
+
+    def flush(self, wait: bool = False) -> None:
+        """Settings written on a thread (text made now: never changed while written), wait: before returning"""
+        self._timer.stop()
+        with self._lock:
+            text = encode_text(json.dumps(self.setting))
+        with self._write_lock:
+            self._pending = text
+        thread = threading.Thread(target=self._write, name="Lap viewer settings", daemon=True)
+        thread.start()
+        if wait:
+            thread.join()
+
+    def _write(self) -> None:
+        with self._write_lock:  # a write started later finds nothing left (text taken by the one before)
+            text, self._pending = self._pending, None
+            if text is not None:
+                write_viewer_setting(self.folder, text)
+
+
+_viewer_settings: dict[str, ViewerSettings] = {}  # telemetry folder (normalized): settings of pages open on it
+
+
+def _settings_key(folder: str) -> str:
+    return os.path.normcase(os.path.abspath(folder))
+
+
+def acquire_viewer_settings(folder: str) -> ViewerSettings:
+    """Settings of telemetry folder kept in memory by a page (UI thread), released by release_viewer_settings"""
+    key = _settings_key(folder)
+    settings = _viewer_settings.get(key)
+    if settings is None:
+        settings = _viewer_settings[key] = ViewerSettings(folder)
+    settings.users += 1
+    return settings
+
+
+def release_viewer_settings(folder: str) -> None:
+    """Page closed: pending changes written now (before the app may quit), memory copy dropped with the last page"""
+    key = _settings_key(folder)
+    settings = _viewer_settings.get(key)
+    if settings is None:
+        return
+    settings.users -= 1
+    settings.flush(wait=True)
+    if settings.users <= 0:
+        del _viewer_settings[key]
+        settings.deleteLater()
+
+
+def load_viewer_setting(folder: str) -> dict:
+    """Lap viewer settings (visible channels, corner sensitivity) saved in telemetry folder: those a page open on
+    the folder keeps in memory (newest, written a moment later), else read from the file"""
+    settings = _viewer_settings.get(_settings_key(folder))
+    return settings.snapshot() if settings is not None else read_viewer_setting(folder)
 
 
 def save_viewer_setting(folder: str, **values):
     """Update lap viewer settings, other saved values kept
 
-    Written to a temporary file then renamed: a crash while writing never leaves a broken file. Not flushed to
-    disk: saved on the UI thread at each viewer setting change, where a flush took 20 ms to hundreds of ms on a
-    busy disk; display preferences lost by a power cut come back to defaults.
+    A page open on the folder keeps them in memory and writes them merged a moment later on a thread (see
+    ViewerSettings); without a page (tools, tests) the file is written now.
     """
-    setting = load_viewer_setting(folder)
+    settings = _viewer_settings.get(_settings_key(folder))
+    if settings is not None:
+        settings.update(values)
+        return
+    setting = read_viewer_setting(folder)
     setting.update(values)
-    try:
-        atomic_replace(os.path.join(folder, VIEWER_SETTING), encode_text(json.dumps(setting)), fsync=False)
-    except OSError as error:
-        logger.warning("LAP VIEWER: unable to save setting: %s", error)
+    write_viewer_setting(folder, encode_text(json.dumps(setting)))
 
 
 def delta_limit(series: Sequence[Sequence[float]]) -> float:
@@ -457,7 +552,7 @@ def gain_color(rate: float, colorblind: bool = False) -> QColor:
 
 def signed(value: float, decimals: int = 0, unit: str = "") -> str:
     """Signed number text, minus sign as typeset, decimal separator of app language"""
-    return f"{localized(f'{value:+.{decimals}f}')}{unit}".replace("-", chr(0x2212))  # minus sign
+    return signed_text(value, decimals, unit)
 
 
 class LapEntry(NamedTuple):
@@ -490,11 +585,12 @@ def import_motec_log(window, filename: str) -> str:
     ]
     if viewers:
         viewers[-1].backend.exports.import_motec([filename])
-        return trm(f"Importing MoTeC log: <b>{name}</b>...")
+        return trm(f"Importing MoTeC log: <b>{name}</b>…")
     # Viewer not available: imported now
     try:
         paths = import_ld_file(filename, os.path.join(cfg.path.telemetry, IMPORT_FOLDER))
-    except (OSError, ValueError, MemoryError) as error:  # memory: huge log (or sizes made up by a broken file)
+    # memory: huge log (or sizes made up by a broken file), arithmetic: values out of range (crafted file)
+    except (OSError, ValueError, MemoryError, ArithmeticError) as error:
         logger.error("LAP VIEWER: unable to import %s: %s", filename, error)
         return trm(f"Unable to import <b>{name}</b>: {str(error) or type(error).__name__}")
     if not paths:
@@ -525,9 +621,9 @@ class LapViewer(BaseDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
         self.view.setFocus()  # page keys work without clicking it first
-        content = self.page_content()
-        if content is not None:
-            content.implicitWidthChanged.connect(self.page_minimum_changed)
+        root = self.view.rootObject()
+        if root is not None:  # language or fonts changed the toolbar & view switch
+            root.minimumPageWidthChanged.connect(self.page_minimum_changed)  # type: ignore[attr-defined]  # QML signal
         self.resize(UIScaler.size(90), UIScaler.size(48))
         # Deleted laps restored: shortcut of this page only (a QML shortcut also matched while another page of app
         # window was shown), text fields keep their own undo (shortcut override)
@@ -539,22 +635,14 @@ class LapViewer(BaseDialog):
     def update_undo_shortcut(self):
         self.undo_shortcut.setEnabled(self.backend.undoText != "")
 
-    def page_content(self):
-        """Toolbar, panels & status line of page (root ColumnLayout of LapViewer.qml), None if not loaded"""
+    def page_minimum_size(self) -> QSize:
+        """Page area minimum while shown in app window (see app.DialogPage), cut below: charts & side panel at
+        their minimum width (narrow page: lap list in its drawer) and toolbar with its pinned actions, the others
+        folded into its "⋯" menu (LapViewer.qml minimumPageWidth, about 41 em)"""
         root = self.view.rootObject()
         if root is None:
-            return None
-        return next((item for item in root.childItems() if item.metaObject().className() == "QQuickColumnLayout"), None)
-
-    def page_minimum_size(self) -> QSize:
-        """Page area minimum while shown in app window (see app.DialogPage), cut below: toolbar at its
-        full width (its buttons never shrink) and lap list, charts & side panel at their minimum width
-        (LapViewer.qml SplitView, 62 em with handles & margins)"""
-        width = UIScaler.size(64.6)
-        content = self.page_content()
-        if content is not None:  # toolbar, with page margins on both sides
-            width = max(width, math.ceil(content.implicitWidth() + 2 * content.x()))
-        return QSize(width, 0)
+            return QSize(UIScaler.size(42), 0)
+        return QSize(math.ceil(root.property("minimumPageWidth")), 0)
 
     def focus_charts(self):
         """Keys to charts: dialog shown as window gives them to first control of page (track list, lap search),

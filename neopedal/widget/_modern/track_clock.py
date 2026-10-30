@@ -31,17 +31,18 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...api_control import api
-from ...const_common import TEXT_NA
 from ...i18n import tr_overlay
 from ...module_info import minfo
-from .base import ModernOverlay, clock_samples, display_order_options
+from .base import DASH, NO_CLOCK, ModernOverlay, clock_samples, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import TrackClockConfig
 
-# Sunlight phase index (see module_mapping.set_sunlight_phase) -> label, is night coming
-PHASES = {0: ("Sunrise", False), 1: ("Midday", False), 2: ("Sunset", True), 3: ("Midnight", True)}
+# Sunlight phase index (see module_mapping.set_sunlight_phase) -> label, is night in progress (color of period in
+# progress, as classic design: night before sunrise & midnight, day before midday & sunset)
+PHASES = {0: ("Sunrise", True), 1: ("Midday", False), 2: ("Sunset", False), 3: ("Midnight", True)}
+COUNTDOWN_UNKNOWN = NO_CLOCK
 
 
 class Realtime(StatsMixin, ModernOverlay):
@@ -62,7 +63,7 @@ class Realtime(StatsMixin, ModernOverlay):
         stats = []
         if wcfg["show_track_clock"]:
             sample = self.widest("strong", clock_samples(wcfg["track_clock_format"]))
-            stats.append(Stat("track_clock", "Track time", sample, "strong", self.theme.warning))
+            stats.append(Stat("track_clock", "Track time", sample, "strong", self.theme.caution))
         if wcfg["show_time_scale"]:
             stats.append(Stat("time_scale", "Scale", "x88"))
         if wcfg["show_sunlight_phase_countdown"]:
@@ -96,19 +97,22 @@ class Realtime(StatsMixin, ModernOverlay):
             if key == "track_clock":
                 values.append(Value(strftime(self.wcfg["track_clock_format"], gmtime(track_time))))
             elif key == "time_scale":
-                values.append(Value(f"x{time_scale}" if 0 <= time_scale <= 60 else TEXT_NA, theme.text_dim))
+                values.append(Value(f"x{time_scale}" if 0 <= time_scale <= 60 else DASH, theme.text_dim))
             elif key == "countdown":
                 countdown, phase = self.next_phase(track_time, time_scale)
-                label, night = PHASES.get(phase, ("Sunrise", False))
-                values.append(Value(f"-{calc.sec2countdown(abs(countdown))}", theme.text,
-                                    sub=tr_overlay(label).upper(), sub_color=theme.blue if night else theme.warning))
+                if phase not in PHASES:  # sunrise & sunset not known
+                    values.append(Value(COUNTDOWN_UNKNOWN, theme.text_dim))
+                    continue
+                label, night = PHASES[phase]
+                values.append(Value(f"-{calc.sec2countdown(countdown)}", theme.text,
+                                    sub=tr_overlay(label).upper(), sub_color=theme.blue if night else theme.caution))
         self.refresh(tuple(values))
 
     def next_phase(self, track_time: float, time_scale: float) -> tuple[float, int]:
-        """Countdown to next sunlight phase, phase index"""
+        """Countdown to next sunlight phase, phase index (-1 if sunrise & sunset not known)"""
         sun_phases = minfo.mapping.sunlightPhases
         if sun_phases is None:
-            return 0.0, 0
+            return 0.0, -1
         for next_time, next_index in sun_phases:  # noqa: B007, used after loop
             if next_time > track_time:
                 break

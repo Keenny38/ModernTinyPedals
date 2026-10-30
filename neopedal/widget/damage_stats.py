@@ -25,9 +25,15 @@ from typing import TYPE_CHECKING
 from ..api_control import api
 from ..const_common import TEXT_NA
 from ._base import Overlay
+from ._common import tyre_punctured
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import DamageStatsConfig
+
+
+def tyre_integrity() -> float:
+    """Lowest tyre integrity (fraction): tread left, 0 for a flat tyre"""
+    return min(0.0 if punctured else wear for wear, punctured in zip(api.read.tyre.wear(), tyre_punctured()))
 
 
 class Realtime(Overlay):
@@ -217,7 +223,7 @@ class Realtime(Overlay):
             self.update_integrity(self.bar_susp, damage_susp, self.bar_style_susp, self.wcfg["low_suspension_integrity_threshold"])
 
         if self.wcfg["show_tyre_integrity"]:
-            damage_tyre = min(api.read.tyre.wear())
+            damage_tyre = tyre_integrity()
             self.update_integrity(self.bar_tyre, damage_tyre, self.bar_style_tyre, self.wcfg["low_tyre_integrity_threshold"])
 
     # GUI update methods

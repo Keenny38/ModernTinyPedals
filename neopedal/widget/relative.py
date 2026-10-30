@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from ..api_control import api
 from ..const_common import REL_TIME_DEFAULT
 from ..module_info import minfo
-from ._columns import DriverTable, lap_time_key, pit_time_key, styles
+from ._columns import DriverTable, lap_time_key, pit_time_key, pit_time_shown, styles
 from ._common import player_vehicle
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ class Realtime(DriverTable):
                 self.update_gap(self.bars_gap[idx], rel_time_gap, hi_player, state)
             # Vehicle laptime (values as displayed, text made once changed)
             if self.wcfg["show_laptime"]:
-                if (self.wcfg["show_pitstop_duration_while_requested_pitstop"] and plr_veh_info.pitRequested) or veh_info.pitTimer.pitting:
+                if (self.wcfg["show_pitstop_duration_while_requested_pitstop"] and plr_veh_info.pitRequested) or pit_time_shown(veh_info):
                     laptime = pit_time_key(veh_info.inPit, veh_info.pitTimer.elapsed)
                     is_class_best = False
                 else:
@@ -150,7 +150,7 @@ class Realtime(DriverTable):
                 color_index = 0
             if data[-1]:
                 if self.wcfg["show_time_gap_sign"] and data[0] != 0:
-                    text = f"{-data[0]:+.{self.gap_decimals}f}"[:self.gap_width].strip(".")
+                    text = f"{-data[0]:+z.{self.gap_decimals}f}"[:self.gap_width].strip(".")
                 else:
                     text = f"{abs(data[0]):.{self.gap_decimals}f}"[:self.gap_width].strip(".")
                 if not self.wcfg["time_gap_align_center"]:
@@ -180,6 +180,8 @@ def lap_difference_index(is_lapped, offset=2):
 
 def relative_data(ahead_list: list, behind_list: list, player_index: int, max_ahead: int, max_behind: int):
     """Generate relative time & index data"""
+    if len(ahead_list) < max_ahead + max_behind:  # few cars: some may be shown ahead and behind
+        ahead_list, behind_list = split_relative(ahead_list, behind_list, max_ahead, max_behind)
     # Yield ahead data
     ahead_count = len(ahead_list)
     while ahead_count < max_ahead:
@@ -203,3 +205,22 @@ def relative_data(ahead_list: list, behind_list: list, player_index: int, max_ah
     while behind_count < max_behind:
         behind_count += 1
         yield REL_TIME_DEFAULT
+
+
+def split_relative(ahead_list: list, behind_list: list, max_ahead: int, max_behind: int) -> tuple[list, list]:
+    """Each car once (fewer cars than rows): ahead if nearer ahead than behind, as rows allow; lists unchanged
+    if no car would be shown twice
+
+    Both lists hold every car: ahead list farthest ahead first (nearest behind first in behind list).
+    Cars kept ahead are the nearest ones of ahead list, the others are behind.
+    """
+    total = len(ahead_list)
+    shown_ahead = {index for _, index in ahead_list[max(total - max_ahead, 0):]}
+    if shown_ahead.isdisjoint(index for _, index in behind_list[:max_behind]):
+        return ahead_list, behind_list
+    gap_behind = {index: gap for gap, index in behind_list}
+    nearer_ahead = sum(gap <= -gap_behind.get(index, -gap) for gap, index in ahead_list)
+    ahead_count = min(max(nearer_ahead, total - max_behind), max_ahead)
+    ahead = ahead_list[total - ahead_count:]
+    shown_ahead = {index for _, index in ahead}
+    return ahead, [data for data in behind_list if data[1] not in shown_ahead]

@@ -544,6 +544,7 @@ class Realtime(
         self.recorder_impact_rebase = False
         self.impact_position: tuple = (0.0, 0.0)
         self.impact_visible = False  # last impact cone shown
+        self.impact_shown_time = 0.0  # game time of impact shown by cone (light impacts ignored)
         self.abs_active = False
         self.tc_active = False
         self.abs_level = -1
@@ -613,6 +614,8 @@ class Realtime(
         self.stats_lap = None  # lap of lap statistics
         self.last_fast_time: float = 0.0
         self.last_session_elapsed: float = 0.0
+        self.last_session: tuple[int, str] | None = None  # session stamp & track (see check_new_session)
+        self.stint_vehicle: str | None = None  # car of stint averages
         self.last_pits_state: bool | None = None
         self.brake_heat_balance = 0.0  # average front minus rear disc temperature (Celsius)
         self.impact_direction: str = ""  # arrow toward last impact reported by game

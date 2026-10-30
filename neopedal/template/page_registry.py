@@ -49,6 +49,9 @@ class PageSpec:
         rail: Position in default navigation rail, -1 if not in it.
         keywords: Extra words finding the tool in command palette (former names, what it covers), both languages.
         status: "module:function" giving status of tool page with an on / off switch ("on", "off", "" closed).
+        description: What the page is for, one short sentence (Tools page, command palette).
+        listed: Shown on Tools page & Tools menu (Settings: own menu, rail gear & Ctrl+, only).
+        wiki: User guide page (and #anchor) explaining the page, opened by the help button.
     """
 
     name: str
@@ -61,6 +64,9 @@ class PageSpec:
     rail: int = -1
     keywords: str = ""
     status: str = ""
+    description: str = ""
+    listed: bool = True
+    wiki: str = ""
 
     @property
     def rail_label(self) -> str:
@@ -73,35 +79,51 @@ class PageSpec:
 
 # Every page: main window pages first (in tab order), then tools by category (in card order)
 PAGES: tuple[PageSpec, ...] = (
-    PageSpec("home", "Home", "", PAGE_MAIN, letter="A", rail=0),  # home
-    PageSpec("widget", "Overlays", "", PAGE_MAIN, letter="W", rail=1),  # all apps grid
-    PageSpec("module", "Module", "", PAGE_MAIN, letter="M"),  # diagnostic
-    PageSpec("preset", "Preset", "", PAGE_MAIN, letter="P", rail=8),  # library
-    PageSpec("spectate", "Spectate", "", PAGE_MAIN, letter="S"),  # view
-    PageSpec("pacenotes", "Pacenotes", "", PAGE_MAIN, letter="N"),  # quick note
-    PageSpec("hotkey", "Hotkey", "", PAGE_MAIN, letter="H"),  # keyboard
-    PageSpec("tools", "Tools", "", PAGE_MAIN, letter="T"),  # developer tools
+    PageSpec("home", "Home", "", PAGE_MAIN, letter="A", rail=0,
+             description="Game, preset, overlays & last session at a glance", wiki="Getting-Started#home-page"),  # home
+    PageSpec("widget", "Overlays", "", PAGE_MAIN, letter="W", rail=1,
+             description="Turn overlays on or off and open their options", wiki="Overlays"),  # all apps grid
+    PageSpec("module", "Module", "", PAGE_MAIN, short_label="Modules", letter="M",
+             description="Data modules recording what overlays and tools need", wiki="Getting-Started#data-modules"),  # diagnostic
+    PageSpec("preset", "Preset", "", PAGE_MAIN, short_label="Presets", letter="P", rail=8,
+             description="Load, create, share and restore presets", wiki="Presets-and-Settings#presets"),  # library
+    PageSpec("spectate", "Spectate", "", PAGE_MAIN, letter="S",
+             description="Choose the driver overlays show while spectating", wiki="Getting-Started#spectate"),  # view
+    PageSpec("pacenotes", "Pacenotes", "", PAGE_MAIN, letter="N",
+             description="Pace notes played while driving", wiki="Presets-and-Settings#global-config"),  # quick note
+    PageSpec("hotkey", "Hotkey", "", PAGE_MAIN, short_label="Hotkeys", letter="H",
+             description="Keyboard, wheel and controller shortcuts", wiki="Getting-Started#hotkeys"),  # keyboard
+    PageSpec("tools", "Tools", "", PAGE_MAIN, letter="T",
+             description="Every tool and editor", wiki="Home#wiki-pages"),  # developer tools
     # Utilities
     PageSpec(
         "race_calculator", "Race Calculator", "", "Utilities",  # calculator
-        "race_calculator.RaceCalculator", short_label="Race", rail=7,
+        "race_calculator.RaceCalculator", short_label="Calculator", rail=7,
         keywords=(
             "fuel calculator tyre tire strategy planner energy pit stop stint "
             "carburant calculateur pneus strategie energie arret relais"
         ),
         status="neopedal.ui.quick.race_backend:race_status",
+        description="Fuel, energy, tyres and pit stops of a race, live or planned",
+        wiki="Race-Calculator",
     ),
     PageSpec(
-        "driver_stats_viewer", "Driver Stats Viewer", "", "Utilities",  # contact
+        "driver_stats_viewer", "Driver Stats", "", "Utilities",  # contact
         "driver_stats_viewer.DriverStatsViewer", short_label="Stats", rail=2,
+        description="Your laps, personal bests and progress on every track",
+        wiki="Driver-Stats",
     ),
     PageSpec(
         "track_map_viewer", "Track Map Viewer", "", "Utilities",  # map pin
         "track_map_viewer.TrackMapViewer", short_label="Map",
+        description="Track maps recorded by the app",
+        wiki="Telemetry-Viewer#track-map-viewer",
     ),
     PageSpec(
         "lap_viewer", "Lap Telemetry Viewer", "", "Utilities",  # area chart
         "lap_viewer.LapViewer", short_label="Telemetry", rail=6,
+        description="Compare recorded laps on charts and on the track map",
+        wiki="Telemetry-Viewer",
     ),
     PageSpec(
         "broadcast_director", "Broadcast Director", "", "Utilities",  # sliders (mixing desk)
@@ -111,6 +133,8 @@ PAGES: tuple[PageSpec, ...] = (
             "auto director tv production regie realisateur spectateur commentateur commentaires bagarre diffusion"
         ),
         status="neopedal.ui.quick.director_backend:director_status",
+        description="Cameras, live timing and graphics while spectating",
+        wiki="Broadcast-Director",
     ),
     PageSpec(
         "race_results_viewer", "Results & Replays", "", "Utilities",  # flag
@@ -120,6 +144,8 @@ PAGES: tuple[PageSpec, ...] = (
             "resultats classement arrivee grille tours secteurs incidents penalites "
             "game replays lmu replay incident contact crash watch rediffusion contacts accrochage revoir"
         ),
+        description="Results of past sessions and game replays",
+        wiki="Race-Results",
     ),
     PageSpec(
         "stream_overlay_view", "Stream Overlays", "", "Utilities",  # streaming
@@ -128,43 +154,55 @@ PAGES: tuple[PageSpec, ...] = (
             "obs streamlabs xsplit vmix twitch youtube stream streaming browser source broadcast layout "
             "diffusion direct source navigateur streamer"
         ),
+        description="Overlays as browser sources for OBS and other streaming apps",
+        wiki="Connections#stream-overlays-obs-streamlabs-xsplit-vmix",
     ),
     # Editors
     PageSpec(
         "heatmap_editor", "Heatmap Editor", "", "Editors",  # color
         "heatmap_editor.HeatmapEditor", short_label="Heatmap",
+        description="Color scales of temperatures and wear",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "brake_editor", "Brake Editor", "", "Editors",  # edit
         "brake_editor.BrakeEditor", short_label="Brakes",
+        description="Brake temperatures and failure thickness of each car",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "tyre_compound_editor", "Tyre Compound Editor", "", "Editors",  # edit
         "tyre_compound_editor.TyreCompoundEditor", short_label="Compounds",
+        description="Tyre compound names, letters and colors",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "vehicle_brand_editor", "Vehicle Brand Editor", "", "Editors",  # tag
         "vehicle_brand_editor.VehicleBrandEditor", short_label="Brands",
+        description="Car brands shown by overlays",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "vehicle_class_editor", "Vehicle Class Editor", "", "Editors",  # car
         "vehicle_class_editor.VehicleClassEditor", short_label="Classes",
+        description="Class names and colors",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "track_info_editor", "Track Info Editor", "", "Editors",  # info
         "track_info_editor.TrackInfoEditor", short_label="Tracks",
+        description="Track details: pit lane, orientation and more",
+        wiki="Presets-and-Settings#global-config",
     ),
     PageSpec(
         "track_notes_editor", "Track Notes Editor", "", "Editors",  # quick note
         "track_notes_editor.TrackNotesEditor", short_label="Notes",
-    ),
-    PageSpec(
-        "layout_editor", "Layout Editor", "", "Editors",  # view all
-        "layout_editor.LayoutEditor", short_label="Layout",
+        description="Notes shown on a track at a given distance",
+        wiki="Telemetry-Viewer",
     ),
     # Management
     PageSpec(
-        "app_settings", "Config", "", "Management",  # settings
+        "app_settings", "Settings", "", "Management",  # settings
         "app_settings.AppSettings",
         keywords=(
             "settings configuration options preferences application config.json overlay style theme notification "
@@ -172,18 +210,21 @@ PAGES: tuple[PageSpec, ...] = (
             "parametres reglages preferences style theme notifications compatibilite controle a distance "
             "tableau de bord dossiers langue demarrage mise a jour sauvegardes"
         ),
-    ),
-    PageSpec(
-        "preset_compare", "Preset Comparison", "", "Management",  # switch
-        "preset_compare.PresetCompare", short_label="Compare",
+        description="Every application option",
+        wiki="Presets-and-Settings#global-config",
+        listed=False,
     ),
     PageSpec(
         "plugin_manager", "Plugin Manager", "", "Management",  # puzzle
         "plugin_manager.PluginManager", short_label="Plugins",
+        description="Install, trust and enable overlay plugins",
+        wiki="Overlays#widget-plugins",
     ),
     PageSpec(
-        "perf_view", "Widget Performance", "", "Management",  # speed
+        "perf_view", "Overlay Performance", "", "Management",  # speed
         "perf_view.PerformanceView", short_label="Performance",
+        description="CPU time of each overlay and module, game data state",
+        wiki="Troubleshooting#performance",
     ),
     # Advanced
     PageSpec(
@@ -193,8 +234,23 @@ PAGES: tuple[PageSpec, ...] = (
             "telemetry replay tpreplay record playback without game overlay test "
             "rejeu telemetrie enregistrer lecture sans jeu"
         ),
+        description="Record a session and play it back without the game",
+        wiki="Connections#session-recorder",
     ),
 )
+
+
+# User guide page of dialog pages absent from PAGES (help button), by dialog class name
+DIALOG_WIKI = {
+    "OverlayOptions": "Getting-Started#the-overlay-options-page",
+    "OptionFinder": "Getting-Started#find-any-option",
+    "ReleaseNotesDialog": "Updates-and-Security#whats-new-page",
+    "About": "Home#license-and-credits",
+    "LogInfo": "Troubleshooting#logs",
+    "BugReport": "Troubleshooting#report-a-bug",
+    "RailEditor": "Getting-Started#the-main-window",
+    "QuickAccessEditor": "Getting-Started#home-page",
+}
 
 
 def check_pages(pages: tuple[PageSpec, ...]):
@@ -223,14 +279,36 @@ def tool_pages(pages: tuple[PageSpec, ...] = PAGES) -> tuple[PageSpec, ...]:
     return tuple(page for category in TOOL_CATEGORIES for page in pages if page.category == category)
 
 
-def tool_sections(pages: tuple[PageSpec, ...] = PAGES) -> tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...]:
-    """Tools page sections: (title, ((label, glyph, "module.DialogClass"), ...)), empty sections left out"""
+def tool_sections(
+    pages: tuple[PageSpec, ...] = PAGES, listed_only: bool = False,
+) -> tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...]:
+    """Tool sections: (title, ((label, glyph, "module.DialogClass"), ...)), empty sections left out
+
+    Args:
+        listed_only: only tools of Tools page & Tools menu (see PageSpec.listed), else every tool page
+            (navigation rail entries, pages reopened at startup).
+    """
     sections = []
     for category in TOOL_CATEGORIES:
-        tools = tuple((page.label, page.glyph, page.dialog) for page in pages if page.category == category)
+        tools = tuple((page.label, page.glyph, page.dialog) for page in pages
+                      if page.category == category and (page.listed or not listed_only))
         if tools:
             sections.append((category, tools))
     return tuple(sections)
+
+
+def page_spec(key: str, pages: tuple[PageSpec, ...] = PAGES) -> PageSpec | None:
+    """Page by name (page key, tool module name) or by tool dialog path or class name, None if unknown"""
+    for page in pages:
+        if key in (page.name, page.dialog) or (page.dialog and page.dialog.rsplit(".", 1)[-1] == key):
+            return page
+    return None
+
+
+def page_wiki(class_name: str) -> str:
+    """User guide page (and #anchor) of a dialog page by class name: its PageSpec, else DIALOG_WIKI, "" if none"""
+    spec = page_spec(class_name)
+    return spec.wiki if spec is not None and spec.wiki else DIALOG_WIKI.get(class_name, "")
 
 
 def default_rail(pages: tuple[PageSpec, ...] = PAGES) -> str:

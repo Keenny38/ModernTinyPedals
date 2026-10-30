@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Widget performance view
+Overlay performance view
 """
 
 from PySide6.QtCore import QBasicTimer, Qt
@@ -38,7 +38,7 @@ from ..i18n.options import module_label
 from ..perf_monitor import PerfMonitor, ProcessMonitor, connection_health, endpoint_rows, gc_stats
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 
-HEADER = ("Widget", "Event", "Calls/s", "Avg (ms)", "Max (ms)", "Total (ms)")
+HEADER = ("Overlay", "Event", "Calls/s", "Avg (ms)", "Max (ms)", "Total (ms)")
 THREAD_HEADER = ("Thread", "CPU %", "CPU time (s)")
 REFRESH_MS = 2000  # tables refreshed this often while shown (thread CPU times of whole process read)
 REST_HEADER = ("Rest API resource", "Status", "Last answer (s ago)", "Last error")
@@ -85,7 +85,7 @@ class PerformanceView(BaseDialog):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.set_utility_title(tr("Widget Performance"))
+        self.set_utility_title(tr("Overlay Performance"))
         self._update_timer = QBasicTimer()
         self.destroyed.connect(self._update_timer.stop)  # page deleted without close (language change)
 
@@ -136,7 +136,7 @@ class PerformanceView(BaseDialog):
         layout_connection.addWidget(self.table_rest)
 
         self.tabs = QTabWidget(self)
-        self.tabs.addTab(tab_widgets, tr("Widgets"))
+        self.tabs.addTab(tab_widgets, tr("Overlay Times"))
         self.tabs.addTab(tab_threads, tr("App & modules"))
         self.tabs.addTab(tab_connection, tr("Game data"))
         self.tabs.currentChanged.connect(self.tab_changed)

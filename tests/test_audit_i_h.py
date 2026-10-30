@@ -9,8 +9,9 @@ from importlib import import_module
 from math import degrees, pi, radians
 
 import pytest
+import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from neopedal.api_control import api
 from neopedal.setting import cfg
@@ -202,18 +203,24 @@ def test_class_key_cached():
 # --- Lap Library: rename, delete & undo on a worker thread
 @pytest.fixture
 def library(ui_env, monkeypatch):
-    from neopedal.ui.lap_library import LapLibrary
+    """Imported laps library panel of a lap viewer (backend.library), listed; page changes recorded"""
+    from neopedal.ui.lap_viewer import LapViewer
     from tests.test_lap_library import import_log, wait_library
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     import_log(cfg.path.telemetry, "Spa race", [139.5, 138.2])
-    parent = QWidget()
+    viewer = LapViewer(None)
+    page = viewer.backend.library
     changes: list[dict] = []
-    page = LapLibrary(parent, cfg.path.telemetry, lambda paths: None, changes.append)
+    real_changed = viewer.backend.library_changed
+    monkeypatch.setattr(viewer.backend, "library_changed", lambda moved: (changes.append(moved), real_changed(moved)))
     page.changes = changes
+    page.viewer = viewer
+    page.open()
     wait_library(page)
     yield page
-    parent.deleteLater()
+    if shiboken6.isValid(viewer):
+        viewer.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
@@ -240,94 +247,79 @@ def wait_until(check, timeout: float = 10.0):
     assert check()
 
 
+def group_row(library) -> dict:
+    return dict(library.model.rows[0])
+
+
 def test_rename_in_background_buttons_disabled_and_single_run(library, monkeypatch):
-    from neopedal.ui import lap_library
+    from neopedal.ui.quick import lap_library_panel
     from tests.test_lap_library import wait_library
 
-    inputs = []
-    monkeypatch.setattr(lap_library.TextInputDialog, "show", lambda self: inputs.append(self))
-    gate, threads = held_job(monkeypatch, lap_library, "rename_group")
-    library.tree.topLevelItem(0).setSelected(True)
-    library.rename()
-    assert inputs[0]._on_accept("Spa best")  # input closed at once, rename runs on a worker thread
+    gate, threads = held_job(monkeypatch, lap_library_panel, "rename_group")
+    assert library.rename("Spa race", "Spa best")  # name taken at once, rename runs on a worker thread
     wait_until(lambda: threads)
     assert threads[0] != threading.current_thread().name
-    assert not library.button_rename.isEnabled() and not library.button_delete.isEnabled()
+    assert library.property("writing")  # rename & delete disabled (panel buttons)
     assert library.is_refreshing()
-    library.rename()  # clicked again: nothing while a write runs
-    library.delete()
-    assert len(inputs) == 1 and len(threads) == 1
+    assert not library.rename("Spa race", "Other")  # asked again: nothing while a write runs
+    library.select(group_row(library)["key"], "set")
+    library.deleteSelected()
+    assert len(threads) == 1
     gate.set()
     wait_library(library)
-    assert library.button_rename.isEnabled() and library.button_delete.isEnabled()
-    assert library.tree.topLevelItem(0).text(library.COL_NAME) == "Spa best"
+    assert not library.property("writing")
+    assert group_row(library)["title"] == "Spa best"
     assert len(library.changes) == 1 and all("Spa best" in new for new in library.changes[0].values())
 
 
 def test_rename_error_told_once_done(library, monkeypatch):
-    from neopedal.ui import lap_library
+    from neopedal.ui.quick import lap_library_panel
     from tests.test_lap_library import wait_library
-
-    inputs = []
-    monkeypatch.setattr(lap_library.TextInputDialog, "show", lambda self: inputs.append(self))
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
 
     def refused(*args):
         raise PermissionError(13, "file in use")
 
-    monkeypatch.setattr(lap_library, "rename_group", refused)
-    library.tree.topLevelItem(0).setSelected(True)
-    library.rename()
-    assert inputs[0]._on_accept("Spa best")
+    monkeypatch.setattr(lap_library_panel, "rename_group", refused)
+    assert library.rename("Spa race", "Spa best")
     wait_library(library)
-    assert warnings and "file in use" in warnings[0] and not library.changes
-    assert library.button_rename.isEnabled() and library.tree.topLevelItem(0).text(library.COL_NAME) == "Spa race"
+    assert "file in use" in library.property("problem") and not library.changes
+    assert not library.property("writing") and group_row(library)["title"] == "Spa race"
 
 
 def test_delete_and_undo_in_background(library, monkeypatch):
-    from neopedal.ui import lap_library
+    from neopedal.ui.quick import lap_library_panel
     from tests.test_lap_library import wait_library
 
-    monkeypatch.setattr(lap_library, "show_toast", lambda *args, **kwargs: None)
-    gate, threads = held_job(monkeypatch, lap_library, "delete_laps")
-    paths = library.lap_paths([library.tree.topLevelItem(0)])
-    library.tree.topLevelItem(0).child(0).setSelected(True)
-    library.delete()
+    backend = library.viewer.backend
+    gate, threads = held_job(monkeypatch, lap_library_panel, "delete_laps")
+    paths = [row["path"] for row in library.model.rows if row["kind"] == "lap"]
+    library.select(paths[0], "set")
+    library.deleteSelected()
     wait_until(lambda: threads)
-    assert threads[0] != threading.current_thread().name and not library.button_delete.isEnabled()
+    assert threads[0] != threading.current_thread().name and library.property("writing")
     assert os.path.exists(paths[0])  # held: not moved yet
     gate.set()
     wait_library(library)
     assert not os.path.exists(paths[0]) and library.changes == [{paths[0]: ""}]
-    assert library.button_undo.isVisibleTo(library) and library.button_undo.isEnabled()
-    assert library.tree.topLevelItem(0).childCount() == 1
+    assert backend.undoText != ""  # one undo with recorded laps (page toast, Ctrl+Z)
+    assert group_row(library)["count"] == 1
 
-    gate, threads = held_job(monkeypatch, lap_library, "restore_laps")
-    library.undo_delete()
-    library.undo_delete()  # twice: restored once
-    wait_until(lambda: threads)
-    assert len(threads) == 1 and not library.button_undo.isVisibleTo(library)
-    gate.set()
+    backend.undoDelete()
+    backend.undoDelete()  # twice: restored once
+    assert backend.undoText == ""
     wait_library(library)
-    assert os.path.exists(paths[0]) and library.tree.topLevelItem(0).childCount() == 2
+    assert os.path.exists(paths[0]) and group_row(library)["count"] == 2
 
 
 def test_library_closed_before_rename_done_viewer_still_told(library, monkeypatch):
-    from neopedal.ui import lap_library
+    from neopedal.ui.quick import lap_library_panel
 
-    inputs = []
-    monkeypatch.setattr(lap_library.TextInputDialog, "show", lambda self: inputs.append(self))
-    gate, threads = held_job(monkeypatch, lap_library, "rename_group")
-    changes = library.changes
-    library.tree.topLevelItem(0).setSelected(True)
-    library.rename()
-    assert inputs[0]._on_accept("Spa best")
+    gate, threads = held_job(monkeypatch, lap_library_panel, "rename_group")
+    assert library.rename("Spa race", "Spa best")
     wait_until(lambda: threads)
-    library.close()  # deleted on close
-    library.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    library.closed()  # panel closed: page still told of moved laps once done
     gate.set()
-    wait_until(lambda: changes)  # lap viewer told of moved laps, library gone: nothing else
-    assert all("Spa best" in new for new in changes[0].values())
-    assert not lap_library.file_jobs().running
+    wait_until(lambda: library.changes)
+    assert all("Spa best" in new for new in library.changes[0].values())
+    wait_until(lambda: not lap_library_panel.file_jobs().running)
+

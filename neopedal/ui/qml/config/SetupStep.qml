@@ -41,6 +41,6 @@ Flickable {
         width: Math.max(0, Math.min(flick.width - theme.em * 4, flick.maxWidth))
         x: Math.max(theme.em * 2, Math.round((flick.width - width) / 2))  // centered on wide windows (as its header)
         y: theme.space1
-        spacing: theme.em * 0.8
+        spacing: theme.space5
     }
 }

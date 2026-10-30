@@ -38,11 +38,13 @@ Runs before logging is set: messages are kept and written to log by log_import_r
 from __future__ import annotations
 
 import errno
+import ipaddress
 import json
 import logging
 import os
 import shutil
 from datetime import datetime
+from typing import Any, cast
 
 from . import atomic_replace, encode_text, read_json
 
@@ -51,7 +53,10 @@ logger = logging.getLogger(__name__)
 REQUEST_FILE = "import_request.json"
 CONFIG_FILE = "config.json"
 SETTINGS_FILES = (CONFIG_FILE, "shortcuts.json")  # one of them: a global settings folder
-SKIPPED_FILES = ("pid.log", "*.lock", "*.tmp", "startup.marker", REQUEST_FILE, ".lap_cache")
+# Never copied: files of this run, and data folders rebuilt by the app or large (a config folder also holding
+# user data, by a user path pointed at it): recorded laps, pictures fetched from the game, deleted presets
+SKIPPED_FILES = ("pid.log", "*.lock", "*.tmp", "startup.marker", REQUEST_FILE, ".lap_cache",
+                 "telemetry", "gameimage", "trash")
 TEMP_SUFFIX = ".importing"
 # Copy errors of a failing disk (full, quota, I/O, CRC): copy not used (files cut short), unlike files in use
 FATAL_COPY_ERRORS = ("[Errno 28]", "[Errno 122]", "[Errno 5]", "[WinError 112]", "[WinError 39]", "[WinError 23]",
@@ -62,6 +67,16 @@ ASIDE_SUFFIX = ".before-import-"  # + time stamp: previous folder set aside
 MAX_IMPORT_ATTEMPTS = 3
 TEMPORARY_ERRNOS = (errno.EACCES, errno.EBUSY, errno.ETXTBSY, errno.EPERM)
 TEMPORARY_WINERRORS = (5, 32, 33)  # access denied, sharing violation, lock violation
+# Never taken from source folder (may come from someone else), see keep_receiver_settings: (section, option)
+DEFAULT_OPTIONS = (("application", "update_repository"),)  # default value
+RECEIVER_OPTIONS = (  # value of previous settings, else default
+    ("web_dashboard", "enable_lan_access"),
+    ("web_dashboard", "access_code"),
+    ("stream_overlay", "enable_lan_access"),
+    ("stream_overlay", "access_token"),
+)
+PLUGIN_TRUST_FILE = "plugin_trust.json"  # plugin_loader.TRUST_FILE (not imported: loads plugin & Qt code)
+PRESET_FOLDER = "settings"  # default preset folder of config folder
 
 _report: list[tuple[int, str]] = []  # (log level, message)
 
@@ -171,6 +186,139 @@ def rewrite_config_paths(config_file: str, path_map: dict[str, str]) -> int:
     return changed
 
 
+def _read_json_dict(filename: str) -> dict:
+    """JSON object of file, empty if missing or invalid"""
+    try:
+        with open(filename, encoding="utf-8-sig") as jsonfile:
+            data = json.load(jsonfile)
+    except (OSError, RecursionError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def keep_receiver_config(config_file: str, previous_file: str) -> list[str]:
+    """Security options of imported config.json not taken from source folder, returns "section.option" changed
+
+    Source folder may come from someone else: update source back to default (official releases), LAN access
+    & access secrets of servers kept from previous settings (else default: off, new secret generated on use),
+    network paths (opened at start, sign-in hash sent to share host) back to default.
+    """
+    from ..template.setting_global import GLOBAL_DEFAULT
+    from ..validator import is_network_path
+    from .private_option import is_private
+
+    config = _read_json_dict(config_file)
+    if not config:
+        return []
+    defaults = cast("dict[str, dict[str, Any]]", GLOBAL_DEFAULT)
+    previous = _read_json_dict(previous_file) if previous_file else {}
+    changed: list[str] = []
+
+    def replace(section: str, key: str, value: Any) -> None:
+        options = config.get(section)
+        if isinstance(options, dict) and key in options and options[key] != value:
+            options[key] = value
+            changed.append(f"{section}.{key}")
+
+    for section, key in DEFAULT_OPTIONS:
+        replace(section, key, defaults[section][key])
+    for section, key in RECEIVER_OPTIONS:
+        own = previous.get(section)
+        replace(section, key, own[key] if isinstance(own, dict) and key in own else defaults[section][key])
+    for section, options in config.items():
+        default = defaults.get(section, {})
+        if not isinstance(options, dict):
+            continue
+        for key, value in options.items():
+            if is_private(key) and is_network_path(value) and key in default:
+                replace(section, key, default[key])
+    if changed:
+        atomic_replace(config_file, encode_text(json.dumps(config, indent=4)))
+    return changed
+
+
+def keep_receiver_trust(config_folder: str, aside: str) -> bool:
+    """Plugin trust of source folder not used (would run plugins of this computer the user never reviewed here):
+    previous trust file put back (removed if none), True if changed"""
+    target = os.path.join(config_folder, PLUGIN_TRUST_FILE)
+    previous = os.path.join(aside, PLUGIN_TRUST_FILE) if aside else ""
+    imported, own = os.path.isfile(target), bool(previous) and os.path.isfile(previous)
+    if not imported and not own:
+        return False
+    if imported and own:
+        with open(target, "rb") as imported_file, open(previous, "rb") as own_file:
+            if imported_file.read() == own_file.read():
+                return False
+    if own:
+        shutil.copyfile(previous, f"{target}.tmp")
+        os.replace(f"{target}.tmp", target)
+    else:
+        os.remove(target)
+    return True
+
+
+def is_loopback_host(host: Any) -> bool:
+    """Game API host on this computer (localhost, 127.x, ::1)"""
+    if not isinstance(host, str):
+        return False
+    host = host.strip().strip("[]").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def keep_local_game_api(settings_folder: str) -> list[str]:
+    """Imported presets of settings folder never connect to a game API on another host (shared memory needs
+    the game on this computer): host & port back to default, returns "preset: section" changed"""
+    from ..template.setting_api import API_DEFAULT
+
+    changed: list[str] = []
+    try:
+        names = sorted(name for name in os.listdir(settings_folder) if name.lower().endswith(".json"))
+    except OSError:
+        return changed
+    for name in names:
+        filename = os.path.join(settings_folder, name)
+        preset = _read_json_dict(filename)
+        sections = [section for section in API_DEFAULT if isinstance(preset.get(section), dict)
+                    and "url_host" in preset[section] and not is_loopback_host(preset[section]["url_host"])]
+        if not sections:
+            continue
+        for section in sections:
+            preset[section]["url_host"] = API_DEFAULT[section]["url_host"]
+            preset[section]["url_port"] = API_DEFAULT[section]["url_port"]
+            changed.append(f"{name[:-5]}: {section}")
+        try:
+            atomic_replace(filename, encode_text(json.dumps(preset, indent=4)))
+        except OSError as error:
+            _record(logging.ERROR, f"IMPORT: game API address of {name} not reset: {error}")
+    return changed
+
+
+def keep_receiver_settings(config_folder: str, aside: str) -> None:
+    """Settings of imported folder that must not come from someone else replaced, see keep_receiver_config,
+    keep_receiver_trust & keep_local_game_api (messages recorded)"""
+    config_file = os.path.join(config_folder, CONFIG_FILE)
+    try:
+        changed = keep_receiver_config(config_file, os.path.join(aside, CONFIG_FILE) if aside else "")
+        if changed:
+            _record(logging.WARNING, f"IMPORT: not imported, current or default value kept: {', '.join(changed)}")
+    except OSError as error:
+        _record(logging.ERROR, f"IMPORT: security options not reset in {CONFIG_FILE}: {error}")
+    try:
+        if keep_receiver_trust(config_folder, aside):
+            _record(logging.WARNING, "IMPORT: trusted plugins not imported, current ones kept")
+    except OSError as error:
+        _record(logging.ERROR, f"IMPORT: trusted plugins of source not removed: {error}")
+    changed = keep_local_game_api(os.path.join(config_folder, PRESET_FOLDER))
+    if changed:
+        _record(logging.WARNING, f"IMPORT: game API address on another host reset to this computer: "
+                                 f"{', '.join(changed)}")
+
+
 def is_fatal_copy_error(error: shutil.Error) -> bool:
     """Copy error of a failing disk (copied files may be cut short), not files left out (in use, locked)"""
     entries = error.args[0] if error.args and isinstance(error.args[0], list) else [error.args]
@@ -194,7 +342,8 @@ def replace_folder(source: str, target: str, stamp: str) -> str:
     if os.path.exists(temp_folder):  # left by an interrupted import
         shutil.rmtree(temp_folder)
     try:
-        shutil.copytree(source, temp_folder, ignore=shutil.ignore_patterns(*SKIPPED_FILES))
+        # Links copied as links (never followed: a link to a large or unrelated tree is not copied whole)
+        shutil.copytree(source, temp_folder, symlinks=True, ignore=shutil.ignore_patterns(*SKIPPED_FILES))
     except shutil.Error as error:  # other files copied: unreadable ones (in use) left out
         if is_fatal_copy_error(error):
             shutil.rmtree(temp_folder, ignore_errors=True)
@@ -279,4 +428,5 @@ def apply_pending_import(config_folder: str, data_folder: str = "") -> bool:
                 _record(logging.INFO, f"IMPORT: {changed} user path(s) updated in {CONFIG_FILE}")
         except (OSError, RecursionError, ValueError) as error:  # invalid json: loader resets it as usual
             _record(logging.WARNING, f"IMPORT: user paths not updated in {CONFIG_FILE}: {error}")
+    keep_receiver_settings(config_folder, aside)
     return True

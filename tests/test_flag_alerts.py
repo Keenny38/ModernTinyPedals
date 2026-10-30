@@ -177,18 +177,18 @@ def test_damage_chip_and_classic_bar(widgets, monkeypatch):
 def test_blue_flag_gap(widgets, monkeypatch):
     reader(monkeypatch, "session", "blue_flag", True)
     minfo.vehicles.nearestBlueClass = "Test Class"  # no class style: name as is
-    minfo.vehicles.nearestTraffic = 0.84
+    monkeypatch.setattr(minfo.vehicles, "nearestBlueGap", 0.84)  # car lapping (not nearest car behind)
     widget = widgets("flag")
     update(widget)
     chip = chips(widget)["blue_flag"]
-    assert (chip.caption, chip.value) == ("Test Class", "0.8s")  # class on caption: value never cut
+    assert (chip.caption, chip.value) == ("Test Class", "0.8")  # class on caption, gap without unit like tables
     classic = widgets("flag", modern=False)
     assert classic.blue_flag_text(12.0) == "Test0.8"
-    minfo.vehicles.nearestTraffic = 99.0  # too far: time under blue flag
+    minfo.vehicles.nearestBlueGap = 99.0  # too far: time under blue flag
     update(widget)
     assert chips(widget)["blue_flag"].value == "0s"
     assert classic.blue_flag_text(12.0) == "Test 12"
-    minfo.vehicles.nearestTraffic = 0.84
+    minfo.vehicles.nearestBlueGap = 0.84
     no_gap = widgets("flag", show_blue_flag_gap=False)
     update(no_gap)
     assert chips(no_gap)["blue_flag"].value == "0s"
@@ -333,6 +333,8 @@ def test_alert_flashes_when_raised(widgets, monkeypatch):
     update(widget)
     assert not chips(widget)["penalty"].flash
     reader(monkeypatch, "vehicle", "penalty", Penalty())
+    update(widget)
+    clock["now"] = 101.7  # gone for more than a moment
     update(widget)
     reader(monkeypatch, "vehicle", "penalty", Penalty(1, "Drive Thru", 0))
     update(widget)

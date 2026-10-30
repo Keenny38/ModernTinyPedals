@@ -104,9 +104,9 @@ class ForecastMixin:
             if index == 0:
                 continue
             # Seconds away = next node start percent * session length - elapsed time
-            _time = self.estimated_time[index] = round(
-                (forecast.start * session_length - elapsed_time) / 60)
-            if _time <= 0:
+            seconds = forecast.start * session_length - elapsed_time
+            self.estimated_time[index] = round(seconds / 60)
+            if seconds <= 0:  # passed (minutes rounded after: node less than 30 seconds away still shown)
                 index_offset += 1
         return index_offset
 
@@ -272,9 +272,11 @@ class Realtime(ForecastMixin, Overlay):
             target.update()
 
     def update_rain_chance(self, target, data):
-        """Rain chance (fraction)"""
-        if target.last != data:
-            target.last = data
+        """Rain chance (fraction), drawn again once it moved by 0.1% (continuous value of the current slot:
+        reading text moves by 1%, bar by less than a pixel)"""
+        shown = round(data, 3)
+        if target.last != shown:
+            target.last = shown
             if target.show_reading:
                 target.text = f"{data:.0%}"
             target.update_input(data)

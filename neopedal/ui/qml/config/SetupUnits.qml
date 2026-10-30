@@ -17,7 +17,7 @@ SetupStep {
 
             Flow {
                 width: parent.width
-                spacing: theme.em * 0.4
+                spacing: theme.space3
                 Repeater {
                     model: unitCard.modelData.units
                     Pill {

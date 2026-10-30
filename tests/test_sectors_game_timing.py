@@ -171,6 +171,7 @@ def test_sector_gap_shown_once_game_sets_sector_time(widgets, monkeypatch, secto
     data = sector_data
     data.sectorPrev[0] = 29.9
     data.deltaSectorBestTB[:] = [-0.1, 0.5, 0.3]  # S2 & S3 gaps of lap before
+    drive(widget, monkeypatch, data, 1.0, 0, 0)  # first update: synced, no sector just finished
     drive(widget, monkeypatch, data, 31.0, 1, 1)
     tiles, current = shown(widget, modern)
     assert "-0.100" in tiles[0]
@@ -195,6 +196,7 @@ def test_lap_without_game_time_shows_best_sectors_again(widgets, monkeypatch, se
     reader(monkeypatch, "timing", "start", 0.0)
     data = sector_data
     data.deltaSectorBestTB[:] = [0.1, 0.2, 0.7]
+    drive(widget, monkeypatch, data, 40.0, 1, 1)  # first update: synced, no sector just finished
     drive(widget, monkeypatch, data, 71.0, 2, 2)
     tiles, _ = shown(widget, modern)
     assert "+0.200" in tiles[1]

@@ -120,7 +120,7 @@ def test_every_option_accepts_its_own_default(ui_env):
 
 
 def test_rename_preset_updates_references(ui_env, no_message_box, monkeypatch):
-    from neopedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import apply_preset_name
 
     settings = cfg.path.settings
     for name in ("race.json", "race.json.backup-auto-2026-01-01", "race.json.backup-2026-02-02"):
@@ -129,9 +129,7 @@ def test_rename_preset_updates_references(ui_env, no_message_box, monkeypatch):
     cfg.user.tracks["Spa"] = {"preset": "race"}
     cfg.user.classes["GT3"] = {"alias": "GT3", "color": "#FFFFFF", "preset": "race"}
     monkeypatch.setattr(type(cfg), "is_loaded", lambda self, name: False)
-    dialog = CreatePreset(None, "Rename", "rename", "race.json")
-    dialog.preset_entry.setText("endurance")
-    dialog.create_preset()
+    assert apply_preset_name("endurance", "rename", "race.json") == ""
     assert os.path.exists(f"{settings}endurance.json")
     assert os.path.exists(f"{settings}endurance.json.backup-auto-2026-01-01")
     assert os.path.exists(f"{settings}endurance.json.backup-2026-02-02")
@@ -149,23 +147,19 @@ def test_rename_locked_file_shows_error(ui_env, no_message_box, monkeypatch):
         raise PermissionError(13, "file used by another process")
 
     monkeypatch.setattr(preset_management.os, "rename", locked)
-    dialog = preset_management.CreatePreset(None, "Rename", "rename", "race.json")
-    dialog.preset_entry.setText("endurance")
-    dialog.create_preset()  # must not raise
-    assert no_message_box and no_message_box[0][0] == "warning"
+    error = preset_management.apply_preset_name("endurance", "rename", "race.json")  # must not raise
+    assert "file used by another process" in error  # told by the name box of the Presets page
     assert os.path.exists(f"{cfg.path.settings}race.json")
 
 
 def test_duplicate_does_not_create_default(ui_env, no_message_box, monkeypatch):
-    from neopedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import apply_preset_name
 
     created = []
     monkeypatch.setattr(type(cfg), "create", lambda self, filename: created.append(filename))
     with open(f"{cfg.path.settings}race.json", "w", encoding="utf-8") as file:
         file.write('{"speedometer": {"font_size": 30}}')
-    dialog = CreatePreset(None, "Duplicate", "duplicate", "race.json")
-    dialog.preset_entry.setText("race copy")
-    dialog.create_preset()
+    assert apply_preset_name("race copy", "duplicate", "race.json") == ""
     assert created == []
     with open(f"{cfg.path.settings}race copy.json", encoding="utf-8") as file:
         assert "30" in file.read()

@@ -66,7 +66,7 @@ class Realtime(Overlay):
         self.prefix_dry = self.wcfg["prefix_wetness_dry"].ljust(prefix_wetness_just)
         self.prefix_wet = self.wcfg["prefix_wetness_wet"].ljust(prefix_wetness_just)
         self.temp_cut = 2 + (self.cfg.units["temperature_unit"] == "Fahrenheit") + (decimals != 0) + decimals
-        self.temp_digits = f"0{self.temp_cut + round(0.1 + decimals * 0.1, decimals)}f"
+        self.temp_decimals = decimals
 
         self.rubber_median_laps = max(int(self.wcfg["rubber_median_laps"]), 100)
         self.rubber_time_scale = (
@@ -97,9 +97,8 @@ class Realtime(Overlay):
 
         if self.wcfg["show_temperature"]:
             layout_temp = self.set_grid_layout()
-            track_temp = f"{self.unit_temp(0):{self.temp_digits}}"[:self.temp_cut]
-            air_temp = f"{self.unit_temp(0):{self.temp_digits}}"[:self.temp_cut]
-            text_temp = f"{track_temp}({air_temp}){self.symbol_temp}"
+            temp_sample = temperature_text(0, self.temp_cut, decimals)
+            text_temp = f"{temp_sample}({temp_sample}){self.symbol_temp}"
             self.bar_temp = self.set_rawtext(
                 text=text_temp,
                 width=font_m.width * len(text_temp) + bar_padx,
@@ -270,17 +269,19 @@ class Realtime(Overlay):
         # Wind speed & direction
         if self.wcfg["show_wind_speed"]:
             speed, angle = wind_reading()
+            speed = self.unit_speed(speed)
+            angle = wind_arrow_angle(speed, angle)
             arrow = "-" if angle is None else WIND_ARROWS[round(angle / 90) % 4]
-            self.update_wind(self.bar_wind, f"{self.unit_speed(speed):>3.0f}", arrow)
+            self.update_wind(self.bar_wind, f"{speed:>3.0f}", arrow)
 
     # GUI update methods
     def update_temperature(self, target, data, track, air):
         """Track & ambient temperature"""
         if target.last != data:
             target.last = data
-            track_temp = f"{self.unit_temp(track):{self.temp_digits}}"
-            air_temp = f"{self.unit_temp(air):{self.temp_digits}}"
-            target.text = f"{track_temp:.{self.temp_cut}}({air_temp:.{self.temp_cut}}){self.symbol_temp}"
+            track_temp = temperature_text(self.unit_temp(track), self.temp_cut, self.temp_decimals)
+            air_temp = temperature_text(self.unit_temp(air), self.temp_cut, self.temp_decimals)
+            target.text = f"{track_temp}({air_temp}){self.symbol_temp}"
             target.update()
 
     def update_temperature_trend(self, target, data):
@@ -350,6 +351,21 @@ def wind_reading(calm: float = WIND_CALM) -> tuple[float, float | None]:
     yaw = api.read.vehicle.orientation_yaw_radians()
     right, behind = calc.rotate_coordinate(yaw - 3.14159265, wind_x, -wind_z)
     return speed, calc.degrees(atan2(right, -behind))
+
+
+def temperature_text(value: float, width: int, decimals: int) -> str:
+    """Temperature zero padded to width, decimals dropped (rounded, never cut) while wider than width"""
+    while True:
+        text = f"{value:0{width}.{decimals}f}" if value >= 0 else f"{value:.{decimals}f}"  # no zero after minus
+        if decimals <= 0 or len(text) <= width:
+            return text
+        decimals -= 1
+
+
+def wind_arrow_angle(speed: float, angle: float | None) -> float | None:
+    """Wind arrow angle, None (no arrow, as while calm) when whole speed reading shows 0 (speed in display unit):
+    never "0 m/s" with an arrow"""
+    return None if f"{speed:.0f}" in ("0", "-0") else angle
 
 
 def laps_to_rubber(value: float, median_laps: int = 2000) -> float:

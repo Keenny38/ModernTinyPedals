@@ -77,13 +77,13 @@ def test_track_infos_read_in_background(backend, monkeypatch):  # noqa: F811
         write_other_track(folder, other, number, 95.0 + number, START + 1000 + number * 100)
     backend.refresh()
     backend.currentTrack = other
-    assert backend.currentTrack == TRACK and backend.status == "Reading laps..."  # shown track kept meanwhile
+    assert backend.currentTrack == TRACK and backend.status == "Reading laps…"  # shown track kept meanwhile
     backend.currentTrack = TRACK  # picked back before read: read result ignored
     backend.wait_jobs()
     assert backend.currentTrack == TRACK and len(backend.entries) == 3
     backend.currentTrack = other
     backend.wait_jobs()
-    assert backend.currentTrack == other and len(backend.entries) == 3 and backend.status != "Reading laps..."
+    assert backend.currentTrack == other and len(backend.entries) == 3 and backend.status != "Reading laps…"
     assert all(entry.info for entry in backend.entries)
 
 

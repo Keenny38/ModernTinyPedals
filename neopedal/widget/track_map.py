@@ -75,11 +75,12 @@ class TrackMapMixin:
         self.map_corners: MapCorners | None = None
 
         # Last data
-        self.last_modified: float = 0
+        self.last_modified: float | None = None  # None: nothing drawn yet
         self.last_orientation = 0.0
         self.last_veh_data_version: int | None = None
         # Car positions, set by update (vehicle_positions), read by paint (None: not updated yet, picture)
         self.car_positions: tuple[tuple[int, float, float], ...] | None = None
+        self.cars_key_cache: tuple | None = None  # positions, pixel ratio & extra state of last cars key, key
         self.track_map: TrackMap = NO_TRACK_MAP  # map drawn (coordinates, distances & sectors of one map)
         self.circular_map = False  # closed loop map
         self.map_scaled: Any = None  # scaled coordinates of track map, None without map
@@ -89,8 +90,8 @@ class TrackMapMixin:
         self.map_orient = 0.0  # radians
 
     def map_changed(self, modified: float) -> bool:
-        """True once per new track map or new orientation of track (modified -1: no map)"""
-        orientation = minfo.mapping.orientation if modified != -1 else 0.0
+        """True once per new track map or new orientation of track (modified of NO_TRACK_MAP: no map)"""
+        orientation = minfo.mapping.orientation if modified != NO_TRACK_MAP.lastModified else 0.0
         if self.last_modified == modified and self.last_orientation == orientation:
             return False
         self.last_modified = modified
@@ -98,8 +99,9 @@ class TrackMapMixin:
         return True
 
     def take_map(self, modified: float) -> TrackMap:
-        """Track map to draw (taken once: coordinates, distances & sectors of the same map), none if modified -1"""
-        self.track_map = minfo.mapping.trackMap if modified != -1 else NO_TRACK_MAP
+        """Track map to draw (taken once: coordinates, distances & sectors of the same map), none if modified of
+        NO_TRACK_MAP (widget creation: map drawn by first update)"""
+        self.track_map = minfo.mapping.trackMap if modified != NO_TRACK_MAP.lastModified else NO_TRACK_MAP
         return self.track_map
 
     def no_map_text(self) -> str:
@@ -237,6 +239,18 @@ class TrackMapMixin:
         total = len(veh_info)  # draw order of relative can list a car vehicles data no longer has (car left)
         position = self.map_position
         return tuple((index, *position(veh_info[index])) for index in minfo.relative.drawOrder if 0 <= index < total)
+
+    def cars_key(self, positions: tuple, ratio: float, *extra) -> tuple:
+        """Repaint key of cars (vehicles_key of widget), built again only for new positions (new vehicles data or
+        map), device pixel ratio or extra state, not at every update"""
+        cached = self.cars_key_cache
+        if cached is None or cached[0] is not positions or cached[1] != (ratio, extra):
+            cached = self.cars_key_cache = (positions, (ratio, extra), self.vehicles_key(positions, ratio))
+        return cached[2]
+
+    def vehicles_key(self, positions: tuple, ratio: float) -> tuple:
+        """Cars as drawn (widget)"""
+        raise NotImplementedError
 
     def place_number(self, veh_info) -> int:
         """Overall or class position of car"""
@@ -490,7 +504,7 @@ class Realtime(TrackMapMixin, Overlay):
             self.pen_corner = QPen(self.wcfg["font_color_corner_numbers"])
             self.brush_corner = QBrush(self.wcfg["background_color_corner_numbers"], Qt.BrushStyle.SolidPattern)
         self.map_shapes: tuple[list, Any] = ([], None)  # map sector paths & full path (map image drawn again)
-        self.update_map(-1)
+        self.update_map(NO_TRACK_MAP.lastModified)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -509,7 +523,7 @@ class Realtime(TrackMapMixin, Overlay):
         safetycar = self.update_safetycar()
         show_duration = self.wcfg["show_pitout_prediction"] and self.wcfg["show_pitstop_duration"]
         key = (
-            self.vehicles_key(self.car_positions, ratio),
+            self.cars_key(self.car_positions, ratio),
             safetycar and device_point(*safetycar, ratio),
             tuple((device_point(pos_x, pos_y, ratio), show_duration and self.pitstop_duration_text(pit_time), auto)
                   for pos_x, pos_y, pit_time, auto in self.update_predictions()),

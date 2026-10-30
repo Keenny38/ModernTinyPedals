@@ -26,10 +26,9 @@ import logging
 import sys
 from collections.abc import Callable
 from functools import partial
-from typing import cast
 
 import shiboken6
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, QUrl, Slot
+from PySide6.QtCore import QEvent, QMetaObject, QRect, QSize, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import (
     QGuiApplication,
     QIcon,
@@ -40,17 +39,15 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QStatusBar,
     QSystemTrayIcon,
     QWidget,
 )
 
 from .. import app_signal, loader
-from .. import regex_pattern as rxp
-from ..api_control import api
 from ..const_app import APP_NAME, VERSION
 from ..const_file import ConfigType
 from ..i18n import install_qt_translation, set_language, tr, trm
@@ -67,7 +64,7 @@ from . import (
     status_color,  # noqa: F401  (re-exported)
     system_dark_mode,
 )
-from ._common import DialogSingleton, confirm_action
+from ._common import MODIFIED_MARKER, DialogSingleton
 from .animation_rate import AnimationRate
 from .app_tab_view import (  # noqa: F401  (re-exported)
     PAGE_SWITCHES,
@@ -142,37 +139,64 @@ def safe_mode_enabled() -> bool:
     return safe_mode.state.enabled
 
 
+def apply_title_bar_scheme(dark: bool) -> bool:
+    """Native title bar of windows in app theme colors (Windows: dark or light frame), True if asked
+
+    Qt follows the color scheme asked of its style hints: Windows window frames (title bar) of the app are drawn
+    dark or light like the app, not like the Windows setting. Windows only: elsewhere the OS color scheme stays
+    the one read (app icon follows the taskbar, see system_dark_mode).
+    """
+    if sys.platform != "win32":
+        return False
+    hints = QGuiApplication.styleHints()
+    set_scheme = getattr(hints, "setColorScheme", None)  # Qt 6.8 and later
+    if not callable(set_scheme):
+        return False
+    scheme = Qt.ColorScheme.Dark if dark else Qt.ColorScheme.Light
+    if hints.colorScheme() != scheme:
+        set_scheme(scheme)
+    return True
+
+
+def focus_search_field(page: QWidget) -> bool:
+    """Search field of page focused, its text selected (Ctrl+F of pages without their own), True if found
+
+    Qt Quick pages: first shown TpSearchField. Widget pages: first shown line edit named like a search box.
+    """
+    for view in page.findChildren(QWidget):
+        if not view.inherits("QQuickWidget") or not view.isVisible():
+            continue
+        root_object = getattr(view, "rootObject", None)
+        root = root_object() if callable(root_object) else None
+        items = [root] if root is not None else []
+        while items:
+            item = items.pop(0)
+            if item.metaObject().className().startswith("TpSearchField") and item.isVisible():
+                view.setFocus(Qt.FocusReason.ShortcutFocusReason)
+                QMetaObject.invokeMethod(item, "forceActiveFocus")
+                QMetaObject.invokeMethod(item, "selectAll")
+                return True
+            items.extend(item.childItems())
+    for edit in page.findChildren(QLineEdit):
+        if edit.isVisible() and "search" in f"{edit.objectName()} {edit.placeholderText()}".lower():
+            edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+            edit.selectAll()
+            return True
+    return False
+
+
 class StatusButtonBar(QStatusBar):
-    """Status button bar"""
+    """Status band of main window: status chips (see notification.NotifyBar, added by the page view), saving
+    state on the right. Background errors go to the notification center (bell of the rail), with a toast while
+    the window is shown. Game & API state is on the rail (API button), theme & scaling in Settings."""
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.button_api = QPushButton("")
-        self.button_api.setObjectName("pillApi")
-        self.button_api.clicked.connect(self.refresh)
-        self.button_api.setToolTip(tr("Config Telemetry API"))
-
-        self.button_style = QPushButton("")
-        self.button_style.setObjectName("pill")
-        self.button_style.clicked.connect(self.toggle_color_theme)
-        self.button_style.setToolTip(tr("Toggle Window Color Theme"))
-
-        self.button_dpiscale = QPushButton("")
-        self.button_dpiscale.setObjectName("pill")
-        self.button_dpiscale.clicked.connect(self.toggle_dpi_scaling)
-        self.button_dpiscale.setToolTip(tr("Toggle High DPI Scaling"))
-        self._last_dpi_scaling = cfg.application["enable_high_dpi_scaling"]
-
-        self.label_saving = QLabel(tr("Saving…"))
+        self.label_saving = QLabel(tr("Saving\u2026"))
         self.label_saving.setObjectName("labelSaving")
         self.label_saving.setVisible(False)
-
         self.addPermanentWidget(self.label_saving)
-        self.addPermanentWidget(self.button_api)
-        self.addWidget(self.button_style)
-        self.addWidget(self.button_dpiscale)
 
-        app_signal.refresh.connect(self.refresh)
         app_signal.saving.connect(self.label_saving.setVisible)
         app_signal.error.connect(self.show_error)
         from ..userfile.json_setting import notices_ready
@@ -180,70 +204,17 @@ class StatusButtonBar(QStatusBar):
 
     @Slot(str)  # type: ignore[operator]
     def show_error(self, message: str):
-        """Show background error message (thread crash, save failure)"""
-        self.showMessage(f"⚠ {trm(message)}", 15000)
+        """Background error (thread crash, save failure): kept in notification center, toast while shown"""
+        from .notification import error_actions, notification_store
 
-    @Slot(bool)  # type: ignore[operator]
-    def refresh(self):
-        """Refresh status bar"""
-        if cfg.api["enable_active_state_override"]:
-            text_api_status = "overriding"
-        else:
-            text_api_status = api.read.state.version()
-        # Dot: green while the game is running (API reports a version), grey otherwise
-        running = bool(text_api_status) and text_api_status not in ("not running", "0.0")
-        if self.button_api.property("running") != running:  # style sheet applied again only when changed
-            self.button_api.setProperty("running", running)
-            self.button_api.style().unpolish(self.button_api)
-            self.button_api.style().polish(self.button_api)
-        self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {tr(text_api_status)}")
-
-        dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
-        # Moon & sun glyphs without a color emoji form, so they stay monochrome like the text
-        glyph = "\u263e " if dark else "\u263c "
-        self.button_style.setText(glyph + trm(f"UI: {tr(cfg.application['window_color_theme'])}"))
-
-        if cfg.application["enable_high_dpi_scaling"]:
-            text_dpi = "Auto"
-        else:
-            text_dpi = "Off"
-        if self._last_dpi_scaling != cfg.application["enable_high_dpi_scaling"]:
-            text_need_restart = "*"
-        else:
-            text_need_restart = ""
-        self.button_dpiscale.setText(trm(f"Scale: {text_dpi}{text_need_restart}"))
-
-    def toggle_dpi_scaling(self):
-        """Toggle DPI scaling"""
-        if cfg.application["enable_high_dpi_scaling"]:
-            state = "Disable"
-            desc = "not be scaled under high DPI screen resolution."
-        else:
-            state = "Enable"
-            desc = "be auto-scaled according to system DPI scaling setting."
-        msg_text = (
-            f"{state} <b>High DPI Scaling</b> and restart <b>NeoPedal</b>?<br><br>"
-            f"<b>Window</b> and <b>Overlay</b> size and position will {desc}"
-        )
-        if not confirm_action(self, tr("High DPI Scaling"), trm(msg_text), tr("Restart")):
-            return
-
-        cfg.application["enable_high_dpi_scaling"] = not cfg.application["enable_high_dpi_scaling"]
-        cfg.save(config_type=ConfigType.CONFIG)
+        text = trm(message)
+        notification_store().add(text, "error", error_actions())
         window = self.window()
-        if isinstance(window, AppWindow):
-            window.restart_app()  # tool pages reopened
-        else:
-            loader.restart()
-
-    def toggle_color_theme(self):
-        """Toggle color theme: Modern Dark, Modern Light, Legacy Dark, Legacy Light"""
-        themes = rxp.THEME_NAMES
-        current = cfg.application["window_color_theme"]
-        index = themes.index(current) if current in themes else -1
-        cfg.application["window_color_theme"] = themes[(index + 1) % len(themes)]
-        cfg.save(config_type=ConfigType.CONFIG)
-        app_signal.refresh.emit(True)
+        if window.isVisible() and not window.isMinimized():
+            view = window.centralWidget() if isinstance(window, QMainWindow) else None
+            show_center = getattr(view, "show_notification_center", None)
+            show_toast(window, f"⚠ {text}", action_text=tr("Details") if callable(show_center) else "",
+                       action=show_center if callable(show_center) else None)
 
 
 class AppWindow(QMainWindow):
@@ -266,6 +237,10 @@ class AppWindow(QMainWindow):
         self._geometry_timer.setInterval(1000)
         self._geometry_timer.timeout.connect(lambda: self.save_window_state(delay=66))
 
+        self._theme_timer = QTimer(self)  # OS theme changed: app icon checked once events settle
+        self._theme_timer.setSingleShot(True)
+        self._theme_timer.setInterval(250)
+        self._theme_timer.timeout.connect(self.refresh_icon)
         install_message_icons()  # message box icons drawn in window color theme
         # Color theme set before widgets are built & shown: first frame was painted in Qt default palette
         # (OS dark mode gray & Windows accent color) until refresh below
@@ -283,12 +258,17 @@ class AppWindow(QMainWindow):
         # Tray icon
         self.set_tray_icon()
 
-        # Command palette
-        QShortcut(QKeySequence("Ctrl+K"), self, self.open_command_palette)
-        # Previous page, like a browser
-        QShortcut(QKeySequence("Alt+Left"), self, self.go_back)
-        # Save shown page (editors, config pages)
-        QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self, self.save_current_page)
+        # Window shortcuts, described (whatsThis) in the keyboard shortcuts sheet
+        for keys, run, text in (
+            ("Ctrl+K", self.open_command_palette, "Command Palette"),
+            ("Alt+Left", self.go_back, "Back"),  # previous page, like a browser
+            ("Alt+Right", self.go_forward, "Forward"),
+            (QKeySequence.StandardKey.Save, self.save_current_page, "Save shown page (editors, settings)"),
+            ("Ctrl+F", self.find_in_page, "Find in page (command palette on pages without search)"),
+            ("Ctrl+/", self.open_shortcuts, "Keyboard Shortcuts"),
+        ):
+            shortcut = QShortcut(QKeySequence(keys), self, run)
+            shortcut.setWhatsThis(tr(text))
 
         # Import preset, preset package or plugin by drag & drop
         self.setAcceptDrops(True)
@@ -321,6 +301,12 @@ class AppWindow(QMainWindow):
         QTimer.singleShot(0, self.restore_open_pages)  # once window is shown: faster startup
         # Follow OS light / dark switch: app icon matches taskbar
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
+        # Errors & warnings told by a tray message while window is hidden in tray or minimized
+        from .notification import TrayRelay
+
+        self._tray_relay = TrayRelay(self)
+        # Window title: shown page & its unsaved changes marker
+        self.connect_page_title()
 
         # Refresh GUI
         app_signal.refresh.emit(True)
@@ -409,7 +395,21 @@ class AppWindow(QMainWindow):
         from .command_palette import CommandPalette
 
         self.show_app()
-        CommandPalette(self).open()
+        CommandPalette(self)
+
+    def open_shortcuts(self):
+        """Keyboard shortcuts sheet (Ctrl+/, F1), closed if open"""
+        from .quick.shell_shortcuts_backend import ShortcutsSheet
+
+        self.show_app()
+        ShortcutsSheet.toggle(self)
+
+    def find_in_page(self):
+        """Ctrl+F not taken by the shown page: its search field focused (text selected), else command palette"""
+        view = self.centralWidget()
+        current = view.current_page() if isinstance(view, TabView) else None
+        if current is None or not focus_search_field(current):
+            self.open_command_palette()
 
     def open_setup_wizard(self):
         """Open first launch setup wizard"""
@@ -428,6 +428,7 @@ class AppWindow(QMainWindow):
             return
         self.last_style = style
         set_style_palette(style)
+        apply_title_bar_scheme(resolve_color_theme(style) == "Dark")
         # Applied at QApplication level (not just this window), so every dialog picks up the
         # style even if not a visual child of AppWindow at the time it is shown, including
         # QMessageBox, QColorDialog and other Qt-built top-level windows.
@@ -442,7 +443,14 @@ class AppWindow(QMainWindow):
         self.apply_color_theme()
         # Status colors of QML pages follow the overlay "colorblind safe colors" option
         set_colorblind(bool(cfg.user.config["overlay_style"].get("enable_colorblind_colors", False)))
-        # App icon (window, taskbar, tray): follow OS taskbar light / dark mode
+        self.refresh_icon()
+        # Language
+        if self.last_language != cfg.application["language"]:
+            self.last_language = cfg.application["language"]
+            QTimer.singleShot(0, self.retranslate)  # rebuild after refresh signal finished
+
+    def refresh_icon(self):
+        """App icon (window, taskbar, tray): follow OS taskbar light / dark mode"""
         icon_dark = system_dark_mode()
         if self.last_icon_dark != icon_dark:
             self.last_icon_dark = icon_dark
@@ -450,10 +458,6 @@ class AppWindow(QMainWindow):
             tray_icon = self.findChild(QSystemTrayIcon)
             if tray_icon is not None:
                 tray_icon.setIcon(QApplication.windowIcon())
-        # Language
-        if self.last_language != cfg.application["language"]:
-            self.last_language = cfg.application["language"]
-            QTimer.singleShot(0, self.retranslate)  # rebuild after refresh signal finished
 
     def retranslate(self):
         """Apply new UI language without restart, rebuild menus, tabs, status bar"""
@@ -499,6 +503,7 @@ class AppWindow(QMainWindow):
             for opener in reversed(openers):
                 tab_view.remember_shown(opener, shown)
         tab_view.track_pages = True
+        self.connect_page_title()
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:
             old_menu = tray_icon.contextMenu()
@@ -521,9 +526,8 @@ class AppWindow(QMainWindow):
         # API menu
         menu_api = APIMenu(tr("API"), self)
         menu.addMenu(menu_api)
-        cast(StatusButtonBar, self.statusBar()).button_api.setMenu(menu_api)
-        # Config menu
-        menu_config = ConfigMenu(tr("Config"), self)
+        # Settings menu
+        menu_config = ConfigMenu(tr("Settings"), self)
         menu.addMenu(menu_config)
         # Tools menu
         menu_tools = ToolsMenu(tr("Tools"), self)
@@ -656,15 +660,52 @@ class AppWindow(QMainWindow):
         if isinstance(view, TabView):
             view.go_back()
 
+    def go_forward(self):
+        """Page left by going back"""
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.go_forward()
+
+    def connect_page_title(self):
+        """Window title follows shown page of view (set again when view is rebuilt)"""
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.page_shown.connect(self.update_window_title)
+        self.update_window_title()
+
+    def update_window_title(self):
+        """Window title: shown page, unsaved changes marker ("*"), app name & version"""
+        view = self.centralWidget()
+        page = view.page_title().removeprefix(MODIFIED_MARKER) if isinstance(view, TabView) else ""
+        base = f"{APP_NAME} v{VERSION}"
+        current = self.windowTitle()
+        suffix = current.split(base, 1)[1] if base in current else ""  # " - Safe Mode" added at start, kept
+        title = f"{page}[*] - {base}{suffix}" if page else f"{base}{suffix}"
+        if self.windowTitle() != title:
+            self.setWindowTitle(title)
+        self.setWindowModified(isinstance(view, TabView) and view.page_modified())
+
     def save_current_page(self) -> bool:
         """Save shown page (Ctrl+S), False if it has nothing to save"""
         view = self.centralWidget()
         return isinstance(view, TabView) and view.save_current_page()
 
+    def keyPressEvent(self, event):
+        """F1 not taken by the shown page (charts show their own help): keyboard shortcuts sheet"""
+        if event.key() == Qt.Key.Key_F1 and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            self.open_shortcuts()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event):
-        """Mouse back button: previous page (clicks not used by widget under mouse come here)"""
+        """Mouse back & forward buttons: previous & next page (clicks not used by widget under mouse come here)"""
         if event.button() == Qt.MouseButton.BackButton:
             self.go_back()
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.ForwardButton:
+            self.go_forward()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -696,6 +737,11 @@ class AppWindow(QMainWindow):
         super().moveEvent(event)
 
     def changeEvent(self, event):
+        # OS light / dark switch while the app asks its own color scheme (title bar, see apply_title_bar_scheme):
+        # style hints keep the asked one, so the app icon follows the taskbar from this event (once settled)
+        theme_timer = getattr(self, "_theme_timer", None)  # events sent while window is built
+        if event.type() == QEvent.Type.ThemeChange and theme_timer is not None and not theme_timer.isActive():
+            theme_timer.start()
         if event.type() == QEvent.Type.WindowStateChange:
             sized = Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen
             if self.windowState() & sized and not event.oldState() & sized:
@@ -789,6 +835,7 @@ class AppWindow(QMainWindow):
         release_quick_views(self)  # QML views unloaded before their backends are deleted
         loader.close()  # must close this first
         self.save_window_state()
+        cfg.flush()  # window state written before the process ends (as restart does)
         self.__break_signal()
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:  # tray is optional (not supported on some desktops)
@@ -813,8 +860,22 @@ class AppWindow(QMainWindow):
         if cfg.application["minimize_to_tray"]:
             event.ignore()
             self.hide()
+            self.tell_closed_to_tray()
         elif not self.quit_app():
             event.ignore()
+
+    def tell_closed_to_tray(self):
+        """First close to tray: tray message telling the app still runs (once, saved)"""
+        if cfg.application.get("close_to_tray_notice_shown", True):
+            return
+        tray_icon = self.findChild(QSystemTrayIcon)
+        if tray_icon is None or not tray_icon.isVisible():
+            return
+        cfg.application["close_to_tray_notice_shown"] = True
+        cfg.save(config_type=ConfigType.CONFIG)
+        tray_icon.showMessage(APP_NAME, trm(
+            f"{APP_NAME} keeps running in the notification area. Right-click its icon to quit, "
+            "or turn off Minimize to Tray in the Window menu."), QSystemTrayIcon.MessageIcon.Information, 10000)
 
     @Slot(bool)  # type: ignore[operator]
     def reload_preset(self, check_singleton: bool):

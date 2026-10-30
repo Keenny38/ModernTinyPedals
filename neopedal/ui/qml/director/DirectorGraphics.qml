@@ -33,8 +33,9 @@ TpPopup {
         objectName: "graphic_" + key
         Layout.fillWidth: true
         wrap: true  // long labels on several lines, never cut
+        checkable: false  // follows backend (a click never breaks the binding)
         checked: popup.graphics[key] === true
-        onToggled: backend.graphics.setGraphic(key, checked)
+        onClicked: backend.graphics.setGraphic(key, popup.graphics[key] !== true)
     }
     component Seconds: NumberField {
         property string key: ""
@@ -44,19 +45,15 @@ TpPopup {
         showRange: true
         onEdited: function(value) { backend.graphics.setGraphic(key, value) }
     }
-    component Hint: Text {
-        Layout.fillWidth: true
-        color: theme.dimText
-        font.pointSize: theme.fontSmall
-        wrapMode: Text.WordWrap
-    }
     component Line: Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border }
     component Heading: TpSectionLabel { Layout.fillWidth: true }
     // On demand graphic: "Show" while hidden, "Hide" (checked) while shown: a second click hides it
     component ShowButton: TpButton {
         property bool shown: false
+        property string hotkey: ""  // director hotkey showing or hiding it: key in the tooltip
         checked: shown
         text: shown ? i18n.tr("Hide") : i18n.tr("Show")
+        tip: (backend.keyLabels[hotkey] || "") !== "" ? i18n.tr("Hotkey %1").arg(backend.keyLabels[hotkey]) : ""
     }
     // Tab content scrolled when taller than the window
     component TabScroll: ScrollView {
@@ -69,7 +66,7 @@ TpPopup {
         ColumnLayout {
             id: column
             width: scroller.availableWidth - (scroller.ScrollBar.vertical.visible ? theme.space5 : 0)
-            spacing: theme.em * 0.5
+            spacing: theme.space3
         }
     }
 
@@ -88,7 +85,7 @@ TpPopup {
                 closable: true
                 onClosed: popup.close()
             }
-            Hint { text: i18n.tr("TV graphics made for the director, as one browser source (1920 x 1080) in OBS, Streamlabs, XSplit or vMix.") }
+            TpText { Layout.fillWidth: true; role: "caption"; wrap: true; text: i18n.tr("TV graphics made for the director, as one browser source (1920 x 1080) in OBS, Streamlabs, XSplit or vMix.") }
             // Source address (token masked), or how to get one
             RowLayout {
                 Layout.fillWidth: true
@@ -96,6 +93,7 @@ TpPopup {
                 Text {
                     Layout.fillWidth: true
                     text: backend.graphics.graphicsUrl.replace(/token=[^&]*/, "token=••••")
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.pointSize: theme.fontSmall
                     elide: Text.ElideMiddle
@@ -104,7 +102,7 @@ TpPopup {
                 TpButton {
                     objectName: "copyGraphicsButton"
                     accent: true
-                    glyph: ""  // copy
+                    glyph: theme.glyphs.copy
                     text: i18n.tr("Copy Address")
                     onClicked: backend.graphics.copyGraphicsUrl()
                 }
@@ -174,15 +172,16 @@ TpPopup {
                         Layout.leftMargin: theme.em * 3  // content-tuned: under the switch label
                         spacing: theme.space5
                         enabled: popup.graphics.tower === true
-                        TpSwitch { text: i18n.tr("Lap times"); checked: popup.graphics.towerLaps === true; onToggled: backend.graphics.setGraphic("towerLaps", checked) }
-                        TpSwitch { text: i18n.tr("Tyres"); checked: popup.graphics.towerTyres === true; onToggled: backend.graphics.setGraphic("towerTyres", checked) }
-                        TpSwitch { text: i18n.tr("Penalties"); checked: popup.graphics.towerPenalties === true; onToggled: backend.graphics.setGraphic("towerPenalties", checked) }
-                        TpSwitch { text: i18n.tr("Fastest lap"); checked: popup.graphics.towerFastest === true; onToggled: backend.graphics.setGraphic("towerFastest", checked) }
-                        TpSwitch { text: i18n.tr("Pit Stops"); checked: popup.graphics.towerStops === true; onToggled: backend.graphics.setGraphic("towerStops", checked) }
+                        TpSwitch { text: i18n.tr("Lap times"); checkable: false; checked: popup.graphics.towerLaps === true; onClicked: backend.graphics.setGraphic("towerLaps", popup.graphics.towerLaps !== true) }
+                        TpSwitch { text: i18n.tr("Tyres"); checkable: false; checked: popup.graphics.towerTyres === true; onClicked: backend.graphics.setGraphic("towerTyres", popup.graphics.towerTyres !== true) }
+                        TpSwitch { text: i18n.tr("Penalties"); checkable: false; checked: popup.graphics.towerPenalties === true; onClicked: backend.graphics.setGraphic("towerPenalties", popup.graphics.towerPenalties !== true) }
+                        TpSwitch { text: i18n.tr("Fastest lap"); checkable: false; checked: popup.graphics.towerFastest === true; onClicked: backend.graphics.setGraphic("towerFastest", popup.graphics.towerFastest !== true) }
+                        TpSwitch { text: i18n.tr("Pit stops"); checkable: false; checked: popup.graphics.towerStops === true; onClicked: backend.graphics.setGraphic("towerStops", popup.graphics.towerStops !== true) }
                         TpSwitch {
                             text: i18n.tr("Classes apart in overall")
+                            checkable: false
                             checked: popup.graphics.towerGroup === true
-                            onToggled: backend.graphics.setGraphic("towerGroup", checked)
+                            onClicked: backend.graphics.setGraphic("towerGroup", popup.graphics.towerGroup !== true)
                         }
                     }
                     RowLayout {
@@ -269,7 +268,7 @@ TpPopup {
 
                 // On demand: shown by the operator, one at a time (or by the director itself)
                 TabScroll {
-                    Hint { text: i18n.tr("Shown until clicked again, one at a time.") }
+                    TpText { Layout.fillWidth: true; role: "caption"; wrap: true; text: i18n.tr("Shown until clicked again, one at a time.") }
                     RowLayout {
                         Layout.fillWidth: true
                         Icon { glyph: ""; color: theme.dimText }  // car
@@ -277,6 +276,7 @@ TpPopup {
                         Seconds { key: "gridSeconds"; minimum: 3; maximum: 60; tip: i18n.tr("Page time") }
                         ShowButton {
                             objectName: "showGrid"
+                            hotkey: "director_starting_grid"
                             shown: backend.graphics.onDemand === "grid"
                             onClicked: backend.graphics.showOnDemand("grid")
                         }
@@ -287,6 +287,7 @@ TpPopup {
                         Text { Layout.fillWidth: true; text: i18n.tr("Event card: track, conditions, forecast"); color: theme.text; wrapMode: Text.WordWrap }
                         ShowButton {
                             objectName: "showEvent"
+                            hotkey: "director_event_card"
                             shown: backend.graphics.onDemand === "event"
                             onClicked: backend.graphics.showOnDemand("event")
                         }
@@ -302,6 +303,7 @@ TpPopup {
                             Text {
                                 Layout.fillWidth: true
                                 text: backend.graphics.captureText !== "" ? i18n.tr("Captured: %1").arg(backend.graphics.captureText) : i18n.tr("Not captured yet")
+                                textFormat: Text.PlainText
                                 color: theme.dimText
                                 font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
@@ -315,12 +317,13 @@ TpPopup {
                             onClicked: backend.graphics.captureResults()
                         }
                         ShowButton {
+                            hotkey: "director_classification"
                             shown: backend.graphics.onDemand === "results"
                             onClicked: backend.graphics.showOnDemand("results")
                         }
                         TpButton {
                             objectName: "clearResults"
-                            glyph: ""  // cancel
+                            glyph: theme.glyphs.remove
                             fallback: "✕"
                             flat: true
                             tip: i18n.tr("Clear")
@@ -329,6 +332,7 @@ TpPopup {
                             TpConfirmDialog {
                                 id: clearResultsDialog
                                 objectName: "clearResultsDialog"
+                                danger: true
                                 title: i18n.tr("Clear the captured classification?")
                                 text: i18n.tr("The classification captured at that moment is lost: a new capture takes the order of now.")
                                 acceptText: i18n.tr("Clear")
@@ -352,14 +356,14 @@ TpPopup {
                         Item { Layout.fillWidth: true; visible: backend.graphics.championshipNames.length === 0 }
                         TpButton {
                             objectName: "importChampionship"
-                            glyph: ""  // open file
+                            glyph: theme.glyphs["import"]
                             fallback: "…"
-                            text: backend.graphics.championshipNames.length > 0 ? "" : i18n.tr("Import...")
+                            text: backend.graphics.championshipNames.length > 0 ? "" : i18n.tr("Import…")
                             tip: i18n.tr("Import a CSV file: driver, points, and team, class if you want")
                             onClicked: backend.graphics.importChampionship()
                         }
                         TpButton {
-                            glyph: ""  // delete
+                            glyph: theme.glyphs.delete
                             fallback: "✕"
                             flat: true
                             visible: backend.graphics.championshipNames.length > 0
@@ -367,6 +371,7 @@ TpPopup {
                             onClicked: removeChampionshipDialog.open()
                             TpConfirmDialog {
                                 id: removeChampionshipDialog
+                                danger: true
                                 title: i18n.tr("Remove this championship?")
                                 text: i18n.tr("Its standings leave the broadcast graphics. Import the CSV file again to get them back.")
                                 acceptText: i18n.tr("Remove")
@@ -389,6 +394,7 @@ TpPopup {
                         Item { Layout.fillWidth: true; visible: backend.graphics.championshipClasses.length === 0 }
                         ShowButton {
                             objectName: "showChampionship"
+                            hotkey: "director_championship"
                             shown: backend.graphics.onDemand === "champ"
                             onClicked: backend.graphics.showOnDemand("champ")
                         }
@@ -558,12 +564,12 @@ TpPopup {
                         Toggle { key: "logo"; text: i18n.tr("League logo & name") }
                         TpButton {
                             glyph: ""  // picture
-                            text: i18n.tr("Logo...")
+                            text: i18n.tr("Logo…")
                             onClicked: backend.graphics.chooseLogo()
                         }
                         TpButton {
                             objectName: "removeLogo"
-                            glyph: ""  // cancel
+                            glyph: theme.glyphs.remove
                             fallback: "✕"
                             flat: true
                             tip: i18n.tr("Remove the logo")
@@ -572,6 +578,7 @@ TpPopup {
                             TpConfirmDialog {
                                 id: removeLogoDialog
                                 objectName: "removeLogoDialog"
+                                danger: true
                                 title: i18n.tr("Remove the league logo?")
                                 text: i18n.tr("The logo file is deleted from the branding folder. Choose the picture again to get it back.")
                                 acceptText: i18n.tr("Remove")
@@ -584,7 +591,7 @@ TpPopup {
                         Toggle { key: "sponsors"; text: i18n.tr("Sponsors in turn") }
                         Seconds { key: "sponsorSeconds"; minimum: 3; maximum: 60 }
                         TpButton {
-                            glyph: ""  // folder open
+                            glyph: theme.glyphs.browse
                             fallback: "…"
                             tip: i18n.tr("Folder of sponsors pictures (PNG, JPG, WEBP, SVG)")
                             onClicked: backend.graphics.openSponsorsFolder()
@@ -605,7 +612,7 @@ TpPopup {
                             onActivated: function(index) { backend.graphics.setLayoutPreset(backend.graphics.layoutPresets[index].key) }
                         }
                     }
-                    Hint { text: i18n.tr("Move and resize every graphic in your browser, with sample data: drag to move, mouse wheel to resize, then Save. Every source of this computer follows.") }
+                    TpText { Layout.fillWidth: true; role: "caption"; wrap: true; text: i18n.tr("Move and resize every graphic in your browser, with sample data: drag to move, mouse wheel to resize, then Save. Every source of this computer follows.") }
                     RowLayout {
                         Layout.fillWidth: true
                         TpButton {
@@ -617,31 +624,12 @@ TpPopup {
                             enabled: backend.graphics.graphicsUrl !== ""
                             onClicked: backend.graphics.editGraphicsLayout()
                         }
-                        TpButton {
+                        TpButton {  // reversible: done at once, Undo in the toast & Ctrl+Z (never confirmed)
                             objectName: "resetGraphicsLayout"
                             Layout.fillWidth: true
-                            visible: !backend.graphics.canUndoLayoutReset
-                            glyph: ""  // undo
+                            glyph: theme.glyphs.reset
                             text: i18n.tr("Reset Layout")
-                            onClicked: resetLayoutDialog.open()
-                            TpConfirmDialog {
-                                id: resetLayoutDialog
-                                objectName: "resetGraphicsLayoutDialog"
-                                danger: false  // undo offered after
-                                title: i18n.tr("Reset the graphics layout?")
-                                text: i18n.tr("Every graphic of this layout goes back to its place and size. You can undo it right after.")
-                                acceptText: i18n.tr("Reset")
-                                onAccepted: backend.graphics.resetGraphicsLayout()
-                            }
-                        }
-                        TpButton {
-                            objectName: "undoGraphicsLayoutReset"
-                            Layout.fillWidth: true
-                            visible: backend.graphics.canUndoLayoutReset
-                            glyph: ""  // undo
-                            text: i18n.tr("Undo")
-                            tip: i18n.tr("Put the graphics back where they were before the reset")
-                            onClicked: backend.graphics.undoLayoutReset()
+                            onClicked: backend.graphics.resetGraphicsLayout()
                         }
                     }
                     Line {}
@@ -673,7 +661,7 @@ TpPopup {
                         }
                         TpButton {
                             objectName: "copyPartialUrl"
-                            glyph: ""  // copy
+                            glyph: theme.glyphs.copy
                             text: i18n.tr("Copy Address")
                             enabled: popup.partial.length > 0 && backend.graphics.graphicsUrl !== ""
                             onClicked: backend.graphics.copyPartialUrl(popup.partial, partialPreset.currentIndex > 0 ? backend.graphics.layoutPresets[partialPreset.currentIndex - 1].key : "")
@@ -699,6 +687,8 @@ TpPopup {
                     glyph: popup.graphics.hidden ? "" : ""  // view, hide
                     checked: popup.graphics.hidden === true
                     text: popup.graphics.hidden ? i18n.tr("Show Graphics") : i18n.tr("Hide Graphics")
+                    tip: (backend.keyLabels.director_hide_graphics || "") !== ""
+                         ? i18n.tr("Hotkey %1").arg(backend.keyLabels.director_hide_graphics) : ""
                     onClicked: backend.graphics.setGraphic("hidden", !popup.graphics.hidden)
                 }
             }

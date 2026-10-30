@@ -101,6 +101,9 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
             motor_inactive_timer_start: float | None = None  # elapsed time motor stopped (0.0 is a real time)
             lap_etime_last = 0.0
             last_lap_stime = FLOAT_INF  # last lap start time
+            # Usage of lap in progress counted from its start (None until read): module started
+            # mid-lap (app started on track, preset reload) only counts the rest of that lap
+            from_lap_start: bool | None = None
 
             delta_reset = False
             delta_recording = False
@@ -117,11 +120,15 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
         lap_etime = api.read.timing.elapsed()
         battery_charge = api.read.emotor.battery_charge() * 100
         motor_state = api.read.emotor.state()
+        if from_lap_start is None:
+            from_lap_start = api.read.vehicle.in_garage() or api.read.timing.current_laptime() < 1
 
         # Lap start & finish detection
         if lap_stime > last_lap_stime:
-            battery_drain_last = battery_drain
-            battery_regen_last = battery_regen
+            if from_lap_start:  # else partial lap: no last lap usage
+                battery_drain_last = battery_drain
+                battery_regen_last = battery_regen
+            from_lap_start = True
             battery_drain = 0
             battery_regen = 0
             motor_active_timer = 0

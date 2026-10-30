@@ -24,10 +24,15 @@ Web dashboard: show live telemetry on phone or tablet (browser), disabled by def
     GET  /?code=<access code>         login link shown in app, redirects to "/" with session cookie
     GET  /api/telemetry               live data (JSON), requires session cookie or "X-Access-Code" header
 
-Listens on 127.0.0.1 only, unless LAN access is enabled. Access code is always required,
-and repeated wrong codes from same address are blocked for a while.
+Listens on 127.0.0.1 only, unless LAN access is enabled. Access code is always required (8 characters at least),
+and repeated wrong codes from same address are blocked for a while; many wrong codes from LAN addresses (any
+address) block every LAN login for a while, logins from this computer keep their own count.
+Host header is checked (DNS rebinding: a web site cannot read the dashboard through its own domain name), and
+code guesses sent by a page of another site (Origin, Sec-Fetch-Site) are refused: a web page cannot lock out logins.
 Access code is exchanged for a random session cookie, so it is not kept in page address or scripts.
-Session expires when unused for a while, and after a few days anyway.
+Session expires when unused for a while, and after a few days anyway (cookie of a login on this computer ends with
+the browser session: cookies ignore ports, other local servers get it too). A session is only valid from the address
+it was created from.
 HTTPS (self-signed certificate, see userfile.tls_cert) can be enabled, otherwise traffic is plain HTTP,
 so only enable LAN access on a trusted network.
 
@@ -48,19 +53,28 @@ import ssl
 import sys
 import threading
 import time
+from collections import deque
 from contextlib import suppress
 from html import escape
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlsplit
 
 from . import app_signal, units
-from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer, redact_secret_query
+from .command_server import (
+    BindRetry,
+    BoundedRequestHandler,
+    LocalHTTPServer,
+    is_allowed_host,
+    is_loopback,
+    own_host_names,
+    redact_secret_query,
+)
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
 from .log_handler import ErrorThrottle
 from .setting import cfg
-from .template.setting_status_colors import STATUS_COLORS
-from .userfile.tls_cert import load_certificate, server_context
+from .template.setting_status_colors import colorblind_style, status_colors
+from .userfile.tls_cert import server_context
 
 logger = logging.getLogger(__name__)
 snapshot_errors = ErrorThrottle()  # telemetry asked every second: warning once a minute
@@ -69,9 +83,17 @@ request_errors = ErrorThrottle()
 MAX_FAILURES = 10
 LOCKOUT_SECONDS = 60
 FAILURE_WINDOW_SECONDS = 600  # failure count is forgotten after this time
+# Every LAN address together (devices, IPv6 addresses changed at will): this many wrong codes within the window
+# block every LAN login for GLOBAL_LOCKOUT_SECONDS (sessions kept, logins from this computer counted apart)
+GLOBAL_MAX_FAILURES = 30
+GLOBAL_WINDOW_SECONDS = 300
+GLOBAL_LOCKOUT_SECONDS = 120
+MIN_CODE_LENGTH = 8  # shorter access code in config replaced by a generated one
 MAX_SESSIONS = 32
 SESSION_IDLE_SECONDS = 12 * 3600  # session expires when unused (no dashboard open) for this time
-SESSION_MAX_SECONDS = 7 * 24 * 3600  # session expires after this time anyway
+SESSION_MAX_SECONDS = 7 * 24 * 3600  # session expires after this time anyway (LAN device)
+# Login on this computer: browser session cookie, at most this long (cookies ignore ports: sent to any local server)
+LOCAL_SESSION_MAX_SECONDS = 12 * 3600
 MAX_FORM_SIZE = 1024
 # Session cookie name, port of server added: cookies are per host (not port), each dashboard (installed & source
 # copy, several instances) keeps its own session
@@ -168,6 +190,47 @@ def lookup_local_addresses() -> list[str]:
     except OSError:
         pass
     return sorted(addresses)
+
+
+def same_origin(origin: str, host: str | None, secure: bool) -> bool:
+    """Origin header is the dashboard itself (scheme, host & port of request Host header); "null" never is"""
+    if not host:
+        return False
+    scheme = "https" if secure else "http"
+    try:
+        parts = urlsplit(origin.strip().lower())
+        _ = parts.port  # invalid port raises ValueError
+    except ValueError:
+        return False
+    if parts.scheme != scheme or not parts.hostname:
+        return False
+    default = f":{443 if secure else 80}"
+
+    def without_default(value: str) -> str:
+        return value[:-len(default)] if value.endswith(default) else value
+
+    return without_default(parts.netloc) == without_default(host.strip().lower())
+
+
+class Session:
+    """Login session: created & last used (monotonic time), client address it is valid from"""
+
+    __slots__ = ("created", "last_used", "address", "local")
+
+    def __init__(self, created: float, address: str, local: bool):
+        self.created = created
+        self.last_used = created
+        self.address = address
+        self.local = local  # login from this computer: shorter lifetime, browser session cookie
+
+    def expired(self, now: float) -> bool:
+        longest = LOCAL_SESSION_MAX_SECONDS if self.local else SESSION_MAX_SECONDS
+        return now - self.last_used > SESSION_IDLE_SECONDS or now - self.created > longest
+
+
+def is_local_client(address: str) -> bool:
+    """Client on this computer: loopback, or an own LAN address (cached, never looked up here)"""
+    return is_loopback(address) or address in local_addresses()
 
 
 def cookie_value(header: str, name: str) -> str | None:
@@ -308,14 +371,18 @@ class DashboardHandler(BoundedRequestHandler):
     (and TLS handshake) per request, each left in TIME_WAIT. Every response sends Content-Length.
     """
 
-    server_version = "NeoPedal"
     protocol_version = "HTTP/1.1"
     timeout = 15  # idle client never holds a handler thread (socket timeout, no streaming endpoint)
     access_code = ""
     failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
-    sessions: dict[str, list[float]] = {}  # session token: [created time, last used time]
+    sessions: dict[str, Session] = {}  # session token: session
+    # Wrong codes of LAN addresses (any address), see GLOBAL_MAX_FAILURES
+    global_failures: deque[float] = deque(maxlen=GLOBAL_MAX_FAILURES)
+    global_until = 0.0  # LAN logins blocked until this monotonic time
     lock = threading.Lock()
     secure = False  # HTTPS: TLS handshake in handler thread, secure cookie
+    lan = False  # LAN access: IP addresses & names of this computer allowed in Host header
+    host_names: frozenset[str] = frozenset()  # names of this computer (LAN access), see own_host_names
 
     def setup(self):
         if self.secure:  # handshake here, so a slow client never blocks accepting others
@@ -323,7 +390,26 @@ class DashboardHandler(BoundedRequestHandler):
             self.request.do_handshake()
         super().setup()
 
+    def check_host(self) -> bool:
+        """Verify Host header (DNS rebinding), send 403 if not allowed"""
+        if is_allowed_host(self.headers.get("Host"), getattr(self.server, "server_port", 0), self.lan,
+                           self.host_names):
+            return True
+        self.close_connection = True  # body (login form) left unread: never read as next request
+        self.send_body(403, b"host not allowed", "text/plain")
+        return False
+
+    def cross_site(self) -> bool:
+        """Request sent by a page of another site or another local server (Sec-Fetch-Site, Origin): never a guess
+        of the access code (a web page could lock out logins)"""
+        if (self.headers.get("Sec-Fetch-Site") or "").strip().lower() in ("cross-site", "same-site"):
+            return True
+        origin = self.headers.get("Origin")
+        return origin is not None and not same_origin(origin, self.headers.get("Host"), self.secure)
+
     def do_GET(self):
+        if not self.check_host():
+            return
         url = urlparse(self.path)
         if url.path == "/api/telemetry":
             if self.authorized(self.headers.get("X-Access-Code", "")):
@@ -337,7 +423,9 @@ class DashboardHandler(BoundedRequestHandler):
         if url.path in ("/", "/index.html"):
             code = parse_qs(url.query).get("code", [""])[0]
             if code:  # link with code (shown in app), exchange for session cookie & remove code from address bar
-                if self.authorized(code, html=True):
+                if self.cross_site():  # link of another site, or picture of a page guessing: code typed instead
+                    self.send_unauthorized(html=True)
+                elif self.authorized(code, html=True):
                     self.send_redirect_with_session()
                 return
             if self.has_session():
@@ -349,8 +437,15 @@ class DashboardHandler(BoundedRequestHandler):
 
     def do_POST(self):
         """Login form, access code sent in request body (not kept in browser history)"""
+        if not self.check_host():
+            return
         if urlparse(self.path).path != "/login":
+            self.close_connection = True  # body left unread
             self.send_body(404, b"not found", "text/plain")
+            return
+        if self.cross_site():  # form posted by a page of another site: never counted as a wrong code
+            self.close_connection = True  # body left unread
+            self.send_body(403, b"cross-site request refused", "text/plain")
             return
         try:  # never read more than form size (negative length reads until connection closed)
             declared = int(self.headers.get("Content-Length") or 0)
@@ -366,38 +461,39 @@ class DashboardHandler(BoundedRequestHandler):
             self.send_redirect_with_session()
 
     def has_session(self) -> bool:
-        """Check session cookie"""
+        """Check session cookie, valid only from the address that logged in (cookie sent to another server of
+        this host, or copied to another device, is refused)"""
         cookie = cookie_value(self.headers.get("Cookie", "") or "", self.session_cookie())
         if not cookie:
             return False
         value = cookie.encode("utf-8")  # bytes: str compare raises TypeError on non ASCII cookie
+        address = str(self.client_address[0])
         now = time.monotonic()
         with self.lock:
             self.purge_sessions(now)
-            for token, times in self.sessions.items():
+            for token, session in self.sessions.items():
                 if hmac.compare_digest(value, token.encode("ascii")):
-                    times[1] = now  # last used
+                    if session.address != address:
+                        return False
+                    session.last_used = now
                     return True
         return False
 
-    def new_session(self) -> str:
-        """Create session token, least recently used session is dropped if limit reached"""
+    def new_session(self, local: bool = False) -> str:
+        """Create session token of client address, least recently used session is dropped if limit reached"""
         token = secrets.token_urlsafe(32)
         now = time.monotonic()
         with self.lock:
             self.purge_sessions(now)
             if len(self.sessions) >= MAX_SESSIONS:
-                del self.sessions[min(self.sessions, key=lambda name: self.sessions[name][1])]
-            self.sessions[token] = [now, now]
+                del self.sessions[min(self.sessions, key=lambda name: self.sessions[name].last_used)]
+            self.sessions[token] = Session(now, str(self.client_address[0]), local)
         return token
 
     @classmethod
     def purge_sessions(cls, now: float):
         """Forget expired sessions: unused for a while, or too old"""
-        expired = [
-            token for token, (created, last_used) in cls.sessions.items()
-            if now - last_used > SESSION_IDLE_SECONDS or now - created > SESSION_MAX_SECONDS
-        ]
+        expired = [token for token, session in cls.sessions.items() if session.expired(now)]
         for token in expired:
             del cls.sessions[token]
 
@@ -409,18 +505,21 @@ class DashboardHandler(BoundedRequestHandler):
             self.send_unauthorized(html)
             return False
         address = self.client_address[0]
+        lan = not is_loopback(address)  # this computer keeps its own count: LAN guesses never lock it out
         now = time.monotonic()
         # Response sent after lock released: a client not reading never blocks other connections
         with self.lock:
             self.purge_failures(now)
             count, until, _ = self.failures.get(address, [0, 0.0, 0.0])
-            blocked = until > now
+            blocked = until > now or (lan and DashboardHandler.global_until > now)
             if not blocked:
                 if hmac.compare_digest(code.encode("utf-8"), self.access_code.encode("utf-8")):
                     self.failures.pop(address, None)
                     return True
                 count += 1
                 self.failures[address] = [count, now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0, now]
+                if lan:
+                    self.count_global_failure(now)
         if blocked:
             self.send_body(429, b"too many attempts, try again later", "text/plain")
         else:
@@ -432,6 +531,18 @@ class DashboardHandler(BoundedRequestHandler):
             self.send_body(401, login_html().encode("utf-8"), "text/html; charset=utf-8")
         else:
             self.send_body(401, b'{"error": "invalid access code"}', "application/json")
+
+    @staticmethod
+    def count_global_failure(now: float):
+        """Wrong code of a LAN address (lock held): too many from any address within GLOBAL_WINDOW_SECONDS block
+        every LAN login a while (many devices or addresses guessing together)"""
+        failures = DashboardHandler.global_failures
+        failures.append(now)
+        if len(failures) >= GLOBAL_MAX_FAILURES and now - failures[0] <= GLOBAL_WINDOW_SECONDS:
+            failures.clear()
+            DashboardHandler.global_until = now + GLOBAL_LOCKOUT_SECONDS
+            logger.warning("WEB DASHBOARD: %s wrong access codes from the local network, logins blocked for %ss",
+                           GLOBAL_MAX_FAILURES, GLOBAL_LOCKOUT_SECONDS)
 
     @classmethod
     def purge_failures(cls, now: float):
@@ -450,13 +561,17 @@ class DashboardHandler(BoundedRequestHandler):
         return f"{SESSION_COOKIE}_{address[1]}" if address else SESSION_COOKIE
 
     def send_redirect_with_session(self):
-        token = self.new_session()
+        """Session cookie: kept 7 days on a LAN device, browser session only on this computer (cookies ignore
+        ports: every local server of the same host gets it)"""
+        local = is_local_client(str(self.client_address[0]))
+        token = self.new_session(local)
         self.send_response(303)
         self.send_header("Location", "/")
         secure = "; Secure" if self.secure else ""
+        lifetime = "" if local else f"; Max-Age={SESSION_MAX_SECONDS}"
         self.send_header(
             "Set-Cookie",
-            f"{self.session_cookie()}={token}; Path=/; Max-Age={SESSION_MAX_SECONDS}; HttpOnly; SameSite=Strict{secure}",
+            f"{self.session_cookie()}={token}; Path=/{lifetime}; HttpOnly; SameSite=Strict{secure}",
         )
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
@@ -502,15 +617,18 @@ class DashboardServer(LocalHTTPServer):
 class WebDashboard:
     """Web dashboard server control"""
 
-    __slots__ = ("_server", "_thread", "_key", "_retry", "_context", "_cert_lock", "__weakref__")  # signal slot
+    __slots__ = (
+        "_server", "_thread", "_key", "_retry", "_context", "_cert_lock", "_start_lock", "__weakref__",  # signal slot
+    )
 
     def __init__(self):
         self._server: DashboardServer | None = None
-        self._thread: threading.Thread | None = None
+        self._thread: threading.Thread | None = None  # serving thread, None while HTTPS is set up (see _start_secure)
         self._key: tuple | None = None  # listening setup of running server: address, HTTPS
         self._retry = BindRetry("Web dashboard", self.enable)
         self._context: ssl.SSLContext | None = None  # HTTPS & LAN access: certificate follows LAN addresses
         self._cert_lock = threading.Lock()  # one certificate update at a time
+        self._start_lock = threading.Lock()  # server started on its set-up thread (HTTPS) or dropped by disable
 
     @property
     def running(self) -> bool:
@@ -518,10 +636,14 @@ class WebDashboard:
 
     @staticmethod
     def access_code() -> str:
-        """Access code, generated and saved on first use"""
+        """Access code, generated and saved on first use, or if shorter than MIN_CODE_LENGTH (hand-set code of
+        before: guessed too easily), shown by the settings page & address dialog"""
         setting = cfg.user.config["web_dashboard"]
         code = str(setting["access_code"]).strip()
-        if len(code) < 6:
+        if len(code) < MIN_CODE_LENGTH:
+            if code:
+                logger.warning("WEB DASHBOARD: access code shorter than %s characters replaced by a new one "
+                               "(see Web Dashboard settings)", MIN_CODE_LENGTH)
             code = generate_access_code()
             setting["access_code"] = code
             cfg.save(config_type=ConfigType.CONFIG)
@@ -561,7 +683,12 @@ class WebDashboard:
                 DashboardHandler.access_code = code
                 DashboardHandler.failures = {}
                 DashboardHandler.sessions = {}
+                DashboardHandler.global_failures.clear()
+                DashboardHandler.global_until = 0.0
         host, port, secure = self.host(), self.port(), self.use_https()
+        lan = host != "127.0.0.1"
+        DashboardHandler.lan = lan
+        DashboardHandler.host_names = own_host_names() if lan else frozenset()
         key = (host, port, secure)
         if self._server is not None and self._key != key:
             self.disable()
@@ -572,56 +699,96 @@ class WebDashboard:
         except (OSError, OverflowError) as error:  # OverflowError: port out of range
             self._retry.failed((host, port), error)
             return
-        lan = host != "127.0.0.1"
+        DashboardHandler.secure = secure
+        self._server = server  # the running server from here: a second enable keeps it, disable drops it
+        self._key = key
+        self._retry.listening()  # after server set: settings card refreshed by its signal reads it running
         if secure:
+            from .module_control import event_loop_running
+
             # Certificate covers LAN addresses known now (never looked up here, GUI not blocked),
-            # made again in background once they change (server kept, see addresses_changed)
+            # made again in background once they change (server kept, see addresses_changed).
+            # TLS context (certificate read, created when missing or outdated: cryptography import, key
+            # generation, files written) built on its own thread while the event loop runs, the server serves
+            # once ready (audit PERF-030); synchronous at start & in tests (no event loop runs meanwhile)
             addresses = local_addresses() if lan else []
-            try:
-                context = server_context(cfg.path.config, addresses)
-            except (OSError, ValueError, ImportError) as error:
-                logger.error("WEB DASHBOARD: unable to set up HTTPS (%s)", error)
-                app_signal.error.emit(f"Web dashboard: unable to set up HTTPS ({error}).")
+            if event_loop_running():
+                threading.Thread(
+                    target=self._start_secure, args=(server, addresses, lan), daemon=True, name="Web dashboard HTTPS",
+                ).start()
+            else:
+                self._start_secure(server, addresses, lan)
+            return
+        with self._start_lock:
+            self._serve(server)
+        if lan:
+            logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
+
+    def _start_secure(self, server: DashboardServer, addresses: list[str], lan: bool):
+        """HTTPS server served once its TLS context is built (any thread), dropped if disabled meanwhile"""
+        try:
+            context = server_context(cfg.path.config, addresses)
+        except (OSError, ValueError, ImportError) as error:
+            logger.error("WEB DASHBOARD: unable to set up HTTPS (%s)", error)
+            app_signal.error.emit(f"Web dashboard: unable to set up HTTPS ({error}).")
+            with self._start_lock:
+                if self._server is server:
+                    self._server = None
+                    self._key = None
+            server.server_close()
+            return
+        with self._start_lock:
+            if self._server is not server:  # disabled (or setting changed) while the context was built
                 server.server_close()
                 return
             server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
-        DashboardHandler.secure = secure
-        self._server = server
-        self._key = key
-        self._thread = threading.Thread(target=server.serve_forever, daemon=True, name="Web dashboard")
-        self._thread.start()
-        self._retry.listening()  # after server set: settings card refreshed by its signal reads it running
-        scheme = "https" if secure else "http"
-        logger.info("ENABLED: web dashboard on %s://%s:%s", scheme, host, port)
-        if lan and not secure:
-            logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
-        if secure and lan:
-            self._context = context
+            if lan:
+                self._context = context
+            self._serve(server)
+        if lan:
             app_signal.addresses.connect(self.addresses_changed)
             if local_addresses() != addresses:  # found meanwhile (signal emitted before connected)
                 self.addresses_changed()
 
+    def _serve(self, server: DashboardServer):
+        """Serving thread started (within _start_lock), server address logged"""
+        self._thread = threading.Thread(target=server.serve_forever, daemon=True, name="Web dashboard")
+        self._thread.start()
+        host, port = server.server_address[:2]
+        logger.info("ENABLED: web dashboard on %s://%s:%s", "https" if DashboardHandler.secure else "http", host, port)
+
     def addresses_changed(self):
-        """LAN addresses changed (any thread): certificate made again in background, loaded in running server,
+        """LAN addresses changed (any thread): certificate made again in background, given to the running server,
         so connections are kept and port never bound again"""
-        context = self._context
-        if context is not None:
+        server = self._server
+        if self._context is not None and server is not None:
             threading.Thread(
-                target=self.update_certificate, args=(context,), daemon=True, name="Web dashboard certificate"
+                target=self.update_certificate, args=(server,), daemon=True, name="Web dashboard certificate"
             ).start()
 
-    def update_certificate(self, context: ssl.SSLContext):
-        """Load certificate covering current LAN addresses in server context (created if needed)"""
+    def update_certificate(self, server: DashboardServer):
+        """New TLS context with a certificate covering current LAN addresses (created if needed) given to the
+        listening socket of server: connections accepted from then on use it. The context in service is never
+        changed (handshakes run on it in handler threads); connections made with it keep it alive (each SSLSocket
+        references its own context) until they end."""
         with self._cert_lock:
-            if context is not self._context:  # server stopped or started again meanwhile
+            if server is not self._server or self._context is None:  # server stopped or started again meanwhile
                 return
             addresses = local_addresses()
             try:
-                load_certificate(context, cfg.path.config, addresses)
-            except (OSError, ValueError, ImportError) as error:  # previous certificate kept
+                context = server_context(cfg.path.config, addresses)
+                listening = server.socket
+                if isinstance(listening, ssl.SSLSocket):
+                    # Sockets accepted next are wrapped with listening.context (SSLSocket.accept). Its public
+                    # setter also sets the context of the TLS object, which a listening socket has none of
+                    listening._context = context  # type: ignore[attr-defined]
+                    if listening.context is not context:  # pragma: no cover - other ssl implementation
+                        raise ValueError("listening socket context not replaced")
+            except (OSError, ValueError, ImportError, AttributeError) as error:  # previous certificate kept
                 logger.error("WEB DASHBOARD: unable to update HTTPS certificate (%s)", error)
                 app_signal.error.emit(f"Web dashboard: unable to update HTTPS certificate ({error}).")
                 return
+            self._context = context
         logger.info("WEB DASHBOARD: HTTPS certificate covers %s", ", ".join(["127.0.0.1", *addresses]))
 
     def disable(self):
@@ -631,12 +798,17 @@ class WebDashboard:
             self._context = None
             with suppress(RuntimeError, TypeError):  # already disconnected
                 app_signal.addresses.disconnect(self.addresses_changed)
-        if self._server is None:
+        with self._start_lock:
+            server, thread = self._server, self._thread
+            if server is None:
+                return
+            self._server = None
+            self._thread = None
+            self._key = None
+        if thread is None:  # HTTPS still being set up on its thread: it closes the dropped server itself
+            logger.info("DISABLED: web dashboard (before it served)")
             return
-        self._server.stop()
-        self._server = None
-        self._thread = None
-        self._key = None
+        server.stop()
         logger.info("DISABLED: web dashboard")
 
 
@@ -696,7 +868,16 @@ def login_html() -> str:
 
 
 def dashboard_html() -> str:
-    return fill_page(DASHBOARD_HTML, PAGE_LABELS, SCRIPT_TEXTS)
+    page = DASHBOARD_HTML.replace("@@status@@", status_vars(colorblind_style(cfg.user.config.get("overlay_style"))))
+    return fill_page(page, PAGE_LABELS, SCRIPT_TEXTS)
+
+
+def status_vars(colorblind: bool = False) -> str:
+    """Status colors of every surface (overlays, app pages, stream graphics), colorblind safe variant as overlays"""
+    colors = status_colors(colorblind)
+    return "".join(
+        f"--{name}:{colors[role][0].lower()};"
+        for name, role in (("green", "gain"), ("red", "loss"), ("blue", "player"), ("yellow", "gold")))
 
 
 LOGIN_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-8">
@@ -783,7 +964,3 @@ $("remain").textContent=hms(d.time_remaining);setTimeout(tick,150)}
 catch(e){$("status").textContent=T.lost;setTimeout(tick,2000)}}
 tick();
 </script></body></html>"""
-# Status colors of every surface (overlays, app pages, stream graphics)
-DASHBOARD_HTML = DASHBOARD_HTML.replace("@@status@@", "".join(
-    f"--{name}:{STATUS_COLORS[role][0].lower()};"
-    for name, role in (("green", "gain"), ("red", "loss"), ("blue", "player"), ("yellow", "gold"))))

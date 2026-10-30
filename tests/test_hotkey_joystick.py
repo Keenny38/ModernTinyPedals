@@ -24,9 +24,10 @@ def test_key_names_and_codes():
     assert keymap["joy1_button_1"] == JOY_CODE_BASE
     assert keymap["joy2_button_5"] == joystick_code(1, 4)
     assert keymap["joy16_pov_left"] == joystick_code(15, JOY_MAX_BUTTONS + 3)
-    assert len(set(keymap.values())) == len(keymap) == 16 * 36  # no shared code
+    assert len(set(keymap.values())) == len(keymap) == 16 * (128 + 4)  # no shared code
     assert min(keymap.values()) > 255  # above keyboard & mouse codes
-    assert all(split_joystick_code(code) == divmod(code - JOY_CODE_BASE, 64) for code in keymap.values())
+    assert all(split_joystick_code(code) == divmod(code - JOY_CODE_BASE, joystick.JOY_CODE_STRIDE)
+               for code in keymap.values())
     assert split_joystick_code(65) == (-1, -1)
     assert split_joystick_code(joystick_code(16, 0)) == (-1, -1)
 

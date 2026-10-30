@@ -32,7 +32,7 @@ import os
 import struct
 import time
 from array import array
-from bisect import bisect_right
+from bisect import bisect_right, insort
 from collections.abc import Collection, Sequence
 from itertools import pairwise
 from typing import NamedTuple
@@ -55,6 +55,13 @@ LD_MARKER = 0x40
 DTYPE_FLOAT = 0x07
 DTYPE_INTEGERS = (0x00, 0x03, 0x05)  # scaled by shift, multiplier, scale & decimal places
 DTYPE_SIZE_32 = 4
+# Read bounds (crafted or broken file never fills memory): channel descriptors of the list, channel rate (game
+# loggers use up to a few hundred Hz, dedicated loggers a few kHz), samples of all channels read (8 bytes each),
+# decimal places of integer channels (int16 in file: 10^32767 overflows)
+MAX_CHANNELS = 10_000
+MAX_FREQUENCY = 10_000
+MAX_SAMPLES = 250_000_000
+MAX_DECIMALS = 20
 
 class ExportChannel(NamedTuple):
     """Recorder CSV column written as MoTeC channel: value * scale + offset"""
@@ -216,7 +223,9 @@ def read_ld(
 
     Channels read one by one from file, samples kept packed (doubles): a game log has about 180 channels, an hour of
     them is millions of samples. Raises OSError or ValueError if not a readable .ld file. Channels of unknown type,
-    or reaching past end of file, are skipped.
+    reaching past end of file, sampled faster than MAX_FREQUENCY, of a name already read, or of data shared with
+    a channel already read (a crafted file pointing many channels to one large block) are skipped. ValueError if
+    channels hold more than MAX_SAMPLES samples.
 
     Args:
         max_seconds: read channels up to this time only (memory bound of very long logs), 0 = whole channels.
@@ -246,20 +255,38 @@ def read_ld(
         info = LdInfo(driver=text(head[14]), vehicle=text(head[15]), venue=text(head[16]), session=session,
                       comment=text(head[18]), timestamp=header_time(text(head[12]), text(head[13])))
         channels = []
-        seen = set()
+        seen: set[int] = set()
+        names_read: set[str] = set()
+        ranges: list[tuple[int, int]] = []  # data (start, end) of channels read, sorted
+        total = 0
         while meta_ptr and meta_ptr not in seen and meta_ptr <= file_size - CHANNEL.size:
+            if len(seen) >= MAX_CHANNELS:
+                logger.warning("MOTEC: more than %s channels, others skipped", MAX_CHANNELS)
+                break
             seen.add(meta_ptr)  # corrupted list could loop
             chan = CHANNEL.unpack(read_at(meta_ptr, CHANNEL.size))
             meta_ptr = chan[1]
             name = text(chan[12])
-            if wanted is not None and name.lower() not in wanted:
+            key = name.lower()
+            if (wanted is not None and key not in wanted) or key in names_read:  # same name: first kept
                 continue
             data_ptr, count, dtype_a, size, frequency = chan[2], chan[3], chan[5], chan[6], chan[7]
             typecode = raw_typecode(dtype_a, size)
-            if not typecode or frequency <= 0 or data_ptr + count * size > file_size:
+            if not typecode or not 0 < frequency <= MAX_FREQUENCY or data_ptr > file_size:
                 continue
             if max_seconds > 0:
                 count = min(count, int(frequency * max_seconds) + 1)
+            # Channel declaring more samples than the file holds (header damaged, logger stopped short): the part
+            # read is still used, bounded by max_seconds first
+            count = min(count, (file_size - data_ptr) // size)
+            if count <= 0:
+                continue
+            if count and overlaps(ranges, data_ptr, data_ptr + count * size):
+                logger.warning("MOTEC: channel %s skipped: data shared with another channel", name)
+                continue
+            total += count
+            if total > MAX_SAMPLES:
+                raise ValueError(f"more than {MAX_SAMPLES} samples")
             raw: array | tuple
             try:
                 data = read_at(data_ptr, count * size)
@@ -272,6 +299,7 @@ def read_ld(
                 logger.warning("MOTEC: channel %s skipped: %s", name, error)
                 continue
             shift, multiplier, scale, decimals = chan[8], chan[9], chan[10], chan[11]
+            decimals = min(max(decimals, -MAX_DECIMALS), MAX_DECIMALS)  # never an OverflowError
             if (shift, multiplier, scale, decimals) == (0, 1, 1, 0) or not scale:
                 values = array("d", raw)
             else:  # value = raw * multiplier * 10^-decimals / scale + shift
@@ -279,7 +307,18 @@ def read_ld(
                 values = array("d", (sample * factor + shift for sample in raw))
             unit = text(chan[14]) or text(chan[13])
             channels.append(Channel(name, text(chan[13]), unit, frequency, values))
+            names_read.add(key)
+            if count:
+                insort(ranges, (data_ptr, data_ptr + count * size))
     return info, channels
+
+
+def overlaps(ranges: list[tuple[int, int]], start: int, end: int) -> bool:
+    """Whether data from start to end (excluded) overlaps one of sorted non overlapping ranges"""
+    index = bisect_right(ranges, (start, end))
+    if index > 0 and ranges[index - 1][1] > start:  # range starting before (or at) start reaches past it
+        return True
+    return index < len(ranges) and ranges[index][0] < end  # range starting after start begins before end
 
 
 def sample_rate(times: list[float]) -> int:
@@ -378,7 +417,8 @@ def import_ld_job(filename: str, folder: str) -> tuple[list[str], str]:
 
     try:
         return import_ld_file(filename, folder), ""
-    except (OSError, ValueError, MemoryError) as error:  # memory: huge log (or sizes made up by a broken file)
+    # memory: huge log (or sizes made up by a broken file), arithmetic: values out of range (crafted file)
+    except (OSError, ValueError, MemoryError, ArithmeticError) as error:
         logger.error("MOTEC: unable to import %s: %s", filename, error)
         return [], error_text(error)
 

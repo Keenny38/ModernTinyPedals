@@ -5,21 +5,54 @@ import "../components"
 
 // Overlays page: title & counts, loaded preset, search, All / Active / Inactive, chips (favorites, recently edited,
 // categories), overlays as cards with preview (grid), compact rows (list) or at their place on the screens
-// (screen view), enable / disable all shown overlays. Rows animate in & out; a hovered card plays its overlay.
-// Keys: type to search, "/" search, arrows move, Space switches, Enter opens settings, Menu key the menu.
+// (screen view), enable / disable all shown overlays (at once, Undo in the toast). Rows animate in & out; a
+// hovered card plays its overlay. Keys: type to search, Ctrl+F or "/" search, arrows move, Space switches, Enter
+// opens options, Ctrl+D favorite, Menu key the menu.
 TpPage {
     id: page
 
     readonly property int view: backend.viewMode  // 0 cards, 1 list, 2 screen
     readonly property bool grid: view === 0
+    readonly property bool compact: width < theme.bpCompact
     readonly property real cardMinWidth: theme.em * 14.5
     readonly property var categoryCounts: backend.categoryCounts
     readonly property var stateCounts: backend.stateCounts
+    readonly property int enableCount: backend.shownCount - backend.shownActiveCount
     property var presetList: []  // presets of header menu, read when it opens
+
+    // Category chip of the chips row (wrapped or scrolled)
+    component CategoryChip: TpChip {
+        required property var modelData
+        text: modelData.label
+        glyph: modelData.glyph
+        showDot: modelData.color !== ""
+        dotColor: modelData.color !== "" ? modelData.color : "transparent"
+        count: page.categoryCounts[modelData.key] || 0
+        selected: backend.category === modelData.key
+        tip: modelData.key === "#favorites" ? i18n.tr("Overlays marked with a star (every preset)")
+           : modelData.key === "#recent" ? i18n.tr("Overlays whose options you saved last, last first")
+           : ""
+        onClicked: backend.setCategory(selected && modelData.key !== "" ? "" : modelData.key)
+    }
 
     function focusSearch() {
         search.forceActiveFocus()
         search.selectAll()
+    }
+    function isFind(event) {
+        return event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier
+    }
+
+    // Ctrl+F searches this page: taken before the app's own Ctrl+F shortcut
+    Keys.onShortcutOverride: function(event) {
+        if (isFind(event))
+            event.accepted = true
+    }
+    Keys.onPressed: function(event) {
+        if (isFind(event)) {
+            page.focusSearch()
+            event.accepted = true
+        }
     }
     function openMenu(item, x, y, entry) {
         cardMenu.name = entry.name
@@ -52,15 +85,15 @@ TpPage {
                 Layout.maximumWidth: theme.em * 13
                 tip: (backend.presetLocked ? i18n.tr("Loaded preset (locked)") : i18n.tr("Loaded preset"))
                      + ": " + backend.presetName + "\n" + i18n.tr("Click to load another preset")
-                onClicked: presetMenu.popup(presetButton, 0, presetButton.height)
+                onClicked: presetMenu.toggleBelow(presetButton)
             }
             TpButton {
                 id: shareButton
                 flat: true
-                glyph: ""  // export
+                glyph: theme.glyphs.share
                 text: i18n.tr("Share")
                 tip: i18n.tr("Export or import overlay settings as a file")
-                onClicked: shareMenu.popup(shareButton, 0, shareButton.height)
+                onClicked: shareMenu.toggleBelow(shareButton)
             }
             TpButton {
                 id: sortButton
@@ -69,48 +102,19 @@ TpPage {
                 glyph: ""  // sort
                 fallback: "⇅"
                 tip: i18n.tr("Sort overlays")
-                onClicked: sortMenu.popup(sortButton, 0, sortButton.height)
+                onClicked: sortMenu.toggleBelow(sortButton)
             }
-            // Cards / list / screen switch
-            Rectangle {
-                implicitHeight: theme.controlHeight
-                implicitWidth: viewRow.implicitWidth + theme.space2 * 2
-                radius: theme.radiusLg
-                color: theme.dark ? Qt.darker(theme.base, 1.25) : Qt.darker(theme.window, 1.04)
-                border.width: 1
-                border.color: theme.border
-                Row {
-                    id: viewRow
-                    anchors.centerIn: parent
-                    spacing: theme.space1
-                    TpButton {
-                        flat: true
-                        size: "sm"
-                        checked: page.view === 0
-                        glyph: ""  // grid view
-                        fallback: i18n.tr("Cards")
-                        tip: i18n.tr("Cards with preview")
-                        onClicked: backend.setViewMode(0)
-                    }
-                    TpButton {
-                        flat: true
-                        size: "sm"
-                        checked: page.view === 1
-                        glyph: ""  // bulleted list
-                        fallback: i18n.tr("List")
-                        tip: i18n.tr("Compact list")
-                        onClicked: backend.setViewMode(1)
-                    }
-                    TpButton {
-                        flat: true
-                        size: "sm"
-                        checked: page.view === 2
-                        glyph: ""  // monitor
-                        fallback: i18n.tr("Screen")
-                        tip: i18n.tr("Running overlays at their place on your screens")
-                        onClicked: backend.setViewMode(2)
-                    }
-                }
+            // Cards / list / screen view: icons (tooltip, screen readers name them)
+            TpSegmented {
+                objectName: "viewChoice"
+                name: i18n.tr("View")
+                options: [
+                    { glyph: "\uE80A", fallback: i18n.tr("Cards"), tip: i18n.tr("Cards with preview") },
+                    { glyph: "\uE71D", fallback: i18n.tr("List"), tip: i18n.tr("Compact list") },
+                    { glyph: "\uE7F4", fallback: i18n.tr("Screen"), tip: i18n.tr("Running overlays at their place on your screens") }
+                ]
+                currentIndex: page.view
+                onActivated: function(index) { backend.setViewMode(index) }
             }
         }
 
@@ -120,11 +124,12 @@ TpPage {
             spacing: theme.space4
             TpSearchField {
                 id: search
+                objectName: "overlaySearch"
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 8
                 focus: true
                 searchDelay: 0  // overlay list filtered at once
-                placeholderText: i18n.tr("Search overlays") + "   /"
+                placeholderText: i18n.tr("Search overlays") + "   Ctrl+F"
                 Accessible.name: i18n.tr("Search overlays")
                 onSearchChanged: function(text) { backend.setSearch(text) }
                 onExitField: page.view === 2 && screenLoader.item ? screenLoader.item.forceActiveFocus() : overlays.forceActiveFocus()
@@ -148,25 +153,40 @@ TpPage {
             }
         }
 
-        // Favorites, recently edited & category chips
-        Flow {
+        // Favorites, recently edited & category chips: wrapped, or one row scrolled sideways on compact pages
+        // (overlays keep the room)
+        Loader {
             Layout.fillWidth: true
-            spacing: theme.space3
-            Repeater {
-                model: backend.categories
-                TpChip {
-                    required property var modelData
-                    text: modelData.label
-                    glyph: modelData.glyph
-                    showDot: modelData.color !== ""
-                    dotColor: modelData.color !== "" ? modelData.color : "transparent"
-                    count: page.categoryCounts[modelData.key] || 0
-                    selected: backend.category === modelData.key
-                    tip: modelData.key === "#favorites" ? i18n.tr("Overlays marked with a star (every preset)")
-                       : modelData.key === "#recent" ? i18n.tr("Overlays whose options you saved last, last first")
-                       : ""
-                    onClicked: backend.setCategory(selected && modelData.key !== "" ? "" : modelData.key)
+            sourceComponent: page.compact ? chipRow : chipFlow
+        }
+        Component {
+            id: chipFlow
+            Flow {
+                spacing: theme.space3
+                Repeater {
+                    model: backend.categories
+                    CategoryChip {}
                 }
+            }
+        }
+        Component {
+            id: chipRow
+            Flickable {
+                objectName: "categoryRow"
+                implicitHeight: chips.implicitHeight
+                contentWidth: chips.implicitWidth
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                clip: true
+                Row {
+                    id: chips
+                    spacing: theme.space3
+                    Repeater {
+                        model: backend.categories
+                        CategoryChip {}
+                    }
+                }
+                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
             }
         }
 
@@ -188,6 +208,7 @@ TpPage {
 
             GridView {
                 id: overlays
+                objectName: "overlayGrid"
                 anchors.fill: parent
                 anchors.leftMargin: -theme.space2  // card margins aligned with header
                 anchors.rightMargin: -theme.space2
@@ -252,9 +273,16 @@ TpPage {
                 Keys.onReturnPressed: if (currentItem) backend.openConfig(currentItem.name)
                 Keys.onEnterPressed: if (currentItem) backend.openConfig(currentItem.name)
                 Keys.onMenuPressed: if (currentItem) page.openMenu(currentItem, currentItem.width / 2, currentItem.height / 2, currentItem)
+                function isFavoriteKey(event) {
+                    return event.key === Qt.Key_D && event.modifiers === Qt.ControlModifier
+                }
+                Keys.onShortcutOverride: function(event) {
+                    if (isFavoriteKey(event) && currentItem)
+                        event.accepted = true
+                }
                 Keys.onPressed: function(event) {
-                    if (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier) && currentItem) {
-                        backend.toggleFavorite(currentItem.name)  // Ctrl+F: favorite
+                    if (isFavoriteKey(event) && currentItem) {
+                        backend.toggleFavorite(currentItem.name)  // Ctrl+D: favorite
                         event.accepted = true
                     } else if (search.routeTyped(event)) {  // type to search
                         event.accepted = true
@@ -289,9 +317,9 @@ TpPage {
             }
 
             // Nothing shown
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
-                visible: page.view !== 2 && overlays.count === 0
+                empty: page.view !== 2 && overlays.count === 0
                 glyph: ""  // search
                 title: backend.category === "#favorites" && !backend.searchText && backend.stateFilter === 0
                        ? i18n.tr("No favorite overlay yet: click the star of a card")
@@ -301,62 +329,64 @@ TpPage {
             }
         }
 
-        // Shown count & batch actions on shown overlays
+        // Shown count (filters on: counts are in the header & chips otherwise), screen view keys, then batch
+        // switch of shown overlays (at once, Undo in the toast)
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             Text {
+                objectName: "footerText"
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 color: theme.dimText
                 text: page.view === 2
-                    ? i18n.tr("Drag an overlay to move it, click to open its settings")
-                    : (backend.filtered
-                        ? i18n.trm(backend.shownCount + " of " + backend.totalCount + " overlays shown")
-                        : i18n.trm(backend.totalCount + " overlays"))
-                      + (page.grid ? "  ·  " + i18n.tr("Previews show simulated race values") : "")
+                    ? i18n.tr("Drag an overlay or use the arrows (Shift: 10 px) to move it, click or Enter to open its options")
+                    : [backend.filtered ? i18n.trm(backend.shownCount + " of " + backend.totalCount + " overlays shown") : "",
+                       page.grid ? i18n.tr("Previews show simulated race values") : ""]
+                      .filter(function(part) { return part !== "" }).join("  ·  ")
+                textFormat: Text.PlainText
             }
             TpButton {
-                visible: page.view === 2
-                flat: true
-                text: i18n.tr("Layout Editor")
-                tip: i18n.tr("Place overlays on a game screenshot, with alignment guides")
-                onClicked: backend.openLayoutEditor()
-            }
-            TpButton {
+                objectName: "enableShownButton"
                 visible: page.view !== 2
-                text: backend.filtered ? i18n.tr("Enable Shown") : i18n.tr("Enable All")
-                enabled: backend.shownCount > 0
+                text: i18n.tr("Enable") + " (" + page.enableCount + ")"
+                tip: backend.filtered ? i18n.tr("Enable the overlays shown") : i18n.tr("Enable every overlay")
+                enabled: page.enableCount > 0
                 onClicked: backend.enableShown()
             }
             TpButton {
+                objectName: "disableShownButton"
                 visible: page.view !== 2
-                text: backend.filtered ? i18n.tr("Disable Shown") : i18n.tr("Disable All")
-                enabled: backend.shownCount > 0
+                text: i18n.tr("Disable") + " (" + backend.shownActiveCount + ")"
+                tip: backend.filtered ? i18n.tr("Disable the overlays shown") : i18n.tr("Disable every overlay")
+                enabled: backend.shownActiveCount > 0
                 onClicked: backend.disableShown()
             }
         }
     }
 
-    TextMetrics { id: menuMetrics; text: showOnlyAction.text }
     TpMenu {
         id: cardMenu
-        width: Math.max(theme.em * 13, menuMetrics.advanceWidth + theme.em * 3.8)  // longest item never cut
         property string name: ""
         property bool active: false
         property bool favorite: false
         property string category: ""
         property string categoryLabel: ""
-        Action { text: i18n.tr("Config") + "..."; onTriggered: backend.openConfig(cardMenu.name) }
+        Action { text: i18n.tr("Options…"); onTriggered: backend.openConfig(cardMenu.name) }
         Action {
             text: cardMenu.active ? i18n.tr("Disable") : i18n.tr("Enable")
             onTriggered: backend.toggle(cardMenu.name)
         }
         Action {
-            text: cardMenu.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")
+            text: (cardMenu.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")) + "   Ctrl+D"
             onTriggered: backend.toggleFavorite(cardMenu.name)
         }
-        Action { text: i18n.tr("Export Settings..."); onTriggered: backend.exportSettings(cardMenu.name) }
+        Action {
+            text: i18n.tr("Test on Screen")
+            enabled: cardMenu.active
+            onTriggered: backend.testOnScreen()
+        }
+        Action { text: i18n.tr("Export Overlay Settings…"); onTriggered: backend.exportSettings(cardMenu.name) }
         MenuSeparator {}
         Action {
             id: showOnlyAction
@@ -366,12 +396,10 @@ TpPage {
         }
         onClosed: overlays.forceActiveFocus()
     }
-    TextMetrics { id: shareMetrics; text: i18n.tr("Import Overlay Settings...") }
     TpMenu {
         id: shareMenu
-        width: Math.max(theme.em * 13, shareMetrics.advanceWidth + theme.em * 3.8)  // longest item never cut
-        Action { text: i18n.tr("Export Overlay Settings..."); onTriggered: backend.exportSettings("") }
-        Action { text: i18n.tr("Import Overlay Settings..."); onTriggered: backend.importSettings() }
+        Action { text: i18n.tr("Export Overlay Settings…"); onTriggered: backend.exportSettings("") }
+        Action { text: i18n.tr("Import Overlay Settings…"); onTriggered: backend.importSettings() }
         onClosed: overlays.forceActiveFocus()
     }
     TpMenu {
@@ -397,21 +425,10 @@ TpPage {
             onObjectRemoved: function(index, object) { presetMenu.removeItem(object) }
         }
         MenuSeparator {}
-        Action { text: i18n.tr("Manage Presets..."); onTriggered: backend.openPresets() }
+        Action { text: i18n.tr("Manage Presets…"); onTriggered: backend.openPresets() }
         onClosed: overlays.forceActiveFocus()
     }
 
-    // Overlay moved from screen view: undo for a few seconds
-    TpToast {
-        id: movedToast
-        actionText: i18n.tr("Undo")
-        onAction: backend.undoMove()
-        Connections {
-            target: backend
-            function onOverlayMoved(label) {
-                movedToast.text = i18n.trm("Overlay moved: " + label)
-                movedToast.show()
-            }
-        }
-    }
+    // Dialogs & toasts of the backend (moves, batch switch & test on screen: Undo in the toast)
+    TpDialogHost {}
 }

@@ -35,19 +35,19 @@ RELATIVE_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
     "pit_status", "laptime", "best_laptime", "average_laptime", "delta_laptime", "energy_remaining",
     "energy_per_lap", "vehicle_integrity", "incidents", "track_limits", "stint_laps", "speed_trap",
-    "lift_and_coast_time", "time_gap", "gap_trend", "driver_ranks",
+    "lift_and_coast_time", "time_gap", "gap_trend", "driver_ranks", "driver_badge",
 )
 STANDINGS_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
     "pit_status", "laptime", "best_laptime", "average_laptime", "delta_laptime",
     "energy_remaining", "energy_per_lap", "vehicle_integrity", "incidents", "track_limits", "stint_laps",
-    "speed_trap", "lift_and_coast_time", "time_interval", "time_gap", "gap_trend", "driver_ranks",
+    "speed_trap", "lift_and_coast_time", "time_interval", "time_gap", "gap_trend", "driver_ranks", "driver_badge",
 )
 RIVALS_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
     "pit_status", "laptime", "best_laptime", "average_laptime", "delta_laptime",
     "energy_remaining", "vehicle_integrity", "incidents", "track_limits", "stint_laps", "speed_trap",
-    "lift_and_coast_time", "time_interval", "gap_trend", "driver_ranks",
+    "lift_and_coast_time", "time_interval", "gap_trend", "driver_ranks", "driver_badge",
 )
 # Column key -> display order option suffix, if different
 DISPLAY_ORDER_NAMES = {"driver_name": "driver", "vehicle_name": "vehicle"}
@@ -70,7 +70,7 @@ COLUMN_TITLES = {
     "energy_per_lap": "Energy per Lap",
     "vehicle_integrity": "Vehicle Integrity",
     "incidents": "Incidents",
-    "track_limits": "Track limits",
+    "track_limits": "Track Limits",
     "stint_laps": "Stint Laps",
     "speed_trap": "Speed Trap",
     "lift_and_coast_time": "Lift & Coast",
@@ -78,9 +78,11 @@ COLUMN_TITLES = {
     "time_gap": "Time Gap",
     "gap_trend": "Gap Trend",
     "driver_ranks": "Driver & Safety Rank",
+    "driver_badge": "Driver Badge",
 }
 # Options of each column (column, options), shown after the column list
 COLUMN_OPTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("class", ("show_class_name",)),
     ("position_change", ("show_position_change_in_class",)),
     ("driver_name", ("driver_name_shorten", "driver_name_uppercase", "driver_name_width")),
     ("vehicle_name", ("show_vehicle_brand_as_name", "vehicle_name_width")),
@@ -95,7 +97,6 @@ COLUMN_OPTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("delta_laptime", ("number_of_delta_laptime", "show_inverted_delta_laptime_layout")),
     ("energy_remaining", ("decimal_places_energy_remaining",)),
     ("energy_per_lap", ("show_energy_per_lap_average",)),
-    ("driver_ranks", ("show_driver_badge",)),
     ("incidents", ("incidents_high_threshold", "incidents_extreme_threshold")),
     ("lift_and_coast_time", ("lift_and_coast_reset_threshold", "lift_and_coast_highlight_threshold")),
     ("time_interval", ("show_time_interval_from_same_class", "decimal_places_time_interval",
@@ -138,10 +139,12 @@ def class_column_inactive(values: Mapping, class_headers: bool = False) -> dict[
     """Class column replaced by class headers (standings, unless kept with them), class style shown only in
     class column"""
     if class_headers and not values.get("show_class_column_with_class_header", False):
-        return {"column_class": ("off", "show_class_header"),
+        return {"column_class": ("off", "show_class_header"), "show_class_name": ("off", "show_class_header"),
                 "show_class_style_for_position_in_class": ("off", "show_class_header")}
     if not values.get("column_class", True):
         return {"show_class_style_for_position_in_class": ("on", "column_class")}
+    if not values.get("show_class_name", True):  # position in class always on class color
+        return {"show_class_style_for_position_in_class": ("on", "show_class_name")}
     return {}
 
 

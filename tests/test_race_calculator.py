@@ -42,6 +42,7 @@ def page(ui_env, monkeypatch, host):
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
+    monkeypatch.setitem(cfg.user.config["fuel_calculator"], "show_quick_setup", False)  # whole page (first use: tests of their own)
     dialog = race_calculator.RaceCalculator(None)
     yield dialog
     dialog.set_unmodified()
@@ -420,6 +421,7 @@ def test_game_data_switched_off_and_on(page, host, monkeypatch):
     from neopedal.hotkey import command
     from neopedal.ui import command_palette
     from neopedal.ui.quick import race_backend, race_files
+    from tests.test_audit_g_qml_pages import item_named
 
     backend = page.backend
     set_race(backend, laps=40)
@@ -428,7 +430,8 @@ def test_game_data_switched_off_and_on(page, host, monkeypatch):
     backend.setTab(3)
     assert backend.strategy.first_lap == 20 and race_backend.race_status() == "on"
     view = page.ensure_view()
-    switch = view.rootObject().findChild(QObject, "gameDataSwitch")
+    switch = item_named(view.rootObject(), "gameDataSwitch")  # toolbar button (Repeater item)
+    assert switch is not None
     QMetaObject.invokeMethod(switch, "click")  # off
     assert not backend.game_data and not backend.header["gameData"] and race_backend.race_status() == "off"
     assert cfg.user.config["fuel_calculator"]["enable_game_data"] is False
@@ -649,7 +652,7 @@ def test_race_plan_widget_pit_menu_and_target(ui_env, monkeypatch, host):
     widget = race_plan_widget(monkeypatch, completed=11)  # 4 laps to stop at 15
     try:
         assert widget.bar_pit_menu.text == "MENU OK"
-        assert widget.bar_target.text == "TGT 3.00"  # 12 L for 4 laps
+        assert widget.bar_target.text == "TGT 3.00L"  # 12 L for 4 laps
         assert widget.bar_target.last[1] == widget.wcfg["warning_color_target"]  # last lap used 3.1
         monkeypatch.setattr(api.read.vehicle, "absolute_refill", lambda *args, **kwargs: 30.0, raising=False)
         widget.timerEvent(None)

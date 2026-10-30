@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Mapping
 from fnmatch import fnmatchcase
 from functools import lru_cache
 
@@ -104,10 +105,34 @@ def _help_translations(code: str) -> dict[str, str]:
     return dict(language_pack(code).get("option_help", {}))
 
 
+_help_holders = 0  # option pages open (see hold_help_cache)
+
+
+def hold_help_cache():
+    """An option page opened: help texts kept while any is open (closing one page never makes the other
+    one, or the next one, read & parse the help files again)"""
+    global _help_holders
+    _help_holders += 1
+
+
+def release_help_cache() -> bool:
+    """An option page closed, True if no page holds the help texts anymore (caller clears the cache, after
+    a delay: the page is often opened again right away)"""
+    global _help_holders
+    _help_holders = max(0, _help_holders - 1)
+    return _help_holders == 0
+
+
+def help_cache_held() -> bool:
+    """An option page is open: help texts kept"""
+    return _help_holders > 0
+
+
 def clear_help_cache():
     """Option help texts freed (several MB), read again when next needed: call once option pages closed"""
     _help.cache_clear()
     _help_translations.cache_clear()
+    option_help_english.cache_clear()
 
 
 def option_help(section: str, key: str) -> str:
@@ -118,15 +143,31 @@ def option_help(section: str, key: str) -> str:
     return text
 
 
+# Widgets whose documentation says "most options are inherited from" other widgets: their help read there
+# when the widget's own section has none (same option, same meaning)
+INHERITED_HELP: dict[str, tuple[str, ...]] = {
+    "standings": ("relative",),
+    "rivals": ("standings", "relative"),
+    "virtual_energy": ("fuel",),
+}
+
+
+def _help_sections(helps: Mapping[str, Mapping[str, str]], section: str, common: str) -> tuple[Mapping[str, str], ...]:
+    """Help sources of a widget section in lookup order: own section, inherited sections, common terms"""
+    return tuple(helps.get(name, {}) for name in (section, *INHERITED_HELP.get(section, ()), common))
+
+
+@lru_cache(maxsize=4096)
 def option_help_english(section: str, key: str) -> str:
-    """Option description from documentation, empty if not documented"""
+    """Option description from documentation, empty if not documented (cached: the pattern & generic word
+    matches below are repeated for every row of an option page and every result of an option search)"""
     helps, common = _help()
-    section_help = helps.get(section, {})
-    common_help = helps.get(common, {})
-    for source in (section_help, common_help):
+    sources = _help_sections(helps, section, common)
+    common_help = sources[-1]
+    for source in sources:
         if key in source:
             return source[key]
-    for source in (section_help, common_help):
+    for source in sources:
         for pattern, text in source.items():
             if "*" in pattern and fnmatchcase(key, pattern):
                 return text
@@ -143,8 +184,9 @@ def option_help_specific(section: str, key: str) -> str:
     if not text:
         return ""
     helps, common = _help()
-    common_help = helps.get(common, {})
-    if key not in common_help and key not in helps.get(section, {}):
+    sources = _help_sections(helps, section, common)
+    common_help = sources[-1]
+    if not any(key in source for source in sources):
         generic = {common_help[word] for word in _GENERIC if word in common_help}
         if text in generic:
             return ""

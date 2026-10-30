@@ -20,12 +20,15 @@
 Delta module
 """
 
+from math import nan
+
 from .. import calculation as calc
 from .. import realtime_state
 from ..adapter.data_notify import notifier
 from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import DeltaInfo, minfo
+from ..userfile.data_saver import queue_save
 from ..userfile.delta_best import (
     read_delta_best_file,
     read_delta_session_file,
@@ -226,8 +229,9 @@ def calc_delta_time(
                     calc_ema_laptime(laptime_pace, laptime_valid),
                     laptime_pace + laptime_pace_margin,
                 )
-        # Invalidated lap (track limits): never delta best, session or stint best
-        if not lap_clean:
+        # Invalidated lap (track limits), or lap through pit lane (out lap, pit in lap: game may give it a
+        # valid time): never delta best, session or stint best (stint best of an out lap after a stop)
+        if not (lap_comparable and lap_clean):
             return
         # Update delta best list
         if laptime_best > laptime_lap:
@@ -245,7 +249,8 @@ def calc_delta_time(
             save_session_file()
 
     def save_best_file():
-        """Save delta best file, never over a faster lap of file not accessible at load"""
+        """Save delta best file (data saver thread, module keeps updating), never over a faster lap of
+        file not accessible at load"""
         nonlocal best_readable, laptime_best, delta_array_best
         if not best_readable:  # file kept unless lap faster than its lap
             (saved_array, saved_laptime), best_readable = read_delta_best_file(
@@ -256,14 +261,16 @@ def calc_delta_time(
                 laptime_best = saved_laptime
                 output.deltaBestData = delta_array_best = saved_array
                 return
-        save_delta_best_file(
+        queue_save(
+            save_delta_best_file,
             filepath=filepath,
             filename=combo_name,
-            dataset=delta_array_best,
+            dataset=delta_array_best,  # tuple, never changed in place
+            sync=lap_state.sync_save,  # module stopping or player inactive: written at once
         )
 
     def save_session_file(keep_stint: bool = True):
-        """Save session & stint best file, faster laps of file not accessible at load kept"""
+        """Save session & stint best file (data saver thread), faster laps of file not accessible at load kept"""
         nonlocal session_readable, laptime_session_best, delta_array_session
         nonlocal laptime_stint_best, delta_array_stint
         pitstops = api.read.vehicle.number_pitstops()
@@ -275,9 +282,11 @@ def calc_delta_time(
                 delta_array_session, laptime_session_best = saved[:2]
             if keep_stint and saved[3] < laptime_stint_best:
                 delta_array_stint, laptime_stint_best = saved[2:]
-        save_delta_session_file(
+        queue_save(
+            save_delta_session_file,
             filepath, combo_name, last_session_id, pitstops,
-            delta_array_session, delta_array_stint,
+            delta_array_session, delta_array_stint,  # tuples, never changed in place
+            sync=lap_state.sync_save,
         )
 
     def resolved_lap(lap: PendingLap, valid: bool):
@@ -333,7 +342,7 @@ def calc_delta_time(
             delta_ema_last = 0.0
             delta_ema_session = 0.0
             delta_ema_stint = 0.0
-            speed_delta_best = speed_delta_last = speed_delta_session = speed_delta_stint = 0.0
+            speed_delta_best = speed_delta_last = speed_delta_session = speed_delta_stint = nan  # nan: unknown
 
             laptime_curr = 0.0  # current laptime
             laptime_last = 0.0  # last laptime

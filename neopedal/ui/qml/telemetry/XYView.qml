@@ -234,7 +234,7 @@ Item {
                 compact: true
                 loading: !scatterArea.hasData && backend.loading
                 empty: !scatterArea.hasData && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE9D2"  // chart
                 title: lapFilter.legend.length === 0 ? i18n.tr("Select recorded laps to compare.") : i18n.tr("Not recorded in shown laps")
             }
@@ -280,7 +280,7 @@ Item {
                     Rectangle {
                         readonly property var tick: root.xTicks[index]
                         visible: tick !== undefined
-                        x: tick ? Math.round(tick.at * plot.width) : 0; width: 1; height: plot.height; color: theme.text; opacity: 0.06
+                        x: tick ? Math.round(tick.at * plot.width) : 0; width: 1; height: plot.height; color: theme.chartGrid
                     }
                 }
                 Repeater {  // horizontal grid
@@ -288,7 +288,7 @@ Item {
                     Rectangle {
                         readonly property var tick: root.yTicks[index]
                         visible: tick !== undefined
-                        y: tick ? Math.round((1 - tick.at) * plot.height) : 0; width: plot.width; height: 1; color: theme.text; opacity: 0.06
+                        y: tick ? Math.round((1 - tick.at) * plot.height) : 0; width: plot.width; height: 1; color: theme.chartGrid
                     }
                 }
                 Rectangle {  // zero lines
@@ -316,7 +316,7 @@ Item {
                             GpuShape {
                                 key: modelData.key
                                 visible: lapFilter.shown(modelData.lap)
-                                color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
+                                color: theme.tint(modelData.color, "outline")
                                 opacity: root.lapOpacity(modelData.lap)
                                 revision: backend.revision
                             }
@@ -341,6 +341,7 @@ Item {
                     y: tick ? (1 - tick.at) * plot.height - height / 2 : 0
                     visible: tick !== undefined && y > -height / 2 && y < plot.height
                     text: tick ? tick.text : ""
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontTiny
                     font.features: { "tnum": 1 }
@@ -354,6 +355,7 @@ Item {
                     x: tick ? scatterArea.padLeft + tick.at * plot.width - width / 2 : 0
                     y: plot.height + theme.em * 0.15
                     text: tick ? tick.text : ""
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontTiny
                     font.features: { "tnum": 1 }
@@ -364,6 +366,7 @@ Item {
                 anchors.horizontalCenter: plot.horizontalCenter
                 anchors.bottom: parent.bottom
                 text: root.scatterData.xTitle || ""
+                textFormat: Text.PlainText
                 color: theme.text
                 font.pointSize: theme.fontCaption
             }
@@ -374,6 +377,7 @@ Item {
                 rotation: -90
                 transformOrigin: Item.TopLeft
                 text: root.scatterData.yTitle || ""
+                textFormat: Text.PlainText
                 color: theme.text
                 font.pointSize: theme.fontCaption
             }
@@ -415,7 +419,7 @@ Item {
                 compact: true
                 loading: histogramArea.bins.length === 0 && backend.loading
                 empty: histogramArea.bins.length === 0 && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE9D2"  // chart
                 title: lapFilter.legend.length === 0 ? i18n.tr("Select recorded laps to compare.") : i18n.tr("Not recorded in shown laps")
             }
@@ -425,12 +429,13 @@ Item {
                     readonly property real share: histogramArea.peak * (index + 1) / 4
                     y: (histogramArea.height - histogramArea.padBottom) * (1 - (index + 1) / 4)
                     width: histogramArea.width
-                    Rectangle { x: histogramArea.padLeft; width: histogramArea.width - histogramArea.padLeft; height: 1; color: theme.text; opacity: 0.07 }
+                    Rectangle { x: histogramArea.padLeft; width: histogramArea.width - histogramArea.padLeft; height: 1; color: theme.chartGrid }
                     Text {
                         y: -height / 2
                         width: histogramArea.padLeft - theme.em * 0.3
                         horizontalAlignment: Text.AlignRight
                         text: parent.share.toFixed(0) + "%"
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontTiny
                     }
@@ -462,9 +467,10 @@ Item {
                     Text {
                         visible: bin.binIndex % histogramArea.labelEvery === 0
                         anchors.top: parent.bottom
-                        anchors.topMargin: theme.em * 0.2
+                        anchors.topMargin: theme.space1
                         x: 0
                         text: histogramArea.bins[bin.binIndex]
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontTiny
                         font.features: { "tnum": 1 }

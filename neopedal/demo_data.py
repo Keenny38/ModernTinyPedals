@@ -38,7 +38,6 @@ import sys
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from itertools import chain
 from typing import Any
 
 from PySide6.QtCore import QTimerEvent
@@ -51,7 +50,7 @@ from .demo_state import demo_drawing
 from .module_info import ConsumptionDataSet, ModuleInfo, StintDataSet, TrackMap, VehicleDataSet
 from .penalty_info import NO_PENALTY, Penalty
 from .process.weather import WeatherNode
-from .template.widget.registry import DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE, demo_names
+from .template.widget.registry import DEMO_GAPS, DEMO_HISTORY, DEMO_LAP, DEMO_SAMPLE, demo_names
 
 KELVIN = 273.15
 
@@ -101,6 +100,8 @@ HISTORY_FRAMES = 150
 LAP_WIDGETS = demo_names(DEMO_LAP)  # draw delta over the lap: fed last lap and current lap so far
 LAP_FRAMES = 60  # per lap
 DELTA_SOURCES = ("deltaBest", "deltaSession", "deltaStint", "deltaLast")
+GAP_WIDGETS = demo_names(DEMO_GAPS)  # draw gaps per lap: fed gaps at end of last laps
+GAP_LAPS = 8  # laps fed before current one (gap trend default number_of_laps)
 UPDATES = 3  # updates before a picture, so smoothed values settle
 # Widgets drawing a sample of every item before their first update (nothing to show on this data),
 # feeds of widgets declared in template.widget.registry.OVERLAYS
@@ -116,6 +117,14 @@ COACH_CORNERS = (
     ("12", 3860.0, 3925.0, 4080.0, 3870.0, 141.0),
 )
 COACH_LAST = ("5", 95.0, 98.0)
+
+
+def tyre_temperature_trend(temperature: float, count: int) -> tuple[float, ...]:
+    """Surface temperature samples of a tyre (Celsius, oldest first) ending at its simulated temperature: tyre
+    warming up, then steady with corner peaks (tyre temperature trend, fed by the overlay itself)"""
+    last = max(count - 1, 1)
+    return tuple(round(temperature - 16 * (1 - step / last) ** 3 + 1.8 * math.sin(5 * math.pi * step / last), 1)
+                 for step in range(count))
 
 
 def car_distance(index: int) -> float:
@@ -155,7 +164,7 @@ def set_telemetry(sim, data):
     """Player car: GT3 at speed, exiting a fast corner"""
     tele = data.telemetry.telemInfo[PLAYER]
     tele.mElapsedTime = ELAPSED
-    tele.mLapNumber = PLAYER_LAPS + 1
+    tele.mLapNumber = PLAYER_LAPS  # LMU: same as completed laps (recorded sessions)
     tele.mLapStartET = LAP_START
     tele.mVehicleName = b"McLaren 720S GT3 Evo #59"
     tele.mVehicleModel = b"McLaren 720S GT3 Evo"
@@ -223,7 +232,8 @@ def set_telemetry(sim, data):
     tele.mElectricBoostMotorRPM = 11800
     tele.mElectricBoostMotorTemperature = 61.5
     tele.mElectricBoostWaterTemperature = 48.2
-    tele.mRegen = 0.0
+    tele.mRegen = -175.5  # kW, negative while deploying
+    tele.mStateOfCharge = 64.0  # same as battery charge
     for index in range(4):
         wheel = tele.mWheels[index]
         front = index < 2
@@ -248,9 +258,10 @@ def set_telemetry(sim, data):
         wheel.mCompoundType = 1  # medium
         wheel.mOptimalTemp = 85
         base = (86 if front else 82) + (5 if not left else 0)
-        for layer in range(3):
-            wheel.mTemperature[layer] = KELVIN + base + (2 - layer) * 2.5
-            wheel.mTireInnerLayerTemperature[layer] = KELVIN + base + 4 + (2 - layer) * 1.5
+        for layer in range(3):  # left, center, right seen from car: inner edge hottest (right of left tyres)
+            inward = layer if left else 2 - layer  # 2 at inner edge
+            wheel.mTemperature[layer] = KELVIN + base + inward * 2.5
+            wheel.mTireInnerLayerTemperature[layer] = KELVIN + base + 4 + inward * 1.5
         wheel.mTireCarcassTemperature = KELVIN + base + 2
         wheel.mSurfaceType = 0
     tele.mFrontTireCompoundIndex = tele.mRearTireCompoundIndex = 1
@@ -416,14 +427,7 @@ def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
         standings: Standings widget setting (vehicles per class split).
         read: reader of simulated game data.
     """
-    from .module.module_relative import (
-        class_order_rank,
-        max_vehicles_in_class,
-        min_top_vehicles_in_class,
-        other_class_vehicles,
-        standings_index_from_all_classes,
-        update_position_in_class,
-    )
+    from .module.module_relative import standings_index, standings_limits, update_position_in_class
 
     vehicles = minfo.vehicles
     size = len(FIELD)
@@ -516,18 +520,15 @@ def set_vehicles(minfo: ModuleInfo, standings: Mapping[str, Any], read):
     vehicles.nearestLine = 6.9
     vehicles.nearestTraffic = 1.1
     vehicles.nearestBlueClass = ""
+    vehicles.nearestBlueGap = 1.1
 
-    # Relative lists, standings (split by class) and draw order, as the relative module computes them
+    # Relative lists, standings (display mode of standings options) and draw order, as the relative module
+    # computes them
     relative = minfo.relative
     relative.relativeAhead, relative.relativeBehind, classes, relative.drawOrder = vehicles_info(read, size, PLAYER)
     plr_class, plr_class_place = update_position_in_class(classes, PLAYER, vehicles.dataSet)
-    min_top = min_top_vehicles_in_class(standings["minimum_top_vehicles"])
-    relative.standings = list(chain(*standings_index_from_all_classes(
-        min_top, classes, plr_class, plr_class_place,
-        other_class_vehicles(standings["maximum_vehicles_per_split_others"]),
-        max_vehicles_in_class(standings["maximum_vehicles_per_split_player"], min_top, 2),
-        class_order_rank(standings.get("class_order", "")),
-    )))
+    relative.standings = standings_index(
+        standings_limits(standings), classes, PLAYER + 1, plr_class, plr_class_place, is_multi_class=True)
 
 
 def set_modules(minfo: ModuleInfo):
@@ -561,7 +562,7 @@ def set_modules(minfo: ModuleInfo):
     fuel.capacity = 120.0
     fuel.amountStart = 120.0
     fuel.amountCurrent = 42.3
-    fuel.amountUsedCurrent = 77.7
+    fuel.amountUsedCurrent = 1.04  # this lap so far (LAP_DISTANCE into lap)
     fuel.amountEndStint = 1.8
     fuel.neededRelative = 6.3
     fuel.neededAbsolute = 48.6
@@ -582,7 +583,7 @@ def set_modules(minfo: ModuleInfo):
     energy.capacity = 100.0
     energy.amountStart = 100.0
     energy.amountCurrent = 58.0
-    energy.amountUsedCurrent = 42.0
+    energy.amountUsedCurrent = 1.37
     energy.amountEndStint = 2.4
     energy.neededRelative = 4.1
     energy.neededAbsolute = 62.1
@@ -601,11 +602,11 @@ def set_modules(minfo: ModuleInfo):
     force.lgtGForceRaw = -0.35
     force.latGForceRaw = 1.21
     force.maxAvgLatGForce = 1.86
-    force.maxLgtGForce = -2.14
+    force.maxLgtGForce = 2.14
     force.maxLatGForce = 2.02
     force.downForceFront = 3150
     force.downForceRear = 3880
-    force.downForceRatio = 44.8
+    force.downForceRatio = 0.448  # fraction, as module output (front downforce of total)
     force.brakingRate = 0.0
     force.transientMaxBrakingRate = 1.92
     force.maxBrakingRate = 2.14
@@ -687,14 +688,14 @@ def set_modules(minfo: ModuleInfo):
     stint.totalEnergy = 54.3
     stint.totalTyreWear = 6.1
     stint.lapTimeDelta = 0.312
-    stint.lapTimeConsistency = 0.987
+    stint.lapTimeConsistency = 98.7  # percent, as stint module
     stint.tyreCompound = "MMMM"
     stint.tyreCompoundNames = ("Medium",) * 4
     history.stintDataSet = deque(
         (
-            StintDataSet(14, 14 * 85.2, 41.2, 54.3, 6.1, 0.312, 0.987, "MMMM", ("Medium",) * 4),
-            StintDataSet(29, 29 * 85.4, 85.1, 99.2, 12.8, 0.398, 0.981, "MMMM", ("Medium",) * 4),
-            StintDataSet(28, 28 * 85.6, 82.0, 98.6, 13.4, 0.441, 0.979, "SSSS", ("Soft",) * 4),
+            StintDataSet(14, 14 * 85.2, 41.2, 54.3, 6.1, 0.312, 98.7, "MMMM", ("Medium",) * 4),
+            StintDataSet(29, 29 * 85.4, 85.1, 99.2, 12.8, 0.398, 98.1, "MMMM", ("Medium",) * 4),
+            StintDataSet(28, 28 * 85.6, 82.0, 98.6, 13.4, 0.441, 97.9, "SSSS", ("Soft",) * 4),
         ),
         100,
     )
@@ -736,12 +737,12 @@ def set_modules(minfo: ModuleInfo):
     wheels.slipAngle = [-2.35, -2.18, -1.66, -1.55]
     wheels.averageFrontSlipAngle = -2.27
     wheels.averageRearSlipAngle = -1.61
-    wheels.slipAngleDifference = -0.66
+    wheels.slipAngleDifference = 0.66  # abs(front average) - abs(rear average), as wheels module
     wheels.toeAngle = [-2.03, -1.995, -0.18, 0.18]
     wheels.averageFrontToeAngle = -2.02
     wheels.averageRearToeAngle = 0.0
-    wheels.frontToeAngleDifference = 0.035
-    wheels.rearToeAngleDifference = 0.36
+    wheels.frontToeAngleDifference = -0.035  # left - right, as wheels module
+    wheels.rearToeAngleDifference = -0.36
     wheels.camberAngle = [-3.67, -3.49, -2.58, -2.46]
     wheels.frontCamberAngleDifference = -0.18
     wheels.rearCamberAngleDifference = -0.12
@@ -833,6 +834,36 @@ def replay_lap(widget, data, minfo: ModuleInfo, update: Callable[[Any], None] | 
         scor.mLapDist, scor.mTotalLaps, tele.mElapsedTime, tele.mLapStartET, values = saved
         for source, value in zip(DELTA_SOURCES, values):
             setattr(delta, source, value)
+
+
+def replay_gaps(widget, data, minfo: ModuleInfo, update: Callable[[Any], None] | None = None):
+    """Feed a widget drawing gaps per lap the gaps to cars ahead & behind (overall & in class) at end of the
+    last laps, ending at the simulated state: gap ahead shrinking, gap behind growing; scoring & gaps put back
+    after"""
+    if update is None:
+        update = timer_event
+    scor = data.scoring.vehScoringInfo[PLAYER]
+    cars = minfo.vehicles.dataSet
+    # Gap ahead is the player's own gap, gap behind the gap of the car behind
+    ahead = cars[PLAYER]
+    behind_overall = cars[PLAYER + 1]
+    behind_class = cars[ahead.classBehindIndex] if ahead.classBehindIndex >= 0 else behind_overall
+    saved = (scor.mTotalLaps, ahead.gapBehindNext, ahead.gapBehindNextInClass, behind_overall.gapBehindNext,
+             behind_class.gapBehindNextInClass)
+    _, ahead_gap, ahead_class_gap, behind_gap, behind_class_gap = saved
+    try:
+        for lap in range(PLAYER_LAPS - GAP_LAPS, PLAYER_LAPS + 1):  # first lap read only (seen partly)
+            laps_to_go = PLAYER_LAPS - lap
+            wobble = 0.06 * math.sin(1.7 * laps_to_go)
+            scor.mTotalLaps = lap
+            ahead.gapBehindNext = ahead_gap + 0.18 * laps_to_go + wobble
+            ahead.gapBehindNextInClass = ahead_class_gap + 0.18 * laps_to_go + wobble
+            behind_overall.gapBehindNext = max(behind_gap - 0.11 * laps_to_go + wobble, 0.1)
+            behind_class.gapBehindNextInClass = max(behind_class_gap - 0.11 * laps_to_go + wobble, 0.1)
+            update(widget)
+    finally:
+        (scor.mTotalLaps, ahead.gapBehindNext, ahead.gapBehindNextInClass, behind_overall.gapBehindNext,
+         behind_class.gapBehindNextInClass) = saved
 
 
 # Animated preview (hovered card of Overlays page): a corner driven in a loop
@@ -1091,6 +1122,8 @@ def update_widget(widget, name: str, session: DemoSession):
     elif name in LAP_WIDGETS:
         with shapes_deferred(widget):
             replay_lap(widget, session.data, session.minfo, update_once)
+    elif name in GAP_WIDGETS:
+        replay_gaps(widget, session.data, session.minfo, update_once)
     for _ in range(UPDATES):
         update_once(widget)
 

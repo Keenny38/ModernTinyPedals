@@ -20,6 +20,8 @@
 Log window
 """
 
+import html
+
 from PySide6.QtCore import QBasicTimer
 from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import (
@@ -162,7 +164,7 @@ class LogInfo(BaseDialog):
         """Copy log"""
         self.log_view.selectAll()
         self.log_view.copy()
-        show_toast(self, tr("Copied all log to Clipboard."))
+        show_toast(self, tr("Log copied"))
 
     def save_log(self):
         """Save log"""
@@ -178,4 +180,4 @@ class LogInfo(BaseDialog):
             with open(filename_full, "w", newline="", encoding="utf-8") as log_file:
                 log_file.write(log_stream.getvalue())
         except OSError as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save log: {error}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save log: {html.escape(str(error))}"))

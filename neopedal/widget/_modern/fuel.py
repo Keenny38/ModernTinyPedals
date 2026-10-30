@@ -47,6 +47,7 @@ class Realtime(ConsumptionPanel):
         level_bar="show_fuel_level_bar",
         start_mark="show_starting_fuel_level_mark",
         refill_mark="show_refueling_level_mark",
+        refill_shown="show_refueling",
     )
     options = (*COMMON_OPTIONS, *names[2:])
 

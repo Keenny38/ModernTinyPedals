@@ -34,6 +34,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from .. import regex_pattern as rxp
+from ..template.setting_status_colors import COLORBLIND_STATUS_COLORS
 
 # Classic default color (RGB) -> modern color (RGB), alpha channel is kept
 MODERN_PALETTE = MappingProxyType({
@@ -126,38 +127,41 @@ LEGACY_LIGHT_PANEL = "CCCCCC"  # darkest legacy light panel (classic #333333 inv
 MINIMUM_CONTRAST = 3.0  # WCAG minimum for large text & graphics
 NEUTRAL_SPREAD = 24  # gray: RGB channels differ by this much at most
 
-# Colorblind safe variant of every theme (Okabe-Ito): red / green pairs become orange / blue
+# Colorblind safe variant of every theme (Okabe-Ito): red / green pairs become orange / blue, status colors
+# (loss, gain, warning, gold, best purple, player) same as app pages & stream pages (setting_status_colors)
+_CB = {role: dark[1:].upper() for role, (dark, _) in COLORBLIND_STATUS_COLORS.items()}
 COLORBLIND_COLORS = MappingProxyType({
-    "FF2200": "D55E00",
-    "FF4400": "D55E00",
-    "DD5500": "D55E00",
-    "EE6600": "E69F00",
-    "FF6600": "E69F00",
-    "FFAA00": "F0E442",
-    "FFCC00": "F0E442",
-    "FFFF00": "F0E442",
+    "FF2200": _CB["loss"],
+    "FF4400": _CB["loss"],
+    "DD5500": _CB["loss"],
+    "EE6600": _CB["warning"],
+    "FF6600": _CB["warning"],
+    "FFAA00": _CB["gold"],
+    "FFCC00": _CB["gold"],
+    "FFFF00": _CB["gold"],
     "009900": "0072B2",
     "22AA00": "0072B2",
-    "22CC22": "56B4E9",
+    "22CC22": _CB["gain"],
     "448800": "0072B2",
-    "44FF00": "56B4E9",
-    "66EE00": "56B4E9",
-    "66FF00": "56B4E9",
-    "88FF00": "56B4E9",
-    "00CCEE": "009E73",
-    "00CCFF": "009E73",
-    "66CCFF": "009E73",
+    "44FF00": _CB["gain"],
+    "66EE00": _CB["gain"],
+    "66FF00": _CB["gain"],
+    "88FF00": _CB["gain"],
+    "00CCEE": _CB["player"],
+    "00CCFF": _CB["player"],
+    "66CCFF": _CB["player"],
+    "9900FF": _CB["purple"],
     "CC22CC": "CC79A7",
     "FF44FF": "CC79A7",
     "FF66FF": "CC79A7",
-    "FF0000": "D55E00", "EE0000": "D55E00", "FF2222": "D55E00", "DD2200": "D55E00",
-    "FF4422": "D55E00", "00FF00": "56B4E9", "22EE22": "56B4E9", "22FF00": "56B4E9",
-    "00CC00": "56B4E9", "44CC00": "56B4E9", "77FF00": "56B4E9", "88FF88": "56B4E9",
+    "FF0000": _CB["loss"], "EE0000": _CB["loss"], "FF2222": _CB["loss"], "DD2200": _CB["loss"],
+    "FF4422": _CB["loss"], "00FF00": _CB["gain"], "22EE22": _CB["gain"], "22FF00": _CB["gain"],
+    "00CC00": _CB["gain"], "44CC00": _CB["gain"], "77FF00": _CB["gain"], "88FF88": _CB["gain"],
     "008800": "0072B2", "44AA00": "0072B2", "00AAFF": "0072B2", "0088FF": "0072B2",
     "0099FF": "0072B2", "FF00FF": "CC79A7", "EE00EE": "CC79A7", "CC00CC": "CC79A7",
     # Black box: warning & hot, cold & low, good, between, yellow, blue, magenta
-    "FF3D3D": "D55E00", "3DC8FF": "56B4E9", "2FC46A": "009E73", "FF9F1C": "E69F00",
-    "FFC400": "F0E442", "3D8BFF": "0072B2", "B0106A": "CC79A7",
+    "FF3D3D": _CB["loss"], "3DC8FF": _CB["gain"], "2FC46A": _CB["player"], "FF9F1C": _CB["warning"],
+    "FFC400": _CB["gold"], "3D8BFF": "0072B2", "B0106A": "CC79A7",
 })
 
 # Overlay themes: design (modern, or legacy: classic look) & dark or light colors

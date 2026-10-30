@@ -25,6 +25,7 @@ Longitudinal & lateral g force (direction arrows), downforce ratio, front & rear
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
@@ -32,7 +33,7 @@ from PySide6.QtGui import QPainter
 from ... import units
 from ...module_info import minfo
 from ...validator import infnan_to_zero as rmnan
-from .base import ModernOverlay, display_order_options
+from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -79,9 +80,11 @@ class Realtime(StatsMixin, ModernOverlay):
         self.draw_stats(painter, self.state)
 
     def downforce(self, value: float) -> Value:
-        """Downforce, negative (lift) highlighted"""
+        """Downforce, negative (lift) highlighted, dash if not provided by game (NaN) or invalid"""
         theme = self.theme
-        force = round(rmnan(value))
+        if not isfinite(value):
+            return Value(DASH, theme.text_faint)
+        force = round(value)
         if force < 0:
             return Value(f"{force:.0f}", theme.negative, theme.tint(theme.negative, 55))
         return Value(f"{force:.0f}", theme.text_dim)
@@ -102,7 +105,8 @@ class Realtime(StatsMixin, ModernOverlay):
                 sign = "◀" if g > 0.1 else ("▶" if g < -0.1 else "●")
                 values.append(Value(f"{abs(g):.2f} {sign}"))
             elif key == "downforce_ratio":
-                values.append(Value(f"{rmnan(force.downForceRatio) * 100:.2f}"[:5] + "%"))
+                ratio = force.downForceRatio
+                values.append(Value(f"{ratio * 100:.2f}"[:5] + "%") if isfinite(ratio) else Value(DASH, theme.text_faint))
             elif key == "front_downforce":
                 values.append(self.downforce(force.downForceFront))
             elif key == "rear_downforce":

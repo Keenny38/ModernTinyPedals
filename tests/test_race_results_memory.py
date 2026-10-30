@@ -132,7 +132,7 @@ def test_chart_lines_follow_view(results_folder, english):  # noqa: F811
         serial = thin.serial
         backend.setChartView(400, 200, 1.5, 3, 4)  # same view: not built again
         assert VertexStore.get(series[0]["thin"]).serial == serial
-        backend.setKindFilter(3)  # practice: no chart, lines forgotten
+        backend.setKindFilter(1)  # practice: no chart, lines forgotten
         assert backend.positions["series"] == [] and not VertexStore.has(series[0]["thin"])
     finally:
         drop(backend)

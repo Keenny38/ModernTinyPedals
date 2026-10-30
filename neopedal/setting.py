@@ -40,16 +40,27 @@ from .const_file import ConfigType, FileExt
 from .setting_validator import PresetValidator, StyleValidator
 from .userfile import app_path, set_global_config_path, set_user_data_path
 from .userfile.json_setting import (
+    ACCESS_TIMEOUT,
+    RELOAD_ACCESS_TIMEOUT,
     copy_setting,
     create_versioned_backup,
     is_saving_backup,
-    load_setting_json_file,
+    is_unreadable_file,
+    load_setting_json_file,  # noqa: F401, imported from here by preset_compare & preset_management
     load_style_json_file,
+    notify_save_failed,
+    read_setting_json_file,
+    read_style_json_file,
     save_and_verify_json_file,
+    save_json_file,
 )
 from .validator import is_allowed_filename
 
 logger = logging.getLogger(__name__)
+
+SAVE_RETRY_ATTEMPTS = 3  # saves of a file failing (backup or write refused: file held for a moment) before giving up
+SAVE_RETRY_DELAY = 0.25  # seconds before a failed save is tried again
+FLUSH_WARN_SECONDS = 1.0  # waiting for the saving thread longer than this is logged (caller thread blocked)
 
 
 def file_mtime(filename: str) -> float | None:
@@ -230,7 +241,10 @@ class Setting:
         "_save_pause",
         "_save_done",
         "_save_wake",
+        "_save_failures",
         "_setting_to_load",
+        "_user_loaded",
+        "_load_changed",
         "is_saving",
         "version_update",
         "filename",
@@ -248,7 +262,10 @@ class Setting:
         self._save_done = threading.Event()
         self._save_done.set()
         self._save_wake = threading.Event()  # deadline changed: saving thread waits again
+        self._save_failures: dict[str, int] = {}  # failed saves in a row per file (saving thread only)
         self._setting_to_load = ""
+        self._user_loaded = False  # first load_user done (start): later loads happen on the GUI thread
+        self._load_changed: set[str] = set()  # config types whose loaded data differs from file, see save_loaded
         self.is_saving = False
         self.version_update = 0
         # Settings
@@ -313,20 +330,22 @@ class Setting:
         # Delayed init
         self.default.set_default()
         # Load setting
-        self.user.config = load_setting_json_file(
+        self.user.config, changed = read_setting_json_file(
             filename=self.filename.config,
             filepath=self.path.config,
             dict_def=self.default.config,
             file_info="global preset",
             validator=PresetValidator.global_preset,
         )
-        self.user.shortcuts = load_setting_json_file(
+        self._set_load_changed(ConfigType.CONFIG, changed)
+        self.user.shortcuts, changed = read_setting_json_file(
             filename=self.filename.shortcuts,
             filepath=self.path.config,
             dict_def=self.default.shortcuts,
             file_info="keyboard shortcuts",
             validator=PresetValidator.shortcuts_preset,
         )
+        self._set_load_changed(ConfigType.SHORTCUTS, changed)
         self.user.filelock = load_style_json_file(
             filename=self.filename.filelock,
             filepath=self.path.config,
@@ -352,69 +371,92 @@ class Setting:
         if new_settings_path != old_settings_path:
             self.set_next_to_load(f"{self.preset_files()[0]}{FileExt.JSON}")
 
-    def load_user(self):
-        """Load user settings, should be called after loaded global setting"""
+    def load_user(self, access_timeout: float | None = None):
+        """Load user settings, should be called after loaded global setting
+
+        Args:
+            access_timeout: seconds a file held by another program is retried. Default: ACCESS_TIMEOUT at
+                first load (start, nothing shown yet), RELOAD_ACCESS_TIMEOUT after (GUI thread waiting).
+        """
+        first_load = not self._user_loaded
+        if access_timeout is None:
+            access_timeout = ACCESS_TIMEOUT if first_load else RELOAD_ACCESS_TIMEOUT
         # Load preset JSON file
         if self._setting_to_load != "":
             filename_setting_temp = self._setting_to_load
             self._setting_to_load = ""
         else:
             filename_setting_temp = self.filename.setting
-        self.user.setting = load_setting_json_file(
+        self.user.setting, changed = read_setting_json_file(
             filename=filename_setting_temp,
             filepath=self.path.settings,
             dict_def=self.default.setting,
+            access_timeout=access_timeout,
         )
+        self._set_load_changed(ConfigType.SETTING, changed)
         self.filename.setting = filename_setting_temp
-        self.load_styles()
+        self.load_styles(access_timeout=access_timeout, write_now=first_load)
+        self._user_loaded = True
 
-    def load_styles(self, discard_queued: bool = False):
+    def load_styles(
+        self, discard_queued: bool = False, access_timeout: float | None = None, write_now: bool | None = None
+    ):
         """Load style JSON files
+
+        A style file missing, corrupted or updated by its validator is saved: at start and after an import
+        written at once, at reload queued for the saving thread (backup & read back, the GUI thread never
+        writes with fsync while overlays run).
 
         Args:
             discard_queued: drop queued saves of style files (styles replaced on disk, by import):
                 a queued save would write older styles in memory over loaded ones.
+            access_timeout: see load_user.
+            write_now: save changed styles on this thread, else queued. Default: first load, or styles
+                replaced on disk (saving is paused by the import: a queued save would wait for its end).
         """
+        if access_timeout is None:
+            access_timeout = ACCESS_TIMEOUT if not self._user_loaded else RELOAD_ACCESS_TIMEOUT
+        if write_now is None:
+            write_now = not self._user_loaded or discard_queued
         if discard_queued:
             with self._save_lock:
                 for config_type in STYLE_TYPES:
                     self._save_queue.pop(getattr(self.filename, config_type), None)
-        self.user.brakes = load_style_json_file(
-            filename=self.filename.brakes,
-            filepath=self.path.settings,
-            dict_def=self.default.brakes,
-            validator=StyleValidator.brakes,
-        )
-        self.user.brands = load_style_json_file(
-            filename=self.filename.brands,
-            filepath=self.path.settings,
-            dict_def=self.default.brands,
-            validator=StyleValidator.brands,
-        )
-        self.user.classes = load_style_json_file(
-            filename=self.filename.classes,
-            filepath=self.path.settings,
-            dict_def=self.default.classes,
-            validator=StyleValidator.classes,
-        )
-        self.user.compounds = load_style_json_file(
-            filename=self.filename.compounds,
-            filepath=self.path.settings,
-            dict_def=self.default.compounds,
-            validator=StyleValidator.compounds,
-        )
-        self.user.heatmap = load_style_json_file(
-            filename=self.filename.heatmap,
-            filepath=self.path.settings,
-            dict_def=self.default.heatmap,
-            validator=StyleValidator.heatmap,
-        )
-        self.user.tracks = load_style_json_file(
-            filename=self.filename.tracks,
-            filepath=self.path.settings,
-            dict_def=self.default.tracks,
-            validator=StyleValidator.tracks,
-        )
+        for config_type in STYLE_TYPES:
+            filename = getattr(self.filename, config_type)
+            style, changed = read_style_json_file(
+                filename=filename,
+                filepath=self.path.settings,
+                dict_def=getattr(self.default, config_type),
+                validator=getattr(StyleValidator, config_type),
+                access_timeout=access_timeout,
+            )
+            setattr(self.user, config_type, style)
+            if not changed:
+                continue
+            if write_now:
+                save_json_file(style, filename, self.path.settings)  # as load_style_json_file (start, import)
+            else:
+                self.save(0, config_type)  # saving thread: backup, write & read back off the GUI thread
+
+    def _set_load_changed(self, config_type: str, changed: bool):
+        """Record whether the file of config_type loaded last needs saving, see save_loaded"""
+        if changed:
+            self._load_changed.add(config_type)
+        else:
+            self._load_changed.discard(config_type)
+
+    def save_loaded(self, config_type: str = ConfigType.SETTING, delay: int = 66) -> bool:
+        """Save file loaded last only if loading changed its data (missing, corrupted, repaired, migrated)
+
+        A file saved as it is on disk is not written again at start (no backup, write & read back,
+        no modified time change for cloud sync & antivirus). Returns True if a save was queued.
+        """
+        if config_type not in self._load_changed:
+            return False
+        self._load_changed.discard(config_type)
+        self.save(delay, config_type)
+        return True
 
     @property
     def api_name(self) -> str:
@@ -554,10 +596,15 @@ class Setting:
             if self._save_queue and not self.is_saving:
                 self.is_saving = True
                 self._save_done.clear()
-                threading.Thread(target=self.__saving, name="Setting saver").start()
+                # Never a daemon thread: started from a module thread (daemon), it would inherit the flag
+                # and be killed by the process end mid-write or while waiting for its delay (saves lost)
+                threading.Thread(target=self.__saving, name="Setting saver", daemon=False).start()
 
     def flush(self, timeout: float = 10.0) -> bool:
         """Save queued files now and wait (without polling) until done
+
+        Blocks the calling thread (GUI thread at quit, restart, preset rename & package import): a wait
+        longer than FLUSH_WARN_SECONDS is logged, so a frozen window can be told from the log.
 
         Returns:
             True if all saving finished within timeout.
@@ -565,7 +612,12 @@ class Setting:
         if not self.is_saving:
             return True
         self.save(next_task=True)  # skip remaining save delay
-        if self._save_done.wait(timeout):
+        started = monotonic()
+        finished = self._save_done.wait(timeout)
+        waited = monotonic() - started
+        if waited > FLUSH_WARN_SECONDS:
+            logger.warning("USERDATA: waited %.1fs for saving to finish", waited)
+        if finished:
             return True
         logger.error("USERDATA: saving not finished after %ss, continue anyway", timeout)
         return False
@@ -603,10 +655,11 @@ class Setting:
             self._save_wake.wait(remaining)
 
         # Run next save task until queue empty
-        saving_attempts = self.max_saving_attempts
-        app_signal.saving.emit(True)
-        try:
+        try:  # everything inside: an error anywhere must never leave is_saving set (no saver ever again)
+            saving_attempts = self.max_saving_attempts
+            app_signal.saving.emit(True)
             while True:
+                retry = False
                 with self._save_pause:  # wait while style files replaced, see styles_replaced
                     with self._save_lock:
                         if not self._save_queue:
@@ -617,12 +670,13 @@ class Setting:
                         # saving queues the file again (saved once more) instead of being lost
                         filename = next(iter(self._save_queue))
                         filepath, dict_user = self._save_queue.pop(filename)
+                    saved: bool | None = True  # unexpected error: dropped, logged (as before)
                     try:
                         if filepath == self.path.settings:  # user & style presets
                             create_versioned_backup(
                                 filename, filepath, max_count=self.application["number_of_automatic_backups"]
                             )
-                        save_and_verify_json_file(
+                        saved = save_and_verify_json_file(
                             dict_user=dict_user,  # serialized once (snapshot), no deep copy
                             filename=filename,
                             filepath=filepath,
@@ -630,6 +684,12 @@ class Setting:
                         )
                     except Exception:  # never leave saving state locked, see is_saving
                         logger.exception("USERDATA: unexpected error while saving %s", filename)
+                    if saved is False:  # refused (backup or write): tried again, see __requeue_failed
+                        retry = self.__requeue_failed(filename, filepath, dict_user)
+                    else:
+                        self._save_failures.pop(filename, None)
+                if retry:
+                    sleep(SAVE_RETRY_DELAY)  # outside pause lock: a package import never waits for retries
         except BaseException:
             with self._save_lock:
                 self.is_saving = False
@@ -638,6 +698,22 @@ class Setting:
         finally:
             self.version_update += 1
             app_signal.saving.emit(False)
+
+    def __requeue_failed(self, filename: str, filepath: str, dict_user: dict) -> bool:
+        """Failed save (backup refused, file held by another program) queued again, up to SAVE_RETRY_ATTEMPTS
+        in a row; then given up with user told (changes stay in memory, saved with the next change)"""
+        if is_unreadable_file(filename, filepath):
+            return False  # never saved this session on purpose, user told once (see save_and_verify_json_file)
+        failures = self._save_failures.get(filename, 0) + 1
+        if failures < SAVE_RETRY_ATTEMPTS:
+            self._save_failures[filename] = failures
+            with self._save_lock:  # a newer change queued meanwhile is kept (same dict, saved once)
+                self._save_queue.setdefault(filename, (filepath, dict_user))
+            return True
+        self._save_failures.pop(filename, None)
+        logger.error("USERDATA: %s not saved after %s attempts, changes kept in memory", filename, failures)
+        notify_save_failed(filename)
+        return False
 
     @property
     def max_saving_attempts(self) -> int:

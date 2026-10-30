@@ -34,8 +34,11 @@ from PySide6.QtCore import (
 )
 
 from ...i18n import tr, trm
+from ...process.results_text import sector_text
 from ...userfile.lap_cache import (
+    RECENT_SECONDS,
     IndexedInfos,
+    cache_file,
     indexed_infos,
     info_index_path,
     prune_cache,
@@ -76,9 +79,49 @@ from .lap_base import (
     BackendBase,
 )
 from .models import DictListModel
+from .stint_analysis import lap_compound
 
 TRACK_ROLES = ("key", "label", "logo", "date", "current")  # track picker rows (same roles as TrackPicker.qml)
 INFO_BACKGROUND = 0  # more lap infos to read from files than this: read in background (track shown once read)
+LIST_BACKGROUND = 200  # more lap files in a track folder than this: their file stamps read in background (a stat()
+# per file: tens of ms on NTFS, hundreds on a network share or behind an antivirus)
+SESSION_KINDS = ("practice", "qualify", "race")  # lap list session filter (test day, warmup, unknown: practice)
+SESSION_ORDERS = ("newest", "oldest", "fastest")  # lap list sessions order (fastest: session best lap)
+LAP_ORDERS = ("driven", "fastest")  # laps order inside a session
+
+
+def session_kind(session: str) -> str:
+    """Session filter kind of a recorded session name (Practice, Qualify, Race, Test day, Warmup)"""
+    name = session.lower()
+    if name.startswith("race"):
+        return "race"
+    if name.startswith("qual"):
+        return "qualify"
+    return "practice"
+
+
+def best_time(group: list[LapEntry]) -> float:
+    """Session best valid lap time, 0 if none"""
+    return min((entry.file.lap_time for entry in group if entry.file.valid and entry.file.lap_time > 0), default=0.0)
+
+
+def order_sessions(groups: list[list[LapEntry]], order: str) -> list[list[LapEntry]]:
+    """Track sessions (newest first, see group_sessions) in lap list order: oldest first, or fastest session best
+    first (sessions without valid lap last, newest first)"""
+    if order == "oldest":
+        return groups[::-1]
+    if order == "fastest":
+        return sorted(groups, key=lambda group: (best_time(group) <= 0, best_time(group)))
+    return groups
+
+
+def order_laps(group: list[LapEntry], order: str) -> list[LapEntry]:
+    """Laps of a session (driving order) in lap list order: fastest valid laps first, others after in driving order"""
+    if order != "fastest":
+        return group
+    timed = (lambda entry: entry.file.valid and entry.file.lap_time > 0)
+    return (sorted((entry for entry in group if timed(entry)), key=lambda entry: entry.file.lap_time)
+            + [entry for entry in group if not timed(entry)])
 
 
 def setup_text(info: dict) -> str:
@@ -139,7 +182,9 @@ class LapLibrary(BackendBase):
             self._geometry_track = ""
         if not self._tracks:  # first refresh: oldest cached laps removed over size limit, old deleted laps
             folder = self.folder
-            self.run_job("lap cache", lambda: (prune_cache(folder), purge_trash(folder)), lambda _: None)
+            keep = [cache_file(folder, path) for path in self._lap_cache]  # laps open: never pruned
+            self.run_job("lap cache", lambda: (prune_cache(folder, keep=keep, recent=RECENT_SECONDS),
+                                               purge_trash(folder)), lambda _: None)
         self._tracks = list_tracks(self.folder)
         self._switch_to = None
         # Laps of another circuit shown without track folder (see switch_circuit): kept
@@ -163,15 +208,23 @@ class LapLibrary(BackendBase):
                 self._lap_cache.pop(path, None)
                 self._cache_mtime.pop(path, None)
 
-    def load_track(self, track: str, new_lap: LapFile | None = None, background: bool = True):
+    def load_track(self, track: str, new_lap: LapFile | None = None, background: bool = True,
+                   listed: tuple[list[LapFile], IndexedInfos] | None = None):
         """Laps of track listed, laps shown last time on it shown (new_lap: lap just recorded compared, live mode),
-        many new lap files: their infos read in background first (unless not background)"""
-        laps = list_laps(self.folder, track) if track else []
+        many lap files: their file stamps read in background first (listed: laps & stamps read there), many new lap
+        files: their infos read in background first (unless not background)"""
         self._infos_generation += 1  # infos read for a former load ignored
         if self._infos_track:
             self._infos_track = ""
             self.notify_status()  # busy indicator of former read dropped
-        indexed = self.indexed_infos(track, laps)
+        if listed is not None:
+            laps, indexed = listed
+        else:
+            laps = list_laps(self.folder, track) if track else []
+            if background and len(laps) > LIST_BACKGROUND:  # a stat() per file: page not frozen
+                self.list_track_infos(track, new_lap, laps)
+                return
+            indexed = self.indexed_infos(track, laps)
         if background and len(indexed[3]) > INFO_BACKGROUND:  # hundreds of new lap files (seconds): page not frozen
             self.read_track_infos(track, new_lap, [lap.path for lap in indexed[3]])
             return
@@ -215,20 +268,42 @@ class LapLibrary(BackendBase):
             self._selected_corner = -1
             self.selectionChanged.emit()
 
+    def list_track_infos(self, track: str, new_lap: LapFile | None, laps: list[LapFile]):
+        """File stamps & known infos of the laps of a large track folder read in background (see indexed_infos),
+        track shown once read (shown track kept meanwhile), unless another track was loaded since"""
+        generation = self._infos_generation
+        self._infos_track = track
+        before = self._status if self._status != tr("Reading laps…") else ""  # shown again once read
+        self.set_status(tr("Reading laps…"), False)
+        lap_folder, index_path, memory = os.path.join(self.folder, track), self.info_index_path(track), self._info_cache
+
+        def done(result):
+            if generation != self._infos_generation:
+                return  # another track loaded meanwhile
+            self._infos_track = ""
+            if self._status == tr("Reading laps…"):
+                self.set_status(before, bool(before))
+            else:
+                self.notify_status()  # busy indicator
+            indexed = result if isinstance(result, tuple) else self.indexed_infos(track, laps)  # job failed
+            self.load_track(track, new_lap, listed=(laps, indexed))
+
+        self.run_job("track", lambda: indexed_infos(lap_folder, index_path, laps, dict(memory)), done)
+
     def read_track_infos(self, track: str, new_lap: LapFile | None, paths: list[str]):
         """Lap infos of track read in background, track shown once read (shown track kept meanwhile), unless another
         track was loaded since"""
         generation = self._infos_generation
         self._infos_track = track
-        before = self._status if self._status != tr("Reading laps...") else ""  # shown again once read
-        self.set_status(tr("Reading laps..."), False)
+        before = self._status if self._status != tr("Reading laps…") else ""  # shown again once read
+        self.set_status(tr("Reading laps…"), False)
 
         def done(result):
             self.keep_infos(result)  # kept even if another track is shown: read once
             if generation != self._infos_generation:
                 return  # another track loaded meanwhile
             self._infos_track = ""
-            if self._status == tr("Reading laps..."):
+            if self._status == tr("Reading laps…"):
                 self.set_status(before, bool(before))
             else:
                 self.notify_status()  # busy indicator
@@ -422,7 +497,35 @@ class LapLibrary(BackendBase):
         listed = {lap.path for lap in laps}
         if listed == known:
             return
-        indexed = self.indexed_infos(self._track, laps)
+        if len(laps) > LIST_BACKGROUND:  # a stat() per file (each lap recorded in live mode): page not frozen
+            self.list_new_laps(laps, known)
+            return
+        self.refresh_listed(laps, known, self.indexed_infos(self._track, laps))
+
+    def list_new_laps(self, laps: list[LapFile], known: set[str]):
+        """File stamps & known infos of the laps of a large shown track read in background (lap files added or
+        removed), list updated once read (see refresh_listed) if the same track is still shown"""
+        self._infos_reading = True
+        self.notify_status()  # busy indicator
+        generation = self._infos_generation
+        track = self._track
+        lap_folder, index_path, memory = os.path.join(self.folder, track), self.info_index_path(track), self._info_cache
+
+        def done(result):
+            self._infos_reading = False
+            self.notify_status()
+            if generation != self._infos_generation or not isinstance(result, tuple):
+                return  # another track shown meanwhile (job failed: list updated at the next change)
+            if self._loader is not None:
+                self._watch_timer.start()  # after current loading
+                return
+            self.refresh_listed(laps, known, result)
+
+        self.run_job("track", lambda: indexed_infos(lap_folder, index_path, laps, dict(memory)), done)
+
+    def refresh_listed(self, laps: list[LapFile], known: set[str], indexed: IndexedInfos):
+        """Lap list of shown track updated from its lap files listed (known: lap paths listed before)"""
+        listed = {lap.path for lap in laps}
         if indexed[3]:  # infos of new lap files read in background first, list updated once read
             self.read_new_infos([lap.path for lap in indexed[3]])
             return
@@ -581,7 +684,7 @@ class LapLibrary(BackendBase):
         """Lap conditions tooltip: vehicle, temperatures, wetness, fuel used"""
         info = entry.info
         lines = []
-        for key, label in (("vehicle", "Vehicle"), ("class", "Class"), ("combo", "Layout")):
+        for key, label in (("vehicle", "Car"), ("class", "Class"), ("combo", "Layout")):
             if info.get(key):
                 lines.append(f"{tr(label)}: {info[key]}")
 
@@ -692,15 +795,19 @@ class LapLibrary(BackendBase):
         shown = self.checked | {self.reference_key}  # listed even if search or clean only filter leaves them out
         matched = False
         entries = []
+        kinds = set(self._session_kinds)
         for entry in self.entries:
             match = ((not self._hide_unclean or (entry.file.valid and entry.info.get("kind") not in ("out", "in")))
+                     and session_kind(str(entry.info.get("session", ""))) in kinds
                      and self.matches_filter(entry))
             matched = matched or match
             if match or entry.file.path in shown:
                 entries.append(entry)
         groups: list[tuple[list[LapEntry], bool]] = [
             (group, False)
-            for group in group_sessions(entries, lambda entry: entry.file.filename, lambda entry: entry.info)
+            for group in order_sessions(
+                group_sessions(entries, lambda entry: entry.file.filename, lambda entry: entry.info),
+                self._session_order)
         ]
         added: dict[str, list[LapEntry]] = {}  # added laps by folder (imported log, other track)
         for entry in self.external:
@@ -719,7 +826,7 @@ class LapLibrary(BackendBase):
             vehicle = str(group[0].info.get("vehicle", ""))
             fastest = min((entry for entry in group if entry.file.valid and entry.file.lap_time > 0),
                           key=lambda entry: entry.file.lap_time, default=None)
-            for entry in group:
+            for entry in group if is_added else order_laps(group, self._lap_order):
                 row = self.lap_row(header["session"], entry, best_sectors, vehicle, entry is fastest, best_lap,
                                    colors.get(entry.file.path, ""))
                 row.update(hint(row))
@@ -733,6 +840,7 @@ class LapLibrary(BackendBase):
         self._session.changed.emit()
         self._best_text = trm(f"Theoretical best: {format_laptime(best_total)}") if best_total > 0 else ""
         self.listChanged.emit()
+        self.listOrderChanged.emit()
 
     def show_rows(self, rows: list[dict]):
         """List rows: lap rows of collapsed sessions left out of list model (no delegate made for them)"""
@@ -783,8 +891,8 @@ class LapLibrary(BackendBase):
             "id": f"session:{key}", "kind": "session", "session": key, "path": "", "title": title,
             "time": format_laptime(best), "s1": "", "s2": "", "s3": "", "best1": False, "best2": False, "best3": False,
             "info": ", ".join(details), "note": "", "count": len(group), "checked": False, "reference": False,
-            "color": "", "dim": False, "fastest": False, "error": False, "gap": "", "tip": "", "open": False,
-            "hint": "", "logo": brand_logo_url(vehicle) if vehicle and not is_added else "",
+            "color": "", "dim": False, "fastest": False, "personalBest": False, "error": False, "gap": "", "tip": "",
+            "open": False, "hint": "", "compound": "", "logo": brand_logo_url(vehicle) if vehicle and not is_added else "",
             "brand": vehicle if not is_added else "",  # logo asked again once game logos arrive
         }
 
@@ -798,20 +906,24 @@ class LapLibrary(BackendBase):
             for value, best in zip(sectors, best_sectors or [0.0, 0.0, 0.0])
         ]
         gap = ""
+        personal_best = False  # fastest valid recorded lap of track (all sessions): green, "PB"
         if best_lap > 0 and entry.file.lap_time > 0 and not entry.external:
             difference = entry.file.lap_time - best_lap
             gap = signed(difference, 3) if difference >= 0.0005 else ""
+            personal_best = entry.file.valid and difference < 0.0005
         path = entry.file.path
         return {
             "id": path, "kind": "lap", "session": session, "path": path, "vehicle": vehicle,
             "title": trm(f"Lap {number}") if number else lap_stem(entry.file.filename),
             "time": format_laptime(entry.file.lap_time),
-            "s1": format_laptime(sectors[0]), "s2": format_laptime(sectors[1]), "s3": format_laptime(sectors[2]),
+            "s1": sector_text(sectors[0]), "s2": sector_text(sectors[1]), "s3": sector_text(sectors[2]),
             "best1": bests[0], "best2": bests[1], "best3": bests[2], **self.mark_values(entry, vehicle),
             "checked": path in self.checked, "reference": path == self.reference_key,
             "color": color, "dim": not entry.file.valid or entry.info.get("kind") in ("out", "in"),
-            "fastest": is_fastest, "count": 0, "error": path in self._failed and path in self.checked, "gap": gap,
+            "fastest": is_fastest, "personalBest": personal_best, "count": 0,
+            "error": path in self._failed and path in self.checked, "gap": gap,
             "tip": self.entry_conditions(entry), "open": True, "hint": "", "logo": "",
+            "compound": lap_compound(entry.info),  # badge of lap row, "" if not recorded
         }
 
     def mark_values(self, entry: LapEntry, vehicle: str) -> dict:
@@ -851,9 +963,15 @@ class LapLibrary(BackendBase):
     def setLapChecked(self, path: str, checked: bool):
         if checked:
             self.checked.add(path)
+            self.list_lap(path)
         else:
             self.checked.discard(path)
         self.load_laps()
+
+    def list_lap(self, path: str):
+        """Lap left out of list by a filter (checked from Session tab) listed: laps shown come from list rows"""
+        if all(row["path"] != path for row in self.lap_rows()):
+            self.fill_list()
 
     @Slot(str, str, bool)
     def selectRange(self, first: str, last: str, checked: bool):
@@ -917,6 +1035,7 @@ class LapLibrary(BackendBase):
             return
         self.reference_key = self._chosen_reference = path
         self.checked.add(path)
+        self.list_lap(path)
         self.load_laps()
 
     @Slot(bool)
@@ -925,6 +1044,61 @@ class LapLibrary(BackendBase):
         save_viewer_setting(self.folder, hide_unclean_laps=enabled)
         self.fill_list()
         self.update_list_state(self.data.laps)
+
+    @Slot(str, bool)
+    def setSessionShown(self, kind: str, shown: bool):
+        """Lap list session filter: practice, qualify or race sessions listed or not (checked laps stay listed)"""
+        if kind not in SESSION_KINDS:
+            return
+        self.set_list_view(session_kinds=[value for value in SESSION_KINDS
+                                          if (shown if value == kind else value in self._session_kinds)])
+
+    @Slot()
+    def showAllSessions(self):
+        self.set_list_view(session_kinds=list(SESSION_KINDS))
+
+    @Slot(str)
+    def setSessionOrder(self, order: str):
+        """Lap list sessions newest, oldest or fastest (session best lap) first"""
+        if order in SESSION_ORDERS:
+            self.set_list_view(session_order=order)
+
+    @Slot(str)
+    def setLapOrder(self, order: str):
+        """Laps of a session in driving order or fastest first"""
+        if order in LAP_ORDERS:
+            self.set_list_view(lap_order=order)
+
+    def set_list_view(self, session_kinds: list[str] | None = None, session_order: str | None = None,
+                      lap_order: str | None = None):
+        """Lap list session filter & order changed: saved in viewer settings, list filled again"""
+        if session_kinds is not None:
+            self._session_kinds = session_kinds
+        if session_order is not None:
+            self._session_order = session_order
+        if lap_order is not None:
+            self._lap_order = lap_order
+        save_viewer_setting(self.folder, lap_session_kinds=self._session_kinds,
+                            lap_session_order=self._session_order, lap_order=self._lap_order)
+        self.fill_list()
+        self.update_list_state(self.data.laps)
+
+    def session_counts(self) -> dict[str, int]:
+        """Sessions of current track by filter kind (lap list filter menu)"""
+        counts = dict.fromkeys(SESSION_KINDS, 0)
+        for group in self.track_sessions():
+            counts[session_kind(str(group[0].info.get("session", "")))] += 1
+        return counts
+
+    def load_list_view(self, setting: dict):
+        """Lap list session filter & order saved in viewer settings (wrong values: defaults)"""
+        kinds = setting.get("lap_session_kinds")
+        self._session_kinds = ([kind for kind in SESSION_KINDS if kind in kinds] if isinstance(kinds, list)
+                               else list(SESSION_KINDS))
+        order = setting.get("lap_session_order")
+        self._session_order = order if order in SESSION_ORDERS else "newest"
+        order = setting.get("lap_order")
+        self._lap_order = order if order in LAP_ORDERS else "driven"
 
     def save_selection(self, paths: list[str]):
         """Remember checked laps & reference of current track"""

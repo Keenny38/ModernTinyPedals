@@ -10,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QMessageBox
 
 from neopedal.setting import cfg
 from tests.test_game_info import replays_page  # noqa: F401 (fixture)
@@ -38,9 +37,9 @@ def test_stint_timer_preview_keeps_own_driver_times():
     assert preview.driver_times is not stint_timer.DRIVER_TIMES
     times = stint_timer.DRIVER_TIMES
     times.reset()
-    times.update("live", 10.0, "Keenny", True, 1)
-    times.update("live", 12.0, "Keenny", True, 1)
-    preview.driver_times.update("demo", 500.0, "Demo Driver", True, 3)  # preview tick: other session
+    times.update("live", 10.0, "Keenny", True)
+    times.update("live", 12.0, "Keenny", True)
+    preview.driver_times.update("demo", 500.0, "Demo Driver", True)  # preview tick: other session
     assert times.times == {"Keenny": 2.0}
     times.reset()
 
@@ -48,10 +47,7 @@ def test_stint_timer_preview_keeps_own_driver_times():
 # --- 2: restored style backup never written over by styles in memory (saving paused, styles reloaded)
 def test_restore_style_backup_pauses_style_saving(ui_env, monkeypatch):
     from neopedal.ui import preset_management
-    from neopedal.ui._common import BaseDialog
 
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: None))
-    monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(preset_management, "app_signal", SimpleNamespace(reload=SimpleNamespace(emit=lambda *a: None)))
     replaced = []
 
@@ -66,17 +62,9 @@ def test_restore_style_backup_pauses_style_saving(ui_env, monkeypatch):
     backup = "classes.json.backup-2026-10-18-12-00-00-000000"
     with open(f"{folder}{backup}", "w", encoding="utf-8") as file:
         json.dump({"GT3": {"alias": "GT3", "color": "#FF0000"}}, file)
-    dialog = preset_management.RestoreBackup(None)
-    try:
-        rows = {dialog.listbox_backup.item(row).text(): row for row in range(dialog.listbox_backup.count())}
-        dialog.listbox_backup.setCurrentRow(rows[backup])
-        dialog.restore()
-        assert replaced == ["start", "end"]
-        assert os.path.exists(f"{folder}classes.json") and not os.path.exists(f"{folder}{backup}")
-    finally:
-        dialog.set_unmodified()
-        dialog.close()
-        flush()
+    preset_management.restore_style_backup(backup)  # Restore of the backups panel, once confirmed
+    assert replaced == ["start", "end"]
+    assert os.path.exists(f"{folder}classes.json") and not os.path.exists(f"{folder}{backup}")
 
 
 # --- 3: ranks of the session's cars only (slots beyond keep drivers of a former bigger session)
@@ -180,9 +168,10 @@ def test_dashboard_session_cookie(monkeypatch):
     assert wd.cookie_value("np_session_9000=abc", "np_session_8338") is None
     assert wd.cookie_value("", "np_session_8338") is None
     now = time.monotonic()
-    monkeypatch.setattr(wd.DashboardHandler, "sessions", {"abc": [now, now]})
+    monkeypatch.setattr(wd.DashboardHandler, "sessions", {"abc": wd.Session(now, "127.0.0.1", True)})
     handler = wd.DashboardHandler.__new__(wd.DashboardHandler)
     handler.server = SimpleNamespace(server_address=("127.0.0.1", 8338))  # type: ignore[assignment]
+    handler.client_address = ("127.0.0.1", 50000)
     assert handler.session_cookie() == "np_session_8338"
     handler.headers = {"Cookie": 'theme=["dark"]; np_session_8338=abc'}  # type: ignore[assignment]
     assert handler.has_session()  # unparsable cookie of another site: session kept
@@ -191,66 +180,59 @@ def test_dashboard_session_cookie(monkeypatch):
 
 
 # --- 7: font size addend within option limit (widgets rebuilt from setting, not validated again)
-def test_font_size_addend_clamped(monkeypatch):
-    from neopedal.ui import config
+def test_font_size_addend_clamped():
+    """Global font override (Settings page): sizes within option limit, addend itself bounded"""
+    from neopedal.template.option_limits import limit_error
+    from neopedal.ui.quick.font_override import FontChoice, apply_changes, font_changes
 
-    monkeypatch.setattr(type(config.cfg), "save", lambda *args, **kwargs: None)
-    monkeypatch.setattr(config, "run_after_saving", lambda callback: None)
-    dialog = SimpleNamespace(
-        selected_choice=lambda edit: config.FONT_NO_CHANGE,
-        edit_fontname=None, edit_fontweight=None, edit_autooffset=None,
-        edit_fontsize=SimpleNamespace(value=lambda: 999, setValue=lambda value: None),
-        edit_fontoffset=SimpleNamespace(value=lambda: 0, setValue=lambda value: None),
-        capture=lambda: None, refresh_modified=lambda: None, reloading=lambda: None,
-    )
-    setting = {"speedometer": {"font_size": 15}}
-    font_class = next(cell.cell_contents for cell in config.FontConfig.__closure__  # singleton_dialog wrapper
-                      if isinstance(cell.cell_contents, type))
-    font_class.save_setting(dialog, setting)
+    setting = {"speedometer": {"font_size": 195}}
+    apply_changes(setting, font_changes(setting, FontChoice(font_size_addend=20)))
     assert setting["speedometer"]["font_size"] == 200
+    setting = {"fuel": {"font_size": 2}}
+    apply_changes(setting, font_changes(setting, FontChoice(font_size_addend=-20)))
+    assert setting["fuel"]["font_size"] == 1
+    assert limit_error("font_size_addend", 999) and not limit_error("font_size_addend", -20)
 
 
 # --- 8: transfer to a destination removed meanwhile or not saved: told, never made again from defaults
 @pytest.fixture
 def transfer(ui_env, monkeypatch):
-    from neopedal.ui import preset_management
-    from neopedal.ui._common import BaseDialog
+    from neopedal.ui.quick.preset_backend import PresetBackend
 
-    warnings, toasts = [], []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
-    monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
-    monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: toasts.append(args))
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
     monkeypatch.setattr(cfg.user, "filelock", {})
     for name in ("a", "b"):
         with open(f"{cfg.path.settings}{name}.json", "w", encoding="utf-8") as file:
             json.dump({"speedometer": {"enable": True, "font_size": 15}}, file)
-    dialog = preset_management.PresetTransfer(None)
-    dialog.dest_selector.setCurrentText("b")
-    for listbox in (dialog.listbox_setting, dialog.listbox_options):
-        for row in range(listbox.count()):
-            listbox.itemWidget(listbox.item(row)).setChecked(True)
-    yield dialog, warnings, toasts
-    dialog.set_unmodified()
-    dialog.close()
+    backend = PresetBackend(None, SimpleNamespace())
+    toasts = []
+    backend.toastShown.connect(lambda text, error, undo: toasts.append(text))
+    panel = backend.transfer
+    panel.start()
+    panel.setDestination("b")
+    panel.setAllSettings(True)
+    panel.setAllTypes(True)
+    yield panel, toasts
+    backend.release()
+    backend.deleteLater()
     flush()
 
 
 def test_transfer_destination_removed_meanwhile(transfer):
-    dialog, warnings, toasts = transfer
+    panel, toasts = transfer
     os.remove(f"{cfg.path.settings}b.json")
-    dialog.transfer()
-    assert warnings == ["Preset not found, it may have been renamed or deleted."] and not toasts
+    assert not panel.transfer()
+    assert panel.error == "Preset not found, it may have been renamed or deleted." and not toasts
     assert not os.path.exists(f"{cfg.path.settings}b.json")
 
 
 def test_transfer_not_saved_told(transfer, monkeypatch):
     from neopedal.ui import preset_management
 
-    dialog, warnings, toasts = transfer
+    panel, toasts = transfer
     monkeypatch.setattr(preset_management, "save_and_verify_json_file", lambda **kwargs: False)
-    dialog.transfer()
-    assert warnings and "could not be saved" in warnings[0] and not toasts
+    assert not panel.transfer()
+    assert "could not be saved" in panel.error and not toasts
 
 
 # --- 9: JSON nested too deep read as corrupted (defaults & backup), never a crash at start
@@ -332,7 +314,7 @@ def test_download_bounded_by_announced_size(tmp_path, monkeypatch):
         def __exit__(self, *args):
             return False
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout: Response())
+    monkeypatch.setattr(update, "open_url", lambda url, timeout: Response())
     path = str(tmp_path / "setup.exe")
     with pytest.raises(ValueError, match="larger"):
         update._download_verified("https://github.com/x", path, "0" * 64, 5, None, None)

@@ -10,11 +10,11 @@ NeoPedal stores global user configuration in `config.json` file, which is used f
 
 Available settings:
 
-* `Application`, can be accessed from `Config` menu in main window, see [Application](#application) section for details.
+* `Application`, can be accessed from `Settings` menu in main window, see [Application](#application) section for details.
 * `Telemetry API`, can be accessed from `API` menu in main window, see [Telemetry API](#telemetry-api) section for details.
-* `Compatibility`, can be accessed from `Config` menu in main window, see [Compatibility](#compatibility) section for details.
-* `Overlay Style`, can be accessed from `Config` menu in main window, see [Overlay Style](#overlay-style) section for details.
-* `User path`, can be accessed from `Config` menu in main window, see [User Path](#user-path) section for details.
+* `Compatibility`, can be accessed from `Settings` menu in main window, see [Compatibility](#compatibility) section for details.
+* `Overlay Style`, can be accessed from `Settings` menu in main window, see [Overlay Style](#overlay-style) section for details.
+* `User path`, can be accessed from `Settings` menu in main window, see [User Path](#user-path) section for details.
 * `Auto load preset`, can be accessed from `Preset` tab in main window, see [Preset Management](#preset-management) section for details.
 
 Reload or Restart:
@@ -95,7 +95,7 @@ Click `Trash` button to restore or permanently delete deleted presets. See [Pres
 
 
 ## Saving JSON file
-NeoPedal automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Config` dialog, or `Restart` APP.
+NeoPedal automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Settings` page, or `Restart` APP.
 
 [**`Back to Top`**](#)
 
@@ -667,7 +667,7 @@ Set text offset position (percentage), value range in `0.0` to `1.0`.
 Set widget edge padding value that multiplies and scales with `font_size`. Default is `0.2` for most widgets. Increase padding value will further increase each element width in widget.
 
     color
-Set color in hexadecimal color codes with alpha value (opacity). The color code format starts with `#`, then follows by two-digit hexadecimal numbers for each channel in the order of `alpha`, `red`, `green`, `blue`. Note, `alpha` is optional and can be omitted. User can select a new color without manual editing, by double-clicking on color entry box in `Config` dialog.
+Set color in hexadecimal color codes with alpha value (opacity). The color code format starts with `#`, then follows by two-digit hexadecimal numbers for each channel in the order of `alpha`, `red`, `green`, `blue`. Note, `alpha` is optional and can be omitted. User can select a new color without manual editing, by double-clicking on color entry box in `Settings` page.
 
     text_alignment
 Set text alignment. Acceptable value: `Left`, `Center`, `Right`.
@@ -676,7 +676,7 @@ Set text alignment. Acceptable value: `Left`, `Center`, `Right`.
 Set prefix text that displayed beside corresponding data. Set to `""` to hide prefix text.
 
     show_caption
-Show short caption description on widget.
+Show short caption description on widget. Modern design: turned off, hides the labels above tiles and values (overlays whose classic caption is off by default keep their modern labels).
 
     display_order
 Set display order of each info column or row.
@@ -688,9 +688,9 @@ Set amount decimal places to keep.
 
 
 ## Application
-**Application options can be accessed from `Config` and `Window` menu in main window.**
+**Application options can be accessed from `Settings` and `Window` menus in main window.**
 
-Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again. Tools of the navigation bar are pages like `Overlays` or `Module`: their entry is selected while shown, no `Close` button (neither on top nor in the tool), and they are kept as left when coming back. Other pages (config dialogs, tools outside the bar) are closed once left for another page, so they never pile up: only pages with unsaved changes stay open behind (closing them would ask to save), and a page stays open while a page opened from it (input, lap library) is shown. Those are listed by the open pages button at bottom of the bar (shown while any page is kept behind the shown one), with `Close All`. `Esc` closes pages that have a `Close` button only. `Alt+Left` or mouse back button shows the page shown before (again to go further back). When a page needs more room, main window grows to fit it (within screen): size is kept while browsing other pages, and restored once every page needing it is closed (unless window was resized meanwhile). Changing language keeps open config pages and pages with unsaved changes as they are, tool pages are reopened translated. Inputs (preset name, key binding, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups. Tool page shown and navigation bar tools left open at quit (or restart, or language change) are opened again at next startup, see `remember_open_pages`.
+Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, under a header (where the page was opened from, `Tools ›` for tools listed on the Tools page, then its title unless the page shows its own, and one `Close` button: the tool's own `Close` is hidden), scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again. Tools of the navigation bar are pages like `Overlays` or `Module`: their entry is selected while shown, no header and no `Close` button, and they are kept as left when coming back. Other pages (config dialogs, tools outside the bar) are closed once left for another page, so they never pile up: only pages with unsaved changes stay open behind (closing them would ask to save), and a page stays open while a page opened from it (input, lap library) is shown. Those are listed by the open pages button at bottom of the bar (shown while any page is kept behind the shown one), with `Close All`. `Esc` closes pages that have a `Close` button only, never the Broadcast Director page. `Alt+Left` or mouse back button shows the page shown before (again to go further back), `Alt+Right` or mouse forward button (or the arrows at the top of the bar) shows again a page left by going back (a tool page closed meanwhile opens again). When a page needs more room, main window grows to fit it (within screen): size is kept while browsing other pages, and restored once every page needing it is closed (unless window was resized meanwhile). Changing language keeps open config pages and pages with unsaved changes as they are, tool pages are reopened translated. Inputs (preset name, key binding, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups. Tool page shown and navigation bar tools left open at quit (or restart, or language change) are opened again at next startup, see `remember_open_pages`.
 
 Pages with unsaved changes (editors, config dialogs, notes, theme editor) show a dot (`•`) before their title, on their navigation bar entry, and in the open pages menu (the open pages button dot changes to warning color). The dot clears once changes are saved or undone. `Ctrl+S` saves the page shown (like `Apply`: page kept open; track notes ask for a file name), on pages that have something to save.
 
@@ -732,7 +732,7 @@ Remember main window last size, and whether it was maximized.
     enable_high_dpi_scaling
 Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting NeoPedal to take effect. This option is enabled by default.
 
-High DPI scaling mode can be quickly toggled via `Scale` button on main window status bar.
+Set in `Settings` > `Application` (asks to restart).
 
 On Windows, scaling is determined by percentage value set in `Display` > `Scale and Layout` setting. For example, `200%` scale in windows setting will double the size of main window dialog and also every widget.
 
@@ -751,9 +751,6 @@ Enable `Global Hotkey` support. This option can be toggled from [Hotkey Tab](#ho
     show_option_group_title
 Show option group title in `Config` dialog.
 
-    show_confirmation_for_batch_toggle
-Show confirmation dialog for enabling or disabling all widgets or modules. This option is enabled by default.
-
     show_overlay_previews
 Show overlays on `Overlays` page as cards with a preview of each overlay, or as a compact list with the preview in a tooltip if disabled. Also switched by the view buttons at top right of `Overlays` page. Previews are drawn only while the page is shown. This option is enabled by default.
 
@@ -764,7 +761,7 @@ Show running overlays on `Overlays` page at their place on your screens (screen 
 Sort of `Overlays` page, set by its sort button: `0` = by name, `1` = enabled overlays first, `2` = by category. Rows are placed again when the sort is chosen (a switched overlay stays where it is until then). Not shown in `Config`. Default is `0`.
 
     favorite_overlays
-Favorite overlays of `Overlays` page (star of a card or row, `Ctrl+F` on the focused one, `Favorites` chip), widget names separated by comma. Kept for every preset. Not shown in `Config`. Default is empty.
+Favorite overlays of `Overlays` page (star of a card or row, `Ctrl+D` on the focused one, `Favorites` chip), widget names separated by comma. Kept for every preset. Not shown in `Config`. Default is empty.
 
     recent_overlays
 Overlays whose options were saved last in `Overlay Options` (`Recently Edited` chip of `Overlays` page, last edited first, 8 kept), widget names separated by comma. Not shown in `Config`. Default is empty.
@@ -804,7 +801,7 @@ Whether main window was maximized at last quit, shown maximized again at startup
     window_color_theme
 Set color theme for main window and dialog: `Modern Dark` (default), `Modern Light`, `Legacy Dark` or `Legacy Light` (classic colors). This option does not affect overlay widget, see `overlay_theme` in Overlay Style.
 
-Color theme can be quickly toggled via `UI` button on main window status bar.
+Also chosen from the command palette (`Ctrl+K`, type `theme`). On Windows, the title bar of the window follows the theme (dark or light), whatever the Windows setting.
 
     language
 Set user interface language: `English` or `Français`. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names and descriptions (tooltips) in config dialogs are also translated.
@@ -816,7 +813,7 @@ Show setup wizard at next startup. The wizard asks for language, game, units, wi
 Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value disables update checks. Default is `Keenny38/ModernTinyPedals` (this fork), so updates never offer the upstream releases.
 
     enable_online_driver_ranks
-Read Driver Rank (DR) & Safety Rank (SR) of Le Mans Ultimate online from RaceControl, the way the game menu does: the app asks the running game for a Steam sign-in ticket, signs in to RaceControl (raceos.gg) with it and reads ranks only (nothing else sent, no change made to your account; ticket & sign-in kept in memory only, never saved). The game no longer keeps ranks in its menu file while it runs, so without this option the Driver Rank overlay, driver cards & Broadcast Director show the last ranks seen. Ranks are read when the app starts (game running), after each session (new race results file: read 30 seconds, 2 and 5 minutes later, as RaceControl updates them a moment after) and every 5 minutes while the game runs. While the game is on an online server, the ranks of the other drivers of the session are read too, by name (kept in memory only), for the Driver & Safety Rank column, strength of field and Broadcast Director cards. This option is enabled by default.
+Read Driver Rank (DR) & Safety Rank (SR) of Le Mans Ultimate online from RaceControl, the way the game menu does: the app asks the running game for a Steam sign-in ticket, signs in to RaceControl (raceos.gg) with it and reads ranks only (nothing else sent, no change made to your account; ticket & sign-in kept in memory only, never saved). Privacy: the Steam session ticket of the game (it identifies your Steam account) and the names of the drivers of an online session are sent over HTTPS to raceos.gg, a third-party service (not NeoPedal), only while the game runs. Turn this option off to send nothing. The game no longer keeps ranks in its menu file while it runs, so without this option the Driver Rank overlay, driver cards & Broadcast Director show the last ranks seen. Ranks are read when the app starts (game running), after each session (new race results file: read 30 seconds, 2 and 5 minutes later, as RaceControl updates them a moment after) and every 5 minutes while the game runs. While the game is on an online server, the ranks of the other drivers of the session are read too, by name (kept in memory only), for the Driver & Safety Rank column, strength of field and Broadcast Director cards. This option is enabled by default.
 
     number_of_automatic_backups
 Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from `Restore Backup` dialog. Set `0` to disable. Default is `10`.
@@ -828,10 +825,16 @@ Set number of days deleted presets are kept in preset trash (`trash` folder insi
 Update version hidden by `Skip This Version` (kept by app, not shown in config dialog): its notice is not shown again at startup, a newer version is. Stored as one number (major * 1000000 + minor * 1000 + patch), `0` if none.
 
     rail_items
-Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: Home, Overlays, Driver Stats Viewer, Results & Replays, Broadcast Director, Telemetry, Race Calculator and Preset (`home,widget,driver_stats_viewer,race_results_viewer,broadcast_director,lap_viewer,race_calculator,preset`; a former `game_replays` entry opens Results & Replays). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.8; Spectate stays in `Tools` and the command palette, Config in the gear button under the bar, the `Config` menu and `Ctrl+,`).
+Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar…`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages and tools left out stay in the `More` menu (`⋯` button at the bottom of the bar), the `Tools` > `Pages` menu and the command palette (`Ctrl+K`). Default: Home, Overlays, Driver Stats Viewer, Results & Replays, Broadcast Director, Telemetry, Race Calculator and Preset (`home,widget,driver_stats_viewer,race_results_viewer,broadcast_director,lap_viewer,race_calculator,preset`; a former `game_replays` entry opens Results & Replays). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.8; Spectate stays in `Tools` and the command palette, Config in the gear button under the bar, the `Config` menu and `Ctrl+,`).
 
     home_quick_access
-Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example `lap_viewer`, `race_calculator`), pages (`widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and actions (`command_palette`, `bug_report`, `check_updates`). Easier to set with `Customize...` next to `Quick Access` on home page (or right-click the buttons): check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. Empty: no quick access button. Default: Telemetry viewer, Race calculator, Driver stats viewer, Layout editor, Widget performance, Results & replays, then the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Config, then Create bug report and Check for updates (`lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,race_results_viewer,widget,module,preset,spectate,hotkey,tools,app_settings,bug_report,check_updates`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.3; a former `game_replays` entry opens Results & replays).
+Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example `lap_viewer`, `race_calculator`), pages (`widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and actions (`command_palette`, `bug_report`, `check_updates`). Easier to set with `Customize…` next to `Quick Access` on home page (or right-click the buttons): check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. Empty: no quick access button. Default: entries that are not in the default navigation bar, Widget performance, Track map viewer, the Modules, Spectate, Pacenotes, Hotkeys and Tools pages, Settings, then Create bug report and Check for updates (`perf_view,track_map_viewer,module,spectate,pacenotes,hotkey,tools,app_settings,bug_report,check_updates`). An earlier default was set once in existing configs, by the update that introduced it (setting version 2.50.3; a former `game_replays` entry opens Results & replays, a former `layout_editor` entry is dropped: the screen view of the Overlays page replaced it).
+
+    command_palette_recent
+Commands run last from the command palette (`Ctrl+K`), newest first, shown under `Recent` when nothing is typed (8 kept). Not shown in `Settings`. Default is empty.
+
+    close_to_tray_notice_shown
+Whether the message telling that NeoPedal keeps running in the notification area was shown, the first time the window was closed with `Minimize to Tray` on (shown once). Not shown in `Settings`. Default is disabled.
 
     remember_open_pages
 Reopen tool pages left open at quit or restart (navigation bar tools like race calculator or telemetry viewer, and tool page shown last, shown again) (saved as soon as it is shown, so a crash or a system shutdown keeps it too). Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
@@ -846,7 +849,7 @@ Show alignment guides (grid, lines where edges or centers line up with other ove
 
 
 ## Compatibility
-**Compatibility options can be accessed from `Config` menu in main window.**
+**Compatibility options can be accessed from `Settings` menu in main window.**
 
     enable_bypass_window_manager
 Set `true` to bypass window manager on Linux. This option does not affect windows system. This option is enabled by default on Linux. Note, while this option is enabled, OBS may not be able to capture overlay widgets in streaming on Linux.
@@ -869,9 +872,9 @@ Note, global background color will only be visible when `enable_translucent_back
 
 
 ## Overlay Style
-**Overlay style options can be accessed from `Config` menu in main window. Changes apply to all widgets in all presets.**
+**Overlay style options can be accessed from `Settings` menu in main window. Changes apply to all widgets in all presets.**
 
-`Config` > `Overlay Style` page also shows `Overlay Editing` group: `enable_edit_mode_on_unlock`, `enable_magnetic_snap`, `snap_distance`, `snap_gap`, `show_layout_guides`, `grid_move_size` and `enable_layout_per_screen_setup`. They are saved in `application` section of `config.json`, see [Application](#application).
+`Settings` > `Overlay Style` page also shows `Overlay Editing` group: `enable_edit_mode_on_unlock`, `enable_magnetic_snap`, `snap_distance`, `snap_gap`, `show_layout_guides`, `grid_move_size` and `enable_layout_per_screen_setup`. They are saved in `application` section of `config.json`, see [Application](#application).
 
 Themes only restyle options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so changing theme never changes presets. Modern themes use modern design, rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Legacy themes keep classic look: modern font, corner, depth and bar gap options do not apply.
 
@@ -919,7 +922,7 @@ Set minimum gap between bars in pixels of classic layout widgets (modern design 
 
 
 ## User path
-**User path options can be accessed from `Config` menu in main window.**
+**User path options can be accessed from `Settings` menu in main window.**
 
 User path dialog allows customization to global user path for storing different user data.
 
@@ -973,12 +976,12 @@ To share user path across multiple copies of NeoPedal, user must set path to pla
 
 
 ## Remote Control
-**Remote control options can be accessed from `Config` menu in main window. Disabled by default.**
+**Remote control options can be accessed from `Settings` menu in main window. Disabled by default.**
 
 Remote control allows other programs (Stream Deck, Companion, SimHub, button box software) to run any hotkey command through a local HTTP server that only listens on `127.0.0.1`:
 
 * `GET http://127.0.0.1:8337/commands` lists available commands.
-* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-NeoPedal` header (any value; `X-NeoPedal` also accepted).
+* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-NeoPedal` header (any value, or the access token when `enable_access_token` is on; `X-NeoPedal` also accepted).
 * `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). `?fields=speed,gear,rpm` only sends these fields, `?changes=1` only sends fields changed since last message (nothing if none changed). Client can change both at any time by sending a text message such as `{"fields": ["speed", "gear"], "changes": true}` (`"fields": null` for every field). Browser pages from other sites are refused (`Origin` check).
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
@@ -991,13 +994,19 @@ Enable remote control server.
     remote_control_port
 Set server port. Default is `8337`.
 
+    enable_access_token
+Require the access token: the `X-NeoPedal` header of every command must be the token (`curl -H "X-NeoPedal: <token>"`), and telemetry stream clients must send it too (same header, or `?token=<token>` in the stream address for browser pages). Other programs and other Windows users of this computer then cannot run commands nor read telemetry. Disabled by default (any header value accepted, as before), except for commands with an effect on the whole app (`quit_application`, `restart_application`, `restart_api`, API and preset selection, every `preset_*`), refused without a token: turn it on, then copy the command shown in `Remote Control` settings into your Stream Deck, Companion or SimHub actions.
+
+    access_token
+Access token required by `enable_access_token`. A random token is generated if empty or shorter than 16 characters. Change it to stop tools set up with the old one.
+
 [**`Back to Top`**](#)
 
 
 ## Web Dashboard
-**Web dashboard options can be accessed from `Config` menu in main window. Disabled by default.**
+**Web dashboard options can be accessed from `Settings` menu in main window. Disabled by default.**
 
-Web dashboard shows live data (gear, speed, RPM, delta, lap times, position, fuel, pedals, tyre & brake temperatures, time left) in a web browser, for example on a phone or tablet placed next to the screen. Select `Web Dashboard Address...` from `Config` menu to see the address to open, including the access code.
+Web dashboard shows live data (gear, speed, RPM, delta, lap times, position, fuel, pedals, tyre & brake temperatures, time left) in a web browser, for example on a phone or tablet placed next to the screen. Select `Web Dashboard Address…` from `Config` menu to see the address to open, including the access code.
 
 The page is in the app language, and shows speed, temperatures and fuel in the units of [Units](#units) config dialog. A car using virtual energy (LMU Hypercar, LMGT3) shows virtual energy (%) instead of fuel, as fuel widgets do. With LMU, the official delta of the game is shown next to the delta best, and the current lap is marked invalid when the game invalidated it (track limits). Telemetry fields of the stream keep their units (`km/h`, `°C`, liters), values in units of the user are in `display` (with their unit symbols), plus `delta_official` (`null` when not available) and `lap_invalid`.
 
@@ -1008,19 +1017,19 @@ Enable web dashboard server.
 Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow NeoPedal the first time.
 
     enable_https
-Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: `Web Dashboard Address...` shows its SHA-256 fingerprint to check before accepting it. Disabled by default.
+Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: `Web Dashboard Address…` shows its SHA-256 fingerprint to check before accepting it. Disabled by default.
 
     web_dashboard_port
 Set server port. Default is `8338`.
 
     access_code
-Access code required to open the dashboard. A random code is generated if empty. After 10 wrong codes, the device is blocked for 60 seconds.
+Access code required to open the dashboard, at least 8 characters. A random code is generated if empty, and replaces a shorter code (set by hand in an older version: the new code is shown in `Web Dashboard` settings). After 10 wrong codes, the device is blocked for 60 seconds; after 30 wrong codes from devices of the local network within 5 minutes, logins from the local network are blocked for 2 minutes (open dashboards stay logged in, this computer is not blocked). Codes sent by pages of other web sites are refused. A login is only valid on the device that made it; on this computer it ends when the browser is closed (or after 12 hours), on a phone or tablet after 7 days.
 
 [**`Back to Top`**](#)
 
 
 ## Stream Overlay
-**Stream overlay options can be accessed from `Stream Overlays` page (`Tools` page, or command palette), or `Stream Overlay` category of `Config` page. Disabled by default.**
+**Stream overlay options can be accessed from `Stream Overlays` page (`Tools` page, or command palette), or `Stream Overlay` category of `Settings` page. Disabled by default.**
 
 Shows widgets in streaming software (OBS Studio, Streamlabs, XSplit, vMix, Twitch Studio...) as browser sources: a transparent page, no chroma key needed, drawn exactly as on screen (also while the game runs in exclusive fullscreen). `Stream Overlays` page gives the addresses to copy into a `Browser` source:
 
@@ -1052,7 +1061,7 @@ Access token included in every source address. A random token is generated if em
 
 
 ## VR Overlay
-**VR overlay options can be accessed from `Config` menu in main window. Disabled by default, not yet tested on every headset.**
+**VR overlay options can be accessed from `Settings` menu in main window. Disabled by default, not yet tested on every headset.**
 
 Shows all visible widgets (same layout as on desktop) in your VR headset, with nothing else to install:
 - **OpenXR games** (any runtime: SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...), only with `enable_openxr_layer` (experimental, off by default): drawn by the app's own OpenXR layer, loaded by the game (Windows, games using Direct3D 11, Direct3D 12 or Vulkan; OpenGL games are not supported). Start the app before the game.
@@ -1085,9 +1094,9 @@ VR mirror window position on desktop, saved when the window is moved.
 
 
 ## Notification
-**Notification options can be accessed from `Config` menu in main window.**
+**Notification options can be accessed from `Settings` menu in main window.**
 
-Note, notifications are displayed in main window. Click on any notification to quickly switch to corresponding tab. It's recommended to keep all notifications enabled.
+Note, notifications are displayed as chips in the status bar at the bottom of main window, and listed under `Now` in the notification center (bell at the bottom of the navigation bar). Click on any notification to quickly switch to corresponding page. Text is kept readable on any chosen color: a background too close to the text color is darkened (or lightened) until the contrast reaches 4.5:1. It's recommended to keep all notifications enabled.
 
     notify_locked_preset
 Show notification for loading locked preset.
@@ -1128,7 +1137,7 @@ Note, you will still need a third party program (such as `OpenKneeboard`) to pro
 
 
 ## Units
-**Units options can be accessed from `Config` menu in main window.**
+**Units options can be accessed from `Settings` menu in main window.**
 
     distance_unit
 Available units: `Meter`, `Feet`.
@@ -1164,7 +1173,7 @@ Unit of wind speed readings ([Wind Direction](#wind-direction) and [Weather](#we
 
 
 ## Global font override
-**Global font override options can be accessed from `Config` menu in main window, which allow changing font setting globally for all widgets.**
+**Global font override options can be accessed from `Settings` menu in main window, which allow changing font setting globally for all widgets.**
 
     Font Name
 Select a font name to replace `font_name` setting of all widgets. Default selection is `no change`, which no changes will be applied.
@@ -1361,15 +1370,15 @@ Enable or disable module.
 Fuel value and unit symbol depend on `Fuel Unit` setting from [Units](#units) config dialog, `L` = liter, `gal` = gallon. Virtual energy unit is `%` = percentage. Note, after changed `Fuel Unit` setting, it is required to close and reopen `Race calculator` in order to update units info for calculation. A typed value is applied when pressing `Enter` or leaving the box (arrows & mouse wheel apply at once), then everything is calculated again. Inputs and tyre plan are kept for next time, `Reset to Zero` clears inputs (starting tread back to 100%).
 
     Top of page (shared by both tabs)
-- Data source: live session (`Load Live`) or consumption history file (`Load File`, `.consumption` or `.csv`, tank capacity of its laps), with track and class name. An invalid file is reported and current data kept. `Follow Live`: inputs follow each new lap of the live session (saved). When the page opens, live laps fill the inputs, except after a race plan was opened (its inputs are kept, live laps only shown, until `Load Live` or `Load File`).
-- `Live Race`: during a race, plan of the rest of the race from now (laps & race time done, fuel, energy & tyres of the car, stops done), planned again at each lap & stop (not while in the pits). Timeline & pit stop plan start at the lap of now (`Now` row), stops keep their race number, the tyre plan of the race is kept (saved). Status next to it (waiting for the race or lap 1, from lap, in the pits); its tooltip shows the values read from the game (laps & lap progress, race time & time left, fuel, energy, tread, stops counted & game count) to check them. Race time is session time minus race start time of the game; a stop is counted when the car stood still in the pits or got fuel, energy or tyres there (drive-through penalties left out), a stop not seen (page closed) is taken from the game count.
-- `Race Plan` menu: `Save Race Plan As...` saves race setup, every input and tyre plan in one `.race-plan` file to keep or share, `Open Race Plan...` opens one (tyre plan replaced can be undone). `Save for Current Car & Track` keeps the plan for the car & track driven, `Open Plan of Car & Track Automatically` opens it again once when that car & track are driven (saved). `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo inputs and tyre plan edits.
+- Data source: one `Source` control, `Game Session` (live session, chosen again: filled in again) or `File` (consumption history file, `.consumption` or `.csv`, tank capacity of its laps; recent files in a menu), with track and class name. An invalid file is reported and current data kept. `Follow Live` (`Live` tab): inputs follow each new lap of the live session (saved). When the page opens, live laps fill the inputs, except after a race plan was opened (its inputs are kept, live laps only shown, until a source is chosen). First use: race length, pit stop time and source asked first (`show_quick_setup`), then the whole page.
+- `Plan From Now` (proposed above the page while a race runs, `Not Now` for this race; switch in the `Live` tab): during a race, plan of the rest of the race from now (laps & race time done, fuel, energy & tyres of the car, stops done), planned again at each lap & stop (not while in the pits). Timeline & pit stop plan start at the lap of now (`Now` row), stops keep their race number, the tyre plan of the race is kept (saved). Status in the top bar and the `Live` tab (waiting for the race or lap 1, from lap, in the pits); its tooltip shows the values read from the game (laps & lap progress, race time & time left, fuel, energy, tread, stops counted & game count) to check them. Race time is session time minus race start time of the game; a stop is counted when the car stood still in the pits or got fuel, energy or tyres there (drive-through penalties left out), a stop not seen (page closed) is taken from the game count.
+- `Race Plan` menu: `Save Race Plan As…` saves race setup, every input and tyre plan in one `.race-plan` file to keep or share, `Open Race Plan…` opens one (tyre plan replaced can be undone). `Save for Current Car & Track` keeps the plan for the car & track driven, `Open Plan of Car & Track Automatically` opens it again once when that car & track are driven (saved). `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo inputs and tyre plan edits.
 - Race: `Time` or `Laps` race (only the field of the selected type is shown), formation or rolling start laps (driven before race clock starts, 0.5 = half a lap of fuel), pit stop time (time lost per stop in pit lane, service time added: refuelling, tyre & driver change), safety margin kept in the tank at every stop and at the finish: in laps of fuel, in fuel (energy: same laps) or in % more consumption per lap.
 - Key figures: race fuel & energy (safety margin included), pit stops (what limits stints: fuel, energy, stint length, tyre life or mandatory stops; stops with tyres), longest stint, average refill per stop (or fuel to load at start when no stop is needed), tyres used by the tyre plan / maximum allowed. A tank too small for one lap, or a starting fuel or energy below one lap, is reported in red.
 - On a narrow window, race setup & key figures wrap on two rows, consumption history moves below calculator and tyre stock below tyre plan.
 
     Fuel tab
-- Lap & consumption: lap time (`minutes` : `seconds` . `milliseconds`, carried over between boxes, at half tank), fuel & energy per lap, tank capacity, fuel ratio (fuel used per 1% of virtual energy). `Load Live` and `Load File` fill them with the average of the 5 latest valid laps at race pace (laps over 105% of median lap time, as in & out laps, left out), and `Load Live` also sets race length from a live race session. A car using energy only (no fuel per lap) is planned on energy.
+- Lap & consumption: lap time (`minutes` : `seconds` . `milliseconds`, carried over between boxes, at half tank), fuel & energy per lap, tank capacity, fuel ratio (fuel used per 1% of virtual energy). Both sources fill them with the average of the 5 latest valid laps at race pace (laps over 105% of median lap time, as in & out laps, left out), and `Game Session` also sets race length from a live race session. A car using energy only (no fuel per lap) is planned on energy.
 - Start: starting fuel & energy, `0` = full tank, or exactly what the race needs when it needs no stop. Start time (checked): time of day of the race start, midnight included, pit stops then shown at their time of day (unchecked: race time).
 - Pit stop: refuel rate and energy rate (amount added per second, `0` = refuelling inside pit stop time), so a splash costs less time than a full tank; driver change time; `Tyres Changed While Refuelling` (longest of refuelling and tyre change counts, not both); in & out laps consumption (% of race pace, pit lane speed limit: a stint can last one lap more).
 - Race rules: mandatory stops (race laps spread evenly over one stint more than stops), maximum stint time (driver limit, real lap times counted: a heavier car is slower), drivers taking turns, `Balanced Stints` (race laps spread evenly over the stints, same stops: no short splash stint at the end), `Leader Finishes First (+1 Lap)` (time race: the race ends when the leader crosses the line after the timer, so a car behind may drive one lap more: fuel planned for it).
@@ -1382,7 +1391,7 @@ Fuel value and unit symbol depend on `Fuel Unit` setting from [Units](#units) co
 - Details: total needed (exact ≈ rounded up), refuel stops each resource alone needs (the plan may stop more often: driver limit, mandatory stops), laps & minutes total amounts last, laps & minutes a full tank lasts (safety margin kept), amount left at stint end, consumption per lap to save one stop (same as saving target, `-` without stop), average refill of the pit stop plan.
 - Saving target: laps per stint (on a full tank) and consumption per lap (difference with current one) for one stop less, planned with the starting fuel; with a saving cost, lap time lost and race time gained or lost (worth it or not). Consumption & stops for laps per stint to aim for.
 - Strategy comparison: plan of now against plans with up to 2 stops less (fuel saving) and one stop more: consumption, lap time lost to saving, time in the pits, laps, race time and gap, best one in bold. Saving target & comparison are calculated at once after a pause, or once quick changes settle (arrow held).
-- Plan against race (race session): stints driven (stint history) against the plan of the race: laps, lap time, fuel & energy per lap (race value / plan value), tyre wear. Driver of each stint when known: driver in the car (game scoring, it changes on a driver swap) at pit entry of the stop ending the stint, else leaving the stop before; stops seen while the app runs (page open or not). In `Live Race`, driver in the car shown on the summary line.
+- Plan against race (race session): stints driven (stint history) against the plan of the race: laps, lap time, fuel & energy per lap (race value / plan value), tyre wear. Driver of each stint when known: driver in the car (game scoring, it changes on a driver swap) at pit entry of the stop ending the stint, else leaving the stop before; stops seen while the app runs (page open or not). In `Plan From Now`, driver in the car shown on the summary line.
 - Class rivals (live race): cars of your class by place, laps, stops (in the pits), laps since last stop and next stop expected (last stop seen while the page is open, plus your full tank laps; `~` when the last stop was not seen).
 - Consumption history: `lap number`, `lap time`, `fuel`, `virtual energy`, `fuel ratio`, `battery drain`, `battery regen`, `battery net change`, `average tyre tread wear`, `tank capacity` of [Consumption History](#consumption-history) data, invalid laps in red. Live history follows new laps while the page is shown. Click a column header to sort (numbers by value), `Valid Laps Only` hides invalid laps (saved). Select laps (whole rows) and click `Add Selected Data`: their average goes to the calculator, invalid laps are left out. `Delete Selected` and `Delete All` remove laps from consumption history (live session or loaded file, asks first, cannot be undone). `Columns` button (or right click on table header) shows or hides optional columns.
 
@@ -1398,9 +1407,11 @@ How stints are planned: a car pits at the end of a lap, so stints are whole laps
 - To add a tyre to the plan, drag it from tyre stock onto a wheel (tyres can be dragged & copied in the plan too). Hold `Ctrl` or `Shift` to select several tyres (drag is disabled then). Right click on tyre stock or plan opens a menu, `Delete` removes selected tyres from the plan (asks first).
 
     Team tab
+- `Line-up`: name of each driver typed before the race (`Add Driver`, `Remove Driver`: a removed driver takes its pace, driving times and planned stints with it). In a Le Mans Ultimate session the real team names replace the typed ones; a close name keeps its place and planned stints.
+- `Stint Plan`: driver of each stint, `Auto` (chosen by the plan) or a driver of the line-up; `Keep Rotation` and `All Auto` set every stint at once. Saved with the plan (`input_stint_drivers`). Names show in plan rows, timeline, `Driving Time` card and exports.
 - Stints of every driver of the car read from the game (`LMU` strategy data), teammates included, also from the monitor while a teammate drives: driver, stint, laps, laps counted, fuel, virtual energy and tyre wear per lap (out laps, pit laps and laps with refuelling or new tyres left out), and usage per lap of each driver. Asked to the game when the tab is shown, then every 15 seconds (`Refresh` asks at once).
 - `Fill In Calculator`: average per lap of selected stints (all stints if none selected) goes to fuel, energy & tyre wear inputs, tank capacity of the car from the game.
-- `Load Live` with no valid lap at race pace yet (`LMU`, while driving): fuel & energy per lap estimated by the game are filled in.
+- `Game Session` source with no valid lap at race pace yet (`LMU`, while driving): fuel & energy per lap estimated by the game are filled in.
 
 [**`Back to Top`**](#)
 
@@ -1414,13 +1425,13 @@ Driver stats are grouped under specific track name, which can be switched from t
 
 `All Tracks`, first entry of track selector, shows the career: each track with best lap of each class (colored by its level on community lap times), totals of track and last driven date; key figures of all tracks (tracks driven & most driven one, median level of best laps); the card on the right counts best laps of each level. Each best lap shows the first letter of its level, so levels are told without colors. Double click a track (or `Enter`) to show its vehicles, right click: `Show Track`, `Delete Track`, `Open Recorded Laps`. When stats are saved under vehicle name (`vehicle_classification` option of [Stats Module](#stats-module)), vehicles are grouped by game class recorded in session history.
 
-Vehicle table columns: personal best, gap to community reference & level, theoretical best (sum of all time best sectors of the class from [Sectors Module](#sectors-module), all brands) & potential (personal best minus theoretical best), qualifying & race best, distance, driving time, fuel, valid & invalid laps, share of valid laps, average speed, fuel consumption per 100 km (or miles), penalties (and per race), race starts, finishes, wins, podiums, DNF (not finished or disqualified), win & podium rates, average finish position, last driven date. Race starts, DNF, average finish position and last driven date are recorded since version adding them. Rates are per start (finishes & DNF for older stats). `View` menu: `Columns` shows or hides columns (also right click on column names, `hidden_columns` option of `driver_stats_viewer` in config file), `Reset Column Widths` (columns are resized by dragging the edge of column names, `column_widths` option), `Sort Tracks by Last Driven` lists tracks driven lately first (`enable_sort_by_last_driven` option), `Colorblind colors` shows levels in colors easier to tell apart with color vision deficiency (`enable_colorblind_colors` option). `Export` saves the table shown (visible columns) to a CSV file, number format of system language: `Export CSV...` as shown, `Export Raw Values (CSV)...` in base units without formatting (lap times in seconds, distance in meters, fuel in liters...) for spreadsheets.
+Vehicle table columns: personal best, gap to community reference & level, theoretical best (sum of all time best sectors of the class from [Sectors Module](#sectors-module), all brands) & potential (personal best minus theoretical best), qualifying & race best, distance, driving time, fuel, valid & invalid laps, share of valid laps, average speed, fuel consumption per 100 km (or miles), penalties (and per race), race starts, finishes, wins, podiums, DNF (not finished or disqualified), win & podium rates, average finish position, last driven date. Race starts, DNF, average finish position and last driven date are recorded since version adding them. Rates are per start (finishes & DNF for older stats). `View` menu: `Columns` shows or hides columns (also right click on column names, `hidden_columns` option of `driver_stats_viewer` in config file), `Reset Column Widths` (columns are resized by dragging the edge of column names, `column_widths` option), `Sort Tracks by Last Driven` lists tracks driven lately first (`enable_sort_by_last_driven` option), `Colorblind Colors` shows levels in colors easier to tell apart with color vision deficiency (`enable_colorblind_colors` option). `Export` saves the table shown (visible columns) to a CSV file, number format of system language: `Export CSV…` as shown, `Export Raw Values (CSV)…` in base units without formatting (lap times in seconds, distance in meters, fuel in liters...) for spreadsheets.
 
 To sort by specific stat, click on corresponding column name (again for reverse order, values not recorded always last). Stats are sorted by `personal best lap time` by default. `Up` / `Down` keys change selected vehicle.
 
 `Telemetry` button (or `Open Recorded Laps` from right click menu) opens recorded laps of selected vehicle class in [Lap Telemetry Viewer](#lap-telemetry-viewer), when [Recorder Module](#recorder-module) recorded laps on this track & class: recorded lap of personal best of selected vehicle (else its fastest lap) is set as reference.
 
-Community lap times: personal best of each vehicle is compared with community LMU lap times of a published Google Sheet (by default the lap time sheet of [ohne_speed](https://www.youtube.com/@ohne_speed): class reference hotlap of each track & class, race pace ladder from ~100% to 107% of it, fastest car). `% Ref.` column shows personal best in percent of class reference, `Level` column its level: `Alien` (~100%), `Competitive` (101%), `Good` (102-103%), `Midpack` (104-105%), `Tail-ender` (106%), `Offline` (107% and slower), as the sheet header. The card on the right shows the ladder of selected vehicle with lap time limit of each level, where personal, qualifying and race best stand, gap to class reference, time to find for next level and fastest car. Below it, `Progression` chart shows best lap of each session (dots) and personal best so far (line, faster higher), with lap time limits of levels (dashed lines), dates of first, middle & last session, date of personal best and last session; hover a dot for its date, session & lap time. `All`, `Practice` (test day, practice, warmup), `Qualifying` & `Race` show sessions of that type only. `Sessions` lists sessions of selected vehicle, newest first: date, session, best lap (personal best highlighted), valid / all laps, race result (finish position, DNF or DQ); hover for driving time & distance. Stints shorter than a minute without a lap (garage exit) are not recorded. LMU track names are matched to sheet tracks by name & layout (Spa-Francorchamps Endurance as Spa, Monza Curva Grande as Monza (curvagrande)...), vehicle class from vehicle name (Hyper, LMP2_ELMS, LMP2, LMP3, GT3, GTE): `vehicle_classification` must include class (`Class - Brand` or `Class`) to compare. The sheet is downloaded once a day when page opens and kept in config folder (works offline). `Reference` menu: `Update Reference` downloads again, `Change Sheet Address...` sets another published Google Sheet of same layout, `Compare With Community Lap Times` turns comparison on or off (`enable_lap_reference` and `lap_reference_sheet_url` options of `driver_stats_viewer` in config file).
+Community lap times: personal best of each vehicle is compared with community LMU lap times of a published Google Sheet (by default the lap time sheet of [ohne_speed](https://www.youtube.com/@ohne_speed): class reference hotlap of each track & class, race pace ladder from ~100% to 107% of it, fastest car). `% Ref.` column shows personal best in percent of class reference, `Level` column its level: `Alien` (~100%), `Competitive` (101%), `Good` (102-103%), `Midpack` (104-105%), `Tail-ender` (106%), `Offline` (107% and slower), as the sheet header. The card on the right shows the ladder of selected vehicle with lap time limit of each level, where personal, qualifying and race best stand, gap to class reference, time to find for next level and fastest car. Below it, `Progression` chart shows best lap of each session (dots) and personal best so far (line, faster higher), with lap time limits of levels (dashed lines), dates of first, middle & last session, date of personal best and last session; hover a dot for its date, session & lap time. `All`, `Practice` (test day, practice, warmup), `Qualifying` & `Race` show sessions of that type only. `Sessions` lists sessions of selected vehicle, newest first: date, session, best lap (personal best highlighted), valid / all laps, race result (finish position, DNF or DQ); hover for driving time & distance. Stints shorter than a minute without a lap (garage exit) are not recorded. LMU track names are matched to sheet tracks by name & layout (Spa-Francorchamps Endurance as Spa, Monza Curva Grande as Monza (curvagrande)...), vehicle class from vehicle name (Hyper, LMP2_ELMS, LMP2, LMP3, GT3, GTE): `vehicle_classification` must include class (`Class - Brand` or `Class`) to compare. The sheet is downloaded once a day when page opens and kept in config folder (works offline). `Reference` menu: `Update Reference` downloads again, `Change Sheet Address…` sets another published Google Sheet of same layout, `Compare With Community Lap Times` turns comparison on or off (`enable_lap_reference` and `lap_reference_sheet_url` options of `driver_stats_viewer` in config file).
 
 To view corresponding track map, click `View Map` button.
 
@@ -1428,7 +1439,7 @@ To reload stats data, click `Reload` button.
 
 To delete all stats from a specific track, click `Delete` button.
 
-To remove all stats from a specific vehicle, right-click on vehicle name and select `Remove Vehicle`.
+To remove all stats from a specific vehicle, right-click on vehicle name and select `Remove Car`.
 
 To reset personal best lap time to default, right-click on personal best lap time and select `Reset Lap Time`.
 
@@ -1463,10 +1474,25 @@ Note, race completion and final standings stats are retrieved at the moment when
 [**`Back to Top`**](#)
 
 
-## Vehicle brand editor
-**Vehicle brand editor can be accessed from `Tools` menu in main window.**
+## Table editors
+**Vehicle brand, vehicle class, brake, track info, tyre compound and heatmap editors can be accessed from `Tools` menu in main window.**
 
-Vehicle brand editor is used for editing [Brands Preset](#brands-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+They share one table page:
+- `Save` (or `Ctrl+S`) checks the table, then saves and applies it at once (no separate `Apply`). Closing the page with unsaved changes asks to save or discard them. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) go back through every change until the page is closed.
+- Type in the filter field (`Ctrl+F`) to show only the rows containing the typed words. Click a column header to sort rows by it (click again: descending order); the order is saved.
+- Click a row to select it, `Ctrl`+click to add or remove a row, `Shift`+click (or `Shift`+arrows) to select a range, `Ctrl+A` for every row shown. `Esc` clears the selection.
+- Double-click a cell, or press `Enter` or `F2`, to edit it (or just type: the typed character replaces the value, as in a spreadsheet): `Enter` keeps the value, `Esc` puts it back. A value that cannot be used (a word in a number column, an invalid color...) is marked in red and kept in the field until it is fixed. Lists (heatmap names, primary preset) open at once. Right-click a cell (or the menu key) for its menu.
+- `Delete` (button or `Delete` key) removes the selected rows; it is off while no row is selected. The message shown has an `Undo` button.
+- `Add` adds the missing rows found in the current session (cars, classes, brakes, compounds, track), else a new row whose name is typed at once.
+- `Reset` puts the default rows back (asked first, saved only by `Save`).
+- A name listed twice, or an invalid color, is marked in red, and `Save` refuses the table until it is fixed (the row is shown).
+- Columns are as wide as their header and longest value; the table scrolls sideways when the page is narrower. A value too long to show whole is cut, its full text shown when the mouse is over it.
+
+[**`Back to Top`**](#)
+
+
+## Vehicle brand editor
+Vehicle brand editor is used for editing [Brands Preset](#brands-preset), see [Table editors](#table-editors) for the common actions.
 
 For brand logo image preparation, see [Brand Logo](#brand-logo) section.
 
@@ -1476,19 +1502,17 @@ For brand logo image preparation, see [Brand Logo](#brand-logo) section.
 
 Note, brands data are automatically imported for `LMU` while driving, there is no need to manually import them. However it is required to manually import for `RF2`.
 
-To import vehicle brand data from `Rest API`, click `Import from` menu, and select either `RF2 Rest API` or `LMU Rest API`. Note, game updates may introduce new vehicles, it is recommended to re-import after each game update to keep brand info updated.
-
-Note, there are currently two sources for importing from `LMU Rest API`:
-- Primary: allows to import brands from both original and custom vehicle skins.
-- Alternative: may allow to import some brands that are missing from Primary source. This is normally not required.
+To import vehicle brand data from the game, start the game, then click `Import` and choose a source. The cars and their makers are read from the game while it runs (its REST API). Note, game updates may introduce new vehicles, it is recommended to re-import after each game update to keep brand info updated.
+- `Le Mans Ultimate (game running)`: brands of both original and custom vehicle skins.
+- `Le Mans Ultimate, other list (game running)`: second list of the game, all installed cars. It may have brands missing from the first one; normally not required.
+- `rFactor 2 (game running)`.
+- `JSON File…`: a file saved from the game REST API (see below).
 
 **Important notes**
 
-Game must be running in order to import from `Rest API`. Newly imported data will be appended on top of existing data, existing data will not be changed.
+Game must be running in order to import from the game. Newly imported data will be appended on top of existing data, existing data will not be changed. The import runs in the background (`Import` is off until the game answered) and can be undone.
 
 If importing fails while game is running, check if `URL Port` option in `RestAPI` module that matches `WebUI port` value that sets in `LMU` (UserData\player\Settings.JSON) or `RF2` (UserData\player\player.JSON) setting file. See [Telemetry API](#telemetry-api) section for details.
-
-Alternatively, to import vehicle brand data from vehicle `JSON` file, click `Import from` menu, and select `JSON file`.
 
     How to manually export vehicle brand data from RF2 Rest API:
     1. Start RF2, then open following link in web browser:
@@ -1503,145 +1527,99 @@ Alternatively, to import vehicle brand data from vehicle `JSON` file, click `Imp
 
     Note: importing feature is experimental. Maximum acceptable JSON file size is limited to "5MB".
 
-To add new brand name, click `Add` button. Note, the editor can auto-detect and fill-in missing vehicle names found from current active session, existing data will not be changed.
-
-To sort brand name in orders, click `Sort` button.
-
-To remove a brand name, select a vehicle name and click `Delete` button.
-
-To batch replace name, click `Replace` button.
-
-To reset all brands setting to default, click `Reset` button; or manually delete `brands.json` preset.
+To batch replace a brand name, click `Replace…`: type the text to find (or pick it from the values of the column), the text to replace it with, then `Replace` (one undo step).
 
 [**`Back to Top`**](#)
 
 
 ## Vehicle class editor
-**Vehicle class editor can be accessed from `Tools` menu in main window.**
-
-Vehicle class editor is used for editing [Classes Preset](#classes-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+Vehicle class editor is used for editing [Classes Preset](#classes-preset), see [Table editors](#table-editors) for the common actions.
 
 `Class name` column is full vehicle class name that must match in-game vehicle.
 
 `Alias name` column is alternative name that replaces class name for displaying.
 
-`Color` column is class color style (HEX code). Double-click on color to open color dialog.
+`Color` column is class color style (HEX code). Click the color square to open the color dialog.
 
-To add new class, click `Add` button. Note, the editor can auto-detect and fill-in missing vehicle classes found from current active session, existing data will not be changed.
-
-To sort class name in orders, click `Sort` button.
-
-To remove class, select one or more rows and click `Delete`.
-
-To reset all classes setting to default, click `Reset` button; or manually delete `classes.json` preset.
+The primary preset of each class is set from the Presets page (right-click a preset > `Set Primary for Class`), the editor keeps it. It applies to every session, or only to practice, qualifying or race (`preset_practice`, `preset_qualify`, `preset_race`, before the preset of every session).
 
 [**`Back to Top`**](#)
 
 
 ## Brake editor
-**Brake editor can be accessed from `Tools` menu in main window.**
-
-Brake editor is used for editing [Brakes Preset](#brakes-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+Brake editor is used for editing [Brakes Preset](#brakes-preset), see [Table editors](#table-editors) for the common actions.
 
 `Brake name` column is full vehicle class name plus brake name that must match in-game vehicle. Brand name may also be added if vehicle brand data is available.
 
 `Failure (mm)` column is millimeter thickness threshold at brake failure and affects brake wear calculation. See [Brake Wear](#brake-wear) widget for details.
 
-`Heatmap name` column is heatmap style name selector. Click on heatmap selector to open drop down list and select a heatmap style.
-
-To add new brake, click `Add` button. Note, the editor can auto-detect and fill-in missing brakes found from running vehicles in current active session, existing data will not be changed.
-
-To sort brake name in orders, click `Sort` button.
-
-To remove brake, select one or more rows and click `Delete`.
-
-To reset all brakes setting to default, click `Reset` button; or manually delete `brakes.json` preset.
+`Heatmap name` column is heatmap style name: edit the cell to choose a heatmap in the list. A heatmap that no longer exists is marked `(not found)`.
 
 [**`Back to Top`**](#)
 
 
 ## Track info editor
-**Track info editor can be accessed from `Tools` menu in main window.**
+Track info editor is used for editing [Tracks Preset](#tracks-preset), see [Table editors](#table-editors) for the common actions.
 
-Track info editor is used for editing [Tracks Preset](#tracks-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+Distances and pit speed are shown and typed in the units of `Settings` > `Units` (`distance_unit`, `speed_unit`), the header tells the unit; they are stored in meters and meters per second. A value left untouched is kept exactly.
 
 `Track name` column is full track name that must match in-game track.
 
-`Pit entry (m)` column is pit entry position (in meters) relative to track length. This value is automatically recorded or updated by [Mapping Module](#mapping-module).
+`Pit entry` column is pit entry position relative to track length. This value is automatically recorded or updated by [Mapping Module](#mapping-module).
 
-`Pit exit (m)` column is pit exit position (in meters) relative to track length. This value is automatically recorded or updated by [Mapping Module](#mapping-module).
+`Pit Exit` column is pit exit position relative to track length. This value is automatically recorded or updated by [Mapping Module](#mapping-module).
 
-`Pit speed (m/s)` column is pit lane speed limit (in meters per second). This value is automatically recorded or updated by [Mapping Module](#mapping-module). Note, vehicle pit limiter must be activated while in pit lane to allow recording speed limit.
+`Pit speed` column is pit lane speed limit. This value is automatically recorded or updated by [Mapping Module](#mapping-module). Note, vehicle pit limiter must be activated while in pit lane to allow recording speed limit.
 
-`Speed trap (m)` column is speed trap position (in meters) relative to track length. To manually set speed trap position at your current on-track position, `Right-Click` on corresponding track's speed trap column and select `Set from Telemetry`.
+`Speed Trap` column is speed trap position relative to track length. To set it at your current on-track position, `Right-Click` the speed trap cell of the current track and select `Set from Telemetry` (asked first; not in the pit lane).
 
-`Orient (°)` column is display orientation angle (in degrees) of this track's map in [Track Map](#track-map) widget, which allows custom map orientation for each track without switching presets. This value is added to `display_orientation` option of Track Map widget. Default is `0`.
+`Map orientation (°)` column is display orientation angle (in degrees) of this track's map in [Track Map](#track-map) widget, which allows custom map orientation for each track without switching presets. This value is added to `display_orientation` option of Track Map widget. Default is `0`.
 
 `Sunrise` column is sunrise hour in `Hour:Minute` format. This value has to be manually defined.
 
 `Sunset` column is sunset hour in `Hour:Minute` format. This value has to be manually defined.
 
-To add new track, click `Add` button. Note, the editor can auto-detect and fill-in missing track found from current active session, existing data will not be changed.
-
-To sort track name in orders, click `Sort` button.
-
-To remove track, select one or more rows and click `Delete`.
-
-To reset all tracks setting to default, click `Reset` button; or manually delete `tracks.json` preset.
+`Primary preset` column is the preset loaded automatically on this track (before the class primary preset), chosen in the list of existing presets (`None` for none). It is the same setting as `Set Primary for Track` of the Presets page. A preset deleted since is marked `(not found)`.
 
 [**`Back to Top`**](#)
 
 
 ## Tyre compound editor
-**Tyre compound editor can be accessed from `Tools` menu in main window.**
-
-Tyre compound editor is used for editing [Compounds Preset](#compounds-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+Tyre compound editor is used for editing [Compounds Preset](#compounds-preset), see [Table editors](#table-editors) for the common actions.
 
 `Compound name` column is full vehicle class name plus full tyre compound name that must match in-game vehicle.
 
-`Symbol` column is alternative symbol character that replaces full tyre compound name for displaying.
+`Symbol` column is alternative symbol character that replaces full tyre compound name for displaying (one letter, `?` if empty).
 
-`Color` column is custom compound color for each different compound type. Compounds added by the `Add` button from the running session get the color of their name (soft white, medium yellow, hard red, wet blue, intermediate green).
+`Color` column is custom compound color for each different compound type. Compounds added by the `Add` button from the running session get the color of their name (soft white, medium yellow, hard red, wet blue, intermediate green). Click the color square to open the color dialog.
 
-`Heatmap name` column is heatmap style name selector. Click on heatmap selector to open drop down list and select a heatmap style.
+`Heatmap name` column is heatmap style name: edit the cell to choose a heatmap in the list.
 
-To add new tyre compound, click `Add` button. Note, the editor can auto-detect and fill-in missing tyre compounds found from running vehicles in current active session, existing data will not be changed.
-
-To sort tyre compound name in orders, click `Sort` button.
-
-To remove tyre compound, select one or more rows and click `Delete`.
-
-To batch replace name, click `Replace` button.
-
-To reset all tyre compounds setting to default, click `Reset` button; or manually delete `compounds.json` preset.
+To batch replace symbols, click `Replace…`.
 
 [**`Back to Top`**](#)
 
 
 ## Heatmap editor
-**Heatmap editor can be accessed from `Tools` menu in main window.**
+Heatmap editor is used for editing [Heatmap Preset](#heatmap-preset), see [Table editors](#table-editors) for the common actions.
 
-Heatmap editor is used for editing [Heatmap Preset](#heatmap-preset). Note, any changes will only be saved and take effect after clicking `Apply` or `Save` Button.
+Each row represents a target temperature and corresponding color. First column is temperature in the unit of `Settings` > `Units` (`temperature_unit`), stored in `Celsius` with up to one decimal place. Second column is corresponding color (HEX code); click the color square to open the color dialog.
 
-Each row represents a target temperature and corresponding color. First column is temperature degree value in `Celsius`, and up to one decimal place is kept. Second column is corresponding color (HEX code). Double-click on color to open color dialog.
+The preview under the preset list shows the heatmap being edited (changes not saved yet too): one band per temperature step, from coldest to hottest.
 
-To add temperature, click `Add` button.
+To add temperature, click `Add`: a step 10 degrees above the hottest one is added, its temperature typed at once.
 
-To sort temperature list in orders, click `Sort` button.
+To offset temperature values, select one or more rows, then click `Offset…`. Turn on `Scale Mode` to multiply temperature values instead. The value is in the unit shown.
 
-To batch offset temperature values, select one or more temperature from `temperature` column, then click `Offset` button. Click `Scale Mode` check box to scale temperature values. Note, offset option will be reset to `0` each time after applying. Last applied offset value is displayed on top of dialog.
+To select a different heatmap preset, choose it in the list at top. Note: a table with errors (temperature listed twice, invalid color) has to be fixed first; changes to the previous heatmap are kept and saved with `Save`. Undo history is per heatmap.
 
-To remove a temperature, select one or more temperature and click `Remove` button.
+To create a new heatmap preset, click `New…`. Note: only alphabetic characters, numbers, underscores are accepted in preset name, and renaming preset is not supported.
 
-To select a different heatmap preset, click `drop-down list` at top, and select a preset name. Note: by selecting a different preset, any changes to previously selected heatmap will be saved in cache, and only be saved to file after clicking `Apply` or `Save` Button.
+To duplicate a heatmap preset (with its unsaved changes), click `Copy…`.
 
-To create a new heatmap preset, click `New` button. Note: only alphabetic characters, numbers, underscores are accepted in preset name, and renaming preset is not supported.
+To delete selected heatmap preset, click `Delete Preset`. Note: built-in presets cannot be deleted.
 
-To duplicate a heatmap preset, click `Copy` button.
-
-To delete selected heatmap preset, click `Delete` button. Note: built-in presets cannot be deleted.
-
-To reset selected heatmap preset, click `Reset` button. Note: only built-in presets can be reset.
+To reset selected heatmap preset, click `Reset`. Note: only built-in presets can be reset.
 
 To assign a heatmap preset to specific widget, select corresponding `heatmap name` in widget config dialog.
 
@@ -1659,7 +1637,7 @@ To load a track map, click `Load Map` button. Map file name, length and number o
 
 To customize map display, click `Config` button (widths are meters on map, colors of start & sector lines, curve section, osculating circle, distance circles, center mark and position marker).
 
-To zoom map in or out, scroll mouse wheel over map (around mouse), or use `+`, `-` and whole map buttons at top right of map; drag to move zoomed map, double-click to show whole map. A scale bar is shown at bottom right. `Follow position` zooms on current position and keeps it centered.
+To zoom map in or out, scroll mouse wheel over map (around mouse), or use `+`, `-` and whole map buttons at top right of map; drag to move zoomed map, double-click to show whole map. A scale bar is shown at bottom right. `Follow Position` zooms on current position and keeps it centered.
 
 To move current position, click the map near the track, use position slider or arrows below elevation profile (step of `position_increment_step`), keyboard `Left` / `Right`, or click / drag the elevation profile. `Play` (or `Space`) drives around the track.
 
@@ -1704,10 +1682,10 @@ Set road slope classification by slope percent.
 
 Note, by default the editor starts in `Pace Notes` edit mode as displayed in status bar.
 
-**Important notes:** The editor does not provide `undo` function, it is recommended to save file before doing heavy modification.
+Every change can be undone with `Undo` (`Ctrl+Z`) and redone with `Redo` (`Ctrl+Y`), until another file is opened or created.
 
 The editor consists of two panel views:
-* Left panel is the `Track Map Viewer`, which can be used to visualize track map and providing analytic info for assisting notes creation. See [Track Map Viewer](#track-map-viewer) section for details.
+* Left panel is the track map (same map, position, curve & slope info as [Track Map Viewer](#track-map-viewer)), with a dot at the place of each note (click a dot to select its note, `Show` > `Marked Coordinates` hides them). The map of the track is opened by itself when a track map file has the same name as the notes. Click the map to move the position, then `Left` / `Right` keys move it along the track.
 
 * Right panel is the track and pace notes editor, which allows to create, open, and save track or pace notes file.
 
@@ -1723,13 +1701,15 @@ Note, DO NOT write file extension (format) in `pace note` column. File extension
 
 * `comment` column defines optional extra info for `pace note` or `track note` column for user. Note, a comment can be broken into multiple lines by adding `\n` to any part of the comment.
 
-To create or open pace notes, click `File` and select `New Pace Notes` or `Open Pace Notes`.
+To create or open pace notes, click `New` or `Open` and select `New Pace Notes` or `Open Pace Notes`.
 
-To create or open track notes, click `File` and select `New Track Notes` or `Open Track Notes`.
+To create or open track notes, click `New` or `Open` and select `New Track Notes` or `Open Track Notes`.
 
-To save notes file, click `Save`. Note, notes file name should exactly match with track name from track map file name for `auto notes loading` function to work. The editor will try to retrieve track name automatically in an active session, or from an opened track map in `Track Map Viewer`.
+To save notes file, click `Save` (`Ctrl+S`): notes opened from a file (or saved once) are written to the same file without asking a name again, in the same format. A name typed in the file name field is saved as that file in the same folder. New notes ask a file name. `Save As…` always asks a file name and format. Note, notes file name should exactly match with track name from track map file name for `auto notes loading` function to work. The editor will try to retrieve track name automatically in an active session, or from the track map shown.
 
-To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `NeoPedal` notes file formats are supported for used in NeoPedal.
+Notes files can also be changed from the Lap Telemetry Viewer (track notes of a track) while they are open in the editor. Neither place overwrites the other: when the open file was changed elsewhere, the editor reads it again if nothing was edited, otherwise it shows a warning and `Save` asks before replacing the file; the lap viewer applies its note to the file as it is now.
+
+To save notes file to other formats or for used in other games, click `Save As…` and select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `NeoPedal` notes file formats are supported for used in NeoPedal.
 
 To hide map viewer, click `Hide Map`. To show map viewer, click `Show Map`.
 
@@ -1739,7 +1719,9 @@ To edit metadata info, click `Info`. Metadata info provides optional info to not
 * `Date` when notes created or modified.
 * `Description` about notes.
 
-To set `distance` (position) value, first select one cell from `distance` column, then click `Set Pos` and click either `From Map` or `From Telemetry`. Note, `From Map` retrieves `distance` data from track map that opened in `Track Map Viewer`; `From Telemetry` retrieves `distance` data from current on-track vehicle position.
+To select notes, click their row number (`Ctrl` + click adds or removes one, `Shift` + click selects every note between), or click into a cell of a note. `Ctrl+A` selects every note, `Delete` deletes the selected ones (notes list focused).
+
+To set `distance` (position) value, first select one note, then click `Set Pos` and click either `From Map` or `From Telemetry`. Note, `From Map` retrieves `distance` data from the position on the track map; `From Telemetry` retrieves `distance` data from current on-track vehicle position.
 
 To add a note line, click `Add`, which adds a new note line at the end of notes table.
 
@@ -1747,17 +1729,17 @@ To insert a note line, first select a note line from notes table, then click `In
 
 To sort notes table, click `Sort`.
 
-To delete notes, first select one or multiple note lines from notes table, then click `Delete`.
+To delete notes, first select one or multiple note lines from notes table, then click `Delete` (`Undo` puts them back).
 
-To replace words, click `Replace` and select a column, then use `Find` and `Replace` to find and replace words.
+To replace words, click `Replace` and select a column, then use `Find` and `Replace` to find and replace words (the button next to `Find` lists the texts of the column).
 
-To batch offset `distance` (position) values, first select one or multiple note lines from `distance` column, then click `Offset` button. Click `Scale Mode` check box to scale distance values. Note, offset option will be reset to `0` each time after applying. Last applied offset value is displayed on top of dialog.
+To batch offset `distance` (position) values, first select one or multiple note lines from notes table, then click `Offset` button. Click `Scale Mode` check box to scale distance values. Note, offset option will be reset to `0` each time after applying. Last applied offset value is displayed on top of dialog.
 
-To highlight a `distance` value on `Track Map Viewer`, right-click on a note line and click `Highlight on Map`.
+To highlight a `distance` value on the track map, right-click on a note line and click `Highlight on Map`.
 
-To add tag to specific notes, select one or more notes, right-click and click `Add Tag`, then select a tag name.
+To add tag to specific notes, select one or more notes, right-click and click `Add Tag`, then select a tag name (or click `Tags` > `Pit`).
 
-To remove all tags from specific notes, select one or more notes, right-click and select `Clear Tag`.
+To remove all tags from specific notes, select one or more notes, right-click and select `Clear Tag` (or click `Tags` > `Clear Tag`).
 
 [**`Back to Top`**](#)
 
@@ -1765,21 +1747,21 @@ To remove all tags from specific notes, select one or more notes, right-click an
 ## Lap telemetry viewer
 **Lap telemetry viewer compares laps recorded by [Recorder module](#recorder-module), which can be accessed from `Telemetry` button of navigation bar (`Ctrl+6`), or `Tools` menu in main window.**
 
-Select track, then check laps to compare in lap list (one color per lap). Fastest valid lap is the reference lap by default, double-click a lap (or right click, `Set as Reference`) to change it. Lap list is grouped by session, newest first: each session row shows session type, start date & time, best lap, number of laps and vehicle, and can be collapsed (sessions with compared laps are expanded). Laps of a session are listed in driving order (`Lap 1`, `Lap 2`...) with lap time, sector times (fastest sector of track in purple) and lap info (invalid, out lap, in lap, other vehicle); invalid, out and in laps are dimmed. Laps recorded by this version keep the session start time, so a session is found even after a garage visit; older laps are grouped by session type, lap number and time between laps. Laps added from other folders or imported are grouped on top. Theoretical best (sum of fastest sectors) is shown below the list, and a warning appears when compared laps come from different vehicles. `Add File...` adds laps from another folder or track. It also imports a MoTeC i2 log (`.ld`), for example one from the built-in logger of Le Mans Ultimate or a lap shared by another driver: every complete lap of the log is converted to a lap file (lap time from start line crossing, between lap distance samples) (in the hidden `.imported` folder of the telemetry folder) and the fastest one becomes the reference lap. Pedals, speed, gear, steering, RPM, lap distance, tyres, brakes, ride height and G forces are imported when the log has them (worn tyre percent is turned into remaining percent), positions are not (no track map line).
+Select track, then check laps to compare in lap list (one color per lap). Fastest valid lap is the reference lap by default, double-click a lap (or right click, `Set as Reference`) to change it. Lap list is grouped by session, newest first: each session row shows session type, start date & time, best lap, number of laps and vehicle, and can be collapsed (sessions with compared laps are expanded). Laps of a session are listed in driving order (`Lap 1`, `Lap 2`...) with lap time, sector times (fastest sector of track in purple) and lap info (invalid, out lap, in lap, other vehicle); invalid, out and in laps are dimmed. Laps recorded by this version keep the session start time, so a session is found even after a garage visit; older laps are grouped by session type, lap number and time between laps. Laps added from other folders or imported are grouped on top. Theoretical best (sum of fastest sectors) is shown below the list, and a warning appears when compared laps come from different vehicles. `Add File…` adds laps from another folder or track. It also imports a MoTeC i2 log (`.ld`), for example one from the built-in logger of Le Mans Ultimate or a lap shared by another driver: every complete lap of the log is converted to a lap file (lap time from start line crossing, between lap distance samples) (in the hidden `.imported` folder of the telemetry folder) and the fastest one becomes the reference lap. Pedals, speed, gear, steering, RPM, lap distance, tyres, brakes, ride height and G forces are imported when the log has them (worn tyre percent is turned into remaining percent), positions are not (no track map line).
 
-`Imported Laps...` opens the library of imported laps, grouped by imported log: best lap time, track, vehicle, driver and import date of each lap. `Import MoTeC...` imports more logs (new logs shown expanded), a MoTeC log dropped on main window is imported too and its laps shown in lap viewer. The search field keeps logs and laps matching every typed word (log name, track, vehicle, driver, date, or lap time to find a lap). `Add to Viewer` (or double-click) shows selected laps (every lap of a selected log) in lap list, fastest one as reference. `Rename...` renames the selected log (lap files keep their name, lap time is read from it), `Delete` removes selected laps or logs from disk after confirmation. Laps already shown in lap list follow renames and deletions.
+`Imported Laps…` opens the library of imported laps, grouped by imported log: best lap time, track, vehicle, driver and import date of each lap. `Import MoTeC…` imports more logs (new logs shown expanded), a MoTeC log dropped on main window is imported too and its laps shown in lap viewer. The search field keeps logs and laps matching every typed word (log name, track, vehicle, driver, date, or lap time to find a lap). `Add to Viewer` (or double-click) shows selected laps (every lap of a selected log) in lap list, fastest one as reference. `Rename…` (F2) renames the selected log (lap files keep their name, lap time is read from it), `Move to Trash` (Delete) moves selected laps or logs to the lap viewer trash: `Undo` in the message, `Ctrl+Z`, or `Recently Deleted Laps…` restore them, like recorded laps. Laps already shown in lap list follow renames and deletions (and come back with an undo).
 
 When the lap viewer page stays in background for 3 minutes, loaded laps are released from memory (several MB each), and loaded again with the same zoom when the page is shown.
 
-Charts show values along lap distance, time delta of each lap against reference lap, and sector limits of reference lap. `Simple View` / `Advanced View` (saved) shows the channels at cursor drawn like overlays, or the charts. `Show` selects shown channels, same in both views (also chart options): delta, speed, pedals, gear, steering, RPM, fuel, accelerations, TC & ABS activity, battery, elevation, and per wheel tyre temperature, pressure & wear, brake temperature, wheel speed, ride height and suspension (laps recorded by older versions only have the first channels). Speed, temperatures, tyre pressures and fuel follow the units setting (km/h or mph, °C or °F, kPa, psi or bar, liters or gallons); pedals and steering are shown in percent. `Time Gain/Loss` chart shows where time is lost (positive) or gained against reference lap, in seconds per 100 m (delta slope over 40 m). Distance (or time) is marked below charts, and each chart shows its highest & lowest values. Gear is drawn as steps. Corners are named with official corner numbers of the circuit (`T1`, `T10a`..., `V1` in French) on charts, track map and `Corners` tab, for Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (F1 layout), Monza, Bahrain, Portimão, Lusail, Road Atlanta, Laguna Seca and Long Beach; Le Mans corners are named (Dunlop, Tertre Rouge, Mulsanne, Arnage, Porsche Curves...). Official corners are placed on the apex of matching bends of the track (reference lap line, or track map file), every one is shown on track map, even flat out ones, and a corner found on speed covering several of them is named `T5-6`. Other circuits and layouts (other length) keep corners numbered in lap order (`T1`, `T2`...) from `Corners` tab. `Time axis` (saved) draws charts along lap time instead of lap distance, the zoomed part of lap is kept. Move mouse over charts to read values at a given distance: values of each lap are shown next to cursor in each chart, colored like their lap, and cursor position in playback bar under charts (play, speed, A-B loop, position bar to drag along lap). Charts are drawn by the graphics card: zoom & move are smooth and animated. Mouse wheel zooms, drag moves, `Shift` + drag zooms to selected area, and double-click (or `Reset`) resets zoom. Whole lap navigator below charts (reference lap speed) shows zoomed part: click or drag it to move. Keyboard: `+` / `-` zoom, `Left` / `Right` move, `Home` resets. Drag a channel name (left of charts) up or down to reorder channels, order is kept.
+Charts show values along lap distance, time delta of each lap against reference lap, and sector limits of reference lap. `Simple View` / `Advanced View` (saved) shows the channels at cursor drawn like overlays, or the charts. `Show` selects shown channels, same in both views (also chart options): delta, speed, pedals, gear, steering, RPM, fuel, accelerations, TC & ABS activity, battery, elevation, and per wheel tyre temperature, pressure & wear, brake temperature, wheel speed, ride height and suspension (laps recorded by older versions only have the first channels). Speed, temperatures, tyre pressures and fuel follow the units setting (km/h or mph, °C or °F, kPa, psi or bar, liters or gallons); pedals and steering are shown in percent. `Time Gain/Loss` chart shows where time is lost (positive) or gained against reference lap, in seconds per 100 m (delta slope over 40 m). Distance (or time) is marked below charts, and each chart shows its highest & lowest values. Gear is drawn as steps. Corners are named with official corner numbers of the circuit (`T1`, `T10a`..., `V1` in French) on charts, track map and `Corners` tab, for Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (F1 layout), Monza, Bahrain, Portimão, Lusail, Road Atlanta, Laguna Seca and Long Beach; Le Mans corners are named (Dunlop, Tertre Rouge, Mulsanne, Arnage, Porsche Curves...). Official corners are placed on the apex of matching bends of the track (reference lap line, or track map file), every one is shown on track map, even flat out ones, and a corner found on speed covering several of them is named `T5-6`. Other circuits and layouts (other length) keep corners numbered in lap order (`T1`, `T2`...) from `Corners` tab. `Time Axis` (saved) draws charts along lap time instead of lap distance, the zoomed part of lap is kept. Move mouse over charts to read values at a given distance: values of each lap are shown next to cursor in each chart, colored like their lap, and cursor position in playback bar under charts (play, speed, A-B loop, position bar to drag along lap). Charts are drawn by the graphics card: zoom & move are smooth and animated. Mouse wheel zooms, drag moves, `Shift` + drag zooms to selected area, and double-click (or `Reset`) resets zoom. Whole lap navigator below charts (reference lap speed) shows zoomed part: click or drag it to move. Keyboard: `+` / `-` zoom, `Left` / `Right` move, `Home` resets. Drag a channel name (left of charts) up or down to reorder channels, order is kept.
 
 `Track Map` tab shows driving line of each lap and car position of each lap at cursor, over the circuit (from track map file of [Mapping module](#mapping-module) when recorded, else from reference lap line, start line checkered, sector limits marked). Line colors (saved): `Laps` (color of each lap, zoomed part highlighted), `Gain / Loss` (first compared lap against reference lap: red where it loses time, green where it gains, grey where even, rate of time difference over 40 meters, full color at 0.2 s per 100 m), `Speed` (reference lap, slowest blue to fastest red, scale below map) or `Pedals` (reference lap: throttle green, brake red, both amber, coasting grey). `Follow zoom` (saved) zooms map on the part of lap zoomed in charts. `Braking points` (saved) marks where each lap starts braking. Corner labels show time lost or gained by first compared lap in each corner, click one to zoom charts on it. Mouse wheel zooms track map around mouse (`+`, `-` and whole map buttons too, scale bar at bottom right), drag moves zoomed view, double-click resets. Click the driving line to show that point in charts (cursor moved there, view moved if it was outside). `G Circle` tab shows lateral vs longitudinal acceleration of each lap (zoomed part only when zoomed). `Corners` tab compares first compared lap with reference lap, corner by corner: corners are found on reference lap speed (speed minimum between two speed peaks, at least 10 km/h apart), each row shows time lost (red) or gained (green) from braking to top speed with a bar, minimum speed of both laps, and below: braking point (positive = brakes later) full throttle point (negative = full throttle earlier), and driving: seconds of trail braking (braking while turning), coasting (no pedal) and throttle & brake overlap of both laps (red when compared lap coasts or overlaps more). Click a corner to zoom charts on it. Two last rows show time lost on straights (between corners) and total lap difference, corners and straights add up to it. `Corner detection` sets the speed drop & rise counted as a corner (default 10 km/h, lower finds more corners), saved for next time. With reference lap only, the rows show its own corner times, minimum speeds and points.
 
-`Export` > `MoTeC i2 (.ld)` saves reference lap, displayed laps, or every lap of track as MoTeC i2 log files (`.ld`), resampled at recording rate, with every recorded channel (pedals in percent), and vehicle, track & session from lap info. Right-click a lap > `Share Lap...` saves it as one compressed lap file (`.csv.gz`, named with track, vehicle, driver name & lap time; lap info tells who shared it) to send to another driver, who adds it with `Add File...`. Charts & map show the track notes of the track (track notes file of the Track Notes overlay, pit lane notes left out): right-click charts > `Add Track Note Here`, `Edit Track Note`, `Remove Track Note`, double-click a note to edit it. Session tab value menu: lap time, sector time, or minimum speed, braking point & corner time of a corner of reference lap for every lap of the session, with its trend. Laps read from their binary copy load the channels shown only (others when first used).
+`Export` > `MoTeC i2 (.ld)` saves reference lap, displayed laps, or every lap of track as MoTeC i2 log files (`.ld`), resampled at recording rate, with every recorded channel (pedals in percent), and vehicle, track & session from lap info. Right-click a lap > `Share Lap…` saves it as one compressed lap file (`.csv.gz`, named with track, vehicle, driver name & lap time; lap info tells who shared it) to send to another driver, who adds it with `Add File…`. Charts & map show the track notes of the track (track notes file of the Track Notes overlay, pit lane notes left out): right-click charts > `Add Track Note Here`, `Edit Track Note`, `Delete Track Note`, double-click a note to edit it. Session tab value menu: lap time, sector time, or minimum speed, braking point & corner time of a corner of reference lap for every lap of the session, with its trend. Laps read from their binary copy load the channels shown only (others when first used).
 
-`Export` > `CSV, Displayed Laps...` saves displayed charts of displayed laps every meter in a CSV file for Excel (decimal comma and semicolon separator when system uses decimal comma). `CSV, Visible Part...` saves the zoomed part only, `MoTeC, Reference Lap A ↔ B...` the reference lap between markers A & B.
+`Export` > `CSV, Displayed Laps…` saves displayed charts of displayed laps every meter in a CSV file for Excel (decimal comma and semicolon separator when system uses decimal comma). `CSV, Visible Part…` saves the zoomed part only, `MoTeC, Reference Lap A ↔ B…` the reference lap between markers A & B.
 
-Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hides invalid, out & in laps (unless checked). Click a lap to show it, flag button or double-click to set it as reference. Right click a lap: `Set as Reference`, `Export MoTeC...`, and for recorded laps `Keep Lap` (a kept lap is never removed by the recorder when laps over `number_of_saved_laps_per_track` are deleted), `Note...` (free text shown in lap list), `Delete Lap` (asks first). Laps added from another folder or imported are grouped by folder. Checked laps and reference lap of each track are remembered. When 3 laps or more must be read, they load in background (window stays responsive), and `Refresh` only reads laps whose file changed.
+Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hides invalid, out & in laps (unless checked). Click a lap to show it, flag button or double-click to set it as reference. Right click a lap: `Set as Reference`, `Export MoTeC…`, and for recorded laps `Keep Lap` (a kept lap is never removed by the recorder when laps over `number_of_saved_laps_per_track` are deleted), `Note…` (free text shown in lap list), `Delete Lap` (asks first). Laps added from another folder or imported are grouped by folder. Checked laps and reference lap of each track are remembered. When 3 laps or more must be read, they load in background (window stays responsive), and `Refresh` only reads laps whose file changed.
 
 [**`Back to Top`**](#)
 
@@ -1789,11 +1771,11 @@ Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hid
 
 Requires `Le Mans Ultimate`, `rFactor 2` or `Le Mans Ultimate (legacy)` API. Click `Start Recording` while in game, and `Stop Recording` when done, or enable `enable_auto_replay_recording` in [Recorder module](#recorder-module). Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute). Frames outside driving are skipped (see `enable_replay_skip_inactive_frames`). Recordings keep track, vehicle and session, lap changes, and incidents detected by Dashboard HUD incident recorder. REST API data is recorded when it changes.
 
-Replays of telemetry folder are listed with date, track, vehicle, session, duration and size. Double-click one (or `Open`), or use `Open Replay...` to pick a file elsewhere: NeoPedal reads from it instead of the game until `Back to Game` is clicked. Frames are read from file when needed, so long replays use little memory.
+Replays of telemetry folder are listed with date, track, vehicle, session, duration and size. Double-click one (or `Open`), or use `Open Replay…` to pick a file elsewhere: NeoPedal reads from it instead of the game until `Back to Game` is clicked. Frames are read from file when needed, so long replays use little memory.
 
 Replay can be paused, sped up or slowed down, looped, and moved with the position slider, which shows lap changes (top ticks) and incidents (red bottom ticks). `Go to lap` jumps to a lap, `◀ Incident` / `Incident ▶` jump to 3 seconds before previous or next incident, and `|◀` / `▶|` move one frame. Keyboard: `Space` play/pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame.
 
-`Set Start` and `Set End` select part of replay at current position, `Save Section...` saves it to a new replay file, to share an incident for example.
+`Set Start` and `Set End` select part of replay at current position, `Save Section…` saves it to a new replay file, to share an incident for example.
 
 [**`Back to Top`**](#)
 
@@ -1806,7 +1788,7 @@ Replay can be paused, sped up or slowed down, looped, and moved with the positio
 - Replay files: `Add` (or files dropped on the page) copies `.Vcr` replay files to the replay folder of the game in background (under a temporary name until copied, a name already used gets a number, nothing copied without enough free disk space, `Stop Copy`), the game lists them at once. Row menu (right-click) and `...` menu: `Export` (copy to a chosen folder), `Rename`, `Protect From Deletion` (star: never deleted nor cleaned up), `Delete` (selected replays to the recycle bin, after confirmation; a replay open in the game is left in place). Clean up: replays older than a number of days, keep only the latest ones, temporary files of the game (`_vcr*.tmp`, older than 10 minutes). `Ctrl` + click adds a replay to the selection, `Shift` + click selects a range, `Ctrl+A` all, `Escape` clears. The replay folder is asked to the game (known even without any replay).
 - Replay playback (enabled while a replay is open): rewind, play backwards, play / pause (`Space`, not while typing), play slowly (`½`), fast forward, other speeds in the `...` menu (fast rewind, slow backwards, very fast). Replay time read from the standings of the replay, moving between answers at the measured playback speed.
 - Camera (in a session or a replay): camera on the previous or next car, car followed by the camera (by car slot: several cars can share a driver name). Camera groups of the game: `Driving`, `Onboard`, `Trackside`; a group button shows that group (again: next angle), arrows step to the previous or next angle of the group shown. Camera angle name shown. Eye button: game HUD shown or hidden, all of it or each part (chat, MFD, speedometer, timing, track map).
-- Drivers: standings of the session or replay open in the game: position (class position with several classes), car number, driver, team or car, class color, laps, best lap (purple when fastest of its class), last lap, gap to leader (time or laps), pit stops, status (garage, in pits, finished, retired, disqualified), penalties, incidents of the driver (click: incidents panel with that driver only). Class chips show one class. Double-click, `Enter` or the camera button puts the camera on the car, right-click: camera, `Go to Lap...` (replay moved until the car is in that lap, from its lap times), incidents of the driver.
+- Drivers: standings of the session or replay open in the game: position (class position with several classes), car number, driver, team or car, class color, laps, best lap (purple when fastest of its class), last lap, gap to leader (time or laps), pit stops, status (garage, in pits, finished, retired, disqualified), penalties, incidents of the driver (click: incidents panel with that driver only). Class chips show one class. Double-click, `Enter` or the camera button puts the camera on the car, right-click: camera, `Go to Lap…` (replay moved until the car is in that lap, from its lap times), incidents of the driver.
 - Map: track & pit lane of the session or replay (game track map), cars at their position (class color, number, white ring: your car, accent ring: car followed by the camera, faded: in pits), gliding between answers. Click a car: camera on it. Wheel: zoom, drag: move, double-click: whole track.
 - Incidents: contacts between cars of the session, or with track objects (`Wall`). Both sides of a contact, and contacts of the same cars less than 2 seconds apart, are merged into one incident. Car number and class from the game standings, player car marked, `All` / `Cars` / `Walls` filter, `My car`, driver chips (click again to see all drivers).
 - Timeline: incidents along the whole session (session length from the game), replay position, drawn at once (long races). Click an incident to jump to it, click elsewhere to move the replay to that time; wheel: zoom, drag: move, double-click: whole session.
@@ -1866,9 +1848,9 @@ Replay can be paused, sped up or slowed down, looped, and moved with the positio
 
 
 ## Layout editor
-**Layout editor places and aligns overlay widgets on a game screenshot, which can be accessed from `Tools` menu in main window.**
+**The screen view of the `Overlays` page places and aligns running overlays (it replaced the Layout Editor tool).**
 
-Enabled widgets are shown as boxes over the whole desktop. `Load Screenshot...` uses a game screenshot as background, `Capture Screen` grabs primary screen. Drag a box to move it: edges and centers snap to other widgets, screen edges and screen center (turn off with `Snap`, or hold `Alt`). Arrow keys nudge selected widget by 1 pixel (`Shift`: 10 pixels). `Apply` moves widgets and saves positions to preset, `Reset` reloads current positions.
+One screen at a time (main screen first, or `All Screens`). `Background` > `Capture Screen` shows a picture of the screen shown (app window hidden a moment), `Load Screenshot…` a game screenshot on the screen of its size, `Remove Background` takes it away (kept until the app closes, never saved). Drag an overlay to move it: edges and centers snap to other overlays, screen edges and screen center, with guide lines (turn off with `Snap`, or hold `Alt`). `Tab` reaches an overlay, arrow keys move it by 1 pixel (`Shift`: 10 pixels), `Enter` opens its options. Moves are saved to the preset at once and can be undone (`Undo` in the message, `Ctrl+Z`); locked overlays (`fixed_position`) are never moved, and a locked preset keeps moves only until the app closes.
 
 [**`Back to Top`**](#)
 
@@ -1892,16 +1874,18 @@ Select `Preset A` and `Preset B`. Widget positions can be ignored. Select one or
 ## Plugin manager
 **Plugin manager lists widget plugins, which can be accessed from `Tools` menu in main window.**
 
-Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting NeoPedal (`Reload Code`), and new plugins can be installed from `.zip` package (`Install...`). See [Widget plugins](#widget-plugins) section for details.
+Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting NeoPedal (`Reload Code`), and new plugins can be installed from `.zip` package (`Install…`). See [Widget plugins](#widget-plugins) section for details.
+
+Plugin code runs only once you trusted it (`Trust…`, or installing it). Trust covers every file of the plugin folder: changing, adding or removing any file asks you to trust the plugin again. A plugin folder holding native code files (`.pyd`, `.dll`, `.so`, `.pth`) is never loaded nor installed. Plugins trusted before 0.28 stay trusted if their folder only holds Python files and package data files (`.json`, `.png`, `.svg`, `.txt`, `.md`), otherwise trust them again.
 
 [**`Back to Top`**](#)
 
 
 ## Other tools
-* `Find Option...` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its page: Overlay Options page at a widget option, config dialog filtered on a module option.
+* `Find Option…` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its page: Overlay Options page at a widget option, config dialog filtered on a module option.
 * `Setup Wizard` (`Help` menu): first launch setup (language, game, units, themes, preset, starter overlays).
-* `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of NeoPedal, modules and game connection.
-* `Create Bug Report...` (`Help` menu): creates a `.zip` file with logs, settings and system info to attach to a bug report. User folder name, access codes and repository names are removed.
+* `Overlay Performance` (`Help` menu): update & paint time of each overlay, and CPU & memory usage of NeoPedal, modules and game connection.
+* `Create Bug Report…` (`Help` menu): creates a `.zip` file with logs, settings and system info to attach to a bug report. User folder name (short `C:\Users\NAME~1` form too), access codes, repository names, local network & IPv6 addresses and team driver names are removed.
 
 [**`Back to Top`**](#)
 
@@ -1915,7 +1899,7 @@ Modules provide important data that updated in real-time for other widgets. Widg
 ## Delta module
 **This module provides deltabest and timing data.**
 
-On an out lap (lap started in pit lane or garage: back to garage starts a new lap, and time spent there counts) and while in pit lane before start line, delta is not comparable to reference laps: delta overlays (Deltabest, Deltabest extended, Dashboard HUD, web dashboard) show a dash, Delta graph line is interrupted, estimated lap time (Timing, Lap time history) is left empty, and delta to last lap of Lap time history shows a dash until a lap without pit lane is completed.
+On an out lap (lap started in pit lane or garage: back to garage starts a new lap, and time spent there counts) and while in pit lane before start line, delta is not comparable to reference laps: delta overlays (Deltabest, Deltabest extended, Dashboard HUD, web dashboard) show a dash, Delta graph line is interrupted, estimated lap time (Timing, Lap time history) is left empty, and delta to last lap of Lap time history shows a dash until a lap without pit lane is completed. A lap through pit lane (out lap, pit in lap) or invalidated by game (track limits) never becomes all time best, session best or stint best lap, even when game gives it a valid lap time.
 
     module_delta
 Enable delta module.
@@ -2209,7 +2193,7 @@ Modern design reads fewer options than classic layout: per cell colors, fonts an
 
 Display order options (`display_order_*`) apply where modern layout has the same rows, tiles, bars or columns: design order is kept while every display order option of a widget is at default value, and display order options set the order once one of them is changed. Fuel, virtual energy, pit stop estimate, acceleration, sectors and brake temperature keep design order (their modern layout has no matching rows). Classic text options (pit status texts, leader texts, session names, speed limiter text) replace design labels once changed from default value.
 
-Dashboard HUD and pace notes keep their own drawing with design font (widget `font_name` while `enable_modern_font` is disabled) & theme colors; their options other than fonts and the colors set by design (background, colors left at default value) are shown, so other colors can still be customized.
+Dashboard HUD keeps its own drawing with design font (widget `font_name` while `enable_modern_font` is disabled) & theme colors; its options other than fonts and the colors set by design (background, colors left at default value) are shown, so other colors can still be customized. Pace notes use the same card as track notes.
 
 Widget context menu can be accessed by `Right-Click` on widget, which provides additional options:
 - Center horizontally: align widget to the center of active screen horizontally.
@@ -2245,7 +2229,7 @@ Set threshold for detecting speed drop during acceleration timing, which cancels
 Note, there are some electric vehicles in `RF2` that are not based on the new electric motor and battery charge system, which there is no battery usage info available.
 
     show_battery_charge
-Show percentage available battery charge.
+Show percentage available battery charge. Shown as `-` without low battery warning for vehicles without electric motor.
 
     show_battery_drain
 Show percentage battery charge drained in current lap.
@@ -2258,13 +2242,13 @@ Show estimated battery charge net change from current lap. Positive value indica
 
 Total net change reading is more accurate for vehicles that constantly consume battery charge, such as `FE` or `Hypercar` class. It is less useful for vehicles that only utilize electric motor for a short duration, such as `Push to pass`.
 
-Note, at least one full lap (excludes pit-out or first lap) is required to generate estimated net change data.
+Note, at least one full lap (excludes pit-out or first lap) is required to generate estimated net change data, shown as `-` until then.
 
     show_activation_timer
 Show electric boost motor activation timer.
 
     show_state_of_charge
-Modern design: show battery state of charge as shown by game (`LMU`), or battery charge (`RF2`), while electric motor is available. Off by default.
+Modern design: show battery state of charge as shown by game (`LMU`), or battery charge (`RF2`), while electric motor is available. Off by default. Note, on the `LMU` Hypercar checked so far, state of charge is the same value as battery charge.
 
     high_battery_threshold, low_battery_threshold
 Set percentage threshold for displaying low or high battery charge warning indicator. Default high threshold is `95` percent (default color purple), low threshold is `10` percent (default color red).
@@ -2279,10 +2263,10 @@ Set number of warning flashes that will be played for a limited number of times.
 Set color highlight duration for each warning flash. Default is `0.4` seconds. Minimum value is limited to `0.2`.
 
     warning_flash_interval
-Set minimum time interval between each warning flash. Default is `0.4` seconds. Minimum value is limited to `0.2`.
+Set minimum time interval between each warning flash. Default is `0.2` seconds. Minimum value is limited to `0.2`.
 
     freeze_duration
-Set freeze duration (seconds) for displaying previous lap total drained/regenerated battery charge after crossing finish line. Value range in `0` to `30` seconds. Default is `10` seconds.
+Set freeze duration (seconds) for displaying previous lap total drained/regenerated battery charge after crossing finish line. Value range in `0` to `30` seconds. Default is `10` seconds. Not frozen after a lap recorded only in part (app started during the lap): current lap is shown.
 
 [**`Back to Top`**](#)
 
@@ -2302,12 +2286,12 @@ Show delta between current and baseline brake bias, which can be useful for keep
     show_brake_migration
 Show real-time brake migration change, as commonly seen in LMH and LMDh classes.
 
-Note, brake migration is calculated based on brake input and brake pressure telemetry data, and is affected by pedal force setting from car setup and electric braking allocation of specific vehicle.
+Note, in `LMU`, brake migration is read from game telemetry, and following calculation, calibration and `electric_braking_allocation` option are not used. In `rF2`, brake migration is calculated based on brake input and brake pressure telemetry data, and is affected by pedal force setting from car setup and electric braking allocation of specific vehicle.
 
 To get accurate brake migration reading, it is necessary for brake pedal to reach fully pressed state for at least once while entering track to recalibrate brake pressure scaling for brake migration calculation. It is normally not required to do manually, as game's auto-hold brake assist is on by default. However if auto-hold brake assist is off, or the APP was reloaded while player was already on track, then it is required to do a full braking for at least once to get accurate brake migration reading.
 
     electric_braking_allocation
-Set allocation for calculating brake migration under different electric braking allocation from specific vehicle. Note, vehicle that has not electric braking, or has disabled regeneration, is not affected by this option. Incorrect allocation value will result wrong brake migration reading from vehicle that has electric braking activated.
+Set allocation for calculating brake migration under different electric braking allocation from specific vehicle (`rF2` only, `LMU` brake migration is read from game). Note, vehicle that has not electric braking, or has disabled regeneration, is not affected by this option. Incorrect allocation value will result wrong brake migration reading from vehicle that has electric braking activated.
 
 Set value to `-1` to enable auto-detection, which automatically checks whether electric braking is activated on either axles while braking, and sets allocation accordingly. This is enabled by default. Note, it may take a few brakes to detect correct allocation.
 
@@ -2532,7 +2516,7 @@ Set display margin in pixels.
     inner_gap
 Set body parts inner gap in pixels.
 
-    part_width
+    parts_width
 Set body parts width in pixels. Minimum value is limited to `1`.
 
     parts_width_ratio
@@ -2563,7 +2547,7 @@ Set color highlight duration for each warning flash. Default is `0.5` seconds. M
 Set minimum time interval between each warning flash. Default is `0.5` seconds. Minimum value is limited to `0.2`.
 
     show_last_impact_cone
-Show cone indicator towards last known impact (collision) position.
+Show cone indicator towards last known impact (collision) position. Light contacts (impact magnitude under `200`, such as kerbs or underbody scraping) and game impact updates without position are ignored.
 
     last_impact_cone_angle
 Set cone angle (size) in degrees. Value range in `2` to `90`. Default is `15`.
@@ -2663,7 +2647,7 @@ Set maximum display range (gain or loss) in seconds for delta bar, accepts decim
 Set maximum display range (gain or loss) in seconds for delta reading, accepts decimal place. Default is `99.999` seconds.
 
     freeze_duration
-Set freeze duration (seconds) for displaying previous lap time difference against best lap time source after crossing finish line. Value range in `0` to `30` seconds. Default is `3` seconds. Set to `0` to disable.
+Set freeze duration (seconds) for displaying previous lap time difference against best lap time source after crossing finish line. Value range in `0` to `30` seconds. Default is `3` seconds. Set to `0` to disable. Difference is against the reference lap as it was when the lap started (none if last lap went through pit lane), or against best lap of game while game delta is shown.
 
     enable_animated_deltabest
 Deltabest display follows delta bar progress.
@@ -2686,7 +2670,7 @@ No delta is shown (a dash) on an out lap, that is a lap started in pit lane or g
 Show deltabest against personal all time best lap time.
 
     show_session_deltabest
-Show deltabest against current personal session best lap time. Session best lap is kept when NeoPedal restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.
+Show deltabest against current personal session best lap time (modern design: `Session PB`, as Timing and Speed delta; purple `Session` of Timing is the best lap of every driver). Session best lap is kept when NeoPedal restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.
 
     show_stint_deltabest
 Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane (pit stop, or back to garage), or when a new session starts.
@@ -2788,10 +2772,10 @@ Show electric motor RPM.
 Show electric motor torque.
 
     show_power
-Show electric motor power.
+Show electric motor power while deploying, `0` while regenerating. `LMU`: electric power given by game. `RF2`: calculated from motor torque and RPM.
 
     show_regeneration_level
-Show electric motor regeneration level.
+Show electric motor regeneration power while regenerating, `0` while deploying. Not available in `RF2` (shown as `-`).
 
 [**`Back to Top`**](#)
 
@@ -2883,13 +2867,10 @@ Show engine torque.
 Show engine power.
 
     show_power_to_weight_ratio
-Show estimated (maximum recorded) power to (current) weight ratio. Final reading is affected by power and weight units setting, and resets after returning to garage. The accuracy depends on game API data, and may not be available on certain vehicles.
+Show estimated (maximum recorded) power to (current) weight ratio. Final reading is affected by power and weight units setting, and resets after returning to garage. The accuracy depends on game API data, and may not be available on certain vehicles. Shown as `-` until vehicle weight is known: measured while stationary before driving off from garage (or set by `minimum_static_weight_override` of Wheels module).
 
     show_game_overheating_warning
-Modern design: highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`.
-
-    show_game_overheating_highlight
-Classic layout: show oil and water temperature in `warning_color_overheat` while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`. Default is disabled.
+Highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water` (classic layout: in `warning_color_overheat`). Same option for modern design and classic layout. Default is enabled.
 
 [**`Back to Top`**](#)
 
@@ -2907,10 +2888,7 @@ Show water temperature.
 Set temperature threshold for oil and water overheat color indicator, unit in Celsius.
 
     show_game_overheating_warning
-Modern design: highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`.
-
-    show_game_overheating_highlight
-Classic layout: show oil and water temperature in `warning_color_overheat` while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water`. Default is disabled.
+Highlight oil and water temperature while game shows engine overheating warning, besides `overheat_threshold_oil` and `overheat_threshold_water` (classic layout: in `warning_color_overheat`). Same option for modern design and classic layout. Default is enabled.
 
     show_rate_of_change
 Show temperature rate of change for a specific time interval.
@@ -2945,7 +2923,7 @@ Set refresh interval in milliseconds. Default is `100`.
 2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
 
     show_pit_timer
-Show pit timer, and total amount time spent in pit after exit pit.
+Show pit timer, and total amount time spent in pit after exit pit. Time spent in garage is not counted: timer starts again from garage exit.
 
     pit_time_highlight_duration
 Set highlight duration for total amount time spent in pit after exit pit.
@@ -2954,7 +2932,7 @@ Set highlight duration for total amount time spent in pit after exit pit.
 Set custom text for pit in, out, closed. Modern design: shown as chip caption once changed from default value.
 
     font_color_pit_closed, background_color_pit_closed
-Set color indicator on pit timer when pit lane is closed.
+Set color indicator on pit timer when pit lane is closed: before session start, and under full course yellow while pits are closed (or open for lead lap cars only, while player is a lap or more behind leader).
 
     show_low_fuel
 Show low fuel (or low virtual energy if available) indicator when below certain amount value. Only one indicator will be displayed for low fuel (LF) or low virtual energy (LE), depends on which one would deplete sooner.
@@ -3013,7 +2991,7 @@ Set custom text for yellow flag.
 Show blue flag indicator with nearest leading vehicle class name displayed on the left, and time gap of car behind (see `show_blue_flag_gap`) or total duration (seconds) under blue flag on the right. Note, the class name is limited and trimmed to 4 characters (modern design: class name shown as chip caption).
 
     show_blue_flag_gap
-Show time gap (seconds) of nearest car behind, the one lapping under blue flag, instead of duration under blue flag. Duration is shown while gap is unknown or over 30 seconds. Default is enabled.
+Show time gap (seconds) of nearest car behind lapping player (any faster car behind outside race), the same car whose class is shown, instead of duration under blue flag. Duration is shown while gap is unknown or over 30 seconds. Default is enabled.
 
     show_blue_flag_for_race_only
 Only show blue flag indicator during race session.
@@ -3028,7 +3006,7 @@ Set custom text for red lights and green flag.
 Set display duration(seconds) for green flag text before it disappears. Default is `3`.
 
     show_traffic
-Show nearest incoming on-track traffic indicator (time gap) while in pit lane or after pit-out.
+Show nearest incoming on-track traffic indicator (time gap) while in pit lane (not in garage) or after pit-out.
 
     show_traffic_while_off_track
 Show nearest incoming on-track traffic indicator while off-track. Note, only all four wheels that are on either grass, dirt, or gravel is considered off-track.
@@ -3114,6 +3092,8 @@ Show downforce ratio between front and rear. 50% indicates equal downforce; high
     show_front_downforce, show_rear_downforce
 Show front and rear downforce reading in Newtons.
 
+Note, downforce readings show `n/a` when the game does not provide downforce data (front and rear downforce staying at `0` while moving, such as in `LMU`), until the car is changed or the session restarts.
+
     warning_color_liftforce
 Set lift force indicator color.
 
@@ -3123,7 +3103,7 @@ Show estimated total vehicle weight measured while vehicle is stationary.
 Note, it may take a lap or two to calibrate measurement for certain vehicles. The accuracy of static weight measurement depends on game API data, and may not be available on certain vehicles, see [Wheels Module](#wheels-module) for details.
 
     show_minimum_static_weight_without_fuel
-Show estimated minimum static weight (in kilograms) excluding fuel.
+Show estimated minimum static weight (in selected weight unit) excluding fuel.
 
     show_estimated_dynamic_weight
 Show estimated total vehicle weight while vehicle is moving.
@@ -3147,7 +3127,7 @@ Set viewable g force range by radius(g).
 Set `true` to invert display orientation for longitudinal and lateral g force axis. Default is `false`, which shows brake at top, acceleration at bottom, right-turn at left, left-turn at right.
 
     show_readings
-Show values from g force reading. Value at top is current longitudinal g force, and value at bottom is maximum longitudinal g force. Value at left is maximum lateral g force, and value at right is current lateral g force.
+Show values from g force reading. Value at top is current longitudinal g force, and value at bottom is maximum longitudinal g force. Value at left is maximum lateral g force, and value at right is current lateral g force. Modern design shows current lateral and longitudinal g force under circle, each with its maximum below.
 
     show_background
 Show background color that covers entire widget.
@@ -3241,14 +3221,17 @@ Also see `estimated laps` display option in [Session](#session) widget that can 
     update_interval
 Set refresh interval in milliseconds. Default is `100`. Values change slowly (fuel & energy of a lap, laps left): faster refresh only costs CPU.
 
+    show_remaining, show_refueling, show_estimated_laps, show_estimated_minutes, show_estimated_consumption, show_saving_target
+Show each value on its own (all on by default): remaining fuel, refueling, estimated laps and minutes, consumption per lap, saving target. Classic layout: a hidden value leaves its place empty while the value above or below it is shown (columns stay aligned), a column with no value is left out. Modern design: the estimate tiles follow one another, the top section is left out when both remaining and refueling are hidden.
+
     show_absolute_refueling
 Show absolute refueling value instead of relative refueling when enabled. Note, `+` or `-` sign is not displayed with absolute refueling.
 
-    show_estimated_pitstop_count
-Show estimated number of pit stop counts column.
+    show_estimated_pitstop_count, show_early_pitstop_count
+Show estimated number of pit stops (pitting at end of current stint), and number of pit stops when pitting at end of current lap, each on its own.
 
-    show_delta_consumption_and_end_remaining
-Show delta consumption and estimated end stint remaining fuel column.
+    show_delta_consumption, show_end_remaining
+Show delta consumption (last lap against estimate), and estimated fuel remaining at end of stint, each on its own.
 
     *remaining
 Remaining fuel in tank.
@@ -3389,7 +3372,7 @@ Fuel (or energy) saving calculation is biased towards pit entry position when nu
 ## Gap trend
 **This widget displays gap to car ahead and car behind, and how it changes lap after lap.**
 
-For each car, widget shows current gap in seconds (or laps), gap change per lap, and gap at end of each of the last laps as a small chart. Gap change per lap is averaged over the laps run against the same car, negative value means gap is shrinking. It is shown in gain color when good for player (catching up car ahead, pulling away from car behind), and in loss color otherwise. Gap history starts again when car ahead or behind changes. `Vehicles module` must be enabled.
+For each car, widget shows current gap in seconds (or laps), gap change per lap, and gap at end of each of the last laps as a small chart. Gap change per lap is averaged over the laps run against the same car, negative value means gap is shrinking. It is shown in gain color when good for player (catching up car ahead, pulling away from car behind), and in loss color otherwise. Gap history starts again when car ahead or behind changes, and after a lap through pit lane (stop of player or of the other car), which is left out. `Vehicles module` must be enabled.
 
     number_of_laps
 Set number of laps kept in gap chart and used for gap change per lap. Value range in `2` to `50`. Default is `8` laps.
@@ -3661,8 +3644,11 @@ Show lap number.
     show_time
 Show lap time.
 
+    show_invalid_lap_in_red
+Modern design: show an invalid lap time in red instead of a `*` before it, as Relative, Standings and Rivals. This option is enabled by default.
+
     show_delta
-Show lap time delta between two consecutive laps.
+Show lap time delta between two consecutive laps. Modern design: faster in green, slower in yellow (red is kept for invalid laps).
 
     show_fuel
 Show fuel consumption per lap.
@@ -3736,7 +3722,7 @@ Set percentage threshold for triggering wheel slip warning under acceleration. `
 Set widget size in pixels.
 
     view_radius
-Set viewable area by radius(unit meter). Default is `500` meters. Minimum value is limited to `5`.
+Set viewable distance (unit meter) across widget width, not from center: `500` shows `500` meters from left to right edge, `250` meters from center to edge. Default is `500` meters. Minimum value is limited to `5`.
 
     show_background
 Show background color that covers entire widget.
@@ -3870,7 +3856,7 @@ Show nearest pace notes index number behind current vehicle position, and distan
 Set maximum display width, value in chars, such as 10 = 10 chars.
 
     enable_auto_hide_if_not_available
-Auto hide this widget if pace notes data is not available for current track.
+Auto hide this widget if pace notes data is not available for current track, or in pit lane without pit notes (tagged `#pit`).
 
     maximum_display_duration
 Set maximum display duration (seconds) of each note. Set to `-1` to always display notes. Default is `-1`.
@@ -3949,7 +3935,7 @@ Set percentage threshold for wheel slip flash under acceleration. `0.1` means 10
 
 Widget is shown while car is in pit lane, and while approaching pit lane entry with pit stop requested (or speed limiter on). Nothing is shown otherwise, unless `show_always` is enabled. In overlay edit mode, widget is always shown for positioning.
 
-Pit speed limit is learned by `Mapping module` while driving through pit lane with speed limiter on, and saved per track. Speed is shown in loss color above pit speed limit, and in gain color below. Speed limiter state is shown in warning color while approaching pit lane without speed limiter, and in loss color while driving in pit lane without speed limiter. Pit box distance requires pit box position from game (LMU), its bar fills up while car approaches pit box. Planned services (pit stop time, refuel, repair) are read from game pit menu through Rest API (LMU), `enable_vehicle_info` must be enabled in LMU API setting.
+Pit speed limit is learned by `Mapping module` while driving through pit lane with speed limiter on, and saved per track. Speed is shown in loss color above pit speed limit, and in gain color below, while approaching and in pit lane (not colored elsewhere with `show_always`). Speed limiter state is shown in warning color while approaching pit lane without speed limiter, and in loss color while driving in pit lane without speed limiter since lane entry (or garage exit), same as Flag widget: speed limiter switched off at lane exit is no danger. Pit box distance requires pit box position from game (LMU), its bar fills up while car approaches pit box. Planned services (pit stop time, refuel, repair) are read from game pit menu through Rest API (LMU), `enable_vehicle_info` must be enabled in LMU API setting.
 
     show_always
 Always show widget, also out of pit lane.
@@ -4026,7 +4012,7 @@ Show number of vehicles that requested for pit stop, and number of vehicles curr
 ## Race notifications
 **This widget displays short race messages that fade out after a few seconds.**
 
-Messages: position gained or lost (overall and in class, once new position is held for 1 second), new penalty, new fastest lap in player class (driver name and lap time), blue flag, full course yellow start and end, lap invalidated by game (LMU, track limits). Position, fastest lap and full course yellow messages are shown in race only. Same message is not repeated while it is shown. Nothing is shown while there is no message, unless overlay edit mode is on.
+Messages: position gained or lost (overall and in class, once new position is held for 1 second), new penalty, new fastest lap in player class (driver name and lap time), blue flag, full course yellow start and end, red flag (race halted), lap invalidated by game (LMU, track limits). Position, fastest lap, blue flag and full course yellow messages are shown in race only. First fastest lap of class seen is not announced (first lap of race, or lap set before widget started): only laps beating it are. Same message is not repeated while it is shown. Nothing is shown while there is no message, unless overlay edit mode is on.
 
 Modern design: each message is a card with an icon in message color (arrow for positions, flag, stopwatch for fastest lap, penalty mark, cross for lap invalidated), title above detail, and a thin bar shrinking with the time left.
 
@@ -4049,10 +4035,10 @@ Show message when a new penalty is given.
 Show message when a new fastest lap is set in player class.
 
     show_blue_flag
-Show message when blue flag is shown to player, with class name of faster car.
+Show message when blue flag is shown to player in race, with class name (alias of vehicle class editor) of car lapping player.
 
     show_full_course_yellow
-Show message when full course yellow starts and ends.
+Show message when full course yellow starts and ends, and when race is halted (red flag).
 
     show_lap_invalidated
 Show message when game invalidates current lap.
@@ -4067,7 +4053,7 @@ Show message when game invalidates current lap.
 Plan the rest of the race again at each lap & stop during a race, from the car: laps & time done, fuel, energy & tyres of now, stops done, driver in the car & driving time of each driver, penalties to serve (time race: fewer laps) and pending repair (next stop longer). Disabled: plan made before the race is followed.
 
     enable_live_consumption
-With `enable_live_replan`: rest of the race planned with the lap time, fuel & energy per lap of the latest 5 valid laps at race pace (at least 3), as `Load Live` of the race calculator, even with the race calculator closed. Disabled: values of the race calculator.
+With `enable_live_replan`: rest of the race planned with the lap time, fuel & energy per lap of the latest 5 valid laps at race pace of the race (at least 3, laps of practice & qualifying sessions left out), as the `Game Session` source of the race calculator, even with the race calculator closed. Disabled: values of the race calculator.
 
     pit_window_laps
 Set number of laps before next stop from which next stop is highlighted with `warning_color_pit_window`.
@@ -4088,10 +4074,10 @@ Show number of tyres to change at next stop, highlighted with `highlight_color_t
 Show stops left, and total stops of plan.
 
     show_pit_menu
-Show pit menu check: refill set in game pit menu (fuel, or virtual energy for a car using it) against amount after next stop of the plan. `OK` when close (1 unit), `menu>plan` in `warning_color_pit_menu` otherwise, `--` when game gives no refill.
+Show pit menu check: refill set in game pit menu (fuel, or virtual energy for a car using it) against amount after next stop of the plan. `OK` when close (1 unit), `menu>plan` in `warning_color_pit_menu` otherwise, `--` when game gives no refill, or when plan has no amount of what the pit menu refills (plan without virtual energy for a car using it).
 
     show_target
-Show consumption per lap to hold to reach next stop (or the finish) with fuel of now (energy for a car using energy only), safety margin kept, in `warning_color_target` when last lap used more.
+Show consumption per lap to hold to reach next stop (or the finish) with fuel of now, or virtual energy for a car using it (as pit menu check), safety margin kept, in `warning_color_target` when last lap used more.
 
     show_pit_entry
 Show distance to pit lane entry (LMU, Rest API `enable_race_info` option), in `warning_color_pit_entry` on the lap ending with the next stop. `--` in the pits or when unknown. Distance unit follows `Distance Unit` setting from [Units](#units) config dialog.
@@ -4107,6 +4093,8 @@ Modern design: show consumption estimate used by fuel (or energy) module: from g
 
 ## Radar
 **This widget displays vehicle radar info.**
+
+Cars parked in garage are not shown (they never keep radar shown with auto hide), nor cars on another road level (bridge above or under, crossing). A car stopped on track is shown in yellow flag color first, before leader, pit & lap colors (both designs).
 
     global_scale
 Sets global scale of radar display. Default is `6`, which is 6 times of original size.
@@ -4140,6 +4128,9 @@ Show background color that covers entire widget.
 
     show_circle_background
 Show circle background color.
+
+    radar_background_opacity_percentage
+Modern design: set opacity of round radar background, in percent: `0` for no background, `100` for opaque background. Only background changes: distance rings & marks are drawn stronger as background fades, so they stay visible over game. Value range in `0` to `100`. Default is `78`.
 
     show_edge_fade_out
 Fade out radar edge.
@@ -4252,19 +4243,22 @@ Show average front and rear ride height difference in millimeters.
 Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished) followed in the same column by pit stops (green on pit request; with a penalty, LMU: its kind as the game gives it, `DT` drive through, `SG10` stop & go of 10 seconds, `+10s` time penalty, `SGx2` when several are to serve, `+35s` added at finish when not served, `DQ` disqualified, `PEN` when given before the app started), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).
 
     show_lap_sectors, show_lap_delta, show_out_and_in_laps, show_invalid_lap_in_red, show_lap_trend, show_running_lap_time
-Modern design, lap time column (Relative, Standings, Rivals): Time, delta and running time share one place, shown in turn (narrow column): `show_running_lap_time` (on by default) shows the time of the lap being driven, moving with the game telemetry; after the line, the completed lap for 4 seconds (with its colors and trend), then the time behind the driver's personal best for 4 seconds. Without running time, lap time and delta are shown in turn every 4 seconds. `show_lap_sectors` draws three sector bars under the time, colored as the game live timing does: sectors of the lap being driven (last lap while the first sector is driven), purple when equal to the best sector of the car's class in the session, green when equal to the driver's best sector of completed laps (a sector beaten during the lap turns green once the lap is completed, as in the game), orange when slower; the sector being driven fills as it is driven (time into it against the driver's best of that sector). Outside races, no sector on an out lap, best lap sectors while in the pit lane. `show_lap_delta` shows the time behind the driver's personal best (`+0.345`, orange) in place of the lap time. `show_out_and_in_laps` shows `OUT` or `IN` instead of the time of a lap that left or entered the pit lane. `show_invalid_lap_in_red` shows an invalid lap in red instead of a `*`. `show_lap_trend` adds an arrow: green down when faster than the lap before, red up when slower.
+Modern design, lap time column (Relative, Standings, Rivals): Time, delta and running time share one place, shown in turn (narrow column): `show_running_lap_time` (on by default) shows the time of the lap being driven, moving with the game telemetry (Standings: whole seconds for other cars, tenths for yours); after the line, the completed lap for 4 seconds (with its colors and trend), then the time behind the driver's personal best for 4 seconds. Without running time, lap time and delta are shown in turn every 4 seconds. Standings and Rivals outside races, without best lap column: best lap of each driver instead (purple when fastest of its class, `show_highlighted_fastest_last_laptime`). `show_lap_sectors` draws three sector bars under the time, colored as the game live timing does: sectors of the lap being driven (last lap while the first sector is driven), purple when equal to the best sector of the car's class in the session, green when equal to the driver's best sector of completed laps (a sector beaten during the lap turns green once the lap is completed, as in the game), yellow when slower; the sector being driven fills as it is driven (time into it against the driver's best of that sector). Outside races, no sector on an out lap, best lap sectors while in the pit lane. `show_lap_delta` shows the time behind the driver's personal best (`+0.345`, yellow as slower laps) in place of the lap time. `show_out_and_in_laps` shows `OUT` or `IN` instead of the time of a lap that left or entered the pit lane. `show_invalid_lap_in_red` shows an invalid lap in red instead of a `*`. `show_lap_trend` adds an arrow: green down when faster than the lap before, red up when slower.
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color. With `show_class_name` off (class column), the class name is left out: position in class alone on a square of class color.
+
+    show_class_name
+Modern design, class column (on by default): class name, then position in class. Off: position in class alone, on a square of class color (narrower column).
 
     column_gap_trend
 Modern design column after relative time gap (on by default): gap change per lap to each car, averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain (closing on a car ahead, pulling away from a car behind), red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
 
     column_driver_ranks
-Modern design column (Relative & Standings), off by default (`LMU` only): Driver Rank & Safety Rank of each driver, short and in rank color (`S2 P3`), dashes while unknown. Yours and your team members' come from the game menu (or RaceControl with `enable_online_driver_ranks`). Other drivers' need `enable_online_driver_ranks` (Config > Application > Online): while the game is on an online server (practice, race, private server), the app asks RaceControl the profiles of the drivers of the session by name (drivers joining the session asked at once, known ones again every 5 minutes and after each session; drivers leaving are no longer shown). Drivers without a RaceControl profile: dashes.
+Modern design column (Relative & Standings), off by default (`LMU` only): Driver Rank & Safety Rank of each driver, short and in rank color (`S2 P3`), dashes while unknown. Yours and your team members' come from the game menu (or RaceControl with `enable_online_driver_ranks`). Other drivers' need `enable_online_driver_ranks` (Settings > Application > Online): while the game is on an online server (practice, race, private server), the app asks RaceControl the profiles of the drivers of the session by name (drivers joining the session asked at once, known ones again every 5 minutes and after each session; drivers leaving are no longer shown). Drivers without a RaceControl profile: dashes.
 
-    show_driver_badge
-Show the game badge of each driver after the ranks (on by default): Good Driver, Trusted Racer, Rookie, Warning... as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there. The Broadcast Director driver card shows the badge name.
+    column_driver_badge
+Modern design column, off by default (`LMU` only): game badge of each driver (Good Driver, Trusted Racer, Rookie, Warning...) as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there; empty while unknown. Same drivers as `column_driver_ranks` (others need `enable_online_driver_ranks`), shown with or without the ranks column, and moved on its own in the Columns list. The Broadcast Director driver card shows the badge name.
 
     column_delta_laptime
 Modern design column, off by default: lap time difference to player over recent laps (green if player was faster, most recent lap at right), as in Standings.
@@ -4407,6 +4401,9 @@ Note, player's compound color is not affected by this setting while `show_player
     tyre_compound_spacing
 Set display spacing (in pixels) between each compound symbol. Default is `1` pixel.
 
+    mixed_compound_symbol, font_color_mixed_compound
+Classic layout, one compound per car (`show_compound_for_each_wheel` disabled): symbol (first character) and color shown when the wheels of a car do not all have the same compound. Default symbol is `X`. The modern design always shows the compounds of each axle, or of each wheel, when they differ.
+
     show_pitstop_count
 Show each driver's pit stop count, or penalty if any, with purple (default) background to distinguish from number of pit stops: `DT` drive through, `SG` stop & go, `TP` time penalty, `DQ` disqualified (`LMU`, read from the game results stream), `PN` for a penalty given before the app started or with rFactor 2.
 
@@ -4420,7 +4417,7 @@ Modern design: show pit stops (or penalty) after the pit status pill (pit lane, 
 Show vehicles parked in garage stall. Default is `false`. Note, local player is always displayed.
 
     additional_players_front, additional_players_behind
-Set additional players shown on relative list. Each value is limited to a maximum of 60 additional players (for a total of 120 additional players). Default is `0`.
+Set additional players shown on relative list. Each value is limited to a maximum of 60 additional players (for a total of 120 additional players). Default is `0`. With fewer cars than rows, each car is shown once, ahead or behind (where it is nearer).
 
 [**`Back to Top`**](#)
 
@@ -4576,7 +4573,7 @@ Set visualized maximum ride height display range (millimeter).
 Set bottoming ride height (in millimeters). This option is used for vehicle that hits ground before ride height reading reaches zero.
 
     show_axle_ride_height
-Modern design: show front and rear ride height from game (aerodynamic reference, in millimeters) between left and right tiles.
+Modern design: show front and rear ride height from game (aerodynamic reference, in millimeters) between left and right tiles. If game does not provide axle ride height (always `0` in `LMU`), the average ride height of the two wheels of each axle is shown instead.
 
 [**`Back to Top`**](#)
 
@@ -4601,14 +4598,14 @@ Modern design column, off by default (`LMU` only): track limits points of each d
     column_driver_ranks
 Modern design column, off by default (`LMU` only): Driver Rank & Safety Rank of each rival, short and in rank color, as the column of [Relative](#relative) (ranks of other drivers need `enable_online_driver_ranks`).
 
-    show_driver_badge
-Show the game badge of each driver after the ranks (on by default): Good Driver, Trusted Racer, Rookie, Warning... as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there. The Broadcast Director driver card shows the badge name.
+    column_driver_badge
+Modern design column, off by default (`LMU` only): game badge of each driver (Good Driver, Trusted Racer, Rookie, Warning...) as the game icon, downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`, a dot of the badge color until it is there; empty while unknown. Same drivers as `column_driver_ranks` (others need `enable_online_driver_ranks`), shown with or without the ranks column, and moved on its own in the Columns list. The Broadcast Director driver card shows the badge name.
 
     column_gap_trend
 Modern design column, off by default: gap change per lap between you and each car by race position (gap to a car ahead of you, gap of a car behind you), averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain, red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color. With `show_class_name` off (class column), the class name is left out: position in class alone on a square of class color.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -4700,7 +4697,7 @@ Show sectors timing based on all time best sectors instead of current session. T
 Set target laptime for display target reference lap and sector time. Set `Theoretical` to show theoretical best sector time. Set `Personal` to show sector time from personal best lap time. Note, if `enable_all_time_best_sectors` option is enabled in `Sectors Module`, all time best sectors data will be displayed instead, otherwise only current session best sectors data will be displayed.
 
     freeze_duration
-Set freeze duration (seconds) for displaying previous sector time. Default is `5` seconds.
+Set freeze duration (seconds) for displaying previous sector time, at most half of sector time. Default is `5` seconds. Game may set the time of the sector just finished a moment after the sector line (lap time at finish line): best sector times are shown again once freeze duration passed, and gap is still shown once game sets it, until next sector.
 
     show_formatted_sector_time
 Show sector time in `minutes:seconds` format. Disable this option to show sector time in `seconds` only.
@@ -4758,9 +4755,9 @@ Modern design, off by default (`LMU` only): average Driver Rank & Safety Rank of
 Set visualized maximum slip angle display range (degrees). Default is `15` degrees.
 
     minimum_oversteer_slip_angle_difference, minimum_understeer_slip_angle_difference
-Set minimum slip angle difference threshold (in degrees) for neutral steer, oversteer and understeer color indication.
+Set minimum slip angle difference threshold (in degrees) for neutral steer, oversteer and understeer color indication. Slip angle difference is average front slip angle minus average rear slip angle (both as absolute values): understeer color shows while difference is above understeer threshold, oversteer color shows while difference is below oversteer threshold. Default is `-1.0` and `1.5` degrees.
 
-Note, value should be set as negative angle for oversteer, and positive angle for understeer.
+Note, value should be set as negative angle for oversteer, and positive angle for understeer. Most cars run slightly higher front slip angle in steady cornering, raise understeer threshold if understeer color shows too often for a balanced car.
 
 [**`Back to Top`**](#)
 
@@ -4780,7 +4777,7 @@ Set visualized maximum slip ratio display range (percentage), value range in `10
 ## Speed delta
 **This widget displays speed difference against multiple lap time sources, at the same point of the lap.**
 
-Speed difference is your speed minus the speed of the reference lap at the same lap distance, smoothed (`speed_delta_smoothing_samples`): positive when faster. Speed of the reference lap is taken from the lap recorded by [Delta module](#delta-module) (distance over time between its points around the same lap distance), so it needs no extra recording. Modern design shows it green when faster, red when slower. No speed difference is shown (a dash) while the reference lap does not exist yet, on an out lap or in pit lane before start line, like [Deltabest extended](#deltabest-extended).
+Speed difference is your speed minus the speed of the reference lap at the same lap distance, smoothed (`speed_delta_smoothing_samples`): positive when faster. Speed of the reference lap is taken from the lap recorded by [Delta module](#delta-module) (distance over time between its points around the same lap distance), so it needs no extra recording. Modern design shows it green when faster, red when slower. No speed difference is shown (a dash) while the reference lap does not exist yet, on an out lap or in pit lane before start line, like [Deltabest extended](#deltabest-extended), or where the reference lap has no point at this lap distance.
 
     layout
 2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
@@ -4839,7 +4836,7 @@ Set cooldown duration (seconds) before resetting minimum or maximum speed value.
 ## Spotter
 **This widget displays two slim side bars, lit while a car is alongside.**
 
-Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Once a side is free again, its bar flashes in clear color (green), like a spotter calling "clear". A car coming up behind on a side, not alongside yet, lights the bottom of the bar, brighter as it gets closer. Car positions come from `Vehicles module`, same as Radar widget. Nothing is shown while no car is alongside, unless overlay edit mode is on, or `show_bar_background` is enabled.
+Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Once a side is free again, its bar flashes in clear color (green), like a spotter calling "clear". A car coming up behind on a side, not alongside yet, lights the bottom of the bar, brighter as it gets closer. Car positions come from `Vehicles module`, same as Radar widget. Cars in garage or stopped in pit lane (at their pit box) are left out, cars moving in pit lane still count (pit exit blend line, or player in pit lane), also cars on another road level (bridge above or under, crossing), and a car straight ahead or behind in player lane (closer sideways than 60% of `vehicle_width`) is not alongside. Nothing is shown while no car is alongside, unless overlay edit mode is on, or `show_bar_background` is enabled.
 
 Modern design: bars with rounded ends glowing toward screen center, lit part going from warning to loss color as the car alongside gets closer sideways.
 
@@ -4891,7 +4888,7 @@ Modern design column, off by default (`LMU` only): track limits points of each d
 Modern design column, off by default: gap change per lap between you and each car by race position (gap to a car ahead of you, gap of a car behind you), averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain, red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color. With `show_class_name` off (class column), the class name is left out: position in class alone on a square of class color.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -4912,13 +4909,13 @@ Enable multi-class split mode, which splits and displays each vehicle class in s
 Set order of vehicle classes in multi-class split mode: class names separated by commas, first one shown at top. Case, spaces and underscores are left out when names are compared (`LMP2 ELMS` matches `LMP2_ELMS`). Classes not listed are shown after, fastest class first. Leave empty to show every class fastest first. Default is `Hypercar, Hyper, LMP2 ELMS, LMP2, LMP3, GT3, LMGT3, GTE`.
 
     show_column_headers
-Show a row of column labels above the vehicles (modern design): Pos, Class, Driver, Tyres, Pit, Stops, Time, Int, Gap... Each column is at least as wide as its label. Enabled by default.
+Show a row of column labels above the vehicles (modern design): Pos, Class, Driver, Tyres, Pit, Time, Int, Gap... Each column is at least as wide as its label. Enabled by default.
 
     show_class_header
 Show class name above the vehicles of each class (modern design), in multi-class split mode or single-class exclusive mode, instead of class column next to each driver. Position column then shows position in class. Enabled by default.
 
     show_class_column_with_class_header
-Keep class column next to each driver while class names are shown above their vehicles (`show_class_header`, modern design), for class colors on every row. Disabled by default: class headers replace class column.
+Keep class column next to each driver while class names are shown above their vehicles (`show_class_header`, modern design): each row then keeps its class alias and position in class, and the position badge shows the overall position. The class color edge of each row is drawn whenever the class column is enabled, with or without class headers. Disabled by default: class headers replace class column.
 
     show_class_sof
 Show the strength of field of each class at the right end of its class header (modern design, `LMU` only, disabled by default): average Driver Rank & Safety Rank of the drivers of the class whose ranks are known (`SoF S2 40% · G1 15%`: rank, tier and progress to the next tier, in color of the average Driver Rank), from their RaceControl profiles (needs `enable_online_driver_ranks`, see `column_driver_ranks` of Relative). Nothing shown while no rank is known (offline). Needs `show_class_header`, in multi-class split mode or single-class exclusive mode.
@@ -4930,7 +4927,7 @@ Set minimum amount top place vehicles to display: top of player's class in split
 Set maximum amount vehicles to display in exclusive mode, which takes effect when `enable_single_class_exclusive_mode` is enabled.
 
     maximum_vehicles_combined_mode
-Set maximum amount vehicles to display in combined mode, which takes effect when `enable_multi_class_split_mode` is not enabled. When total vehicle number is lower than this value, extra rows will auto-hide. When total vehicle number is above this value, the top 3 vehicles will always show, and rest of the vehicles will be selected from the nearest front and behind places related to player.
+Set maximum amount vehicles to display in combined mode, which takes effect when `enable_multi_class_split_mode` is not enabled. When total vehicle number is lower than this value, extra rows will auto-hide. When total vehicle number is above this value, the top 3 vehicles will always show, and rest of the vehicles will be selected from the nearest front and behind places related to player, with a space (`split_gap`) between the top places and the places around player when places in between are left out.
 
     maximum_vehicles_split_mode
 Set maximum amount vehicles to display in split mode, which takes effect when in multi-class session and `enable_multi_class_split_mode` is enabled. If total vehicle number is above this value, any extra vehicles will not be shown. Default is `50`, which is sufficient in most case.
@@ -4939,7 +4936,7 @@ Set maximum amount vehicles to display in split mode, which takes effect when in
 Set maximum amount vehicles to display for class where player is in. Default is `7`. Note that, if player is not in first place, then at least one opponent ahead of player will always be displayed, even if this value sets lower.
 
     maximum_vehicles_per_split_others
-Set amount of top vehicles to display for each class where player is not in, `0` hides those classes. Not raised by `minimum_top_vehicles`. Default is `3`.
+Set amount of top vehicles to display for each class where player is not in, `0` hides those classes (no empty class gap left). Not raised by `minimum_top_vehicles`. Default is `3`.
 
     split_gap
 Set split gap between each class.
@@ -4963,6 +4960,9 @@ Show time interval from same class. This option only takes effect while `enable_
 
     time_interval_leader_text
 Set text indicator for race leader in time interval column. Modern design shows a dash while this text is left at default.
+
+    time_interval_width
+Set time interval display width (classic layout), value is in chars, 4 = 4 chars wide.
 
     show_laptime
 Show driver's last lap time or pit stop duration if available. Invalid lap time is preceded by asterisk mark, such as *1:23.54.
@@ -5002,7 +5002,7 @@ Show remaining virtual energy reading in percentage from each driver, with 4 dif
 Note, for vehicle without virtual energy, remaining fuel (only if available) will be displayed instead. If fuel data is not available from game API, then nothing will be displayed.
 
     decimal_places_energy_remaining
-Set additional decimals to be displayed, both designs. Default is `1` for Standings (`45.7%`), `0` for Relative and Rivals.
+Set additional decimals to be displayed, both designs. Default is `0` (`46%`) for Relative, Standings and Rivals (existing presets keep their value).
 
 **Important notes on decimal place accuracy:**
 
@@ -5060,7 +5060,7 @@ Manually set steering display range in degrees. Set to `0` to read physical stee
 Show average front wheel angle in degrees.
 
     show_steering_ratio
-Show steering ratio between steering wheel angle and average front wheel angle.
+Show steering ratio between steering wheel angle and average front wheel angle. Shows `-` near straight ahead (steering wheel angle below 2 degrees or front wheel angle below 0.2 degree, too small for a meaningful ratio), capped at `99.9`.
 
     show_ackermann_percentage
 Show Ackermann percentage of inner and outer wheel angle during cornering. `0` percent indicates parallel steering. `100` percent indicates true Ackermann steering. Negative percent indicates Anti-Ackermann steering.
@@ -5127,7 +5127,7 @@ Show user-defined custom steering wheel image instead of default image.
     custom_steering_wheel_image_file
 Set custom steering wheel image file path. Double-click this option in widget's `Config` dialog to select an image file.
 
-Note, image file must be in `PNG` format with same width and height. Maximum supported `PNG` file size is limited to `10MB`. Default image will be used if selected image is not valid.
+Note, image file must be in `PNG` format with same width and height. Maximum supported `PNG` file size is limited to `10MB`. Default image will be used if selected image is not valid, or is on a network path (`\\server\share`).
 
     display_size
 Set widget display size in pixels.
@@ -5203,7 +5203,7 @@ Show consistency percentage sign.
 ## Stint timer
 **This widget displays stint time and driving time of each driver, for endurance races.**
 
-Stint time and laps come from `Stint module`. Driving time of each driver is counted from driver name of player car (teammates included while they drive the car), from the moment widget is running: it is kept while widget reloads, and reset when a new session starts. Fair share is race length divided by number of drivers (timed race only).
+Stint time and laps come from `Stint module`. Driving time of each driver is counted from driver name of player car (teammates included while they drive the car), from the moment widget is running: it is kept while widget reloads, and reset when a new session starts. Not counted in spectate mode (car watched is not the player car). Fair share is race length divided by number of drivers (timed race only, race session only).
 
     maximum_stint_minutes
 Set maximum stint length in minutes for stint countdown. Countdown is shown in warning color near the end, and as negative time in loss color once exceeded. Set `0` to disable. Default is `0`.
@@ -5235,6 +5235,8 @@ Set minimum driving time per driver in minutes, used as target. Set `0` to use f
     show_force_ratio
 Show percentage force ratio between each and total suspension force. Set `false` to show individual suspension force in Newtons.
 
+Note, gauge bar shows force ratio of each suspension, full at `50%` of total suspension force (half bar at `25%`, equal force on four wheels).
+
 [**`Back to Top`**](#)
 
 
@@ -5260,7 +5262,7 @@ Note, maximum suspension position calculation is handled by [Wheels Module](#whe
 
 Note, suspension travel data calculation is handled by [Wheels Module](#wheels-module), and resets after exited garage.
 
-Static suspension position is measured only while car is stationary on track or in garage stall (neutral gear and no throttle). Measurement is disabled in pit lane, as car can be lifted by pit crew which would result incorrect readings.
+Static suspension position is measured while car is stationary, from session start, garage exit or car change until car first drives off with throttle. Measurement is skipped while car is lifted (any negative suspension force, such as car lifted by pit crew), which would result incorrect readings. Recorded values of previous car or session are cleared on reset, and show `0` until recorded again.
 
 A minimum of two laps are required to get sensible readings.
 
@@ -5381,7 +5383,7 @@ Show personal current stint best lap time.
 Show personal current average lap time pace, this reading is also used in real-time fuel calculation. Note, additional `average lap time pace` calculation setting can be found in [Delta Module](#delta-module) config. After ESC or session ended, lap time pace reading will be reset, and aligned to `all time personal best lap time` if available.
 
     show_invalid_lap_indicator
-Modern design: highlight current lap time in loss color while game invalidated current lap (track limits). This option only works for `LMU`.
+Modern design: highlight current lap time in loss color while game invalidated current lap (track limits, this part only works for `LMU`), last lap time in loss color when it was invalid.
 
     show_invalid_lap_highlight
 Classic layout: show current lap time in `font_color_invalid_last` while game invalidated current lap (track limits). This option only works for `LMU`. Default is disabled.
@@ -5393,15 +5395,15 @@ Classic layout: show current lap time in `font_color_invalid_last` while game in
 **This widget displays track clock, time scale, sunlight phase info.**
 
     show_track_clock
-Show current in-game clock time of the circuit.
+Show current in-game clock time of the circuit. In `LMU`, track clock is the time of day given by game, always in sync whatever the options below; in `rF2`, it is calculated from session time and time scale.
 
     enable_track_clock_synchronization
-Enable auto track clock and time scale synchronization. `enable_restapi_access` must be enabled to synchronize track clock from Rest API.
+Enable auto time scale synchronization (and track clock in `rF2`). `enable_restapi_access` must be enabled to synchronize time scale from Rest API.
 
 Note, synchronization may not work in multiplayer.
 
     track_clock_time_scale
-Manually set time multiplier for time-scaled session. Default is `1`, which matches `Time Scale: Normal` setting in-game. Note, this option will only be used if `enable_track_clock_synchronization` option is disabled.
+Manually set time multiplier for time-scaled session. Default is `1`, which matches `Time Scale: Normal` setting in-game. Note, this option will only be used if `enable_track_clock_synchronization` option is disabled. In `LMU`, it changes time scale shown and sunlight phase countdown only (track clock comes from game).
 
     track_clock_format
 Set track clock format string. To show seconds, add `%S`, such as `%H:%M:%S %p`. See [link](https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes) for full list of format codes.
@@ -5410,7 +5412,7 @@ Set track clock format string. To show seconds, add `%S`, such as `%H:%M:%S %p`.
 Show current session track clock time scale multiplier.
 
     show_sunlight_phase_countdown
-Show sunlight phase countdown timer and indicator. The timer counts down towards each of four primary sunlight phases: sunrise, midday, sunset, midnight. An arrow indicator is displayed alongside with day/night color.
+Show sunlight phase countdown timer and indicator. The timer counts down towards each of four primary sunlight phases: sunrise, midday, sunset, midnight. An arrow indicator (modern design: next phase name) is displayed alongside in color of period in progress: night color before sunrise and midnight, day color before midday and sunset. Dashes are shown while sunrise and sunset are not known.
 
 This countdown timer can be used to check how long until sunrise or sunset for planning strategy.
 
@@ -5419,7 +5421,7 @@ Note, game does not provide `sunrise` and `sunset` data. Sunrise and sunset hour
 See Wiki Appendix page for sunrise and sunset reference table for some common tracks.
 
     enable_time_scaled_countdown
-Enable time scaled countdown, which scales with session track clock time scale multiplier. This option is disabled by default.
+Enable time scaled countdown, which scales with session track clock time scale multiplier. This option is disabled by default: countdown is in real time (track time left divided by time scale).
 
 [**`Back to Top`**](#)
 
@@ -5591,7 +5593,7 @@ Show nearest track notes index number behind current vehicle position, and dista
 Set maximum display width, value in chars, such as 10 = 10 chars.
 
     enable_auto_hide_if_not_available
-Auto hide this widget if track notes data is not available for current track.
+Auto hide this widget if track notes data is not available for current track, or in pit lane without pit notes (tagged `#pit`).
 
     maximum_display_duration
 Set maximum display duration (seconds) of each note. Set to `-1` to always display notes. Default is `-1`.
@@ -5602,7 +5604,7 @@ Set maximum display duration (seconds) of each note. Set to `-1` to always displ
 ## Traffic
 **This widget displays traffic vehicle info.**
 
-This widget is designed to show the nearest traffic vehicles that are closing in, either the `slower` vehicle that you are catching up ahead, or the `faster` vehicle that is catching up from behind.
+This widget is designed to show the nearest traffic vehicles that are closing in, either the `slower` vehicle that you are catching up ahead, or the `faster` vehicle that is catching up from behind. Race leader column is empty while you lead the race. Modern design: with both `show_estimated_laps` & `show_time_interval` disabled, class (or driver) name is shown as value.
 
 Note, vehicles are not counted as traffic if they cannot close the gap, or while in pit lane. For example, a driver that falls constantly 3 seconds behind you is not considered as traffic since he cannot close the gap and overtake you.
 
@@ -5707,7 +5709,7 @@ Note, at least one lap is required to calibrate top reference speed. Top referen
 Set trailing line width in pixels.
 
     *_line_style
-Set trailing line style. `0` for solid line, `1` for dashed line.
+Set trailing line style. `0` for solid line, `1` for dotted line (one dot per sample). Solid line of TC & ABS activation, wheel lock and wheel slip is broken where they are not shown.
 
     show_wheel_lock
 Show wheel lock (slip ratio) plot under braking when slip ratio has exceeded `wheel_lock_threshold` value.
@@ -5799,9 +5801,9 @@ Set display order of plot lines.
 Note, if temperature drops below `-100` degrees Celsius, temperature readings will be replaced by unavailable sign as `-`.
 
     enable_heatmap_auto_matching
-Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to front and rear tyre compounds separately.
+Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to the compound of each tyre separately.
 
-Note, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.
+Note, `LMU` gives the compound of each tyre; `RF2` gives one compound per axle, so left and right tyres of an axle show the same compound there.
 
     heatmap_name
 Set heatmap preset name that is defined in `heatmap.json` preset. Note, this option has no effect while `enable_heatmap_auto_matching` is enabled.
@@ -5825,7 +5827,7 @@ Set time interval in seconds for rate of change calculation. Default interval is
 Set number of samples for reducing data fluctuation. Lower value may result more fluctuated reading. Set `1` to disable smoothing.
 
     show_tyre_compound
-Show tyre compound symbols (front and rear) that matches specific tyre compounds defined in `compounds.json` preset.
+Show tyre compound symbol of each tyre (one per axle in `RF2`) that matches specific tyre compounds defined in `compounds.json` preset.
 
     show_compound_color_by_type
 Show different compound color by compound type, which can be customized in [Tyre Compound Editor](#tyre-compound-editor).
@@ -5851,9 +5853,9 @@ Set millimeter threshold of tyre deflection for detecting lifted wheels. Default
 Note, if temperature drops below `-100` degrees Celsius, temperature readings will be replaced by unavailable sign as `-`.
 
     enable_heatmap_auto_matching
-Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to front and rear tyre compounds separately.
+Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to the compound of each tyre separately.
 
-Note, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.
+Note, `LMU` gives the compound of each tyre; `RF2` gives one compound per axle, so left and right tyres of an axle show the same compound there.
 
     heatmap_name
 Set heatmap preset name that is defined in `heatmap.json` preset. Note, this option has no effect while `enable_heatmap_auto_matching` is enabled.
@@ -5874,7 +5876,7 @@ Set `true` to show degree sign for each temperature value.
 Set amount leading zeros for each temperature value. Default is `2`. Minimum value is limited to `1`.
 
     show_tyre_compound
-Show tyre compound symbols (front and rear) that matches specific tyre compounds defined in `compounds.json` preset.
+Show tyre compound symbol of each tyre (one per axle in `RF2`) that matches specific tyre compounds defined in `compounds.json` preset.
 
     show_compound_color_by_type
 Show different compound color by compound type, which can be customized in [Tyre Compound Editor](#tyre-compound-editor).
@@ -5889,7 +5891,7 @@ Show different compound color by compound type, which can be customized in [Tyre
 Show percentage load ratio between each and total tyre load. Set `false` to show individual tyre load in Newtons.
 
     low_load_threshold
-Show warning indication when load (in Newtons) is below the threshold.
+Show warning indication when load is at or below the threshold. The threshold is in the unit shown: percentage of total load while `show_tyre_load_ratio` is enabled (default), Newtons otherwise. Default is `1`.
 
 [**`Back to Top`**](#)
 
@@ -5907,7 +5909,7 @@ Show wheel name (FL, FR, RL, RR) in each card.
 Show tyre compound badge in the corner of each card, colored as in the Tyre compound editor.
 
     show_tyre_alerts
-Show tyre alerts in place of the compound badge, most important first: detached wheel, puncture, flat spot.
+Show tyre alerts, most important first: detached wheel, puncture, flat spot. Classic design shows the alert in place of the compound badge, modern design in place of the wheel name (compound badge kept).
 
     flat_spot_threshold
 Set tread lost by locking (percent) from which a flat spot is shown. Default is `1.0`. Set `0` to never show flat spots.
@@ -5976,7 +5978,7 @@ Show tread left as a gauge along the tyre, orange then red when getting close to
 Show tread left (percent), red at or below `warning_threshold_remaining`.
 
     show_wear_per_lap
-Show tread worn per lap (percent), from valid laps (at least one valid lap is required).
+Show tread worn per lap (percent), from valid laps (no pit lap). Until a lap is completed, wear of the lap in progress is shown, and laps left estimated from it are too high on that lap.
 
     show_lifespan_laps
 Show estimated laps left on current tread, red at or below `warning_threshold_laps`. `99+` while wear is still too small to count.
@@ -6009,10 +6011,10 @@ Show average tyre pressure deviation between each tyre and the tyre with highest
 Set duration (seconds) for calculating average tyre pressure. Default is `10` seconds. Maximum duration is limited to `600` seconds.
 
     swap_style
-Swap cold and hot pressure color.
+Swap font and background color of pressure readings (cold and hot pressure colors shown as background).
 
     show_tyre_compound
-Show tyre compound symbols (front and rear) that matches specific tyre compounds defined in `compounds.json` preset.
+Show tyre compound symbol of each tyre (one per axle in `RF2`) that matches specific tyre compounds defined in `compounds.json` preset.
 
     show_compound_color_by_type
 Show different compound color by compound type, which can be customized in [Tyre Compound Editor](#tyre-compound-editor).
@@ -6044,9 +6046,9 @@ Show tyre optimal temperature as a dashed line (LMU).
 Set `true` to show degree sign for each temperature value.
 
     enable_heatmap_auto_matching
-Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to front and rear tyre compounds separately.
+Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to the compound of each tyre separately.
 
-Note, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.
+Note, `LMU` gives the compound of each tyre; `RF2` gives one compound per axle, so left and right tyres of an axle show the same compound there.
 
     heatmap_name
 Set heatmap preset name that is defined in `heatmap.json` preset. Note, this option has no effect while `enable_heatmap_auto_matching` is enabled.
@@ -6060,9 +6062,9 @@ Set heatmap preset name that is defined in `heatmap.json` preset. Note, this opt
 Note, if temperature drops below `-100` degrees Celsius, temperature readings will be replaced by unavailable sign as `-`.
 
     enable_heatmap_auto_matching
-Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to front and rear tyre compounds separately.
+Enable automatically heatmap style matching for specific tyre compounds defined in `compounds.json` preset. This option applies matching heatmap style to the compound of each tyre separately.
 
-Note, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.
+Note, `LMU` gives the compound of each tyre; `RF2` gives one compound per axle, so left and right tyres of an axle show the same compound there.
 
     heatmap_name
 Set heatmap preset name that is defined in `heatmap.json` preset. Note, this option has no effect while `enable_heatmap_auto_matching` is enabled.
@@ -6083,7 +6085,7 @@ Set `true` to show degree sign for each temperature value.
 Set amount leading zeros for each temperature value. Default is `2`. Minimum value is limited to `1`.
 
     show_tyre_compound
-Show tyre compound symbols (front and rear) that matches specific tyre compounds defined in `compounds.json` preset.
+Show tyre compound symbol of each tyre (one per axle in `RF2`) that matches specific tyre compounds defined in `compounds.json` preset.
 
     show_compound_color_by_type
 Show different compound color by compound type, which can be customized in [Tyre Compound Editor](#tyre-compound-editor).
@@ -6101,7 +6103,7 @@ Show different compound color by compound type, which can be customized in [Tyre
 Show total remaining tyre tread in percentage that changes color according to wear.
 
     show_wear_difference
-Show estimated tyre wear difference per lap (at least one valid lap is required).
+Show estimated tyre wear difference per lap: wear of last lap, adjusted by wear so far in current lap. Until a lap is completed, wear of the lap in progress is shown, and lifespan in laps & minutes estimated from it are too high on that lap.
 
     show_live_wear_difference
 Show current lap tyre wear difference.
@@ -6138,16 +6140,19 @@ Set warning threshold for estimated tyre lifespan in minutes. Default is `6` min
 ## Virtual energy
 **This widget displays virtual energy usage info.**
 
-Note, most options are inherited from [Fuel](#fuel) widget, with some additions noted below. For battery charge usage info, see [Battery](#battery) widget.
+Note, most options are inherited from [Fuel](#fuel) widget, with some additions noted below. For battery charge usage info, see [Battery](#battery) widget. Values are shown as `-` for vehicles without virtual energy.
 
     update_interval
 Set refresh interval in milliseconds. Default is `100`. Values change slowly (fuel & energy of a lap, laps left): faster refresh only costs CPU.
 
+    show_refilling
+Show refilling value (on by default), see `show_refueling` of [Fuel](#fuel).
+
     show_absolute_refilling
 Show absolute refilling value instead of relative refilling when enabled. Note, `+` or `-` sign is not displayed with absolute refilling.
 
-    show_fuel_ratio_and_bias
-Show fuel ratio and fuel bias column.
+    show_fuel_ratio, show_fuel_bias
+Show fuel ratio, and fuel bias, each on its own.
 
     *fuel_ratio
 Show fuel ratio between estimated fuel and energy consumption, which can help balance fuel and energy usage, as well as providing refueling reference for adjusting pit stop `Fuel ratio` during race.
@@ -6169,7 +6174,7 @@ Note, depleting virtual energy could result a `Stop-Go` penalty in `LMU`; while 
 Show track and ambient temperature.
 
     decimal_places_temperature
-Set amount decimal places to keep. Default is `1` decimal place, set to `0` to hide decimals. Note, when number of digits is less than expected, extra leading zero or decimal place will be added to fill the gap.
+Set amount decimal places to keep. Default is `1` decimal place, set to `0` to hide decimals. Note, when number of digits is less than expected, extra leading zero will be added to fill the gap; when more (such as negative or three-digit temperature), reading is rounded to fewer decimals. Classic layout only, modern design always shows set decimal places.
 
     show_rain
 Show rain precipitation in percentage.
@@ -6178,10 +6183,10 @@ Show rain precipitation in percentage.
 Show average surface wetness in percentage.
 
     show_wind
-Modern design: show wind speed in wind speed unit, with arrow of where wind blows relative to vehicle (up: tailwind, down: headwind, no arrow while calm).
+Modern design: show wind speed in wind speed unit, with arrow of where wind blows relative to vehicle (up: tailwind, down: headwind, no arrow while calm or while reading shows `0`).
 
     show_wind_speed
-Classic layout: show wind speed in wind speed unit, after an arrow of where wind blows relative to vehicle in four directions (up: tailwind, down: headwind, `-` while calm). Default is disabled.
+Classic layout: show wind speed in wind speed unit, after an arrow of where wind blows relative to vehicle in four directions (up: tailwind, down: headwind, `-` while calm or while reading shows `0`). Default is disabled.
 
     show_rubber_coverage_while_dry
 Show rough estimate of rubber coverage (percent) based on total number of laps done by all drivers while road surface is dry.
@@ -6566,7 +6571,7 @@ All texts of this widget are automatically reduced if they do not fit in their b
 RPM bar turns `rpm_redline_color` above this fraction of maximum RPM. Default is `0.95`.
 
     display_profile
-Preset group of show options: `Custom` (default) uses your own values, `Minimal` keeps only the essentials (tyre temperature & wear, brakes, center column basics), `Sprint` favours lap time & delta without fuel rows, `Endurance` turns on pressure, wear estimates, compound, brake wear, fuel & energy rows, stint comparison and trends. A profile overrides the matching options while it is selected, without changing your saved values. `User 1`, `User 2` and `User 3` are your own profiles: pick `Save as Profile...` on the Overlay Options page to save the items shown now (every show option) as one of them; a user profile not saved yet acts as `Custom`. Changing an option set by a profile switches to `Custom`, keeping the other profile values. In simple mode the Overlay Options page lists the main items only; turn on `Advanced Options` (or search) for every option.
+Preset group of show options: `Custom` (default) uses your own values, `Minimal` keeps only the essentials (tyre temperature & wear, brakes, center column basics), `Sprint` favours lap time & delta without fuel rows, `Endurance` turns on pressure, wear estimates, compound, brake wear, fuel & energy rows, stint comparison and trends. A profile overrides the matching options while it is selected, without changing your saved values. `User 1`, `User 2` and `User 3` are your own profiles: use the `Profile` menu of the Overlay Options page to save the items shown now (every show option) as one of them; a user profile not saved yet acts as `Custom`. Changing an option set by a profile switches to `Custom`, keeping the other profile values. In simple mode the Overlay Options page lists the main items only; turn on `Advanced Options` (or search) for every option.
 
     auto_compact_display_scale
 Hide secondary elements (diagnostic readings, end of stint wear, compound, brake wear & pressure, caption, stint comparison, trends) when `display_scale` is below this value. `0` disables (default).
@@ -6652,13 +6657,13 @@ Wheel color by suspension damage, detached wheel color, and puncture outline col
 Suspension damage fraction from which each color is used. Defaults are `0.02`, `0.15`, `0.4` and `0.8`, same as `Damage` widget.
 
     show_damage_panel_impact_cone, damage_panel_impact_cone_angle, damage_panel_impact_cone_duration, damage_panel_impact_cone_color
-Show a cone toward the last impact for `damage_panel_impact_cone_duration` seconds (default `15`), `damage_panel_impact_cone_angle` degrees wide (default `15`).
+Show a cone toward the last impact for `damage_panel_impact_cone_duration` seconds (default `15`), `damage_panel_impact_cone_angle` degrees wide (default `15`). Light contacts (impact magnitude under `200`, such as kerbs or underbody scraping) and game impact updates without position are ignored, as in `Damage` widget.
 
     show_damage_panel_integrity, show_damage_panel_aero_integrity, text_integrity_body, text_integrity_aero
 Show remaining body integrity in the middle, or aero integrity if the car reports it, with its source label (defaults `BODY` and `AERO`).
 
     show_incident_recorder, recorder_duration, incident_deceleration_threshold, incident_display_duration
-Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g ↗`, with an arrow toward the impact reported by the game), before going back to live. Steering input is drawn around the middle line (up is right). Use the `black_box_next_incident` hotkey to look at older incidents. The dot at top right counts incidents of the session. A new session clears the live recording; an incident still recording its last 2 seconds is kept. The recording stops while the game is paused, so a pause leaves no gap in it. Incidents and event log are kept when the widget is reloaded after an option change.
+Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss; light contacts such as kerbs or underbody scraping, impact magnitude under `200`, are not incidents), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g ↗`, with an arrow toward the impact reported by the game), before going back to live. Steering input is drawn around the middle line (up is right). Use the `black_box_next_incident` hotkey to look at older incidents. The dot at top right counts incidents of the session. A new session clears the live recording; an incident still recording its last 2 seconds is kept. The recording stops while the game is paused, so a pause leaves no gap in it. Incidents and event log are kept when the widget is reloaded after an option change.
 
     enable_incident_replay
 Replay a frozen incident: a cursor sweeps the recording in real time, then starts again, with the time from the incident, speed, throttle, brake and gear under it at the bottom of the trace (`-1.2s 184km/h T0 B87 3`). Enabled by default.
@@ -6699,7 +6704,7 @@ Log each contact of the player with another car (`CONTACT` and its driver name) 
     text_damage, text_impact
 Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
 
-Options of this widget in Overlay Options page are in sections, one per part of the widget: General, Profile & Data, Size & Layout, Visual Style, Units, Steering & Wheel Slip, Tyre Temperature, Tyre Pressure, Tyre Wear & Status, Tyre Readings, Brakes, Suspension, RPM LEDs, Gear & Speed, Center Column, Fuel & Energy Gauges, Battery, Damage Panel, Incident Recorder & Event Log, Labels and Center Column Order. The live preview shows changes before saving. The page shows this widget in simple mode, showing on/off and choice options plus the few common ones; tick `Advanced Options` to show every option (colors, thresholds, labels). Click a section title to collapse or expand it, `Reset` beside it resets that section only; a search looks through every option, collapsed or advanced ones included. Options that only matter while another option is on are dimmed while it is off, and options set by the selected `display_profile` are locked in italic, naming the profile. `Color Theme...` sets every color at once (Default, Colorblind Safe), saved only with Apply. The table button of `tyre_target_by_compound` edits it as a table. Each label text sits in the section of the part it names. Default colors follow one palette: red for warnings and hot, cyan for cold and low, green for good, orange and yellow for intermediate states.
+Options of this widget in Overlay Options page are in sections, one per part of the widget: General, Profile & Data, Size & Layout, Visual Style, Units, Steering & Wheel Slip, Tyre Temperature, Tyre Pressure, Tyre Wear & Status, Tyre Readings, Brakes, Suspension, RPM LEDs, Gear & Speed, Center Column, Fuel & Energy Gauges, Battery, Damage Panel, Incident Recorder & Event Log, Labels and Center Column Order. The live preview shows changes before saving. The page shows this widget in simple mode, showing on/off and choice options plus the few common ones; tick `Advanced Options` to show every option (colors, thresholds, labels). Click a section title to collapse or expand it, `Reset` beside it resets that section only; a search looks through every option, collapsed or advanced ones included. Options that only matter while another option is on are dimmed while it is off, and options set by the selected `display_profile` are locked in italic, naming the profile. `Color Theme…` sets every color at once (Default, Colorblind Safe), saved only with Apply. The table button of `tyre_target_by_compound` edits it as a table. Each label text sits in the section of the part it names. Default colors follow one palette: red for warnings and hot, cyan for cold and low, green for good, orange and yellow for intermediate states.
 
 [**`Back to Top`**](#)
 
@@ -6713,7 +6718,7 @@ Tyre radius (in millimeters) is the rolling radius measured by [Wheels Module](#
 2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
 
     show_front_tyre_radius, show_rear_tyre_radius
-Show average front and rear tyre radius (in millimeters).
+Show average front and rear tyre radius (in millimeters), after axle label (`F` front, `R` rear).
 
 [**`Back to Top`**](#)
 
@@ -6721,7 +6726,7 @@ Show average front and rear tyre radius (in millimeters).
 ## Wheel toe
 **This widget displays wheel toe angle info.**
 
-Note, all toe readings are in degrees.
+Note, all toe readings are in degrees. Front wheel toe angle from game includes steering angle, front wheel readings show static toe only while driving straight. Total front toe angle cancels out most of steering angle (except steering geometry such as Ackermann).
 
     enable_symmetric_toe_angle
 Enable this option to show symmetric toe angle, where positive reading indicates toe-in (inward), negative indicates toe-out (outward). Disable this option to show each wheel's toe angle with reference to vehicle's heading (positive to right side of vehicle, negative to left side). This option is enabled by default.
@@ -6729,7 +6734,7 @@ Enable this option to show symmetric toe angle, where positive reading indicates
     show_total_toe_angle
 Show total toe angle between left and right wheel on the same axle, useful for quickly checking amount total toe angle while driving.
 
-    toe_in_smoothing_samples, total_toe_angle_smoothing_samples
+    toe_angle_smoothing_samples, total_toe_angle_smoothing_samples
 Set number of samples for reducing data fluctuation. Lower value may result more fluctuated reading. Set `1` to disable smoothing.
 
 [**`Back to Top`**](#)
@@ -6765,7 +6770,7 @@ Show wind speed reading, in wind speed unit set in [Units](#units) dialog.
 Show wind speed unit after reading.
 
     decimal_places
-Set amount decimal places of wind speed reading. Default is `1` decimal place.
+Set amount decimal places of wind speed reading, value range in `0` to `2`. Default is `1` decimal place.
 
     wind_speed_offset_x, wind_speed_offset_y
 Set wind speed reading position as a fraction of widget size. Defaults are `0.5` and `0.8`.
@@ -6826,7 +6831,7 @@ A new UI language can be added without changing code, with a JSON language pack:
 
 1. Create a template (from repository root): `python tools/make_language_template.py de Deutsch`. This writes `de.json` with every UI text, dialog message, option label and option description to translate, plus French text in `_reference` as a guide.
 2. Fill the empty values. Empty values stay in English, so a partial translation works. `messages` entries are regular expressions: keep the pattern (first item) as is, translate the replacement (second item), `\1`, `\2`... insert the matched parts.
-3. Copy the file to the `languages` folder of the global config folder (`Config` > `Open Folder` > `Config`), restart, then select the language in `Config` > `Application` > `Language`.
+3. Copy the file to the `languages` folder of the global config folder (`Settings` > `Open Folder` > `Config`), restart, then select the language in `Settings` > `Application` > `Language`.
 
 Language pack format:
 
@@ -6844,3 +6849,7 @@ Language pack format:
 `overlay` holds the short labels of modern design widgets (kept apart from `ui`, as overlays need shorter words).
 
 Invalid files are skipped and reported in the log. A language pack cannot replace English or French.
+
+Some entries are left out (reported in the log) so that a pack shared by someone else cannot freeze or misuse the app:
+* `messages` patterns longer than 1000 characters, with a repeat inside a repeat (`(\w+\s?)+`), alternatives inside a repeat (`(a|ab)*`) or more than 8 unbounded repeats (`.*`, `.+`);
+* texts with formatting tags (`<b>`, `<a href=...>`, `<img>`...) that the English text (or the message pattern) does not have. Keep the tags of the English text as they are.

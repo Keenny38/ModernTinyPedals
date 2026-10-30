@@ -22,7 +22,6 @@ Driver stats viewer part (StatsTable, mixin of DriverStatsBackend): Table of veh
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Iterable
 from contextlib import suppress
@@ -133,6 +132,7 @@ class StatsTable(StatsHost):
             self._recent = self.recent_sessions()
             self._driver = self.driver_card()
             self._rivals = self.rivals_card()
+            self._weekly = self.weekly_card()
         selected = self._selected[self.mode]
         keys = [key for key, _ in self._table]
         if selected not in keys:
@@ -149,6 +149,7 @@ class StatsTable(StatsHost):
             self.publish("recent", self._recent, self.recentChanged)
             self.publish("driver", self._driver, self.driverChanged)
             self.publish("rivals", self._rivals, self.rivalsChanged)
+            self.publish("weekly", self._weekly, self.weeklyChanged)
             self.publish_upcoming()  # best laps on their tracks changed
             if self._visible:
                 self.load_upcoming()
@@ -404,12 +405,13 @@ class StatsTable(StatsHost):
         return self.classes.get(vehicle) or class_prefix(vehicle)
 
     def theory_of(self, track: str, vehicle: str) -> float:
-        """Theoretical best of track & vehicle class (sector best file, read again once changed), 0 if unknown"""
+        """Theoretical best of track & vehicle class (sector best file, read again once changed), 0 if unknown
+
+        Files listed by the reload job (every lap while driving): no disk access here, row by row on the UI thread.
+        """
         name = combo_name(track, self.class_of(vehicle))
-        path = f"{cfg.path.sector_best}{name}.sector"
-        try:
-            modified = os.path.getmtime(path)
-        except OSError:
+        modified = self._sector_times.get(name)
+        if modified is None:
             return 0.0
         cached = self._theory_cache.get(name)
         if cached is None or cached[0] != modified:
@@ -615,8 +617,8 @@ class StatsTable(StatsHost):
     @Property(str, notify=StatsCore.statsChanged)
     def hint(self) -> str:
         if self.selected_stats_key:
-            return tr("Right click a vehicle or lap time to remove or reset it, Ctrl+Z to undo.")
-        return tr("Double click a track to show its vehicles.")
+            return tr("Right click a car or lap time to remove or reset it, Ctrl+Z to undo.")
+        return tr("Double click a track to show its cars.")
 
     @Property(str, notify=StatsCore.statsChanged)
     def emptyText(self) -> str:
@@ -680,7 +682,7 @@ class StatsTable(StatsHost):
         bests = [(valid_laptime(value.get("pb", 0)), name) for name, value in self.selected_stats_dict.items()
                  if isinstance(value, dict)]
         bests = [entry for entry in bests if entry[0] > 0]
-        tip_best = tr("Best personal best of the track, any vehicle")
+        tip_best = tr("Best personal best of the track, any car")
         tip_level = tr("Level of best lap on community lap times")
         if not bests:
             return [self.tile(tr("Best Lap"), "-", tip=tip_best, glyph=""),  # stopwatch

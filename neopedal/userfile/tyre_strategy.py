@@ -246,7 +246,7 @@ def load_tyre_strategy_file(filename: str, filepath: str, extension: str = "") -
             return validate_tyre_strategy(data)
     except FileNotFoundError:
         logger.info("USERDATA: %s not found, abort", filename)
-    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError):
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError, RecursionError):
         logger.error("USERDATA: %s failed loading, abort", filename)
     return None
 

@@ -56,7 +56,7 @@ ColumnLayout {
                 onClicked: bar.choose(index)
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 background: Rectangle {
-                    radius: theme.radiusMd
+                    radius: theme.radiusSm
                     color: tabButton.hovered && !tabButton.current ? theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: theme.motionFast } }
                     FocusRing { visible: bar.activeFocus && tabButton.current }
@@ -68,12 +68,13 @@ ColumnLayout {
                         spacing: theme.space3
                         Icon {
                             glyph: tabButton.modelData.glyph || ""
-                            size: theme.em * 0.9
+                            size: theme.iconSm
                             color: tabButton.current ? theme.accent : theme.dimText
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             text: tabButton.modelData.text
+                            textFormat: Text.PlainText
                             color: tabButton.current ? theme.text : theme.dimText
                             font.weight: tabButton.current ? Font.DemiBold : Font.Normal
                             anchors.verticalCenter: parent.verticalCenter
@@ -91,7 +92,7 @@ ColumnLayout {
     Item {  // underline: slides to current tab
         Layout.fillWidth: true
         implicitHeight: 2
-        Rectangle { anchors.fill: parent; color: theme.border }
+        Rectangle { anchors.fill: parent; color: theme.strokeSubtle }
         Rectangle {
             // count read: itemAt alone is never evaluated again once tab buttons are made (null at start)
             readonly property Item target: tabRepeater.count > bar.currentIndex ? tabRepeater.itemAt(bar.currentIndex) : null

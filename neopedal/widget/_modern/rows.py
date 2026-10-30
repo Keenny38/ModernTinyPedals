@@ -28,9 +28,7 @@ from typing import Any
 
 from PySide6.QtGui import QColor
 
-from ... import calculation as calc
 from ... import units
-from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...formatter import class_style as shared_class_style
 from ...formatter import shorten_driver_name
 from ...i18n import tr_overlay as tr
@@ -58,14 +56,6 @@ def class_style(config, class_name: str, theme: Theme) -> tuple[str, QColor]:
         return "", theme.surface_raised
     alias, color = shared_class_style(class_name, config.user.classes)  # same as app pages & stream graphics
     return alias, _qcolor(color)
-
-
-def laptime_text(laptime: float, valid: bool = True) -> str:
-    """Lap time, * prefix if invalid"""
-    if 0 < laptime < MAX_SECONDS:
-        text = calc.sec2laptime_full(laptime)
-        return text if valid else f"*{text}"
-    return TEXT_NOLAPTIME
 
 
 def compound_badge(name: str) -> tuple[str, QColor]:
@@ -96,7 +86,7 @@ def pit_cell(theme: Theme, in_pit: int, is_yellow: bool, is_finished: bool,
     if is_finished:
         return Cell(PILL, finish, color=readable_on(theme.positive), fill=theme.positive)  # as app pages & Director
     if in_pit == 1:
-        return Cell(PILL, pit, color=readable_on(theme.orange), fill=theme.orange)
+        return Cell(PILL, pit, color=readable_on(theme.warning), fill=theme.warning)
     if in_pit == 2:
         return Cell(PILL, garage, color=theme.text, fill=theme.surface_strong)
     if is_yellow:
@@ -179,7 +169,7 @@ class RowStyle:
         if energy <= -1:
             return Cell(TEXT, DASH, "dim", theme.text_faint)
         tone = energy_tone(energy)  # thresholds & colors of every surface
-        color = theme.negative if tone == "loss" else theme.orange if tone == "warning" else theme.positive
+        color = theme.negative if tone == "loss" else theme.warning if tone == "warning" else theme.positive
         return Cell(TEXT, self.energy_text(energy), "dim", color)
 
     def integrity_cell(self, integrity: float) -> Cell:

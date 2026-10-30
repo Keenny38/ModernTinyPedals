@@ -77,7 +77,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.4), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         track = self.track
         rounded(painter, track, self.radius(0.25), theme.surface_alt)
         center = track.center().x()

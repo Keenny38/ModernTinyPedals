@@ -31,107 +31,110 @@ def close(editor):
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-# --- Track notes editor
+# --- Track notes editor (Qt Quick page, state in quick/track_notes_backend.py)
 @pytest.fixture
-def notes_editor(dialogs, monkeypatch):
+def notes_editor(dialogs):
     from neopedal.ui import track_notes_editor
 
-    monkeypatch.setattr(track_notes_editor, "show_toast", lambda *args, **kwargs: None)
     editor = track_notes_editor.TrackNotesEditor(None)
-    yield editor
+    yield editor.backend
     close(editor)
 
 
-def notes_column(editor, column: int) -> list[str]:
-    return [editor.table_notes.item(row, column).text() for row in range(editor.table_notes.rowCount())]
+def notes_column(backend, column: str) -> list:
+    return [row[column] for row in backend.rows]
+
+
+def row_key(backend, index: int) -> int:
+    return backend.rows[index]["key"]
 
 
 def test_notes_edit_sort_tag_and_save(notes_editor, tmp_path, monkeypatch):
-    from neopedal.ui import track_notes_editor
+    from neopedal.ui.quick import track_notes_backend
     from neopedal.userfile.track_notes import HEADER_PACE_NOTES, load_notes_file
 
-    notes_editor.create_pacenotes()
-    table = notes_editor.table_notes
-    table.item(0, 0).setText("500")
-    table.item(0, 1).setText("R3")
-    notes_editor.add_notes()
-    table.item(1, 0).setText("bad")  # invalid distance reverted
-    assert float(table.item(1, 0).text()) == 0
-    table.item(1, 0).setText("120.5")
-    table.item(1, 1).setText("L2")
-    table.selectRow(1)
-    notes_editor.add_tag("#pit")
-    notes_editor.add_tag("#pit")  # added once
-    assert table.item(1, 3).text() == "#pit"
+    backend = notes_editor
+    backend.create("Pace Notes")
+    backend.setValue(row_key(backend, 0), "distance", "500")
+    backend.setValue(row_key(backend, 0), "note", "R3")
+    backend.addRow()
+    assert not backend.setValue(row_key(backend, 1), "distance", "bad")  # invalid distance refused
+    assert backend.rows[1]["distance"] == 0
+    backend.setValue(row_key(backend, 1), "distance", "120.5")
+    backend.setValue(row_key(backend, 1), "note", "L2")
+    backend.select(row_key(backend, 1), 0)
+    backend.addTag("#pit")
+    backend.addTag("#pit")  # added once
+    assert backend.rows[1]["tags"] == "#pit"
     target = tmp_path / "Spa.tppn"
-    monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
+    monkeypatch.setattr(track_notes_backend.QFileDialog, "getSaveFileName",
                         lambda *args, **kwargs: (str(target), "NeoPedal Pace Notes (*.tppn)"))
-    notes_editor.saving()  # sorted by distance before saving
-    assert notes_column(notes_editor, 1) == ["L2", "R3"]
+    assert backend.save()  # sorted by distance before saving
+    assert notes_column(backend, "note") == ["L2", "R3"]
     notes, _ = load_notes_file(f"{tmp_path.as_posix()}/", "Spa.tppn", HEADER_PACE_NOTES)
     assert [(note["distance"], note["pace note"], note["tags"]) for note in notes] == [
         (120.5, "L2", "#pit"), (500.0, "R3", "")]
-    assert not notes_editor.is_modified()
+    assert not backend.modified
 
 
 def test_notes_load_offset_and_undo(notes_editor, tmp_path, monkeypatch):
-    from neopedal.ui import track_notes_editor
+    from neopedal.ui.quick import track_notes_backend
     from neopedal.userfile.track_notes import HEADER_TRACK_NOTES, create_notes_metadata, save_notes_file
 
+    backend = notes_editor
     notes = [{"distance": 100.0, "track note": "Eau Rouge", "comment": "", "tags": ""},
              {"distance": 900.0, "track note": "Kemmel", "comment": "flat", "tags": ""}]
     save_notes_file(f"{tmp_path.as_posix()}/", "Spa.tptn", HEADER_TRACK_NOTES, notes, create_notes_metadata())
-    monkeypatch.setattr(track_notes_editor.QFileDialog, "getOpenFileName",
+    monkeypatch.setattr(track_notes_backend.QFileDialog, "getOpenFileName",
                         lambda *args, **kwargs: (str(tmp_path / "Spa.tptn"), "NeoPedal Track Notes (*.tptn)"))
-    notes_editor.load_tracknotes_file()
-    assert notes_column(notes_editor, 1) == ["Eau Rouge", "Kemmel"]
-    table = notes_editor.table_notes
-    table.clearSelection()
-    table.item(0, 0).setSelected(True)
-    table.item(1, 0).setSelected(True)
-    notes_editor.apply_batch_offset(10, False)
-    assert notes_column(notes_editor, 0) == ["110.0", "910.0"]
-    notes_editor.undo()
-    assert notes_column(notes_editor, 0) == ["100.0", "900.0"]
+    backend.openNotes("Track Notes")
+    assert notes_column(backend, "note") == ["Eau Rouge", "Kemmel"]
+    backend.selectAll()
+    backend.applyOffset(10, False)
+    assert notes_column(backend, "distance") == [110.0, 910.0]
+    backend.undo()
+    assert notes_column(backend, "distance") == [100.0, 900.0]
 
 
-def test_notes_set_position_from_telemetry(notes_editor, dialogs):
+def test_notes_set_position_from_telemetry(notes_editor):
     from neopedal.api_control import api
 
-    notes_editor.create_tracknotes()
-    table = notes_editor.table_notes
-    table.clearSelection()
-    notes_editor.set_position_from_tele()  # no distance selected
-    assert dialogs
+    backend = notes_editor
+    backend.create("Track Notes")
+    told = []
+    backend.message.connect(lambda text, error, undo: told.append(error))
+    backend.clearSelection()
+    assert not backend.setPositionFromTelemetry()  # no note selected
+    assert told == [True]
     api.read.lap.distance = lambda: 1234.5678
-    table.setCurrentCell(0, 0)
-    notes_editor.set_position_from_tele()
-    assert table.item(0, 0).text() == "1234.57"  # 2 decimals
+    backend.select(row_key(backend, 0), 0)
+    assert backend.setPositionFromTelemetry()
+    assert backend.rows[0]["distance"] == 1234.57  # 2 decimals
 
 
 def test_notes_insert_delete_and_clear_tag(notes_editor):
-    notes_editor.create_pacenotes()
-    table = notes_editor.table_notes
-    table.setCurrentCell(0, 0)
-    notes_editor.insert_notes(1)
-    notes_editor.insert_notes(0)
-    assert table.rowCount() == 3
-    table.selectRow(2)
-    notes_editor.add_tag("#pit")
-    notes_editor.clear_tag()
-    assert table.item(2, 3).text() == ""
-    notes_editor.delete_notes()
-    assert table.rowCount() == 2
+    backend = notes_editor
+    backend.create("Pace Notes")
+    backend.select(row_key(backend, 0), 0)
+    backend.insertRow(1)
+    backend.insertRow(0)
+    assert backend.rowCount == 3
+    backend.select(row_key(backend, 2), 0)
+    backend.addTag("#pit")
+    backend.clearTags()
+    assert backend.rows[2]["tags"] == ""
+    assert backend.deleteSelected() == 1
+    assert backend.rowCount == 2
 
 
 def test_notes_sort_without_errors(notes_editor):
-    notes_editor.create_pacenotes()
-    table = notes_editor.table_notes
+    backend = notes_editor
+    backend.create("Pace Notes")
     for distance in ("300", "100", "200"):
-        notes_editor.add_notes()
-        table.item(table.rowCount() - 1, 0).setText(distance)
-    notes_editor.sort_notes()
-    assert notes_column(notes_editor, 0) == ["0", "100", "200", "300"]
+        backend.addRow()
+        backend.setValue(row_key(backend, backend.rowCount - 1), "distance", distance)
+    backend.sortRows()
+    assert notes_column(backend, "distance") == [0, 100, 200, 300]
 
 
 # --- Driver stats viewer (Qt Quick page, state in quick/stats_backend.py)

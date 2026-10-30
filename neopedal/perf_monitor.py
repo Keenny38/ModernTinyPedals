@@ -67,6 +67,9 @@ class PerfMonitor:
     enabled = False
     _data: dict[tuple[str, str], list[float]] = {}  # (name, event): [calls, total, max]
     _start_time = monotonic()
+    # Records come from several threads at once (GUI events, GC callback on any thread, stall timer) while stats
+    # & reset read or replace the data: samples would be lost or counted on a dropped dict without a lock
+    _lock = threading.Lock()
 
     @classmethod
     def set_enabled(cls, enabled: bool):
@@ -80,25 +83,29 @@ class PerfMonitor:
     @classmethod
     def reset(cls):
         """Reset data"""
-        cls._data = {}
-        cls._start_time = monotonic()
+        with cls._lock:
+            cls._data = {}
+            cls._start_time = monotonic()
 
     @classmethod
     def record(cls, name: str, event: str, seconds: float):
-        """Record event time"""
-        data = cls._data.get((name, event))
-        if data is None:
-            cls._data[(name, event)] = [1, seconds, seconds]
-        else:
-            data[0] += 1
-            data[1] += seconds
-            if seconds > data[2]:
-                data[2] = seconds
+        """Record event time (any thread)"""
+        with cls._lock:
+            data = cls._data.get((name, event))
+            if data is None:
+                cls._data[(name, event)] = [1, seconds, seconds]
+            else:
+                data[0] += 1
+                data[1] += seconds
+                if seconds > data[2]:
+                    data[2] = seconds
 
     @classmethod
     def stats(cls) -> list[PerfStats]:
         """Get stats, sorted by total time (most expensive first)"""
-        duration = max(monotonic() - cls._start_time, 0.001)
+        with cls._lock:
+            duration = max(monotonic() - cls._start_time, 0.001)
+            rows = [(key, tuple(values)) for key, values in cls._data.items()]
         output = [
             PerfStats(
                 name=name,
@@ -109,7 +116,7 @@ class PerfMonitor:
                 maximum=peak * 1000,
                 total=total * 1000,
             )
-            for (name, event), (calls, total, peak) in list(cls._data.items())
+            for (name, event), (calls, total, peak) in rows
         ]
         output.sort(key=lambda item: item.total, reverse=True)
         return output
@@ -202,13 +209,23 @@ def _owner_name(widget) -> str:
     return name
 
 
-def timed_event(func: Callable, event: str) -> Callable:
-    """Wrap widget event method (self, event) to record time while monitor is enabled"""
+def timed_event(func: Callable, event: str, after: Callable[[Any], None] | None = None) -> Callable:
+    """Wrap widget event method (self, event) to record time while monitor is enabled
+
+    Args:
+        after: called with the widget after every call, monitor enabled or not (ex. overlay paint serial count,
+            see widget._base.count_paint), in the same wrapper: no second wrapper on the hot path.
+    """
 
     @wraps(func)
     def wrapper(self, qt_event):
         if not PerfMonitor.enabled:
-            return func(self, qt_event)
+            if after is None:
+                return func(self, qt_event)
+            try:
+                return func(self, qt_event)
+            finally:
+                after(self)
         start = perf_counter()
         try:
             return func(self, qt_event)
@@ -221,6 +238,8 @@ def timed_event(func: Callable, event: str) -> Callable:
                 with suppress(AttributeError):  # slots class: looked up every time
                     self._perf_owner = name
             PerfMonitor.record(name, event, elapsed)
+            if after is not None:
+                after(self)
 
     wrapper.timed = True  # type: ignore[attr-defined]
     return wrapper

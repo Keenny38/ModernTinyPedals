@@ -169,7 +169,7 @@ def test_qml_page(ui_env):
         for _ in range(20):
             QCoreApplication.processEvents()
         texts = item_texts(page.view)
-        assert "Changed only" in texts and "Application" in texts and "Snap Gap" in page.backend.model.rows[0]["label"].replace(
+        assert "Changed Only" in texts and "Application" in texts and "Snap Gap" in page.backend.model.rows[0]["label"].replace(
             "<b>", "").replace("</b>", "")
     finally:
         page.close()

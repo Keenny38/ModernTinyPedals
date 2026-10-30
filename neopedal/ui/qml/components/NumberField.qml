@@ -76,7 +76,7 @@ TextField {
     leftPadding: theme.em * 0.5
     color: theme.text
     selectionColor: theme.accentFill
-    selectedTextColor: "white"
+    selectedTextColor: theme.accentInk
     selectByMouse: true
     font.features: { "tnum": 1 }
     inputMethodHints: Qt.ImhFormattedNumbersOnly
@@ -85,17 +85,17 @@ TextField {
     Accessible.description: rangeText
 
     // Out of range value put back in range: border in warning color & range shown for a moment
-    Timer { id: clampFlash; interval: 2500 }
+    Timer { id: clampFlash; interval: theme.flashDuration }
     ToolTip.visible: (tip !== "" && hovered && !activeFocus) || (clampFlash.running && rangeText !== "")
     ToolTip.text: rangeText !== "" ? (tip !== "" ? tip + "\n" + rangeText : rangeText) : tip
     ToolTip.delay: clampFlash.running ? 0 : theme.tipDelay
 
     background: Rectangle {
-        radius: theme.radiusMd
-        color: theme.dark ? Qt.darker(theme.base, 1.3) : Qt.darker(theme.base, 1.03)
+        radius: theme.radiusSm
+        color: theme.surfaceSunken
         border.width: field.activeFocus || clampFlash.running ? 1.5 : 1
         border.color: clampFlash.running ? theme.warning
-                    : field.activeFocus ? theme.accent : field.hovered ? Qt.lighter(theme.border, 1.2) : theme.border
+                    : field.activeFocus ? theme.accent : field.hovered ? theme.strokeStrong : theme.border
         Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
     }
 
@@ -103,6 +103,7 @@ TextField {
         id: unitText
         visible: field.suffix !== ""
         text: field.suffix
+        textFormat: Text.PlainText
         color: theme.dimText
         font.pointSize: theme.fontLabel
         anchors.right: parent.right

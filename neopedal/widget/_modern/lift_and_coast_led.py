@@ -21,7 +21,7 @@ Lift and coast LED Widget, modern design
 
 Capsule LEDs filling with lift & coast progress (purple, brighter when critical); all lit by
 wheel lock (red), ABS (blue), wheel slip (yellow) or TC (orange). Horizontal or vertical,
-optionally mirrored on two sides.
+optionally doubled side by side (second set mirrored when horizontal).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class Realtime(ModernOverlay):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
         theme = self.theme
-        self.count = max(int(wcfg["number_of_led"]), 1)
+        self.count = max(int(wcfg["number_of_led"]), 3)
         led_w = max(float(wcfg["led_width"]), 1.0)
         led_h = max(float(wcfg["led_height"]), 1.0)
         gap = max(float(wcfg["inner_gap"]), 0.0)
@@ -77,19 +77,20 @@ class Realtime(ModernOverlay):
         side_gap = max(float(wcfg["double_side_led_gap"]), 0.0)
         self.leds: list[QRectF] = []
         for side in range(sides):
-            offset = side * (length + side_gap)
-            side_reverse = reverse != bool(side)  # second side mirrored
+            # Second side on the right (horizontal gap), mirrored only when horizontal, as classic design
+            side_reverse = reverse != (bool(side) and not vertical)
             for index in range(self.count):
                 position = self.count - 1 - index if side_reverse else index
                 if vertical:
-                    self.leds.append(QRectF(pad, pad + offset + position * step_h, led_w, led_h))
+                    x = pad + side * (led_w + side_gap)
+                    self.leds.append(QRectF(x, pad + position * step_h, led_w, led_h))
                 else:
-                    self.leds.append(QRectF(pad + offset + position * step_w, pad, led_w, led_h))
-        total = length * sides + side_gap * (sides - 1)
+                    x = pad + side * (length + side_gap) + position * step_w
+                    self.leds.append(QRectF(x, pad, led_w, led_h))
         if vertical:
-            self.set_size(led_w + pad * 2, total + pad * 2)
+            self.set_size(led_w * sides + side_gap * (sides - 1) + pad * 2, length + pad * 2)
         else:
-            self.set_size(total + pad * 2, led_h + pad * 2)
+            self.set_size(length * sides + side_gap * (sides - 1) + pad * 2, led_h + pad * 2)
         self.colors = (
             theme.tint(theme.surface_raised, 230), theme.best, QColor(theme.best).lighter(135),
             theme.negative, theme.blue, theme.caution, theme.warning,
@@ -99,7 +100,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         if self.wcfg["show_background"]:
-            panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+            panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         for rect in self.leds:
             rounded(painter, rect, min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0), self.colors[OFF])
 

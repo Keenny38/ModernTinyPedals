@@ -107,6 +107,7 @@ def test_sections_of_every_overlay_hold_every_shown_option_once(ui_env):
             layout = build_layout(name, cfg.user.setting[name])
             shown = design_option_keys(cfg, name, list(cfg.user.setting[name]))
             hidden = layout.option_ui.hidden if layout.option_ui is not None else ()  # held by page tools
+            hidden = (*hidden, "enable")  # header switch (on / off at once), never a row
             assert sorted(layout.keys) == sorted(key for key in shown if key not in hidden), name
             assert all(section.keys for section in layout.sections), name
             for key, control in layout.dependencies.items():  # options depend on an on/off option of the overlay
@@ -447,7 +448,7 @@ def test_driver_list_sections_and_column_list(options):
     layout = build_layout("standings", cfg.user.setting["standings"])
     titles = [section.title for section in layout.sections]
     assert titles[:5] == ["General", "Position & Layout", "Rows", "Classes & Number of Cars", "Columns"]
-    assert titles[5:7] == ["Position Change", "Driver Name"] and "Options" not in titles
+    assert titles[5:8] == ["Class", "Position Change", "Driver Name"] and "Options" not in titles
     columns = layout.section_of["column_time_gap"]
     assert columns.key == SECTION_ORDER and "display_order_time_gap" in columns.keys
     assert layout.dependencies["brand_logo_width"] == "column_brand_logo"
@@ -515,7 +516,9 @@ def test_driver_list_preview_shows_sample_race(ui_env, bundled_fonts):
     assert split.count(-1) == 3 and PLAYER in split  # three classes, space after each
     setting["enable_multi_class_split_mode"] = False
     combined = sample_standings(field, setting)
-    assert combined[-1] == -1 and -1 not in combined[:-1] and PLAYER in combined
+    # One list: a space only where places are left out (top places, then the places around the player)
+    assert combined[-1] == -1 and combined[:-1].count(-1) == 1 and PLAYER in combined
+    assert combined[:3] == [0, 1, 2] and combined[3] == -1 and combined[4] > 3
     setting["enable_single_class_exclusive_mode"] = True
     exclusive = sample_standings(field, setting)
     assert {FIELD[index][3] for index in exclusive if index >= 0} == {FIELD[PLAYER][3]}

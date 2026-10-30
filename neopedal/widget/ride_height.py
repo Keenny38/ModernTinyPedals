@@ -129,7 +129,8 @@ class Realtime(Overlay):
     # GUI update methods
     def update_rideh(self, target, data):
         """Ride height"""
-        if target.last != data:
+        below_bottoming = data < target.offset
+        if target.changed(data, below_bottoming):
             target.last = data
-            target.bg_color = self.rideh_color[data < target.offset]
+            target.bg_color = self.rideh_color[below_bottoming]
             target.update_input(data)

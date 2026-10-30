@@ -23,6 +23,7 @@ allocation from game, undo & redo of inputs & tyre plan
 
 from __future__ import annotations
 
+import html
 import os
 from typing import Any
 
@@ -159,19 +160,23 @@ class TyreTab(RaceBase):
         self.tyres.insert_row(row + 1, copy_from=row)
         self.tyre_plan_changed()
 
+    # Every change of the tyre plan is in the undo history: done at once, Undo in the toast & Ctrl+Z (never a
+    # confirmation as well)
     @Slot(int)
     def deleteRow(self, row: int):
-        if self.host.confirm(tr("<b>Delete selected row?</b>")):
+        if 0 <= row < len(self.tyres.rows):
             self.tyres.delete_rows([row])
             self.tyre_plan_changed()
+            self.toast_undo(tr("Row deleted"))
 
     @Slot()
     def proposeChanges(self):
         """New tyres where the strategy proposes them (minimum tread), within tyres allowed"""
-        if self.tyres.has_tyres() and not self.host.confirm(tr("<b>Replace tyre plan with proposed changes?</b>")):
-            return
+        replaced = self.tyres.has_tyres()
         self.tyres.propose()
         self.tyre_plan_changed()
+        if replaced:  # former plan given back by Undo
+            self.toast_undo(tr("Tyre plan replaced with proposed changes"))
 
     @Slot()
     def addTyre(self):
@@ -180,18 +185,19 @@ class TyreTab(RaceBase):
 
     @Slot(str)
     def removeTyre(self, name: str):
-        """Tyre taken out of stock (and off the plan) after confirmation"""
-        if self.host.confirm("<b>Remove selected tyre from list?</b><br><br>"  # translated by message rules
-                             "Corresponding tyre will be removed from table."):
+        """Tyre taken out of stock (and off the plan)"""
+        if name in self.tyres.stock:
             self.tyres.remove_tyres([name])
             self.tyre_plan_changed()
+            self.toast_undo(tr("%1 removed from stock").replace("%1", f"<b>{html.escape(name)}</b>"))
 
     @Slot()
     def clearTyres(self):
-        if self.tyres.stock and self.host.confirm("<b>Remove all tyres from list?</b><br><br>"  # message rules
-                                                  "All allocated tyres will be removed from table."):
+        """Every tyre taken out of stock (and off the plan)"""
+        if self.tyres.stock:
             self.tyres.remove_tyres(list(self.tyres.stock))
             self.tyre_plan_changed()
+            self.toast_undo(tr("All tyres removed from stock"))
 
     @Slot()
     def removeUnusedTyres(self):
@@ -204,7 +210,11 @@ class TyreTab(RaceBase):
             self.host.toast(tr("No unused tyre in stock"))
 
     def toast_undo(self, text: str):
-        """Change done without confirmation: toast with an Undo button (host without one: plain toast)"""
+        """Change done without confirmation: recorded at once as one undo step (a change not marked modified too),
+        toast with an Undo button (host without one: plain toast)"""
+        record_change = getattr(self.host, "record_change", None)
+        if callable(record_change):
+            record_change()
         toast_undo = getattr(self.host, "toast_undo", None)
         if callable(toast_undo):
             toast_undo(text)
@@ -218,10 +228,12 @@ class TyreTab(RaceBase):
 
     @Slot()
     def newTyrePlan(self):
-        if self.tyres.has_tyres() and not self.host.confirm(tr("<b>Start a new tyre plan?</b>")):
-            return
+        """Empty tyre plan, former one given back by Undo"""
+        replaced = self.tyres.has_tyres()
         self.tyres.new_plan()
         self.tyre_plan_changed(user_edit=False)
+        if replaced:
+            self.toast_undo(tr("New tyre plan started"))
 
     @Slot()
     def openTyrePlan(self):
@@ -268,7 +280,7 @@ class TyreTab(RaceBase):
         self.tyres.name = os.path.splitext(filename)[0]
         self.tyresChanged.emit()
         self.host.set_unmodified()
-        self.host.toast(trm(f"Tyre strategy file saved at:<br><b>{filename_full}</b>"))
+        self.host.toast_file(trm(f"Tyre strategy file saved at:<br><b>{filename_full}</b>"), filename_full)
 
     @Slot()
     def exportTyrePlanCsv(self):
@@ -307,7 +319,7 @@ class TyreTab(RaceBase):
             self.host.warn(trm(f"Unable to export: {error}"))
             return
         save_tyre_strategy_file_path(filepath)
-        self.host.toast(trm(f"Tyre strategy file exported at:<br><b>{filename_full}</b>"))
+        self.host.toast_file(trm(f"Tyre strategy file exported at:<br><b>{filename_full}</b>"), filename_full)
 
     @Slot()
     def configureCompound(self):

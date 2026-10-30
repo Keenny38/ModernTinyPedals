@@ -133,6 +133,7 @@ def test_http_request_without_network(monkeypatch):
         raise OSError("refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", refused)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", refused)  # opener of http_request (redirects)
     assert raceos.http_request("POST", raceos.AUTH_URL, b"{}", {}, 1) == (0, b"")
 
 

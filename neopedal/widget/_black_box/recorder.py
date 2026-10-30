@@ -372,7 +372,7 @@ def export_incident(incident: Incident, folder: str, export_format: str = "JSON"
                 writer.writerows(rows)
         return filepath
     except (OSError, ValueError) as error:
-        logger.warning("DASHBOARD HUD: unable to save incident: %s", error)
+        logger.warning("BLACK BOX: unable to save incident: %s", error)
         return ""
 
 
@@ -409,7 +409,7 @@ def open_folder(folder: str) -> bool:
             os.startfile(folder)  # pylint: disable=no-member
             return True
     except OSError as error:
-        logger.warning("DASHBOARD HUD: unable to open incident folder: %s", error)
+        logger.warning("BLACK BOX: unable to open incident folder: %s", error)
         return False
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices

@@ -37,6 +37,9 @@ from ._base import Overlay
 if TYPE_CHECKING:
     from ..template.widget_config_types import SectorsConfig
 
+# Running time formatted uncached: new value every update, would evict lap times of tables from cache
+running_laptime = calc.sec2laptime.__wrapped__
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -132,13 +135,15 @@ class Realtime(Overlay):
         self.freeze_timer_start = 0.0  # sector timer start
         self.sector_start = 0.0  # game time when sector index changed
         self.sector_shown = True  # time of sector just finished shown (or not given by game)
+        self.sector_late = False  # time of sector just finished not set within freeze duration, still awaited
 
     def post_update(self):
-        self.last_sector_idx = -1
+        self.last_sector_idx = -1  # resumed: synced again, sector just finished long ago never shown
         self.last_target_time = MAX_SECONDS
         self.freeze_timer_start = 0
         self.sector_start = 0.0
         self.sector_shown = True
+        self.sector_late = False
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -152,16 +157,24 @@ class Realtime(Overlay):
         else:
             data = minfo.sectors.sessionBest
         if data.sectorIndex < 0:  # sector data reset, sector not known yet
+            self.last_sector_idx = -1  # synced again once known
             return
 
         theoretical = self.wcfg["target_laptime"] == "Theoretical"
         sector_best = data.sectorBestTB if theoretical else data.sectorBestPB
 
-        # Triggered when sector changed (time of sector just finished may be set by game a bit later)
-        if self.last_sector_idx != data.sectorIndex:
+        if self.last_sector_idx < 0:
+            # Started, resumed or data reset: target & best sectors of current data, no sector just finished
+            self.last_sector_idx = data.sectorIndex
+            self.sector_shown = True
+            self.last_target_time = calc.accumulated_sum(sector_best, data.sectorIndex)
+            self.end_freeze(0, sector_best)
+        elif self.last_sector_idx != data.sectorIndex:
+            # Sector changed (time of sector just finished may be set by game a bit later)
             self.last_sector_idx = data.sectorIndex
             self.sector_start = lap_etime
             self.sector_shown = False
+            self.sector_late = False
             self.freeze_timer_start = 0
 
         if not self.sector_shown:
@@ -188,9 +201,11 @@ class Realtime(Overlay):
                     if sum_sectortime < MAX_SECONDS:  # bypass invalid value
                         laptime_curr = sum_sectortime
                 self.update_time_curr(self.bar_time_curr, laptime_curr, prev_s_idx)
-            elif lap_etime - self.sector_start >= self.freeze_duration(data.sectorPrev[data.sectorIndex]):
-                # No sector time from game (lap without valid time): no gap shown, best sectors back at line
-                self.sector_shown = True
+            elif not self.sector_late and lap_etime - self.sector_start >= self.freeze_duration(
+                    data.sectorPrev[data.sectorIndex]):
+                # No sector time from game yet (lap without valid time, or set late): best sectors back at line,
+                # gap still shown if game sets it before next sector (as module waits for it)
+                self.sector_late = True
                 self.last_target_time = calc.accumulated_sum(sector_best, data.sectorIndex)
                 self.end_freeze(data.sectorIndex, sector_best)
 
@@ -216,7 +231,7 @@ class Realtime(Overlay):
         """Gap to best sector time"""
         if target.last != data:
             target.last = data
-            target.text = f"{data:+.3f}"[:7 + self.extra_width]
+            target.text = f"{data:+z.3f}"[:7 + self.extra_width]
             target.fg, target.bg = self.bar_style_gap[data < 0]
             target.update()
 
@@ -224,7 +239,7 @@ class Realtime(Overlay):
         """Current sector time text"""
         if target.last != data:
             target.last = data
-            target.text = f"{SECTOR_ABBR_ID[prev_s_idx]}{calc.sec2laptime(data)[:8 + self.extra_width]:>{9 + self.extra_width}}"
+            target.text = f"{SECTOR_ABBR_ID[prev_s_idx]}{running_laptime(data)[:8 + self.extra_width]:>{9 + self.extra_width}}"
             target.update()
 
     def update_time_target(self, target, seconds):

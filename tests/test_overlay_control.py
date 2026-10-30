@@ -189,6 +189,49 @@ def test_class_preset_auto_loaded_without_track_preset(overlay, monkeypatch):
     assert calls.count(("reload", False)) == 1
 
 
+def test_class_session_preset_auto_loaded(overlay, monkeypatch):
+    """Class preset of the session first (before track & class presets), loaded again when the session changes
+    while driving (practice to qualifying), class preset in a session without its own preset"""
+    from neopedal.setting import cfg
+
+    control, game, calls = overlay
+    cfg.application["enable_auto_load_preset"] = True
+    for name in ("gt3 practice", "gt3 race", "spa", "gt3"):
+        open(f"{cfg.path.settings}{name}.json", "w", encoding="utf-8").close()
+    monkeypatch.setitem(cfg.user.tracks, "Spa", {"preset": "spa"})
+    monkeypatch.setitem(cfg.user.classes, "GT3", {
+        "preset": "gt3", "preset_practice": "gt3 practice", "preset_qualify": "", "preset_race": "gt3 race"})
+    monkeypatch.setattr(cfg, "_setting_to_load", "")
+    monkeypatch.setattr(cfg.filename, "setting", "default.json")
+    game["session_type"] = 1  # practice
+    run_loop(control)
+    assert cfg._setting_to_load == "gt3 practice.json" and calls.count(("reload", False)) == 1
+    monkeypatch.setattr(cfg.filename, "setting", "gt3 practice.json")
+    run_loop(control, runs=2)  # same session: not checked again
+    assert calls.count(("reload", False)) == 1
+    game["session_type"] = 2  # qualifying, no preset of its own: track preset
+    run_loop(control)
+    assert cfg._setting_to_load == "spa.json" and calls.count(("reload", False)) == 2
+    monkeypatch.setattr(cfg.filename, "setting", "spa.json")
+    monkeypatch.setitem(cfg.user.tracks, "Spa", {"preset": ""})
+    game["session_type"] = 0  # test day counts as practice
+    run_loop(control)
+    assert cfg._setting_to_load == "gt3 practice.json" and calls.count(("reload", False)) == 3
+    monkeypatch.setattr(cfg.filename, "setting", "gt3 practice.json")
+    game["session_type"] = 2  # class preset, every session
+    run_loop(control)
+    assert cfg._setting_to_load == "gt3.json"
+    monkeypatch.setattr(cfg.filename, "setting", "gt3.json")
+    game["session_type"] = 3  # warmup counts as race
+    run_loop(control)
+    assert cfg._setting_to_load == "gt3 race.json" and calls.count(("reload", False)) == 5
+    # Auto load off: nothing on session change
+    cfg.application["enable_auto_load_preset"] = False
+    game["session_type"] = 1
+    run_loop(control)
+    assert calls.count(("reload", False)) == 5
+
+
 def test_missing_preset_not_loaded(overlay, monkeypatch):
     from neopedal.setting import cfg
 

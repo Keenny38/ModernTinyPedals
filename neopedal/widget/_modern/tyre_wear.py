@@ -55,7 +55,7 @@ class Realtime(QuadMixin, ModernOverlay):
     wcfg: TyreWearConfig
 
     options = (
-        "font_size", "layout", "warning_threshold_remaining", "warning_threshold_wear", "warning_threshold_laps",
+        "font_size", "layout", "show_caption", "warning_threshold_remaining", "warning_threshold_wear", "warning_threshold_laps",
         "warning_threshold_minutes", *(f"show_{key}" for key, _, _ in SECTIONS),
         *display_order_options("tyre_wear"),
     )

@@ -87,8 +87,8 @@ def test_standings_index_is_empty_when_the_player_class_is_absent():
 def test_standings_index_respects_the_vehicle_limit():
     class_list = [entry("GT3", place, place) for place in range(1, 21)]
     result = calc_standings_index(3, 6, 12, class_list)
-    assert len(result) == 7  # six vehicles plus the gap marker
-    assert result[-1] == -1
+    # Six vehicles: top places, then (apart) the places around the player, then the gap marker
+    assert result == [1, 2, 3, -1, 11, 12, 13, -1]
 
 
 # --- Class splitting and ordering
@@ -260,7 +260,8 @@ def test_other_class_count_not_raised_by_minimum_top(others, shown):
     classes = [entry("GT3", 3, 0, best=101.0), entry("GT3", 4, 1, best=101.0),
                entry("HY", 1, 2, best=95.0), entry("HY", 2, 3, best=95.0)]
     lists = list(standings_index_from_all_classes(3, classes, "GT3", 1, other_class_vehicles(others), 5))
-    assert lists == [[*shown, -1], [0, 1, -1]]  # player class keeps its own limits
+    other_class = [[*shown, -1]] if shown else []  # class hidden: no empty group
+    assert lists == [*other_class, [0, 1, -1]]  # player class keeps its own limits
     assert other_class_vehicles(-2) == 0
 
 

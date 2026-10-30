@@ -50,7 +50,8 @@ Item {
             text: i18n.tr("Grip envelope")
             tip: i18n.tr("Outline of grip used in every direction by each lap (dots faded)")
             checked: backend.gEnvelope
-            onToggled: backend.setGEnvelope(checked)
+            checkable: false  // follows the backend (never unbound by a click)
+            onClicked: backend.setGEnvelope(!backend.gEnvelope)
         }
         LapFilter { id: lapFilter; Layout.fillWidth: true; visible: circle.hasData && !lapFilter.single }
 
@@ -89,7 +90,7 @@ Item {
                 compact: true
                 loading: !circle.hasData && backend.loading
                 empty: !circle.hasData && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE9D2"  // chart
                 title: lapFilter.legend.length === 0 ?i18n.tr("Select recorded laps to compare.") : i18n.tr("No acceleration recorded")
             }
@@ -109,19 +110,20 @@ Item {
                         radius: ringRadius
                         color: "transparent"
                         border.width: 1
-                        border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, index === 0 ? 0.22 : 0.1)
+                        border.color: theme.tint(theme.text, index === 0 ? "selected" : "subtle")
                         Text {
                             x: parent.width / 2 + 3
                             y: 1
                             text: (index + 1) + "G"
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontCaption
                         }
                     }
                 }
                 readonly property real reach: circle.limit * circle.gScale  // outer ring radius on screen
-                Rectangle { x: circle.originX - parent.reach; y: circle.originY; width: parent.reach * 2; height: 1; color: theme.text; opacity: 0.1 }
-                Rectangle { x: circle.originX; y: circle.originY - parent.reach; width: 1; height: parent.reach * 2; color: theme.text; opacity: 0.1 }
+                Rectangle { x: circle.originX - parent.reach; y: circle.originY; width: parent.reach * 2; height: 1; color: theme.chartAxis }
+                Rectangle { x: circle.originX; y: circle.originY - parent.reach; width: 1; height: parent.reach * 2; color: theme.chartAxis }
                 Text { text: i18n.tr("Braking"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - width / 2; y: circle.originY + parent.reach + 2 }
                 Text { text: i18n.tr("Acceleration"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - width / 2; y: circle.originY - parent.reach - height - 2 }
                 Text { text: i18n.tr("Left"); color: theme.dimText; font.pointSize: theme.fontCaption; x: circle.originX - parent.reach + 3; y: circle.originY + 2 }
@@ -139,8 +141,7 @@ Item {
                             GpuShape {
                                 key: modelData.key
                                 visible: lapFilter.shown(modelData.lap)
-                                color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b,
-                                               circle.chartZoomed || backend.gEnvelope ? 0.12 : 0.4)
+                                color: theme.tint(modelData.color, circle.chartZoomed || backend.gEnvelope ? "subtle" : "outline")
                                 opacity: circle.lapOpacity(modelData.lap)
                                 revision: backend.revision
                             }

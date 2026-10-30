@@ -21,41 +21,61 @@ Track notes Widget
 """
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..api_control import api
 from ..const_common import EMPTY_DICT, TEXT_NOTAVAILABLE
-from ..module_info import minfo
+from ..i18n import tr_overlay
+from ..module_info import NotesInfo, minfo
 from ..userfile.track_notes import COLUMN_COMMENT, COLUMN_DISTANCE, COLUMN_TRACKNOTE
 from ._base import Overlay
 
 if TYPE_CHECKING:
-    from ..template.widget_config_types import TrackNotesConfig
+    from ..template.widget_config_types import PaceNotesConfig, TrackNotesConfig
 
 
 class TrackNotesMixin:
-    """Current track note & auto hide, for classic & modern widget"""
+    """Current note & auto hide, for classic & modern widgets of track notes (and pace notes: see NOTE_COLUMN &
+    notes_data)"""
 
-    wcfg: "TrackNotesConfig"
+    NOTE_COLUMN = COLUMN_TRACKNOTE  # column of note text
+
+    wcfg: "TrackNotesConfig | PaceNotesConfig"
+    cfg: Any
+    widget_name: str
+
+    def notes_data(self) -> NotesInfo:
+        """Notes of module"""
+        return minfo.tracknotes
 
     def setup_notes(self):
-        """Last note & auto hide state"""
+        """Last note & auto hide state, texts without note"""
         self.last_notes_index = None
         self.notes_hidden = False
         self.last_etime = 0.0
+        self.pit_note_text = self.option_text(self.wcfg["pit_notes_text"], "pit_notes_text")
+        self.pit_comment_text = self.option_text(self.wcfg["pit_comments_text"], "pit_comments_text")
+        self.no_note_text = tr_overlay(TEXT_NOTAVAILABLE)
+
+    def option_text(self, text: str, key: str) -> str:
+        """Text option, translated while at default value"""
+        if text and text == self.cfg.default.setting.get(self.widget_name, {}).get(key):
+            return tr_overlay(text)
+        return text
 
     def read_notes(self) -> tuple[Mapping, Mapping, bool]:
         """Current & next note (empty if not available), whether in pits; sets notes_hidden"""
         in_pits = api.read.vehicle.in_pits()
+        notes = self.notes_data()
 
         if not in_pits:  # out pit
-            notes_current = minfo.tracknotes.out.currentNote
-            notes_next = minfo.tracknotes.out.nextNote
-            notes_index = minfo.tracknotes.out.currentIndex if notes_current else None
-        elif self.wcfg["show_pit_notes_while_in_pit"]:
-            notes_current = minfo.tracknotes.pit.currentNote
-            notes_next = minfo.tracknotes.pit.nextNote
-            notes_index = minfo.tracknotes.pit.currentIndex
+            notes_current = notes.out.currentNote
+            notes_next = notes.out.nextNote
+            notes_index = notes.out.currentIndex if notes_current else None
+        elif self.wcfg["show_pit_notes_while_in_pit"]:  # no pit note: auto hidden, or pit notes text
+            notes_current = notes.pit.currentNote
+            notes_next = notes.pit.nextNote
+            notes_index = notes.pit.currentIndex if notes_current else None
         else:  # not available
             notes_current = EMPTY_DICT
             notes_next = EMPTY_DICT
@@ -80,16 +100,12 @@ class TrackNotesMixin:
         return notes_current, notes_next, in_pits
 
     def note_text(self, notes_current: Mapping, in_pits: bool) -> str:
-        """Track note text"""
-        if in_pits:
-            return notes_current.get(COLUMN_TRACKNOTE, self.wcfg["pit_notes_text"])
-        return notes_current.get(COLUMN_TRACKNOTE, TEXT_NOTAVAILABLE)
+        """Note text"""
+        return notes_current.get(self.NOTE_COLUMN, self.pit_note_text if in_pits else self.no_note_text)
 
     def comment_text(self, notes_current: Mapping, in_pits: bool) -> str:
         """Comment text (line breaks written as \\n)"""
-        if in_pits:
-            return notes_current.get(COLUMN_COMMENT, self.wcfg["pit_comments_text"])
-        return notes_current.get(COLUMN_COMMENT, TEXT_NOTAVAILABLE)
+        return notes_current.get(COLUMN_COMMENT, self.pit_comment_text if in_pits else self.no_note_text)
 
 
 class Realtime(TrackNotesMixin, Overlay):
@@ -131,7 +147,7 @@ class Realtime(TrackNotesMixin, Overlay):
         # Track notes
         if self.wcfg["show_track_notes"]:
             self.bar_notes = self.set_rawtext(
-                text="TRACK NOTES",
+                text=tr_overlay("TRACK NOTES"),
                 width=font_m.width * notes_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
@@ -148,7 +164,7 @@ class Realtime(TrackNotesMixin, Overlay):
         if self.wcfg["show_comments"]:
             self.base_height = font_m.height
             self.bar_comments = self.set_rawtext(
-                text="COMMENTS",
+                text=tr_overlay("COMMENTS"),
                 width=font_m.width * comments_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
@@ -164,7 +180,7 @@ class Realtime(TrackNotesMixin, Overlay):
         # Debugging info
         if self.wcfg["show_debugging"]:
             self.bar_debugging = self.set_rawtext(
-                text="DEBUGGING",
+                text=tr_overlay("DEBUGGING"),
                 width=font_m.width * debugging_width + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,

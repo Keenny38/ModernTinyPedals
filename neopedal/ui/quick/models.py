@@ -124,8 +124,8 @@ class DictListModel(QAbstractListModel):
         (following removed or inserted rows together), True if anything changed
 
         Delegates of rows kept stay in place (a reset would create every delegate again), views keep scroll position.
-        Reset instead when many rows moved (see too_many_moves), or with reset_if_mostly_new when less than half
-        of the rows are kept (other overlay, search...).
+        Reset instead when no row is kept, when many rows moved (see too_many_moves), or with reset_if_mostly_new
+        when less than half of the rows are kept (other overlay, search...).
         """
         old = self.rows
         wanted: dict = {}  # key: position in rows (first row of a key, a key listed again is a new row)
@@ -139,7 +139,9 @@ class DictListModel(QAbstractListModel):
         kept_keys = list(kept)  # current order
         stay = {kept_keys[number] for number in longest_increasing([wanted[value] for value in kept_keys])}
         moves = len(kept_keys) - len(stay)
-        if old and (too_many_moves(moves, len(rows))
+        # No row kept (other track, list emptied): reset, no remove & add transitions running together (old rows
+        # fading out under new ones, left drawn over them by ListView with reused delegates)
+        if old and (not kept or too_many_moves(moves, len(rows))
                     or (reset_if_mostly_new and len(kept) * 2 < max(len(rows), len(old)))):
             self.reset([dict(row) for row in rows])
             return True

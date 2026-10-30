@@ -52,7 +52,8 @@ def test_one_session_color_and_live_color():
     assert zone_matches(r"function sessionColor") == []
     badge = zone_files()["ResultsBadge.qml"]
     assert "theme.sessionColor(" in badge
-    assert "theme.sessionColor(" in zone_files()["DriverStats.qml"]
+    # Stats session badge: the Results & Replays one (letter & session color)
+    assert "ResultsBadge {" in zone_files()["StatsRecentCard.qml"] and "ResultsBadge {" in zone_files()["StatsProgressionCard.qml"]
     # Live: theme.live everywhere (never gain or loss)
     assert zone_matches(r"i18n\.tr\(\"Live\"\).*color: theme\.(gain|loss)") == []
     replay = zone_files()["ReplayView.qml"]
@@ -62,7 +63,8 @@ def test_one_session_color_and_live_color():
 def test_color_never_alone():
     files = zone_files()
     assert "font.strikeout: invalidValue" in files["RaceHistory.qml"]  # invalid laps struck through
-    assert '"◆"' in files["ResultsLaps.qml"] and '"●"' in files["ResultsLaps.qml"]  # session & own bests
+    # Session & own bests: shared record mark (TpLapTime ◆ / ●)
+    assert 'record: tone === "purple" ? "session" : tone === "gain" ? "personal"' in files["ResultsLaps.qml"]
     assert 'tyreMark: "◆"' in files["RaceTimeline.qml"]  # tyre changes
     assert "font.italic: !stintRow.usable" in files["RaceTeamTab.qml"]
 

@@ -32,7 +32,7 @@ Rectangle {
     radius: height / 2
     color: struck ? "transparent" : theme.tint(lapColor, selected ? "strong" : hovered ? "selected" : "subtle")
     border.width: selected || outlined ? 1.5 : 1
-    border.color: struck ? theme.border : selected || outlined ? lapColor : theme.tint(lapColor, 0.45)
+    border.color: struck ? theme.border : selected || outlined ? lapColor : theme.tint(lapColor, "outline")
     Behavior on color { ColorAnimation { duration: theme.motionFast } }
 
     activeFocusOnTab: true
@@ -81,6 +81,7 @@ Rectangle {
         Text {
             visible: chip.mark !== ""
             text: chip.mark
+            textFormat: Text.PlainText
             color: theme.text
             font.pointSize: theme.fontCaption
             font.weight: Font.Bold
@@ -94,6 +95,7 @@ Rectangle {
         }
         Text {
             text: chip.label
+            textFormat: Text.PlainText
             color: chip.struck || chip.excluded || chip.dimmed ? theme.dimOn(chip.color) : theme.text
             font.pointSize: chip.size === "sm" ? theme.fontCaption : theme.fontLabel
             font.italic: chip.excluded
@@ -103,6 +105,7 @@ Rectangle {
         Text {
             visible: chip.badge !== ""
             text: chip.badge
+            textFormat: Text.PlainText
             color: chip.dimmed ? theme.dimOn(chip.color) : chip.lapColor
             font.pointSize: theme.fontCaption
             font.weight: Font.Bold
@@ -111,6 +114,7 @@ Rectangle {
         Text {
             visible: chip.detail !== ""
             text: chip.detail
+            textFormat: Text.PlainText
             color: theme.dimOn(chip.color)
             font.pointSize: theme.fontCaption
             font.features: { "tnum": 1 }

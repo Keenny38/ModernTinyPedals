@@ -39,6 +39,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "relative": {
         "column_position": True,
         "column_class": True,
+        "show_class_name": True,  # class column: class name, then position in class (else position on class color)
         "column_position_change": False,
         "column_driver_name": True,
         "column_vehicle_name": False,
@@ -65,8 +66,9 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_gap_trend": True,
         "display_order_gap_trend": 23,  # column of modern design only (default order in template)
         "column_driver_ranks": False,
-        "show_driver_badge": True,
         "display_order_driver_ranks": 24,
+        "column_driver_badge": False,  # game badge of driver, same drivers as driver & safety rank column
+        "display_order_driver_badge": 28,
         "column_delta_laptime": False,
         "number_of_delta_laptime": 3,
         "show_inverted_delta_laptime_layout": False,
@@ -84,6 +86,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "standings": {
         "column_position": True,
         "column_class": True,
+        "show_class_name": True,  # class column: class name, then position in class (else position on class color)
         "column_position_change": False,
         "column_driver_name": True,
         "column_vehicle_name": False,
@@ -110,8 +113,9 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "display_order_track_limits": 25,  # columns of modern design only (default orders in template)
         "display_order_energy_per_lap": 26,
         "column_driver_ranks": False,
-        "show_driver_badge": True,
         "display_order_driver_ranks": 27,
+        "column_driver_badge": False,  # game badge of driver, same drivers as driver & safety rank column
+        "display_order_driver_badge": 29,
         "column_gap_trend": False,
         "display_order_gap_trend": 28,
         "column_stint_laps": False,
@@ -128,6 +132,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "rivals": {
         "column_position": True,
         "column_class": True,
+        "show_class_name": True,  # class column: class name, then position in class (else position on class color)
         "column_position_change": False,
         "column_driver_name": True,
         "column_vehicle_name": False,
@@ -158,20 +163,20 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "column_track_limits": False,
         "display_order_track_limits": 24,  # columns of modern design only
         "column_driver_ranks": False,
-        "show_driver_badge": True,
         "display_order_driver_ranks": 25,
+        "column_driver_badge": False,  # game badge of driver, same drivers as driver & safety rank column
+        "display_order_driver_badge": 27,
         "column_gap_trend": False,
         "display_order_gap_trend": 26,
     },
-    "timing": {"show_invalid_lap_indicator": True},
+    "timing": {"show_invalid_lap_indicator": True},  # last & current lap in red while invalid
+    "lap_time_history": {"show_invalid_lap_in_red": True},  # else * prefix, as driver lists
     "deltabest": {"show_invalid_lap_indicator": True},
     "laps_and_position": {"show_invalid_lap_indicator": True},
     "race_plan": {"show_stint_limit": False, "show_consumption_estimate": False},
     "battery": {"show_state_of_charge": False},  # value scale to check live (LMU), same as battery charge on rF2
-    "engine": {"show_game_overheating_warning": True},
     "tyre_temperature": {"enable_heatmap_from_optimal_temperature": False},
     "gear": {"show_speed_limiter_reminder": True},
-    "engine_temperature": {"show_game_overheating_warning": True},
     "weather": {"show_wind": True},
     "track_map": {
         "show_sector_performance": True,
@@ -190,6 +195,7 @@ MODERN_ONLY_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
         "show_pressure_target_range": True,
         "show_tread_gauge": True,
     },
+    "radar": {"radar_background_opacity_percentage": 78},  # in template at its place in options page
     "flag": {  # in template at their place in options page
         "enable_new_flag_flash": True,
         "new_flag_flash_duration": 1.5,

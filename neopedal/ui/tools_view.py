@@ -17,21 +17,17 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Tools page: utilities & editors as a grid of cards
+Tools page: utilities & editors as tiles, opening tools by path
 """
 
 import logging
 from importlib import import_module
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
-    QGridLayout,
-    QLabel,
-    QMessageBox,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -39,13 +35,15 @@ from PySide6.QtWidgets import (
 from ..i18n import tr
 from ..template.page_registry import tool_pages, tool_sections
 from . import draw_focus_ring
-from ._common import UIScaler, find_dialog_host
+from ._common import find_dialog_host
 
 logger = logging.getLogger(__name__)
 
 # Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, "module.DialogClass"), ...)),
 # see template.page_registry.PAGES. Dialog modules are imported when first opened, to keep startup light
 TOOL_SECTIONS = tool_sections()
+# Tools of Tools page & Tools menu (Settings left out: own menu, gear button of the rail & Ctrl+,)
+LISTED_TOOL_SECTIONS = tool_sections(listed_only=True)
 
 
 # Former tools merged into another one: old path (saved open pages, navigation bar) -> new path
@@ -55,7 +53,11 @@ RENAMED_TOOLS = {
     "game_replays.GameReplays": "race_results_viewer.RaceResultsViewer",  # replays list of results & replays
 }
 SHOW_REPLAYS = "game_replays.GameReplays"  # former path: replays list shown
+# Former Preset Comparison tool: compare panel of the Presets page (path kept: palette, saved pages & shortcuts)
+SHOW_PRESET_COMPARE = "preset_compare.PresetCompare"
 RENAMED_TOOL_KEYS = {old.split(".", 1)[0]: new.split(".", 1)[0] for old, new in RENAMED_TOOLS.items()}
+RENAMED_TOOL_KEYS["preset_compare"] = "preset"  # navigation bar & quick access entry: Presets page
+PAGE_PATH = "page:"  # "page:<key>" path of a main window page (Pages section of the Tools page)
 # Extra words finding a tool in command palette (former names, what it covers), both languages
 TOOL_KEYWORDS = {page.dialog: page.keywords for page in tool_pages() if page.keywords}
 
@@ -72,6 +74,8 @@ def open_tool(dialog_path: str, parent):
         if callable(show_replays):
             show_replays()
         return dialog
+    if dialog_path == SHOW_PRESET_COMPARE:
+        return show_preset_compare(parent)
     dialog_path = RENAMED_TOOLS.get(dialog_path, dialog_path)
     module_name, class_name = dialog_path.rsplit(".", 1)
     host = find_dialog_host(parent)
@@ -89,11 +93,43 @@ def open_tool(dialog_path: str, parent):
         dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
     except (ImportError, AttributeError):  # slot exceptions are silent in the windowed build
         logger.exception("TOOLS: unable to open %s", dialog_path)
-        QMessageBox.warning(parent, tr("Error"), tr("Unable to open tool, see log for details."))
+        from .quick import dialogs
+
+        dialogs.alert(parent, tr("Error"), tr("Unable to open tool, see log for details."))
         return None
     _dialog = dialog_class(parent)
     _dialog.show()
     return _dialog
+
+
+def show_preset_compare(parent):
+    """Presets page shown with its compare panel open (loaded preset with another one), the page returned, None if
+    no main window"""
+    from .nav_rail import PAGE_INDEX
+    from .preset_view import PresetList
+
+    host = find_dialog_host(parent)
+    if host is None:
+        return None
+    host.select_page(PAGE_INDEX["preset"])
+    page = host.window().findChild(PresetList)
+    if page is None or page.ensure_view() is None:
+        return None
+    QTimer.singleShot(0, page, lambda: page.backend.openPage("compare"))  # once the page is shown & laid out
+    return page
+
+
+def open_page_or_tool(path: str, parent):
+    """Open "page:<key>" main window page (Pages section of the Tools page), else tool by dialog path"""
+    if not path.startswith(PAGE_PATH):
+        return open_tool(path, parent)
+    from .nav_rail import PAGE_INDEX
+
+    host = find_dialog_host(parent)
+    index = PAGE_INDEX.get(path.removeprefix(PAGE_PATH), -1)
+    if host is not None and index >= 0:
+        host.select_page(index)
+    return None
 
 
 class ToolCard(QAbstractButton):
@@ -157,44 +193,26 @@ class ToolCard(QAbstractButton):
 
 
 class ToolsView(QWidget):
-    """Tools page"""
+    """Tools page: Qt Quick page (qml/shell/Tools.qml), tiles of listed tools by section with what each is for,
+    live state of tools with an on / off switch, search; state & actions in quick/shell_tools_backend.py"""
 
-    def __init__(self, parent, icon_family: str, dialog_parent=None):
+    def __init__(self, parent, icon_family: str = "", dialog_parent=None):
+        from .quick import create_quick_view
+        from .quick.shell_tools_backend import ToolsBackend
+
         super().__init__(parent)
         dialog_parent = dialog_parent or parent
-        content = QWidget(self)
-        content.setObjectName("pageStack")
-        layout_content = QVBoxLayout(content)
-        margin = UIScaler.pixel(10)
-        layout_content.setContentsMargins(margin, margin, margin, margin)
-        layout_content.setSpacing(UIScaler.pixel(6))
-
-        for title, tools in TOOL_SECTIONS:
-            header = QLabel(tr(title), content)
-            header_font = header.font()
-            header_font.setBold(True)
-            header.setFont(header_font)
-            layout_content.addWidget(header)
-            grid = QGridLayout()
-            grid.setSpacing(UIScaler.pixel(6))
-            for index, (label, glyph, dialog_path) in enumerate(tools):
-                card = ToolCard(tr(label), glyph, icon_family, content)
-                card.clicked.connect(lambda _=False, path=dialog_path: open_tool(path, dialog_parent))
-                grid.addWidget(card, index // 2, index % 2)
-            if len(tools) % 2:  # fill last row: a single card stays as wide as cards of other sections
-                grid.addWidget(QWidget(content), len(tools) // 2, 1)
-            layout_content.addLayout(grid)
-            layout_content.addSpacing(UIScaler.pixel(4))
-        layout_content.addStretch(1)
-
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
+        self.backend = ToolsBackend(self, lambda path: open_page_or_tool(path, dialog_parent))
+        self.view = create_quick_view(self, "Tools.qml", {"backend": self.backend})
         layout_main = QVBoxLayout(self)
         layout_main.setContentsMargins(0, 0, 0, 0)
-        layout_main.addWidget(scroll)
+        layout_main.addWidget(self.view)
+        self.setFocusProxy(self.view)
+
+    def set_statuses(self, statuses: dict[str, str]):
+        """Live state of tools with an on / off switch (dialog class name: "on", "off", "" closed), each second"""
+        self.backend.set_statuses(statuses)
 
     def refresh(self):
-        """Nothing to refresh, kept for page interface"""
+        """Navigation bar entries may have changed (tiles mark tools of the bar)"""
+        self.backend.refresh()

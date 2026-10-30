@@ -6,7 +6,7 @@ import "../components"
 // Math channels editor: channels computed from others by an expression (+ - * / abs min max d, numbers, pi g deg),
 // built-in ones (understeer angle, brake release & throttle application rates), saved with viewer settings.
 // Click a channel name below the form to put it in the expression. Typed changes not saved yet: a click beside
-// keeps the editor open, Close asks before dropping them.
+// keeps the editor open, Close (or Esc) asks first: Save, Discard or Cancel (as every editor of the app).
 TpPopup {
     id: editor
 
@@ -62,7 +62,7 @@ TpPopup {
         expressionField.forceActiveFocus()
         check()
     }
-    // Close: typed changes not saved are dropped only once confirmed
+    // Close: typed changes not saved are saved or dropped once asked
     function requestClose() {
         if (dirty) discardDialog.open()
         else close()
@@ -166,6 +166,7 @@ TpPopup {
             Text {
                 Layout.fillWidth: true
                 text: editor.error
+                textFormat: Text.PlainText
                 color: theme.loss
                 wrapMode: Text.WordWrap
                 Accessible.role: Accessible.AlertMessage
@@ -211,6 +212,7 @@ TpPopup {
                 onClicked: removeDialog.open()
                 TpConfirmDialog {
                     id: removeDialog
+                    danger: true
                     title: i18n.tr("Remove this math channel?")
                     text: i18n.tr("Its formula is deleted and it leaves the charts.")
                     acceptText: i18n.tr("Remove")
@@ -235,12 +237,18 @@ TpPopup {
             TpButton { text: i18n.tr("Close"); onClicked: editor.requestClose() }
         }
     }
-    TpConfirmDialog {
+    TpUnsavedDialog {
         id: discardDialog
         objectName: "mathDiscardDialog"
-        title: i18n.tr("Discard changes to this math channel?")
-        text: i18n.tr("Name, expression or unit typed since last save are lost.")
-        acceptText: i18n.tr("Discard")
-        onAccepted: editor.close()
+        title: i18n.tr("Save changes to this math channel?")
+        text: i18n.tr("Discard drops the name, expression or unit typed since last save.")
+        applyText: i18n.tr("Save")
+        applyEnabled: editor.error === "" && nameField.text !== "" && expressionField.text !== ""
+        onApplyChosen: {
+            editor.save()
+            if (editor.error === "")
+                editor.close()
+        }
+        onDiscardChosen: editor.close()
     }
 }

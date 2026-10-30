@@ -296,6 +296,22 @@ def test_radar_auto_hide_and_overlap(widgets, oval, monkeypatch):
     assert image.pixelColor(1, 1).alpha() == 0  # edge faded out
 
 
+def test_radar_background_opacity(widgets):
+    """Background opacity 0-100%: no background at 0, opaque at 100, default look at 78"""
+    alphas = {}
+    for percent in (0, 40, 78, 100):
+        widget = widgets("radar", enable_auto_hide=False, show_edge_fade_out=False,
+                         radar_background_opacity_percentage=percent)
+        for car in minfo.vehicles.dataSet:
+            car.relativeRotatedPositionX, car.relativeRotatedPositionY = 100.0, 100.0  # out of range
+        image = update(widget)
+        size = widget.area_size
+        alphas[percent] = image.pixelColor(round(size * 0.68), round(size * 0.29)).alpha()  # between marks
+    assert alphas[0] == 0
+    assert 0 < alphas[40] < alphas[78] < alphas[100]
+    assert abs(alphas[78] - 200) <= 3 and alphas[100] >= 250
+
+
 def test_radar_fade_with_distance(widgets, monkeypatch):
     widget = widgets("radar", enable_auto_hide=True, enable_radar_fade=True)
     monkeypatch.setattr(minfo.vehicles, "nearestLine", widget.radar_radius * 0.95)

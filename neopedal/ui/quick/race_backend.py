@@ -29,8 +29,8 @@ Every input change calculates at once (one calculation per change, see batch), s
 Dialogs, toasts & undo history belong to the page hosting the QML view (RaceHost).
 
 Parts of the page are mixins of RaceBackend sharing its state (base: race_base.RaceBase): data source & files
-(race_files), consumption history & team stints (race_history), tyre tab & undo (race_tyre_tab), live tab
-(race_live_tab). This module keeps page state, properties, results, inputs & calculation.
+(race_files), consumption history & team stints (race_history), line-up & driver of each stint
+(race_team_plan), tyre tab & undo (race_tyre_tab), live tab (race_live_tab). This module keeps page state, properties, results, inputs & calculation.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 import time
 import weakref
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial
@@ -125,6 +125,7 @@ from .race_model import (
     start_time_text,
     unit_text,
 )
+from .race_team_plan import TeamPlan
 from .race_tyre_tab import TyreTab
 from .race_tyres import (
     MEASURED_DEFAULT,
@@ -150,6 +151,7 @@ class RaceHost(Protocol):
     def toast(self, text: str) -> None: ...
     def toast_file(self, text: str, path: str) -> None: ...  # toast of a file written: its folder opened on click
     def confirm(self, text: str) -> bool: ...
+    def ask(self, text: str, on_yes: Callable[[], object], action_text: str = "", danger: bool = False) -> None: ...
     def open_file(self, directory: str, file_filter: str) -> str: ...
     def save_file(self, directory: str, file_filter: str) -> str: ...
     def open_compound_config(self, name: str, user_setting: dict, reload) -> None: ...
@@ -205,7 +207,7 @@ def race_status() -> str:
     return "" if backend is None else "on" if backend.game_data else "off"
 
 
-class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
+class RaceBackend(RaceFiles, HistoryTeam, TeamPlan, TyreTab, LiveTab, PageBackend):
     """Race calculator state for QML, see module docstring"""
 
     inputsChanged = Signal()
@@ -218,6 +220,7 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     detailsChanged = Signal()
     tyreLifeChanged = Signal()
     driverTimesChanged = Signal()
+    teamPlanChanged = Signal()
     planVsRaceChanged = Signal()
     scenariosChanged = Signal()
     notesChanged = Signal()
@@ -231,6 +234,7 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     teamSelectionChanged = Signal()
     headerChanged = Signal()
     liveChanged = Signal()  # live race status & tip (apart from header: tip changes at each live refresh)
+    raceProposalChanged = Signal()  # planning the rest of a race under way proposed or not
     rivalsChanged = Signal()
     liveDataChanged = Signal()  # anything of the live tab (Python callers: QML reads the parts below)
     liveRaceChanged = Signal()
@@ -255,6 +259,8 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         self.symbol_fuel = units.set_symbol_fuel(cfg.units["fuel_unit"])
 
         self.values = ranged_inputs(config)
+        if config.get("show_quick_setup", True) and self.values != ranged_inputs(SAVED_INPUTS):
+            self.set_quick_setup(False)  # calculator used before (inputs kept): never asked
         measured = config.get("input_measured_compound", MEASURED_DEFAULT)
         compounds = tuple(DEFAULT_TYRE_SET)
         self.measured_index = measured if isinstance(measured, int) and not isinstance(measured, bool) \
@@ -267,6 +273,7 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         self.race_setup = StrategyInput()  # input of whole race (before live race state), kept for widget
         self.race_strategy = Strategy()  # plan of whole race (before live race state)
         self.race_state: RaceState | None = None  # live race under way: plan of the rest of the race
+        self.pit_menu_available = False  # LMU session under way: refill of the next stop can be set in its pit menu
         self.race_tyre_changes: list[int] = []  # tyres changed at each stop of tyre plan (whole race)
         self.proposed_tyre_rows: list[int] = []  # tyre plan rows (stints) needing new tyres (minimum tread)
         self.sections: dict = {}  # results shown, by QML property name (see publish)
@@ -321,7 +328,7 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         self.garage = GarageData()
         self.garage_time = ""  # time of last garage answer
         self.garage_request = GameRequest(self, GARAGE_RESOURCES, self.received_garage, self.garage_request_failed)
-        self._apply_garage = False  # Load Live asked: garage values filled in once answered
+        self._apply_garage = False  # Game Session source chosen: garage values filled in once answered
         self.live_values: list[LiveValue] = []
         self._dry_plan: tuple[StrategyInput | None, int] = (None, 0)  # input of dry plan, its race laps
         # Live tab: rows synced in place (group titles as rows), each other part notified only when changed
@@ -335,6 +342,9 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         self._race_key: tuple | None = None
         self.live_status = ""
         self.live_tip = ""
+        self._race_running = False  # race of the game under way (live race proposed while not planned from now)
+        self._race_dismissed = False  # proposal turned down for the race under way
+        self._race_proposal = False
         self._rivals: dict = results.class_rivals([], 0)
         self._combo_loaded = ""
         self._shown_combo = ""
@@ -407,6 +417,7 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
                 self.rivalsChanged.emit()
         self.update_team_timer()
         self.update_garage_timer()
+        self.update_race_proposal()
 
     def game_data_refused(self) -> bool:
         """Action asking the game while calculator is off: told, True"""
@@ -506,6 +517,10 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     def driverTimes(self) -> dict:
         return self.sections.get("driverTimes", {})
 
+    @Property(dict, notify=teamPlanChanged)
+    def teamPlan(self) -> dict:
+        return self.sections.get("teamPlan", {})
+
     @Property(dict, notify=planVsRaceChanged)
     def planVsRace(self) -> dict:
         return self.sections.get("planVsRace", {})
@@ -535,7 +550,12 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
             "collapsed": self.collapsed_sections(),
             "tab": self.tab, "combo": self.combo_name() if self.game_data else "", "gameData": self.game_data,
             "trackLogo": self.logos.track(self.source_name.split(" - ", 1)[0]) if self.source_name else "",
+            "quickSetup": bool(config.get("show_quick_setup", True)),
         }
+
+    @Property(bool, notify=raceProposalChanged)
+    def raceProposal(self) -> bool:
+        return self._race_proposal
 
     @Property(str, notify=liveChanged)
     def liveStatus(self) -> str:
@@ -544,6 +564,11 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     @Property(str, notify=liveChanged)
     def liveTip(self) -> str:
         return self.live_tip
+
+    @Property(bool, notify=liveChanged)
+    def pitMenuAvailable(self) -> bool:
+        """Pit Menu button: game pit menu reachable (LMU, in a session)"""
+        return self.pit_menu_available
 
     @Property(dict, notify=historyChanged)
     def history(self) -> dict:
@@ -689,9 +714,11 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
     def save_inputs(self):
         """Inputs kept for next time (saved once changed)"""
         config = cfg.user.config["fuel_calculator"]
-        if all(config.get(key) == value for key, value in self.values.items()):
+        if (config.get("input_measured_compound", MEASURED_DEFAULT) == self.measured_index
+                and all(config.get(key) == value for key, value in self.values.items())):
             return
         config.update(self.values)
+        config["input_measured_compound"] = self.measured_index
         cfg.save(config_type=ConfigType.CONFIG)
 
     def input_values(self) -> dict:
@@ -721,8 +748,10 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
             self.calculate()
         finally:
             self._updating = False
-        if self.values != self._shown_values or not self._shown_values:
-            self._shown_values = dict(self.values)
+        # Measured compound shown with inputs (undo & plan file set it without set_measured_compound)
+        shown = dict(self.values, input_measured_compound=self.measured_index)
+        if shown != self._shown_values:
+            self._shown_values = shown
             self.inputsChanged.emit()
         self.save_inputs()
         self.host.record_change()
@@ -840,13 +869,14 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         })
         self.publish("tiles", results.key_figures(strategy, setup, self.symbol_fuel, self.is_gallon, tyre_status))
         self.publish("summary", results.summary(strategy, self.race_state, setup.pit_seconds))
-        self.publish("timeline", results.timeline(strategy, drivers, self.symbol_fuel, self.time_text))
+        self.publish("timeline", results.timeline(strategy, drivers, self.symbol_fuel, self.time_text,
+                                                       self.driver_label))
         self.publish("fuelLevels", results.fuel_levels(strategy, plan_setup, has_fuel))
         self.publish("plan", {
             "columns": [{"key": key, "title": title, "tip": tr(results.PLAN_TIPS[key]) if key in results.PLAN_TIPS else ""}
                         for key, title in zip(results.PLAN_COLUMNS, results.plan_header(self.symbol_fuel))],
             "rows": [list(row) for row in results.plan_rows(strategy, has_energy, self.time_text,
-                                                             plan_setup.clock_offset)],
+                                                             plan_setup.clock_offset, self.driver_short)],
             "hidden": results.plan_hidden(strategy, has_energy, drivers),
             "title": results.plan_title(strategy) if ready else tr("Pit Stop Plan"),
             "ready": ready,
@@ -859,7 +889,8 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         self.publish("tyreLife", results.tyre_life(
             self.values["input_tread_start"], self.values["input_wear_per_lap"], self.values["input_minimum_tread"],
             stint_laps, setup.laptime))
-        self.publish("driverTimes", results.driver_times(strategy, drivers, driver_limits))
+        self.publish("driverTimes", results.driver_times(strategy, drivers, driver_limits, self.driver_short))
+        self.publish("teamPlan", self.team_plan_view())
         self.publish("planVsRace", results.plan_against_race(
             stints_done, self.race_strategy, setup.fuel_per_lap, setup.energy_per_lap, setup.laptime,
             self.unit_fuel, has_energy, self.symbol_fuel, self.race_stint_drivers()))
@@ -1016,6 +1047,39 @@ class RaceBackend(RaceFiles, HistoryTeam, TyreTab, LiveTab, PageBackend):
         """During a race: plan of the rest of the race from now"""
         self.set_option("enable_live_race", checked)
         self.refresh_race_state()
+        self.update_race_proposal()
+
+    def update_race_proposal(self):
+        """Race of the game under way, plan not made from now: planning the rest of the race proposed (until turned
+        down for this race)"""
+        proposal = (self.game_data and self._race_running and not self._race_dismissed
+                    and not cfg.user.config["fuel_calculator"].get("enable_live_race"))
+        if proposal != self._race_proposal:
+            self._race_proposal = proposal
+            self.raceProposalChanged.emit()
+
+    @Slot()
+    def dismissLiveRace(self):
+        """Proposal to plan the rest of the race turned down: not proposed again during this race"""
+        if self._race_running and not self._race_dismissed:
+            self._race_dismissed = True
+            self.update_race_proposal()
+
+    # Quick setup: first use of the calculator asks race length, pit stop time & data source, then shows the page
+    @staticmethod
+    def set_quick_setup(shown: bool) -> bool:
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("show_quick_setup", True) == shown:
+            return False
+        config["show_quick_setup"] = shown
+        cfg.save(config_type=ConfigType.CONFIG)
+        return True
+
+    @Slot()
+    def finishQuickSetup(self):
+        """Quick setup answered or skipped: whole page shown, never asked again"""
+        if self.set_quick_setup(False):
+            self.headerChanged.emit()
 
     @Slot(bool)
     def setShowHistory(self, checked: bool):

@@ -218,29 +218,29 @@ def test_dialog_from_dialog_stays_popup(window):
     offset.close()
 
 
-def test_inputs_shown_as_pages(window, monkeypatch):
-    """Preset name & other name inputs: pages too, also when opened from a dialog page"""
+def test_inputs_shown_over_the_page(window, monkeypatch):
+    """Name inputs: a small window modal over the page asking for it, never a page of their own (the page it
+    answers stays shown); preset names: box of the Presets page"""
     from neopedal.ui._common import TextInputDialog, embedded_host
-    from neopedal.ui.preset_management import CreatePreset
     from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
-    dialog = CreatePreset(view.preset_tab, title="Create new default preset")
-    assert embedded_host(dialog) is view
-    dialog.close()
     open_tool("heatmap_editor.HeatmapEditor", window)
-    editor = view.dialog_pages()[0].dialog
-    names = []
-    TextInputDialog(editor, "New", "Name:", lambda text: names.append(text) or text != "Taken").show()
     pages = view.dialog_pages()
-    assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog)
-    assert view._pages.currentWidget() is pages[1]
-    pages[1].dialog.edit.setText("Taken")
-    pages[1].dialog.accepting()  # refused name: input kept open
-    assert len(view.dialog_pages()) == 2
-    pages[1].dialog.edit.setText("Dusk")
-    pages[1].dialog.accepting()
-    assert view.dialog_pages() == pages[:1] and view._pages.currentWidget() is pages[0]  # back to editor
+    editor = pages[0].dialog
+    names = []
+    dialog = TextInputDialog(editor, "New", "Name:", lambda text: names.append(text) or text != "Taken")
+    assert embedded_host(dialog) is None
+    dialog.show()
+    settle()
+    assert view.dialog_pages() == pages and view._pages.currentWidget() is pages[0]  # editor still shown
+    assert dialog.isVisible() and dialog.isWindow() and dialog.windowModality() == Qt.WindowModality.WindowModal
+    dialog.edit.setText("Taken")
+    dialog.accepting()  # refused name: input kept open
+    assert dialog.isVisible()
+    dialog.edit.setText("Dusk")
+    dialog.accepting()
+    assert not dialog.isVisible() and view._pages.currentWidget() is pages[0]
     assert names == ["Taken", "Dusk"]
 
 
@@ -308,19 +308,41 @@ def test_left_page_with_unsaved_changes_kept(window):
 
 
 def test_page_opened_from_page_keeps_it_open(window):
-    """Input page opened from a page (new name): page it was opened from kept behind it"""
-    from neopedal.ui._common import TextInputDialog
+    """Page opened from a page (EMBED_FROM_PAGE: lap library from the lap viewer...): page it was opened from
+    kept behind it"""
+    from neopedal.ui._common import BaseDialog
+    from neopedal.ui.tools_view import open_tool
+
+    class FromPage(BaseDialog):
+        EMBED_FROM_PAGE = True
+
+    view = window.centralWidget()
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    editor = view.dialog_pages()[0].dialog
+    FromPage(editor).show()
+    settle()
+    pages = view.dialog_pages()
+    assert len(pages) == 2 and isinstance(pages[1].dialog, FromPage) and pages[1].opener is pages[0]
+    assert view._button_pages.isHidden()  # editor is not left behind, input is shown over it
+    view.set_current_index(1)  # both left
+    settle()
+    assert not view.dialog_pages()
+
+
+def test_tool_opened_from_page_is_page_too(window):
+    """Tool opened from a page (results -> stats, stats -> map...): page in app kept behind, never a window"""
     from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("heatmap_editor.HeatmapEditor", window)
     editor = view.dialog_pages()[0].dialog
-    TextInputDialog(editor, "New", "Name:", lambda text: True).show()
+    other = open_tool("brake_editor.BrakeEditor", editor)  # parent: the page itself, not the main window
     settle()
     pages = view.dialog_pages()
-    assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog) and pages[1].opener is pages[0]
-    assert view._button_pages.isHidden()  # editor is not left behind, input is shown over it
-    view.set_current_index(1)  # both left
+    assert other is not None and other.in_app_page and not other.isWindow()
+    assert len(pages) == 2 and pages[1].dialog is other and pages[1].opener is pages[0]
+    assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "BrakeEditor"]
+    view.set_current_index(1)
     settle()
     assert not view.dialog_pages()
 
@@ -525,8 +547,8 @@ def test_rail_tools_have_no_close_buttons(window):
                  "race_calculator.RaceCalculator"):
         open_tool(path, window)
         assert not close_buttons(view._pages.currentWidget()), path
-    open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: title & own close buttons
-    assert len(close_buttons(view._pages.currentWidget())) == 2
+    open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: Close of the header, own one hidden
+    assert len(close_buttons(view._pages.currentWidget())) == 1
     # Tool removed from rail: its page gets close buttons back
     lap_page = next(page for page in view.dialog_pages() if page.title == "Lap Telemetry Viewer")
     cfg.application["rail_items"] = "home,widget,tools"
@@ -635,7 +657,7 @@ def test_rail_fades_show_hidden_entries(window):
     cfg.application["rail_items"] += ",spectate,hotkey"  # more entries than a short window shows
     view.build_rail_items()
     top, bottom = view._rail_fades
-    window.resize(700, 900)
+    window.resize(700, 1000)
     window.show()
     QApplication.processEvents()
     assert top.isHidden() and bottom.isHidden()  # every entry visible
@@ -885,22 +907,28 @@ def test_language_change_leaves_no_menus(window):
         window.last_language = language
 
 
-def test_key_binding_page_kept_by_language_change_closes(window, monkeypatch):
-    """Key binding page (opened from hotkey page) kept by a language change: closing it works (hotkey page it
-    came from was replaced)"""
+def test_key_capture_open_while_language_changes(window, monkeypatch):
+    """Key capture (dialog of the hotkey page) open while a language change replaces the page: capture ended,
+    global hotkeys back on, no error"""
     import sys
 
-    from neopedal.ui.hotkey_view import ConfigHotkey, HotkeyConfigItem
+    from neopedal.ui.hotkey_view import HotkeyList
     from neopedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.quick import hotkey_backend
 
+    calls = []
+    for action in ("enable", "disable"):
+        monkeypatch.setattr(type(hotkey_backend.kctrl), action, lambda self, _action=action: calls.append(_action))
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    cfg.application["enable_global_hotkey"] = True
     window.show()
     view = window.centralWidget()
     view.select_page(PAGE_INDEX["hotkey"])
     settle()
-    item = window.findChildren(HotkeyConfigItem)[0]
-    item.open_config_dialog()
+    page = window.findChildren(HotkeyList)[0]
+    page.view.rootObject().openCapture("overlay_lock")
     settle()
-    assert view.find_dialog_page("ConfigHotkey") is not None
+    assert page.backend.capturing and calls[-1] == "disable"
     errors = []
     monkeypatch.setattr(sys, "excepthook", lambda *args: errors.append(args[1]))
     language = cfg.application["language"]
@@ -910,10 +938,8 @@ def test_key_binding_page_kept_by_language_change_closes(window, monkeypatch):
         window.retranslate()
         settle()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # replaced view deleted
-        page = window.centralWidget().find_dialog_page("ConfigHotkey")
-        assert page is not None and isinstance(page.dialog, ConfigHotkey)
-        page.dialog.close()
         settle()
+        assert calls[-1] == "enable"  # capture of the replaced page ended
     finally:
         cfg.application["language"] = language
         window.last_language = language
@@ -931,9 +957,20 @@ def change_language(window, name: str):
     settle()
 
 
+def open_inputs() -> list:
+    """Text input windows still open (small windows over the page asking for them)"""
+    from shiboken6 import isValid
+
+    from neopedal.ui._common import TextInputDialog
+
+    return [widget for widget in QApplication.topLevelWidgets()
+            if isinstance(widget, TextInputDialog) and isValid(widget) and widget.isVisible()]
+
+
 def test_language_change_closes_input_of_app_page(window):
-    """Text input opened from an app page (preset page): closed by a language change, app page shown
-    again (was: kept, its OK called back the deleted preset list)"""
+    """Text input opened from an app page (preset page): a window over the page, closed with the page by a language
+    change (window modal: the app cannot change language while it is open), app page shown again (was: kept, its
+    OK called back the deleted preset list)"""
     from neopedal.ui._common import TextInputDialog
     from neopedal.ui.nav_rail import PAGE_INDEX
 
@@ -942,12 +979,12 @@ def test_language_change_closes_input_of_app_page(window):
     view.select_page(PAGE_INDEX["preset"])
     TextInputDialog(view.preset_tab, "Input", "Text:", lambda text: True).open()
     settle()
-    assert isinstance(view._pages.currentWidget().dialog, TextInputDialog)
+    assert len(open_inputs()) == 1 and view.find_dialog_page("TextInputDialog") is None  # not a page
     language = cfg.application["language"]
     try:
         change_language(window, "Français")
         new_view = window.centralWidget()
-        assert new_view.find_dialog_page("TextInputDialog") is None
+        assert not open_inputs()
         assert new_view.current_index() == PAGE_INDEX["preset"]  # page input was opened from
     finally:
         change_language(window, language)
@@ -974,7 +1011,11 @@ def test_language_change_closes_input_of_reopened_tool(window, tool, backend_cal
     call = getattr(backend, backend_call)
     call("lap.tpl") if backend_call == "editNote" else call()
     settle()
-    assert type(view._pages.currentWidget().dialog).__name__ == "TextInputDialog"
+    from neopedal.ui.quick.dialogs import page_bridge
+
+    bridge = page_bridge(view.find_dialog_page(name).dialog)  # QML page with TpDialogHost: input inside the page
+    in_page = bridge is not None and bridge.pending == 1
+    assert (len(open_inputs()) == 1 or in_page) and type(view._pages.currentWidget().dialog).__name__ == name
     language = cfg.application["language"]
     errors = []
     excepthook = sys.excepthook
@@ -982,7 +1023,7 @@ def test_language_change_closes_input_of_reopened_tool(window, tool, backend_cal
     try:
         change_language(window, "Français")
         new_view = window.centralWidget()
-        assert new_view.find_dialog_page("TextInputDialog") is None
+        assert not open_inputs()
         assert new_view._pages.currentWidget() is new_view.find_dialog_page(name)  # tool shown again
     finally:
         sys.excepthook = excepthook
@@ -991,25 +1032,27 @@ def test_language_change_closes_input_of_reopened_tool(window, tool, backend_cal
 
 
 def test_language_change_closes_lap_library_of_reopened_lap_viewer(window):
-    """Lap library (and its rename input) opened from lap viewer: closed with it by a language change (was: kept,
-    adding laps went to the closed lap viewer)"""
-    from neopedal.ui._common import TextInputDialog
+    """Lap library opened from lap viewer: a panel of the viewer page (was: a page of its own kept by a language
+    change, adding laps went to the closed lap viewer), closed with it, viewer shown again"""
+    from PySide6.QtCore import QObject
+
     from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("lap_viewer.LapViewer", window)
     settle()
     view = window.centralWidget()
-    view.find_dialog_page("LapViewer").dialog.backend.openLibrary()
+    viewer = view.find_dialog_page("LapViewer").dialog
+    viewer.backend.openLibrary()
     settle()
-    library = view.find_dialog_page("LapLibrary").dialog
-    TextInputDialog(library, "Rename", "Imported log name:", lambda text: True, "old").show()
-    settle()
-    assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["LapViewer", "LapLibrary", "TextInputDialog"]
+    panel = viewer.view.rootObject().findChild(QObject, "libraryPanel")
+    assert panel.property("visible")
+    assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["LapViewer"]  # no page of its own
     language = cfg.application["language"]
     try:
         change_language(window, "Français")
         new_view = window.centralWidget()
+        assert not open_inputs()
         assert [type(page.dialog).__name__ for page in new_view.dialog_pages()] == ["LapViewer"]
         assert new_view._pages.currentWidget() is new_view.find_dialog_page("LapViewer")
     finally:
@@ -1034,13 +1077,13 @@ def test_language_change_keeps_input_of_kept_page(window):
     try:
         change_language(window, "Français")
         new_view = window.centralWidget()
-        page = new_view.find_dialog_page("TextInputDialog")
-        assert page is not None and new_view._pages.currentWidget() is page
-        page.dialog.edit.setText("Dusk")
-        page.dialog.accepting()
+        inputs = open_inputs()
+        assert len(inputs) == 1 and new_view._pages.currentWidget() is new_view.find_dialog_page("HeatmapEditor")
+        inputs[0].edit.setText("Dusk")
+        inputs[0].accepting()
         assert names == [(editor.objectName(), "Dusk")]
         settle()
-        assert new_view._pages.currentWidget() is new_view.find_dialog_page("HeatmapEditor")  # back to editor
+        assert not open_inputs() and new_view._pages.currentWidget() is new_view.find_dialog_page("HeatmapEditor")
     finally:
         editor.set_unmodified()
         change_language(window, language)

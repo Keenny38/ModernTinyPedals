@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../components"
-import "../config"
 
 // Lap telemetry viewer page: lap list, channel charts (advanced view) or simple view over them, track map / G circle /
 // corners / range statistics
@@ -10,22 +9,26 @@ TpPage {
     id: page
 
     property bool mapFocus: false  // large track map over laps & charts
+    // Narrow page (lap list, charts & tools do not fit side by side): lap list in a drawer opened by the Laps button
+    readonly property bool narrow: width < theme.bpNarrow
+    property bool lapsOpen: false
+    onNarrowChanged: if (!narrow) lapsOpen = false
+    // Page width it is cut below (lap_viewer.py page_minimum_size): charts & tools of a narrow page side by side (lap
+    // list in its drawer), toolbar with its pinned actions & "⋯" (other actions fold into it), page margins
+    readonly property real minimumPageWidth: Math.ceil(Math.max(
+        theme.em * 39.6,  // charts & tools minimum widths (narrow page), split handle
+        trackBox.Layout.minimumWidth + viewMode.implicitWidth + toolbar.moreWidth * 3 + theme.space3 * 4)
+        + theme.padPage * 2)
+    onLapsOpenChanged: if (!lapsOpen) chart.forceActiveFocus()  // keys back to charts
+    // Esc closes the drawer first, wherever the focus is (charts use Esc for markers; text fields keep theirs)
+    Shortcut {
+        sequence: "Esc"
+        enabled: page.lapsOpen && pageState.active
+        onActivated: page.lapsOpen = false
+    }
     property alias traceChart: chart  // for components (map in focus mode): "chart" there is their own property
     // Menu of a toolbar action, under its button (or under the toolbar's "⋯" button), closed by a second click
-    function toggleMenu(menu, source) {
-        if (menu.visible) menu.close()
-        else menu.popup(source, 0, source.height + theme.space1)
-    }
-    // Laps moved to trash: lap named, undo at hand (Ctrl+Z also restores them)
-    function showTrashed(count, label) {
-        toast.text = count === 1 && label !== "" ? i18n.tr("%1 moved to trash").arg(label)
-                                                 : i18n.tr("%1 laps moved to trash").arg(count)
-        toast.show()
-    }
-    Connections {
-        target: backend
-        function onLapsTrashed(count, label) { page.showTrashed(count, label) }
-    }
+    function toggleMenu(menu, source) { menu.toggleBelow(source) }
 
     // Page picture (laps, charts, map) saved to PNG or copied to clipboard
     function grabPicture(copy) {
@@ -48,6 +51,7 @@ TpPage {
     onMapFocusChanged: if (!mapFocus) chart.forceActiveFocus()
     // Esc left by a control (map, slider...): keys back to charts, never closes viewer window or page
     Keys.onEscapePressed: function(event) {
+        page.lapsOpen = false
         page.mapFocus = false
         chart.forceActiveFocus()
         event.accepted = true
@@ -57,42 +61,52 @@ TpPage {
     TpMenu {
         id: importMenu
         onClosed: chart.forceActiveFocus()
-        Action { text: i18n.tr("Add File..."); onTriggered: backend.exports.addFiles() }
-        Action { text: i18n.tr("Imported Laps..."); onTriggered: backend.openLibrary() }
-        Action { text: i18n.tr("Import Folder..."); onTriggered: backend.exports.importFolder() }
+        Action { text: i18n.tr("Add File…"); onTriggered: backend.exports.addFiles() }
+        Action { text: i18n.tr("Imported Laps…"); onTriggered: backend.openLibrary() }
+        Action { text: i18n.tr("Import Folder…"); onTriggered: backend.exports.importFolder() }
     }
+    // Data files for other tools (MoTeC i2, Excel, delta best of the game overlay)
     TpMenu {
         id: exportMenu
+        objectName: "exportMenu"
         onClosed: chart.forceActiveFocus()
         TpMenu {
             title: "MoTeC i2 (.ld)"
-            Action { text: i18n.tr("Reference Lap..."); onTriggered: backend.exports.exportMotec("") }
-            Action { text: i18n.tr("Displayed Laps..."); onTriggered: backend.exports.exportMotecMany(false) }
-            Action { text: i18n.tr("All Laps of Track..."); onTriggered: backend.exports.exportMotecMany(true) }
+            Action { text: i18n.tr("Reference Lap…"); onTriggered: backend.exports.exportMotec("") }
+            Action { text: i18n.tr("Displayed Laps…"); onTriggered: backend.exports.exportMotecMany(false) }
+            Action { text: i18n.tr("All Laps of Track…"); onTriggered: backend.exports.exportMotecMany(true) }
         }
-        Action { text: i18n.tr("Reference Lap as Delta Best..."); onTriggered: backend.exports.exportDeltaBest("") }
-        MenuSeparator {}
-        Action { text: i18n.tr("CSV, Displayed Laps..."); onTriggered: backend.exports.exportCsv() }
-        Action { text: i18n.tr("CSV, Displayed Laps on Time Base..."); onTriggered: backend.exports.exportTimeCsv() }
         Action {
-            text: i18n.tr("CSV, Passage A ↔ B...")
-            enabled: chart.hasRange
-            onTriggered: backend.exports.exportPassageCsv(chart.markerA, chart.markerB)
-        }
-        Action { text: i18n.tr("CSV, Visible Part..."); onTriggered: backend.exports.exportPassageCsv(chart.viewStart, chart.viewEnd) }
-        Action {
-            text: i18n.tr("MoTeC, Reference Lap A ↔ B...")
+            text: i18n.tr("MoTeC, Reference Lap A ↔ B…")
             enabled: chart.hasRange
             onTriggered: backend.exports.exportPassageMotec(chart.markerA, chart.markerB)
         }
+        Action { text: i18n.tr("Reference Lap as Delta Best…"); onTriggered: backend.exports.exportDeltaBest("") }
         MenuSeparator {}
-        Action { text: i18n.tr("Picture (PNG)..."); onTriggered: page.grabPicture(false) }
+        Action { text: i18n.tr("CSV, Displayed Laps…"); onTriggered: backend.exports.exportCsv() }
+        Action { text: i18n.tr("CSV, Displayed Laps on Time Base…"); onTriggered: backend.exports.exportTimeCsv() }
+        Action {
+            text: i18n.tr("CSV, Passage A ↔ B…")
+            enabled: chart.hasRange
+            onTriggered: backend.exports.exportPassageCsv(chart.markerA, chart.markerB)
+        }
+        Action { text: i18n.tr("CSV, Visible Part…"); onTriggered: backend.exports.exportPassageCsv(chart.viewStart, chart.viewEnd) }
+    }
+    // What another driver or a team mate looks at: pictures, the lap itself, the corner report
+    TpMenu {
+        id: shareMenu
+        objectName: "shareMenu"
+        onClosed: chart.forceActiveFocus()
+        Action { text: i18n.tr("Picture (PNG)…"); onTriggered: page.grabPicture(false) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: page.grabPicture(true) }
         Action {
-            text: i18n.tr("Picture of Passage A ↔ B...")
+            text: i18n.tr("Picture of Passage A ↔ B…")
             enabled: chart.hasRange
             onTriggered: page.grabPassage()
         }
+        MenuSeparator {}
+        Action { text: i18n.tr("Share Reference Lap…"); onTriggered: backend.exports.shareLap("") }
+        Action { text: i18n.tr("Corner Report…"); onTriggered: backend.exports.exportCornerReport() }
     }
     // Channels shown on charts & in simple view, chart options: right-aligned under the button it was opened from
     ShowPicker {
@@ -107,7 +121,9 @@ TpPage {
 
     // Math channels editor (Show menu), setup differences (lap chip menu)
     MathChannels { id: mathEditor; objectName: "mathEditor"; onClosed: chart.forceActiveFocus() }
-    SetupDiff { id: setupDiff; objectName: "setupDiff"; onClosed: chart.forceActiveFocus() }
+    // Imported laps library (Import menu, backend.openLibrary): opens itself on backend.library.openRequested
+    LapLibraryPanel { id: libraryPanel; objectName: "libraryPanel"; onKeysBack: chart.forceActiveFocus() }
+    CarSetupDiff { id: setupDiff; objectName: "setupDiff"; onClosed: chart.forceActiveFocus() }
 
     // Keyboard & mouse help (? key on charts, help button)
     TpPopup {
@@ -136,7 +152,8 @@ TpPage {
                             ["+ / −", i18n.tr("Zoom")], ["← →", i18n.tr("One recorded frame")],
                             ["Ctrl+← →", i18n.tr("Move cursor farther")], ["Shift+← →", i18n.tr("Move view")],
                             ["Alt+← →", i18n.tr("Previous / next zoom")], [i18n.tr("Home key") + " / 0", i18n.tr("Whole lap")],
-                            ["[ ]", i18n.tr("Previous / next corner")], ["A / B", i18n.tr("Markers A & B at cursor")],
+                            ["[ ]", i18n.tr("Previous / next corner")], ["Shift+[ ]", i18n.tr("Previous / next corner where time is lost")],
+                            ["A / B", i18n.tr("Markers A & B at cursor")],
                             [i18n.tr("Esc"), i18n.tr("Clear markers, then kept position")],
                             ["R", i18n.tr("Highlighted lap as reference")], [i18n.tr("Space"), i18n.tr("Play / pause")],
                             ["L", i18n.tr("Loop passage A-B")], [", .", i18n.tr("Playback speed")],
@@ -144,11 +161,12 @@ TpPage {
                             ["?", i18n.tr("This help")],
                         ]],
                         [i18n.tr("Track Map"), [
-                            ["F", i18n.tr("Fit whole circuit")], ["R", i18n.tr("Turn map")], ["1-9", i18n.tr("Line coloring")],
+                            [i18n.tr("Click"), i18n.tr("Map takes the keys below")],
+                            ["F", i18n.tr("Fit whole circuit")], ["Shift+R", i18n.tr("Turn map")], ["1-9", i18n.tr("Line coloring")],
                             ["+ / −", i18n.tr("Zoom")], ["← ↑ → ↓", i18n.tr("Move map")],
-                            ["B C S O", i18n.tr("Driving points")], ["L", i18n.tr("Lockups, wheelspin & bottoming")],
+                            ["Shift+B, C S O", i18n.tr("Driving points")], ["Shift+L", i18n.tr("Lockups, wheelspin & bottoming")],
                             ["G", i18n.tr("Off track")], ["X", i18n.tr("Track limits exceeded")],
-                            ["Z", i18n.tr("Pedal zones")], ["T", i18n.tr("Cursor trail")], ["M", i18n.tr("Measure distance")],
+                            ["Z", i18n.tr("Pedal Zones")], ["T", i18n.tr("Cursor Trail")], ["M", i18n.tr("Measure distance")],
                         ]],
                         [i18n.tr("Laps"), [
                             [i18n.tr("Click"), i18n.tr("Show or hide lap")], ["Shift+" + i18n.tr("Click"), i18n.tr("Every lap between")],
@@ -161,7 +179,7 @@ TpPage {
                         Layout.alignment: Qt.AlignTop
                         Layout.fillWidth: true
                         spacing: theme.space2
-                        Text { text: modelData[0]; color: theme.text; font.weight: Font.DemiBold; font.pointSize: theme.fontSubtitle }
+                        TpText { role: "subtitle"; text: modelData[0] }
                         Repeater {
                             model: modelData[1]
                             RowLayout {
@@ -173,9 +191,9 @@ TpPage {
                                     color: theme.hover
                                     border.width: 1
                                     border.color: theme.border
-                                    Text { id: keyText; anchors.centerIn: parent; text: modelData[0] === "Wheel" ? i18n.tr("Wheel") : modelData[0]; color: theme.text; font.pointSize: theme.fontSmall }
+                                    Text { id: keyText; anchors.centerIn: parent; text: modelData[0] === "Wheel" ? i18n.tr("Wheel") : modelData[0]; color: theme.text; font.pointSize: theme.fontSmall; textFormat: Text.PlainText }
                                 }
-                                Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                TpText { role: "label"; text: modelData[1]; color: theme.dimText; Layout.fillWidth: true; wrapMode: Text.WordWrap; elide: Text.ElideNone }
                             }
                         }
                     }
@@ -228,9 +246,23 @@ TpPage {
                 objectName: "lapToolbar"
                 onMenuClosed: chart.forceActiveFocus()  // keys back to charts
                 Layout.fillWidth: true
+                // Narrow page: lap list drawer
+                TpAction {
+                    name: "lapsButton"
+                    shown: page.narrow
+                    text: i18n.tr("Laps")
+                    glyph: ""  // bulleted list
+                    fallback: "☰"
+                    tip: i18n.tr("Recorded laps of the track: check laps to compare them")
+                    priority: 6
+                    pinned: true
+                    checkable: true
+                    checked: page.lapsOpen
+                    onTriggered: page.lapsOpen = !page.lapsOpen
+                }
                 TpAction {
                     name: "refreshButton"
-                    glyph: ""
+                    glyph: theme.glyphs.refresh
                     fallback: "⟳"
                     tip: i18n.tr("Refresh")
                     priority: 1
@@ -240,7 +272,7 @@ TpPage {
                 TpAction {
                     name: "importButton"
                     text: i18n.tr("Import")
-                    glyph: ""  // open file
+                    glyph: theme.glyphs["import"]
                     fallback: "+"
                     tip: i18n.tr("Add laps from another folder or track, import a MoTeC log (.ld) or a teammate's folder")
                     priority: 2
@@ -248,11 +280,21 @@ TpPage {
                     onTriggered: function(source) { page.toggleMenu(importMenu, source) }
                 }
                 TpAction {
+                    name: "shareButton"
+                    text: i18n.tr("Share")
+                    glyph: theme.glyphs.share
+                    fallback: "↗"
+                    tip: i18n.tr("Picture of the page, the reference lap for another driver, or the corner report")
+                    priority: 2
+                    checked: shareMenu.visible
+                    onTriggered: function(source) { page.toggleMenu(shareMenu, source) }
+                }
+                TpAction {
                     name: "exportButton"
-                    text: i18n.tr("Export")
-                    glyph: ""  // export
+                    text: i18n.tr("Export Data")
+                    glyph: theme.glyphs.export
                     fallback: "⇪"
-                    tip: i18n.tr("Export laps to MoTeC i2 log files (.ld), displayed charts to CSV (Excel), or a picture of the page")
+                    tip: i18n.tr("Export laps to MoTeC i2 log files (.ld), displayed charts to CSV (Excel), or the reference lap as delta best")
                     priority: 2
                     checked: exportMenu.visible
                     onTriggered: function(source) { page.toggleMenu(exportMenu, source) }
@@ -267,6 +309,18 @@ TpPage {
                     checked: helpPopup.visible
                     onTriggered: helpPopup.visible ? helpPopup.close() : helpPopup.open()
                 }
+                // Guided analysis: best vs last lap, Corners tool on the corner where most time is lost ({ } next)
+                TpAction {
+                    name: "analyzeButton"
+                    text: i18n.tr("Analyze My Last Lap")
+                    glyph: ""  // diagnostic
+                    fallback: "◎"
+                    tip: i18n.tr("Best lap against last lap, Corners tool opened on the corner where most time is lost")
+                         + "\n" + i18n.tr("Shift+[ ]: previous / next corner where time is lost")
+                    priority: 4
+                    enabled: backend.hasTrackLaps
+                    onTriggered: backend.analyzeLastLap()
+                }
                 TpAction {
                     name: "liveButton"
                     text: i18n.tr("Live")
@@ -279,7 +333,7 @@ TpPage {
                 TpAction {
                     name: "timeAxisButton"
                     shown: !backend.simpleView  // charts only
-                    text: i18n.tr("Time axis")
+                    text: i18n.tr("Time Axis")
                     tip: i18n.tr("Charts along lap time instead of lap distance")
                     priority: 3
                     checkable: true
@@ -329,16 +383,24 @@ TpPage {
                 Component.onCompleted: if (backend.layoutState.byteLength > 0) restoreState(backend.layoutState)
                 onResizingChanged: if (!resizing) backend.setLayoutState(saveState())
 
-                LapList {
-                    objectName: "lapList"
-                    chart: chart
+                // Lap list place in wide pages; narrow pages: list in the drawer over charts (lapDrawer)
+                Item {
+                    id: lapPane
+                    visible: !page.narrow
                     SplitView.preferredWidth: theme.em * 21
                     SplitView.minimumWidth: theme.em * 14
+                    LapList {
+                        id: lapList
+                        objectName: "lapList"
+                        chart: chart
+                        parent: page.narrow ? drawerSlot : lapPane  // one list: rows, menus & scroll kept
+                        anchors.fill: parent
+                    }
                 }
 
                 Card {
                     SplitView.fillWidth: true
-                    SplitView.minimumWidth: theme.em * 30
+                    SplitView.minimumWidth: page.narrow ? theme.em * 24 : theme.em * 30
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: theme.padCard
@@ -400,7 +462,7 @@ TpPage {
                 Card {
                     // Ultrawide screens: map & tools get a share of the width, not a fixed strip beside huge charts
                     SplitView.preferredWidth: Math.max(theme.em * 27, body.width * 0.22)
-                    SplitView.minimumWidth: theme.em * 18
+                    SplitView.minimumWidth: page.narrow ? theme.em * 15 : theme.em * 18
                     ColumnLayout {
                         id: sideColumn
                         anchors.fill: parent
@@ -421,7 +483,7 @@ TpPage {
                             maxWidth: parent.width
                             name: i18n.tr("Tools")
                             onTextsWidthChanged: sideColumn.fitTabs()
-                            options: [i18n.tr("Track Map"), i18n.tr("G Circle"), i18n.tr("Corners"), i18n.tr("Range"), i18n.tr("Session"), i18n.tr("XY")]
+                            options: [i18n.tr("Track Map"), i18n.tr("G Circle"), i18n.tr("Corners"), i18n.tr("A-B Passage"), i18n.tr("Session"), i18n.tr("XY")]
                             currentIndex: backend.sideTab
                             onActivated: function(index) { backend.setSideTab(index) }
                         }
@@ -485,6 +547,29 @@ TpPage {
                 }
             }
 
+            // Narrow page: lap list in a drawer over charts (Laps button, Esc or a click beside it closes it)
+            Rectangle {
+                anchors.fill: parent
+                visible: page.lapsOpen
+                color: theme.scrim
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.ArrowCursor
+                    onClicked: page.lapsOpen = false
+                }
+            }
+            Item {
+                id: lapDrawer
+                objectName: "lapDrawer"
+                width: Math.min(theme.em * 21, bodyArea.width * 0.9)
+                height: bodyArea.height
+                x: page.lapsOpen ? 0 : -width - theme.space6
+                visible: page.narrow && (page.lapsOpen || drawerSlide.running)
+                Behavior on x { NumberAnimation { id: drawerSlide; duration: theme.motionBase; easing.type: Easing.OutCubic } }
+                TpShadow {}
+                Item { id: drawerSlot; anchors.fill: parent }
+            }
+
             // Focus mode: large track map over laps & charts (charts keep driving cursor & zoom),
             // created only while shown (a second map otherwise keeps all its shapes)
             // Keys to large map (F, R, 1-9, Esc leaves), keys it leaves to charts (Space plays, arrows, A, ?)
@@ -518,12 +603,7 @@ TpPage {
             readonly property bool active: backend.status !== "" || backend.warning !== "" || backend.loading || backend.undoText !== ""
             opacity: active ? 1 : 0
             spacing: theme.space3
-            BusyIndicator {
-                running: backend.loading && pageState.active
-                visible: running
-                implicitWidth: theme.em * 1.4
-                implicitHeight: implicitWidth
-            }
+            TpSpinner { visible: backend.loading }
             Text {
                 id: statusText
                 text: backend.status
@@ -533,13 +613,16 @@ TpPage {
                 elide: Text.ElideRight
                 Layout.maximumWidth: page.width * 0.5  // page width: never the row itself (rearranged again)
                 HoverHandler { id: statusHover }
-                ToolTip.visible: statusHover.hovered && statusText.truncated
-                ToolTip.text: statusText.text
-                ToolTip.delay: theme.tipDelay
+                TpToolTip {  // status has <b> of escaped names: not the shared plain text tooltip
+                    visible: statusHover.hovered && statusText.truncated
+                    text: statusText.text
+                    textFormat: Text.StyledText
+                    delay: theme.tipDelay
+                }
             }
             TpButton {
                 visible: backend.undoText !== ""
-                glyph: ""  // undo
+                glyph: theme.glyphs.restore
                 fallback: "↶"
                 text: backend.undoText
                 flat: true
@@ -556,6 +639,7 @@ TpPage {
             Text {
                 id: warningText
                 text: backend.warning
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: theme.warning
                 Layout.fillWidth: true
@@ -569,11 +653,6 @@ TpPage {
         }
     }
 
-    // Laps moved to trash (named), undo at hand
-    TpToast {
-        id: toast
-        objectName: "lapToast"
-        actionText: backend.undoText !== "" ? i18n.tr("Undo") : ""
-        onAction: backend.undoDelete()
-    }
+    // Dialogs & toasts of the backend (lap note, delete & delta best confirmations; laps moved to trash: named, Undo)
+    TpDialogHost {}
 }

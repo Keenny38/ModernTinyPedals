@@ -94,6 +94,19 @@ def test_reset_if_mostly_new():
     assert resets and keys(model) == list(range(15, 40))
 
 
+def test_reset_if_no_row_kept():
+    # Lap list on another track: no remove & add transitions together (old rows left drawn under new ones)
+    model = DictListModel(("key",))
+    model.sync([{"key": number} for number in range(3)])
+    resets, removed = [], []
+    model.modelReset.connect(lambda: resets.append(True))
+    model.rowsRemoved.connect(lambda *args: removed.append(args))
+    model.sync([{"key": number} for number in range(10, 12)])
+    assert resets and not removed and keys(model) == [10, 11]
+    model.sync([])
+    assert len(resets) == 2 and not removed and keys(model) == []
+
+
 def test_duplicate_keys():
     model = DictListModel(("key", "value"))
     model.sync([{"key": "a", "value": 1}, {"key": "a", "value": 2}, {"key": "b", "value": 3}])

@@ -122,7 +122,8 @@ def test_delta_trace_laps():
     trace.update(5, 0.35, -0.4)  # skipped slots filled linearly
     assert math.isclose(trace.current[1], -0.2) and math.isclose(trace.current[2], -0.3)
     assert not trace.update(5, 0.36, -0.5)  # same slot: no change
-    assert not trace.update(5, math.nan, 0.1) and not trace.update(5, 0.5, math.inf)
+    assert not trace.update(5, math.nan, 0.1)
+    assert trace.update(5, 0.5, math.inf) and math.isnan(trace.current[5])  # no delta: slot followed, empty
     trace.update(5, 0.95, 0.2)
     trace.update(6, 0.02, 0.0)  # lap completed: current becomes previous
     assert trace.previous[9] == 0.2 and math.isnan(trace.current[5])
@@ -278,11 +279,15 @@ def test_pit_lane_helper_visibility(field, monkeypatch, modern):
     pit_lane(monkeypatch, 50.0, speed=21.0)
     assert widget.read_pit().box_fraction == round(1 - 150 / 700, 3)  # 700 m to box when shown
     pit_lane(monkeypatch, 50.0, limiter=False, speed=21.0)
-    assert widget.read_pit().limiter_state == DANGER
+    assert widget.read_pit().limiter_state == WARNING  # released after switched on in lane: no false alarm (Flag)
     pit_lane(monkeypatch, 400.0, speed=21.0)  # drove past box
     assert widget.read_pit().box_fraction == 1.0
     frames(widget)
     assert not is_blank(grab(widget))
+    pit_lane(monkeypatch, 1000.0, in_lane=0)  # lane left, entered again without limiter
+    widget.read_pit()
+    pit_lane(monkeypatch, 4900.0, limiter=False, speed=21.0)
+    assert widget.read_pit().limiter_state == DANGER
 
 
 def test_pit_lane_helper_services(field, monkeypatch):
@@ -319,17 +324,17 @@ def test_driver_times():
     from neopedal.widget.stint_timer import DriverTimes
 
     times = DriverTimes()
-    times.update(1, 100.0, "A", True, 0)
-    times.update(1, 101.0, "A", True, 1)
-    times.update(1, 120.0, "A", True, 1)  # jump (pause, replay): not driving time
-    times.update(1, 121.0, "B", True, 2)
-    times.update(1, 122.0, "B", False, 2)  # in garage
-    assert times.times == {"A": 1.0, "B": 1.0} and times.laps == {"A": 1, "B": 1}
-    times.update(1, 50.0, "B", True, 0)  # session restarted
+    times.update(1, 100.0, "A", True)
+    times.update(1, 101.0, "A", True)
+    times.update(1, 120.0, "A", True)  # jump (pause, replay): not driving time
+    times.update(1, 121.0, "B", True)
+    times.update(1, 122.0, "B", False)  # in garage
+    assert times.times == {"A": 1.0, "B": 1.0}
+    times.update(1, 50.0, "B", True)  # session restarted
     assert times.times == {"B": 0.0}
-    times.update(2, 60.0, "C", True, 0)  # new session
+    times.update(2, 60.0, "C", True)  # new session
     assert list(times.times) == ["C"]
-    times.update(2, math.nan, "C", True, 0)
+    times.update(2, math.nan, "C", True)
     assert times.times["C"] == 0.0
 
 
@@ -341,6 +346,7 @@ def test_stint_timer_drivers(field, monkeypatch, modern):
     clock = {"elapsed": 0.0, "driver": "Driver A"}
     set_reader(monkeypatch, "session", "elapsed", lambda: clock["elapsed"])
     set_reader(monkeypatch, "session", "end", 3600.0)
+    set_reader(monkeypatch, "session", "in_race", True)  # fair share of races only
     set_reader(monkeypatch, "session", "identifier", (9, 0, 0))
     set_reader(monkeypatch, "vehicle", "driver_name", lambda index=None: clock["driver"])
     set_reader(monkeypatch, "vehicle", "player_has_vehicle", True)

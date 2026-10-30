@@ -25,6 +25,7 @@ Map coordinates are track map file (SVG) coordinates: meters, y down. Line width
 
 from __future__ import annotations
 
+import html
 import logging
 import math
 import os
@@ -45,6 +46,7 @@ from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
 from ..lap_viewer import distance_unit
 from ..track_map_geometry import config_grades, curve_at, curve_description, node_at
+from . import dialogs
 from .formatting import format_date
 from .game_pictures import LogoCache, notifier
 from .lines import (
@@ -459,10 +461,9 @@ class TrackMapBackend(PageBackend):
         Returns:
             False if file missing, else True (map shown once read, or warned if invalid).
         """
-        from PySide6.QtWidgets import QMessageBox
-
         if not os.path.exists(f"{filepath}{filename}{FileExt.SVG}"):
-            QMessageBox.warning(self._window, tr("Error"), trm(f"Cannot find track map for<br><b>{filename}</b><br>"))
+            dialogs.alert(
+                self._window, tr("Error"), trm(f"Cannot find track map for<br><b>{html.escape(filename)}</b><br>"))
             return False
         widths, scale = self.scaled_widths(), self._meters_per_pixel
 
@@ -486,16 +487,14 @@ class TrackMapBackend(PageBackend):
 
     def map_read(self, result: tuple):
         """Map read in background: shown, or warned if invalid (map shown before kept)"""
-        from PySide6.QtWidgets import QMessageBox
-
         if self._released:
             return
         self.set_loading(False)
         filepath, filename, geometry, lines, built_for = result
         if geometry is None:
-            QMessageBox.warning(self._window, tr("Error"), trm(
+            dialogs.alert(self._window, tr("Error"), trm(
                 "Unable to load track map file from<br>"
-                f"<b>{filepath}{filename}{FileExt.SVG}</b><br><br>"
+                f"<b>{html.escape(filepath + filename)}{FileExt.SVG}</b><br><br>"
                 "Only support SVG file that generated with NeoPedal."))
             return
         self.geometry = geometry

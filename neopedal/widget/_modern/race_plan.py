@@ -40,7 +40,14 @@ from ...i18n import tr_overlay
 from ...module_info import minfo
 from ...race_live import StopCounter
 from ...race_live import read_race_state as read_live
-from ..race_plan import MENU_TOLERANCE, PLAN_CHECK_SECONDS, distance_text, pit_entry_ahead
+from ..race_plan import (
+    MENU_TOLERANCE,
+    PLAN_CHECK_SECONDS,
+    distance_text,
+    energy_plan,
+    pit_entry_ahead,
+    pit_menu_check,
+)
 from ..race_plan import Realtime as ClassicPlan
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
@@ -133,7 +140,7 @@ class Realtime(StatsMixin, ModernOverlay):
         if now >= self.next_check:
             self.next_check = now + PLAN_CHECK_SECONDS
             self.refresh_plan()
-        live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
+        live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel, describe=False)
         if self.wcfg["enable_live_replan"]:
             self.replan(live)
         else:
@@ -155,8 +162,8 @@ class Realtime(StatsMixin, ModernOverlay):
                     to_go = max(stop.lap - lap, 0)
                     window = to_go <= self.wcfg["pit_window_laps"]
                     values.append(Value(f"L{stop.lap - self.formation_laps} ({to_go})",
-                                        theme.orange if window else None,
-                                        theme.tint(theme.orange, 55) if window else None))
+                                        theme.warning if window else None,
+                                        theme.tint(theme.warning, 55) if window else None))
             elif key == "refuel":
                 values.append(Value(f"+{stop.fuel:.1f}{self.symbol_fuel}" if stop else DASH))
             elif key == "energy":
@@ -179,8 +186,8 @@ class Realtime(StatsMixin, ModernOverlay):
                 distance = -1.0 if in_pits else pit_entry_ahead()
                 in_lap = stop is not None and stop.lap - lap <= 1 and distance >= 0  # stop at end of this lap
                 values.append(Value(distance_text(distance, self.distance_unit).replace("--", DASH),
-                                    theme.orange if in_lap else None,
-                                    theme.tint(theme.orange, 55) if in_lap else None))
+                                    theme.warning if in_lap else None,
+                                    theme.tint(theme.warning, 55) if in_lap else None))
             elif key == "stint_limit":
                 values.append(self.limit_value(strategy))
             elif key == "consumption_estimate":
@@ -199,8 +206,7 @@ class Realtime(StatsMixin, ModernOverlay):
 
     def estimate_value(self) -> Value:
         """Consumption estimate used by fuel (or energy) module: game, last lap or median of laps"""
-        energy = self.setup.fuel_per_lap <= 0 and self.setup.energy_per_lap > 0
-        source = minfo.energy if energy else minfo.fuel
+        source = minfo.energy if energy_plan(self.setup) else minfo.fuel
         method = getattr(source, "consumptionMethod", "")  # data module version without it: unknown
         if method not in ESTIMATE_LABELS:
             return Value(DASH, self.theme.text_faint)
@@ -214,13 +220,10 @@ class Realtime(StatsMixin, ModernOverlay):
         """Refill set in game pit menu (fuel, or virtual energy of a car using it) against amount
         after next stop of the plan: OK, or menu > plan"""
         theme = self.theme
-        refill = api.read.vehicle.absolute_refill()
-        if stop is None or refill <= 0:
+        check = pit_menu_check(self.setup, stop, self.unit_fuel, self.symbol_fuel)
+        if check is None:
             return Value(DASH, theme.text_faint)
-        if self.setup.energy_per_lap > 0:
-            menu, planned, unit = refill, stop.energy_after, "%"
-        else:
-            menu, planned, unit = self.unit_fuel(refill), stop.fuel_after, self.symbol_fuel
+        menu, planned, unit = check
         if abs(menu - planned) <= MENU_TOLERANCE:
             return Value(tr_overlay("OK"), theme.positive)
         return Value(f"{menu:.0f}>{planned:.0f}{unit}", theme.negative, theme.tint(theme.negative, 55))
@@ -230,8 +233,7 @@ class Realtime(StatsMixin, ModernOverlay):
         warning when last lap used more"""
         theme = self.theme
         end = stop.lap if stop is not None else strategy.last_lap
-        energy = self.setup.fuel_per_lap <= 0 and self.setup.energy_per_lap > 0
-        if energy:
+        if energy_plan(self.setup):
             target = target_to_stop(self.setup, api.read.engine.virtual_energy() * 100, end - position, "energy")
             last = minfo.energy.lastLapConsumption
             unit = "%"

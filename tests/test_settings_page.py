@@ -1,5 +1,6 @@
 """Settings page (config.json): categories & groups, editors by option kind, pending edits checked while typing,
-undo & redo, reset, search through every category, apply (saved, app reloaded), status cards, page in app"""
+undo & redo, reset, search through every category, apply (saved, what reads the sections refreshed or restarted),
+status cards, page in app"""
 
 import time
 from contextlib import suppress
@@ -131,7 +132,7 @@ def test_groups_and_editor_kinds(settings):
     settings.selectCategory("notification")
     color = row(settings, "notification/font_color_locked_preset")
     assert color["kind"] == "color" and color["color"] == "#FFFFFF" and color["help"] == ""  # generic help skipped
-    assert settings.previews["Preset Locked"]["background"] == "#777777"
+    assert settings.previews["Preset Locked"]["background"] == "#767676"  # white text 4.5:1 (UI/UX audit N5)
 
 
 def test_pending_edits_undo_redo_discard(settings):
@@ -277,10 +278,10 @@ def test_search_through_every_category(settings):
     settings.setSearch("PORT")
     keys = [item["key"] for item in settings.model.rows]
     assert keys == ["remote_control/remote_control_port", "web_dashboard/web_dashboard_port",
-                    "stream_overlay/stream_overlay_port"]
-    assert settings.matchCount == 3 and settings.searching
+                    "stream_overlay/stream_overlay_port", "preset:api_lmu/url_port"]  # API options of preset too
+    assert settings.matchCount == 4 and settings.searching
     matches = {entry["key"]: entry["matches"] for entry in settings.categories}
-    assert matches["remote_control"] == 1 and matches["application"] == 0
+    assert matches["remote_control"] == 1 and matches["application"] == 0 and matches["api"] == 1
     assert settings.model.rows[0]["group"] == "Remote Control"
     settings.selectCategory("vr_overlay")  # leaves search
     assert not settings.searching and settings.searchText == ""
@@ -336,6 +337,21 @@ def test_status_cards(settings):
     cfg.user.config["web_dashboard"]["enable_web_dashboard"] = False
     remote = settings.remoteControl
     assert remote["stream"] == "ws://127.0.0.1:8337/stream" and "X-NeoPedal" in remote["command"]
+    # Access token required (security audit 2026-10-29): generated, shown in command & stream address
+    cfg.user.config["remote_control"].update(enable_remote_control=True, enable_access_token=True, access_token="")
+    remote = settings.remoteControl
+    token = cfg.user.config["remote_control"]["access_token"]
+    assert len(token) >= 16 and f'"X-NeoPedal: {token}"' in remote["command"]
+    assert remote["stream"] == f"ws://127.0.0.1:8337/stream?token={token}"
+
+
+def test_short_access_code_and_token_refused(settings):
+    settings.setText("web_dashboard/access_code", "ABC")
+    settings.setText("remote_control/access_token", "short")
+    assert settings.errorCount == 2 and settings.apply() is False
+    settings.setText("web_dashboard/access_code", "")
+    settings.setText("remote_control/access_token", "x" * 16)
+    assert settings.errorCount == 0
 
 
 def test_status_card_updated_when_lan_addresses_found(settings):
@@ -403,7 +419,7 @@ def test_config_menu_entries_open_one_page_at_category(window):
     flush()
     assert second is first and first.backend.category == "user_path" and len(settings_pages(window)) == 1
     assert not first.view.errors(), [error.toString() for error in first.view.errors()]
-    assert settings_pages(window)[0].title == "Config"
+    assert settings_pages(window)[0].title == "Settings"
 
 
 def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
@@ -417,6 +433,11 @@ def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
     assert page.is_marked_modified() and settings_pages(window)[0].is_modified()
     assert window.centralWidget().save_current_page()  # Ctrl+S
     assert cfg.application["snap_gap"] == 4 and reloads and not page.is_marked_modified()
+    # Window option saved: the window is refreshed once saving is done, overlays & modules are not restarted
+    # (audit I PERF-007, see app_settings.apply_saved_sections); user_path, compatibility... still reload the app
+    from neopedal.ui.menu import menu_reload_preset
+
+    assert reloads[-1] is not menu_reload_preset
     page.backend.setNumber("application/snap_gap", 6)
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Cancel))
     page.close()
@@ -478,7 +499,7 @@ def test_page_rebuilt_in_new_language(window):
     i18n.set_language("Français")
     try:
         page.refresh()  # page shown: rebuilt now
-        assert settings_pages(window)[0].title == "Réglages" and not page._stale
+        assert settings_pages(window)[0].title == "Paramètres" and not page._stale
         assert page.backend.pendingCount == 1 and not page.view.errors()
         assert page.backend.categoryInfo["label"] == "Application"
         assert page.view.rootContext().contextProperty("i18n").property("table")["Search settings"] == "Rechercher un paramètre"  # QML texts too
@@ -495,7 +516,7 @@ def test_config_page_in_navigation_bar_and_tools(window):
     from neopedal.ui.tools_view import TOOL_KEYWORDS, TOOL_SECTIONS, open_tool
 
     entry = rail_entries()["app_settings"]
-    assert entry.dialog == "app_settings.AppSettings" and entry.label == "Config"
+    assert entry.dialog == "app_settings.AppSettings" and entry.label == "Settings"
     # Not in the default bar (gear button of the quick buttons & Ctrl+,), can be added to it
     assert "app_settings" not in default_rail_items() and "app_settings" in default_quick_items()
     assert any(path == "app_settings.AppSettings" for _, tools in TOOL_SECTIONS for _, _, path in tools)
@@ -636,3 +657,27 @@ def test_language_change_keeps_window_size(window):
     finally:
         cfg.application["language"] = "English"
         i18n.set_language("English")
+
+
+def test_feature_switches_saved_at_once(settings, monkeypatch):
+    """Switch turning a feature on or off (global hotkeys, servers...): saved & applied at once like on its own
+    page, other pending edits kept"""
+    from neopedal.ui.quick import settings_backend
+
+    applied = []
+    monkeypatch.setattr(settings_backend, "apply_switch", applied.append)
+    saved = cfg.application["show_at_startup"]
+    settings.setBool("application/show_at_startup", not saved)  # pending until Apply
+    hotkeys = cfg.application["enable_global_hotkey"]
+    settings.setBool("application/enable_global_hotkey", not hotkeys)
+    assert cfg.application["enable_global_hotkey"] == (not hotkeys) and applied == [settings_backend.SWITCH_HOTKEYS]
+    assert settings.pendingCount == 1 and cfg.application["show_at_startup"] == saved
+    settings.selectCategory("web_dashboard")
+    web = cfg.user.config["web_dashboard"]["enable_web_dashboard"]
+    settings.setBool("web_dashboard/enable_web_dashboard", not web)
+    assert cfg.user.config["web_dashboard"]["enable_web_dashboard"] == (not web)
+    settings.resetOption("web_dashboard/enable_web_dashboard")  # back to default: at once too
+    assert applied[-1] == settings_backend.SWITCH_SERVERS and settings.pendingCount == 1
+    cfg.application["enable_global_hotkey"] = hotkeys
+    cfg.user.config["web_dashboard"]["enable_web_dashboard"] = web
+    assert set(settings_backend.IMMEDIATE_SWITCHES) <= set(settings._infos)  # every switch is an option shown

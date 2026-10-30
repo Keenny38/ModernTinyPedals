@@ -30,12 +30,14 @@ import os
 from collections.abc import Sequence
 from dataclasses import asdict
 from functools import partial
+from html import escape
 
 from PySide6.QtCore import QUrl, Slot
 from PySide6.QtGui import QGuiApplication
 
 from ...api_control import api
 from ...const_file import ConfigType, FileExt, FileFilter
+from ...formatter import strip_invalid_char
 from ...fuel_strategy import (
     RaceState,
     full_tank_laps,
@@ -64,6 +66,7 @@ from .race_model import (
     RACE_SESSION,
     checked_inputs,
     convert_fuel_inputs,
+    laptime_text,
     live_race_length,
     plan_markdown,
     ranged_inputs,
@@ -154,6 +157,40 @@ class RaceFiles(RaceBase):
         self.set_plan_inputs(False)
         self.remember_recent(DROP_HISTORY, filename_full)
         return True
+
+    @staticmethod
+    def history_path_of(track: str, vehicle: str) -> str:
+        """Consumption history file recorded for a track & vehicle class ("Track - Class" as the Stint module names
+        it; vehicle: class, "Class - Brand" or vehicle name of driver stats), empty if none"""
+        names = [f"{track} - {vehicle}"]
+        vehicle_class = vehicle.split(" - ", 1)[0].strip()
+        if vehicle_class and vehicle_class != vehicle:
+            names.append(f"{track} - {vehicle_class}")
+        for name in names:
+            path = f"{cfg.path.fuel_delta}{strip_invalid_char(name)}{FileExt.CONSUMPTION}"
+            if os.path.isfile(path):
+                return path
+        return ""
+
+    def prepare_race(self, track: str, vehicle: str, lap_time: float = 0.0) -> list[str]:
+        """Race of a track & vehicle prepared (Driver Stats): calculator turned on, consumption history of the
+        track & class loaded (race pace, consumption, wear), else lap time given (personal best) filled in;
+        what was filled in returned (also told in a toast)"""
+        if not self.game_data:
+            self.setGameData(True)  # asked by the user: page shows the plan
+        done = []
+        path = self.history_path_of(track, vehicle) if track else ""
+        if path and self.load_history_file(path):
+            done.append(tr("consumption history loaded"))
+        elif lap_time > 0:
+            self.setInput("input_lap_time", lap_time)
+            done.append(f"{tr('Lap Time')}: {laptime_text(self.values['input_lap_time'])}")
+        name = f"{track} - {vehicle}" if track and vehicle else track or vehicle
+        if done:
+            self.host.toast(trm(f"Race prepared for <b>{escape(name)}</b>:") + " " + ", ".join(done))
+        else:
+            self.host.toast(trm(f"Nothing recorded for <b>{escape(name)}</b> yet: fill in the race setup"))
+        return done
 
     # Files opened or saved last (Recent menus), files dropped on page
     @staticmethod
@@ -320,8 +357,10 @@ class RaceFiles(RaceBase):
 
     def refresh_race_state(self, live=None):
         """Rest of race planned again at each lap & stop (not while in the pits), status shown
-        next to Live Race (values read from the game in its tooltip, to check them)"""
+        in the top bar & Live tab (values read from the game in its tooltip, to check them)"""
+        self.update_pit_menu_available()
         if not self.game_data:  # whole race planned, nothing read
+            self.set_race_running(False)
             if (self.live_status, self.live_tip) != ("", ""):
                 self.live_status, self.live_tip = "", ""
                 self.liveChanged.emit()
@@ -331,6 +370,7 @@ class RaceFiles(RaceBase):
             return
         if live is None:
             live = read_live(self.unit_fuel, self.stop_counter, self.symbol_fuel)
+        self.set_race_running(bool(live.text))  # race of the game under way (text: values read in a race)
         checked = bool(cfg.user.config["fuel_calculator"].get("enable_live_race"))
         state: RaceState | None = live.state if checked else None
         if not checked:
@@ -344,7 +384,7 @@ class RaceFiles(RaceBase):
         else:
             status = tr("waiting for the race") if not live.text else tr("waiting for lap 1")
         tip = (f"{tr('Lap')} (+{tr('progress')}) · {tr('race time')} / {tr('time left')} · {tr('fuel')} · "
-               f"{tr('energy')} · {tr('tread')} · {tr('stops')} ({tr('game')})<br>{live.text}" if live.text else "")
+               f"{tr('energy')} · {tr('tread')} · {tr('stops')} ({tr('game')})\n{live.text}" if live.text else "")
         if (status, tip) != (self.live_status, self.live_tip):
             self.live_status, self.live_tip = status, tip
             self.liveChanged.emit()
@@ -354,6 +394,13 @@ class RaceFiles(RaceBase):
         if key != self._race_key:
             self._race_key = key
             self.set_race_state(state)
+
+    def set_race_running(self, running: bool):
+        """Race of the game started or over: planning the rest of the race proposed (header), proposal turned
+        down forgotten once the race is over"""
+        self._race_running = running
+        self._race_dismissed = self._race_dismissed and running
+        self.update_race_proposal()
 
     @staticmethod
     def race_stints() -> list:
@@ -467,7 +514,7 @@ class RaceFiles(RaceBase):
         try:
             with open(filename_full, encoding="utf-8") as file:
                 data = json.load(file)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
             data = None
         if not self.apply_race_plan(data, os.path.splitext(os.path.basename(filename_full))[0]):
             if not quiet:
@@ -517,12 +564,12 @@ class RaceFiles(RaceBase):
         columns = self.plan_columns()
         header = results.plan_header(self.symbol_fuel)
         rows = results.plan_rows(self.strategy, self.values["input_energy_per_lap"] > 0, self.time_text,
-                                 self.plan_setup.clock_offset)
+                                 self.plan_setup.clock_offset, self.driver_short)
         return [header[column] for column in columns], [tuple(row[column] for column in columns) for row in rows]
 
     def plan_text(self) -> str:
         return results.plan_text(self.strategy, self.symbol_fuel, self.values["input_energy_per_lap"] > 0,
-                                 self.values["input_drivers"], self.time_text)
+                                 self.values["input_drivers"], self.time_text, self.driver_label)
 
     @Slot()
     def copyPlanText(self):

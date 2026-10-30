@@ -131,7 +131,7 @@ class Realtime(StintTimerMixin, StatsMixin, TableMixin, ModernOverlay):
         return tuple(rows)
 
     def paint_static(self, painter: QPainter):
-        panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         self.paint_stats_static(painter, show_panel=False)
         if self.rows:
             painter.translate(0, self.table_top)

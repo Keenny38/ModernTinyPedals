@@ -35,13 +35,14 @@ import logging
 import re
 from typing import TYPE_CHECKING, NamedTuple
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QImageReader
+from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QImageReader, QKeySequence, QShortcut
 from PySide6.QtWidgets import QWidget
 
+from ... import app_signal
 from ...const_common import DATE_NA
 from ...const_file import ConfigType
-from ...i18n import current_language, tr
+from ...i18n import current_language, tr, trm
 from ...i18n.options import format_module_name, module_label
 from ...setting import cfg
 from ...update import changelog_image_file, release_url
@@ -60,6 +61,7 @@ from ..release_notes import (
     split_notes,
     version_text,
 )
+from . import open_web_link
 from .models import DictListModel
 from .page_backend import PageBackend
 
@@ -156,6 +158,7 @@ class ReleaseNotesBackend(PageBackend):
     skipClicked = Signal()
     cancelClicked = Signal()
     closeClicked = Signal()
+    overlayTried = Signal(str, str)  # overlay turned on by Try: name & message (Undo offered)
 
     def __init__(self, parent: QObject, releases: list[Release], newer: bool = False, prompt: bool = False,
                  installable: bool = False, can_install: bool = False, portable: bool = False,
@@ -186,6 +189,12 @@ class ReleaseNotesBackend(PageBackend):
         self._image_loading = ""
         self._image_list: list[dict] = []  # screenshots of shown rows (viewer navigation)
         self._enabled_overlays: list[str] = []
+        self._tried: list[str] = []  # overlays turned on by Try, last last (Ctrl+Z, Undo of the toast)
+        self._undo_shortcut: QShortcut | None = None
+        if isinstance(parent, QWidget):  # Ctrl+Z on this page undoes the last Try, as the Undo of its toast
+            self._undo_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), parent, self.undoLastTry)
+            self._undo_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            self._undo_shortcut.setEnabled(False)
         self._close_visible = True
         self._downloading = False
         self._cancelling = False
@@ -196,6 +205,10 @@ class ReleaseNotesBackend(PageBackend):
         self._refresh_rows(reset=True)
         self._refresh_overlays()
         self._detail = self._detail_text()
+
+    def first_version(self) -> tuple[int, int, int] | None:
+        """Version of the notes opened with (newest), None if none"""
+        return self._default[0].version if self._default else None
 
     # Content -----------------------------------------------------------------------------------------------
 
@@ -332,7 +345,7 @@ class ReleaseNotesBackend(PageBackend):
     @Property(str, notify=headerChanged)
     def title(self) -> str:
         first = self._first()
-        return f"{tr('Version')} {version_text(first.version)}" if first is not None else tr("Release Notes")
+        return f"{tr('Version')} {version_text(first.version)}" if first is not None else tr("What's New")
 
     @Property(str, notify=headerChanged)
     def chip(self) -> str:
@@ -439,7 +452,7 @@ class ReleaseNotesBackend(PageBackend):
     def _version_choices(self) -> list[dict]:
         first = self._default[0] if self._default else None
         if first is None:
-            label = tr("Release Notes")
+            label = tr("What's New")
         elif len(self._default) > 1:
             label = f"{version_text(self._default[-1].version)} → {version_text(first.version)}"
         else:
@@ -489,8 +502,8 @@ class ReleaseNotesBackend(PageBackend):
         """
         if link.startswith("option:"):
             self.open_option(link[7:], [name for name in overlays.split(",") if name])
-        elif link.startswith(("https://", "http://")):
-            QDesktopServices.openUrl(QUrl(link))
+        else:
+            open_web_link(link, ("https", "http"))
 
     def host_window(self) -> QWidget | None:
         """Window pages open from (options, Find Option): main window when shown as page, else the one that opened
@@ -541,12 +554,50 @@ class ReleaseNotesBackend(PageBackend):
 
     @Slot(str)
     def tryOverlay(self, name: str):
-        """Turn on overlay named by a card (saved in loaded preset)"""
+        """Turn on overlay named by a card (saved in loaded preset), Undo offered by the page toast & Ctrl+Z"""
         from ...module_control import wctrl
 
-        if name in wctrl.names:
-            wctrl.set_enabled([name], True)
+        if name in wctrl.names and wctrl.set_enabled([name], True):
             logger.info("UPDATES: %s turned on from what's new", name)
+            text = trm(f"Overlay turned on: {module_label(name)}")
+            self.overlayTried.emit(name, text)
+            self._tried = [*(tried for tried in self._tried if tried != name), name]
+            self.tried_changed()
+            page = self.parent()
+            if isinstance(page, QWidget):
+                from ..toast import show_toast
+
+                show_toast(page, text, action_text=tr("Undo"), action=lambda: self.undo_tried(name))
+            app_signal.refresh.emit(True)  # Overlays page, menus & tray follow
+        self._refresh_overlays()
+
+    @Slot()
+    def undoLastTry(self):
+        """Ctrl+Z: last overlay turned on by Try turned off again (then the one before)"""
+        if self._tried:
+            self.undo_tried(self._tried[-1])
+
+    def undo_tried(self, name: str):
+        """Undo of a toast: overlay turned on by that Try turned off again, once"""
+        if name in self._tried:
+            self.undoTry(name)
+
+    def tried_changed(self):
+        if self._undo_shortcut is not None:
+            self._undo_shortcut.setEnabled(bool(self._tried))
+
+    @Slot(str)
+    def undoTry(self, name: str):
+        """Overlay turned on by Try turned off again"""
+        from ...module_control import wctrl
+
+        if name in self._tried:
+            self._tried.remove(name)
+            self.tried_changed()
+
+        if name in wctrl.names and wctrl.set_enabled([name], False):
+            logger.info("UPDATES: %s turned off again from what's new", name)
+            app_signal.refresh.emit(True)
         self._refresh_overlays()
 
     @Slot(str)
@@ -609,7 +660,10 @@ class ReleaseNotesBackend(PageBackend):
     def openImage(self, url: str):
         """Screenshot in default image viewer (local file once loaded), else online"""
         state = self._images.get(url, {})
-        QDesktopServices.openUrl(QUrl(state["source"]) if state.get("status") == "ready" else QUrl(url))
+        if state.get("status") == "ready":
+            QDesktopServices.openUrl(QUrl(state["source"]))  # local file of the cache
+        else:
+            open_web_link(url)  # address of release notes text: https only
 
     # Install, download, actions ----------------------------------------------------------------------------
 

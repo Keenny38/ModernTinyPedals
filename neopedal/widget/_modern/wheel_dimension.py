@@ -24,13 +24,14 @@ Front & rear tyre radius measured while driving, in display order.
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
 from ..wheel_dimension import radius_text
-from .base import ModernOverlay
+from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -70,6 +71,11 @@ class Realtime(StatsMixin, ModernOverlay):
         """Update when vehicle on track"""
         wheels = minfo.wheels
         self.refresh(tuple(
-            Value(radius_text(wheels.wheelRadiusFront if front else wheels.wheelRadiusRear))
-            for front in self.fronts
+            self.radius_value(wheels.wheelRadiusFront if front else wheels.wheelRadiusRear) for front in self.fronts
         ))
+
+    def radius_value(self, radius: float) -> Value:
+        """Tyre radius, dash while not measured (or invalid reading)"""
+        if isfinite(radius) and radius > 0:
+            return Value(radius_text(radius))
+        return Value(DASH, self.theme.text_faint)

@@ -53,6 +53,8 @@ NO_ROWS: tuple = (None, ())
 NO_TELE_MAP: tuple = (None, None, ())
 # Zeroed telemetry of vehicle without telemetry match (never another car's data)
 EMPTY_TELE: Any = rf2_struct.rF2VehicleTelemetry()
+# Zeroed scoring of player while not synced (never the last slot of the array, stale in a dense session)
+EMPTY_SCOR: Any = rf2_struct.rF2VehicleScoring()
 
 # Shared memory zones recorded in replay frame, in order: (name, structure)
 REPLAY_ZONES: tuple[tuple[str, Any], ...] = (
@@ -212,22 +214,30 @@ class SyncData(_sync.SyncData):
         self._tele_rows = NO_ROWS
 
     def __sync_player_scor(self, scor_index: int = INVALID_INDEX) -> None:
-        """Sync local player vehicle scoring data"""
-        self.player_scor = self.dataset.scor.data.mVehicles[scor_index]
+        """Sync local player vehicle scoring data, zeroed if no scoring index (cached wrapper otherwise)"""
+        if scor_index < 0:
+            self.player_scor = EMPTY_SCOR
+        else:
+            self.player_scor = self.scoring_rows(self.dataset.scor.data)[scor_index]
 
     def __sync_player_tele(self, tele_index: int = INVALID_INDEX) -> None:
-        """Sync local player vehicle telemetry data, zeroed if no telemetry index"""
+        """Sync local player vehicle telemetry data, zeroed if no telemetry index (cached wrapper otherwise)"""
         if tele_index < 0:
             self.player_tele = EMPTY_TELE
         else:
-            self.player_tele = self.dataset.tele.data.mVehicles[tele_index]
+            self.player_tele = self.telemetry_rows(self.dataset.tele.data)[tele_index]
 
     def _player_scoring_index(self) -> int:
         """Scoring index of local player (or player index override), from cached vehicle wrappers
-        (same data as scoring array)"""
+        (same data as scoring array); last index checked first, it rarely changes between ticks"""
         scoring = self.dataset.scor.data
-        veh_total = scoring.mScoringInfo.mNumVehicles
+        veh_total = min(scoring.mScoringInfo.mNumVehicles, MAX_VEHICLES)
         scor_rows = self.scoring_rows(scoring)
+        last_index = self.player_scor_index
+        if 0 <= last_index < veh_total:
+            last_row = scor_rows[last_index]
+            if (last_row.mID == self.player_slot_id) if self.override_player_index else last_row.mIsPlayer:
+                return last_index
         if self.override_player_index:
             return local_scoring_index_by_id(self.player_slot_id, scor_rows, veh_total)
         return local_scoring_index(scor_rows, veh_total)
@@ -417,6 +427,14 @@ class RF2Info:
     def stop(self) -> None:
         """Stop data updating thread"""
         self._sync.stop()
+
+    def request_stop(self) -> None:
+        """Signal data updating thread to stop, see SyncData.request_stop (threads of an API stop in parallel)"""
+        self._sync.request_stop()
+
+    def wait_stopped(self, timeout: float = _sync.STOP_TIMEOUT, deadline: float | None = None) -> bool:
+        """Wait for signalled data updating thread & close mmap, see SyncData.wait_stopped"""
+        return self._sync.wait_stopped(timeout, deadline)
 
     def setPID(self, pid: str = "") -> None:
         """Set rF2 process ID for connecting to server data"""

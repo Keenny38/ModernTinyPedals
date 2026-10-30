@@ -57,7 +57,9 @@ def save_fuel_delta_file(
     """Save fuel/energy delta file (*.fuel, *.energy)"""
     if len(dataset) < 10 or invalid_save_name(filename):
         return
-    with atomic_write(f"{filepath}{filename}{extension}", newline="") as csvfile:
-        data_writer = csv.writer(csvfile)
-        data_writer.writerows(dataset)
-        logger.info("USERDATA: %s%s saved", filename, extension)
+    try:
+        with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as csvfile:
+            csv.writer(csvfile).writerows(dataset)
+    except OSError:  # already logged by atomic_write, data kept in memory (saved again on next lap)
+        return
+    logger.info("USERDATA: %s%s saved", filename, extension)

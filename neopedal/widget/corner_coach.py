@@ -115,15 +115,22 @@ class CornerCoachMixin:
         stop_loading()
         super().stop()  # type: ignore[misc]
 
+    def vehicle_reset(self):
+        """Driving of previous car or session forgotten (next corner braking, last corner driven)"""
+        self.tracker.clear()
+        self.tracker.last = None
+
     def read_coach(self) -> CoachView:
         """Sample car, follow it along reference corners: texts drawn"""
         reference = self.demo_reference() if drawing_demo() else self.poll_reference()
         if reference is not self.reference:
             self.reference = reference
-            self.tracker.reset(reference.corners if reference is not None else (),
-                               reference.length if reference is not None else 0.0)
-            if drawing_demo():
-                self.tracker.last = self.demo_last()
+            if reference is None:
+                self.tracker.reset((), 0.0)
+            else:  # new reference lap (new record): last corner driven still shown
+                last = self.tracker.last
+                self.tracker.reset(reference.corners, reference.length)
+                self.tracker.last = self.demo_last() if drawing_demo() else last
         if reference is None or not reference.corners:
             return CoachView(status=tr("No reference lap"))
         distance = self.lap_distance()

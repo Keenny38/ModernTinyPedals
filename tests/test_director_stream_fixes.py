@@ -132,29 +132,42 @@ def test_graphics_layout_reset_of_preset_in_use_and_undo(director_page, english)
     director_layout.set("", {})
 
 
-def test_graphics_layout_reset_confirmed_in_panel(director_page, english):  # noqa: F811
+def test_graphics_layout_reset_at_once_undo_in_toast_and_ctrl_z(director_page, english):  # noqa: F811
+    """Reversible reset: never confirmed, Undo in the one toast of the page & Ctrl+Z (no Undo button of its own)"""
     from neopedal.stream_director import director_layout
 
     backend, root = shown_director(director_page, car(1, 1), car(2, 2, distance=600.0))
     director_layout.set("", {"tower": [0.2, 0.2, 1.0]})
+    backend.graphics.resetGraphicsLayout()
+    pump()
+    assert director_layout.get("") == {}
+    root.forceActiveFocus()
+    QTest.keyClick(director_page.view, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)  # Ctrl+Z
+    pump()
+    assert director_layout.get("") == {"tower": [0.2, 0.2, 1.0]} and not backend.graphics.canUndoLayoutReset
     panel = root.findChild(QObject, "graphicsPopup")
     panel.setProperty("tab", 2)  # style & layout
     panel.setProperty("visible", True)
     pump()
     button = item_named(root, "resetGraphicsLayout") or panel.findChild(QObject, "resetGraphicsLayout")
-    dialog = root.findChild(QObject, "resetGraphicsLayoutDialog") or panel.findChild(QObject, "resetGraphicsLayoutDialog")
+    assert root.findChild(QObject, "resetGraphicsLayoutDialog") is None
+    assert (item_named(root, "undoGraphicsLayoutReset") or panel.findChild(QObject, "undoGraphicsLayoutReset")) is None
     QMetaObject.invokeMethod(button, "click")
-    assert wait_until(lambda: dialog.property("visible"))
-    assert director_layout.get("") == {"tower": [0.2, 0.2, 1.0]}  # asked first
-    QMetaObject.invokeMethod(dialog, "accept")
     pump()
-    assert director_layout.get("") == {} and backend.graphics.canUndoLayoutReset
-    undo = item_named(root, "undoGraphicsLayoutReset") or panel.findChild(QObject, "undoGraphicsLayoutReset")
-    assert not button.property("visible") and undo.property("visible")
-    backend.graphics.undoLayoutReset()
+    assert director_layout.get("") == {} and backend.graphics.canUndoLayoutReset and button.property("visible")
+    toasts = [item for item in root.findChildren(QObject) if item.objectName() == "bridgeToast"]
+    assert len(toasts) == 1  # one toast in the page
+    toast = toasts[0]
+    assert toast.property("shown") and toast.property("actionText") == "Undo"
+    assert toast.property("text") == "Graphics back to their places"
+    director_page.view.rootContext().contextProperty("dialogs").toastAction()  # Undo of the toast
     pump()
-    assert director_layout.get("") == {"tower": [0.2, 0.2, 1.0]} and button.property("visible")
+    assert director_layout.get("") == {"tower": [0.2, 0.2, 1.0]} and not backend.graphics.canUndoLayoutReset
     panel.setProperty("visible", False)
+    backend.notify("Camera refused", True)  # refused command: same toast, in red
+    pump()
+    assert toast.property("level") == "error" and toast.property("actionText") == ""
+    assert toast.property("text") == "Camera refused"
     director_layout.set("", {})
     assert not director_page.view.errors()
 
@@ -182,7 +195,7 @@ def test_stream_layout_reset_undo(page_backend, english):  # noqa: F811
     stream_layout.set("16:9", {})
 
 
-def test_stream_page_confirms_new_token_and_reset(page_backend, english):  # noqa: F811
+def test_stream_page_confirms_new_token_resets_with_undo(page_backend, english):  # noqa: F811
     from PySide6.QtCore import QCoreApplication, QEvent
 
     from neopedal.setting import cfg
@@ -204,18 +217,24 @@ def test_stream_page_confirms_new_token_and_reset(page_backend, english):  # noq
         QMetaObject.invokeMethod(dialog, "accept")
         process_events(0.05)
         assert cfg.user.config["stream_overlay"]["access_token"] != token
-        dialog = root.findChild(QObject, "resetStreamLayoutDialog")
+        # Layout reset: reversible, at once (never confirmed), Undo in the toast & Ctrl+Z
+        assert root.findChild(QObject, "resetStreamLayoutDialog") is None
+        assert root.findChild(QObject, "undoStreamLayoutReset") is None
         QMetaObject.invokeMethod(root.findChild(QObject, "resetStreamLayout"), "click")
-        assert wait_until(lambda: dialog.property("visible"))
-        assert stream_layout.get("16:9") != {}
-        QMetaObject.invokeMethod(dialog, "accept")
         process_events(0.05)
         assert stream_layout.get("16:9") == {}
-        undo = root.findChild(QObject, "undoStreamLayoutReset")
-        assert undo.property("visible")
-        QMetaObject.invokeMethod(undo, "click")
+        toast = root.findChild(QObject, "bridgeToast")
+        assert toast.property("shown") and toast.property("actionText") == "Undo"
+        view.view.rootContext().contextProperty("dialogs").toastAction()
         process_events(0.05)
-        assert stream_layout.get("16:9") == {"gear": [0.5, 0.25, 1.5]} and not undo.property("visible")
+        assert stream_layout.get("16:9") == {"gear": [0.5, 0.25, 1.5]}
+        QMetaObject.invokeMethod(root.findChild(QObject, "resetStreamLayout"), "click")
+        process_events(0.05)
+        assert stream_layout.get("16:9") == {}
+        view.view.setFocus()
+        QTest.keyClick(view.view, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+        process_events(0.05)
+        assert stream_layout.get("16:9") == {"gear": [0.5, 0.25, 1.5]}
         assert not view.view.errors()
     finally:
         stream_layout.set("16:9", {})

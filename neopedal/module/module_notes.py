@@ -22,6 +22,7 @@ Notes module
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 
 from .. import calculation as calc
@@ -38,8 +39,10 @@ from ..userfile.track_notes import (
     load_notes_file,
     parse_csv_notes_only,
 )
-from ..validator import generator_init
+from ..validator import generator_init, is_network_path
 from ._base import WAIT_STATE_CHANGE, DataModule, derived_stamp
+
+logger = logging.getLogger(__name__)
 
 
 class Realtime(DataModule):
@@ -164,11 +167,15 @@ def offset_position(position: float, offset: float, track_length: float) -> floa
 def load_pace_notes_file(
     config: dict, filepath: str, filename: str,
     table_header: tuple, parser: Callable, extension: str):
-    """Load pace notes"""
+    """Load pace notes, file of preset never on a network path (shared preset: opening it sends the Windows
+    sign-in hash to the share host)"""
     if config["enable_manual_file_selector"]:
         filepath = ""
         filename = config["pace_notes_file_name"]
         extension = ""
+        if is_network_path(filename):
+            logger.warning("NOTES: pace notes file on network path not loaded: %s", filename)
+            return None
     return load_notes_file(
         filepath=filepath,
         filename=filename,
@@ -206,8 +213,12 @@ def notes_selector(output: NotesData, dataset: tuple[Mapping, ...]):
         last_index = curr_index
         next_index = (curr_index + 1) * (pos_curr < pos_final)
 
-        if curr_index < 0:
-            curr_index = end_index
+        if curr_index < 0:  # before first note: last note of lap before (only note: same pass, same index)
+            curr_index = output.currentIndex if end_index == 0 and output.currentNote else end_index
+        elif end_index == 0 and output.currentNote:
+            # Only note passed again (next lap): index alternates (0, -1), so readers keyed on index (overlay
+            # display duration, audio playback) take it as a new note, as with notes in between
+            curr_index = -1 - output.currentIndex
 
         output.currentIndex = curr_index
         output.currentNote = dataset[curr_index]

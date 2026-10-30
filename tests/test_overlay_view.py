@@ -219,29 +219,38 @@ def test_failed_state(overlays):
 
 
 def test_batch_toggle_shown_only(overlays, monkeypatch):
+    """Shown overlays switched at once (no question, Undo offered by the page toast)"""
     control = overlays.test_control
+    told = []
+    overlays.bulkToggled.connect(told.append)
     overlays.setCategory("Brakes")
     overlays.enableShown()
     assert control.toggled == ["brake_wear"] and not control.batch  # only shown & off
     assert control.grouped == [(["brake_wear"], True)]  # one grouped switch: saved & demand updated once
-    assert "2 shown" not in overlays.test_answers[0] and "1 shown overlays" in overlays.test_answers[0]
+    assert told == ["1 overlay enabled"] and not overlays.test_answers  # never asked
     overlays.clearFilters()
     overlays.disableShown()
     assert control.batch == ["disable"]  # no filter: every overlay
-    overlays.disableShown()  # nothing left to switch: no question
-    assert len(overlays.test_answers) == 2
-    monkeypatch.setitem(cfg.application, "show_confirmation_for_batch_toggle", False)
+    overlays.disableShown()  # nothing left to switch: nothing told
+    assert len(told) == 2 and not overlays.test_answers
     overlays.enableShown()
-    assert control.batch == ["disable", "enable"] and len(overlays.test_answers) == 2
+    assert control.batch == ["disable", "enable"] and not overlays.test_answers
 
 
-def test_batch_toggle_declined(ui_env):
-    control = FakeControl(("brake_wear", "fuel"))
+def test_batch_toggle_undo(ui_env):
+    control = FakeControl(("brake_wear", "fuel", "relative"))
     for name in control.names:
-        cfg.user.setting[name]["enable"] = False
+        cfg.user.setting[name]["enable"] = name == "relative"
     backend = OverlayBackend(None, control, lambda name: None, lambda text: False)
+    told = []
+    backend.bulkToggled.connect(told.append)
+    assert backend.shownActiveCount == 1
     backend.enableShown()
-    assert not control.batch and not control.toggled
+    assert told == ["2 overlays enabled"] and all(cfg.user.setting[name]["enable"] for name in control.names)
+    backend.undoBulk()  # only those switched go back
+    assert [name for name in control.names if cfg.user.setting[name]["enable"]] == ["relative"]
+    backend.undoBulk()  # once only
+    assert [name for name in control.names if cfg.user.setting[name]["enable"]] == ["relative"]
     backend.deleteLater()
 
 
@@ -510,7 +519,7 @@ def test_qml_page_created_when_shown(page):
     for _ in range(20):
         QCoreApplication.processEvents()
     texts = item_texts(page.view)
-    assert "Overlays" in texts and "Speedometer" in texts and "Enable All" in texts
+    assert "Overlays" in texts and "Speedometer" in texts and "Enable (4)" in texts and "Disable (2)" in texts
     assert not page.view.grabFramebuffer().isNull()
     page.hide()
     assert not page.backend.previews.active  # no preview drawn while hidden
@@ -523,7 +532,7 @@ def test_qml_page_list_view_and_filters(page):
     for _ in range(20):
         QCoreApplication.processEvents()
     texts = item_texts(page.view)
-    assert "Enable Shown" in texts and "Speedometer" not in texts
+    assert any(text.startswith("Enable (") for text in texts) and "Speedometer" not in texts
     page.backend.setSearch("zzz")
     for _ in range(20):
         QCoreApplication.processEvents()
@@ -542,7 +551,7 @@ def test_qml_page_translated(overlays):
         for _ in range(10):
             QCoreApplication.processEvents()
         texts = item_texts(view.view)
-        assert "Tout activer" in texts and "Enable All" not in texts
+        assert "Activer (4)" in texts and "Enable (4)" not in texts
         assert "2 / 6 activés" in texts
         view.close()
         view.deleteLater()

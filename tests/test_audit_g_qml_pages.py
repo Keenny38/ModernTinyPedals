@@ -249,7 +249,7 @@ def test_ctrl_s_commits_number_being_typed(window, monkeypatch):  # noqa: F811
     field.forceActiveFocus()
     QTest.keyClicks(options_page.view, "7")  # focused field selects its text: replaced, no Enter
     pump()
-    assert not options_page.backend.is_modified()
+    assert options_page.backend.is_modified()  # typed number taken at each key, as on the Settings page
     assert window.centralWidget().save_current_page()  # Ctrl+S
     assert cfg.user.setting["speedometer"][key] == 7 and not options_page.backend.is_modified()
 
@@ -272,7 +272,7 @@ def test_apply_button_commits_color_being_typed(window, monkeypatch):  # noqa: F
     QMetaObject.invokeMethod(field, "selectAll")
     QTest.keyClicks(options_page.view, "#FF0000")
     pump()
-    assert options_page.backend.pendingCount == 1  # typed color not sent yet
+    assert options_page.backend.pendingCount == 2  # typed color taken at each key, as on the Settings page
     apply = next(item for item in items_of(root) if "TpButton" in item.metaObject().className()
                  and item.property("text") == "Apply")
     click(options_page.view, apply)

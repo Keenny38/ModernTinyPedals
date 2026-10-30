@@ -22,7 +22,6 @@ Driver stats viewer part (StatsSelection, mixin of DriverStatsBackend): Selected
 
 from __future__ import annotations
 
-import os
 import time
 from contextlib import suppress
 from functools import partial
@@ -37,6 +36,7 @@ from ... import calculation as calc
 from ...const_common import MAX_SECONDS
 from ...formatter import strip_invalid_char
 from ...i18n import tr, trm
+from ...process.results_text import MISSING, laptime_text
 from ...setting import cfg
 from ...userfile import lap_reference
 from ...userfile.driver_history import (
@@ -50,6 +50,7 @@ from ...userfile.lap_reference import LEVELS, LapReference
 from ..lap_viewer import number_text, signed
 from ..track_map_viewer import TrackMapViewer
 from .formatting import format_date
+from .stats_analysis import parse_goals
 from .stats_common import (
     CONDITION_FILTERS,
     GOAL_RANGE,
@@ -62,18 +63,21 @@ from .stats_common import (
     chart_ticks,
     combo_name,
     conditions_text,
+    folder_stamp,
     format_duration,
     format_header_key,
-    lap_folder_stamp,
     lap_matches_vehicle,
     level_letter,
     level_text,
+    list_lap_folders,
     parse_display_value,
     parse_laptime,
     places_gained,
     plural,
     race_result,
     result_details,
+    result_tone,
+    session_code,
     session_kind,
     session_name,
     signed_places,
@@ -270,6 +274,28 @@ class StatsSelection(StatsHost):
         self.save_viewer_config(condition_filter=0, online_filter=0, since_version="")
         self.update_selection()
 
+    @Property(list, notify=StatsCore.filtersChanged)
+    def filterChips(self) -> list[dict]:
+        """Filters in use, each removable on its own: key ("road", "server", "version"), text"""
+        condition, online, since = self._published.get("filters", (0, 0, ""))[:3]
+        chips = []
+        if 0 < condition < len(CONDITION_FILTERS):
+            chips.append({"key": "road", "text": tr(CONDITION_FILTERS[condition])})
+        if 0 < online < len(ONLINE_FILTERS):
+            chips.append({"key": "server", "text": tr(ONLINE_FILTERS[online])})
+        if since:
+            chips.append({"key": "version", "text": trm(f"Since v{since}")})
+        return chips
+
+    @Slot(str)
+    def clearFilter(self, key: str):
+        """One filter removed (chip of filterChips), others kept"""
+        names = {"road": ("condition_filter", 0), "server": ("online_filter", 0), "version": ("since_version", "")}
+        if key in names:
+            name, value = names[key]
+            self.save_viewer_config(**{name: value})
+            self.update_selection()
+
     # Lap time goal of selected vehicle (saved by track & vehicle), suggested: next level of community lap times
     def goal_key(self, vehicle: str = "") -> str:
         vehicle = vehicle or (self._selected["vehicles"] if self.selected_stats_key else "")
@@ -277,9 +303,7 @@ class StatsSelection(StatsHost):
 
     def goals(self) -> dict[str, float]:
         """Goals of every track & vehicle (valid lap times only)"""
-        goals = self.viewer_config().get("goals", {})
-        return {str(key): float(value) for key, value in goals.items()
-                if valid_laptime(value)} if isinstance(goals, dict) else {}
+        return parse_goals(self.viewer_config().get("goals", {}))
 
     def goal_of(self, track: str, vehicle: str) -> float:
         return self.goals().get(f"{track}|{vehicle}", 0.0)
@@ -305,7 +329,7 @@ class StatsSelection(StatsHost):
         best = valid_laptime(self.selected_stats_dict[vehicle].get("pb", 0))
         suggested, level = self.suggested_goal(vehicle)
         data = {"visible": True, "set": goal > 0, "time": calc.sec2laptime_full(goal) if goal else "",
-                "best": calc.sec2laptime_full(best) if best else "-", "reached": False, "gap": "", "gapColor": "",
+                "best": laptime_text(best), "reached": False, "gap": "", "gapColor": "",
                 "suggestion": "", "ratio": -1.0}
         if suggested > 0:
             text = calc.sec2laptime_full(suggested)
@@ -331,29 +355,33 @@ class StatsSelection(StatsHost):
     @Slot()
     def editGoal(self):
         """Ask the goal lap time of selected vehicle (empty: removed), suggested one proposed"""
-        from .._common import TextInputDialog
-
         key = self.goal_key()
         if not key:
             return
         vehicle = key.split("|", 1)[1]
         goal = self.goal_of(self.selected_stats_key, vehicle) or self.suggested_goal(vehicle)[0]
+        self.ask_goal(key, calc.sec2laptime_full(goal) if goal else "")
 
-        def accept(text: str) -> bool:
-            text = text.strip()
-            if not text:
+    def ask_goal(self, key: str, text: str):
+        """Goal lap time of a vehicle asked (in the page); not a lap time: told, then asked again with the text"""
+        from . import dialogs
+
+        def accept(typed: str) -> bool:
+            typed = typed.strip()
+            if not typed:
                 self.set_goal(key, 0.0)
                 return True
-            laptime = parse_laptime(text)
+            laptime = parse_laptime(typed)
             if not laptime:
-                self.warning(tr("Not a lap time: write it as 1:52.300 or 112.3"))
-                return False
+                dialogs.alert(self._window, tr("Error"), tr("Not a lap time: write it as 1:52.300 or 112.3"), "warning",
+                              lambda: self.ask_goal(key, typed))
+                return True
             self.set_goal(key, laptime)
             return True
 
-        TextInputDialog(self._window, tr("Lap Time Goal..."),
-                        trm(f"Lap time goal of {vehicle} (empty to remove it):"), accept,
-                        calc.sec2laptime_full(goal) if goal else "").open()
+        vehicle = key.split("|", 1)[1]
+        dialogs.ask_text(self._window, tr("Lap Time Goal…"), trm(f"Lap time goal of {vehicle} (empty to remove it):"),
+                         accept, text)
 
     @Slot()
     def clearGoal(self):
@@ -411,7 +439,7 @@ class StatsSelection(StatsHost):
         vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
         folder = self.lap_folder(vehicle) if vehicle else ""
         laps = f"{folder}|{vehicle}"
-        key = f"{laps}|{lap_folder_stamp(folder)}" if folder else laps
+        key = f"{laps}|{self.lap_folders().get(folder, 0)}" if folder else laps
         if not vehicle or not folder:
             self._laps_generation += 1  # running or waiting read ignored
             self._laps_job = None
@@ -423,7 +451,7 @@ class StatsSelection(StatsHost):
         if not folder:
             self._laps_key = key
             self._stints = {"visible": True, "busy": False,
-                            "note": tr("No recorded lap for this vehicle class: enable the Recorder module, then drive a few laps.")}
+                            "note": tr("No recorded lap for this car class: enable the Recorder module, then drive a few laps.")}
             self.lapsChanged.emit()
             return
         if key == self._laps_key and self._stints.get("visible"):
@@ -433,7 +461,7 @@ class StatsSelection(StatsHost):
         if same_laps:  # new lap recorded: stints shown kept while read again
             self._stints = {**self._stints, "busy": True}
         else:
-            self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps...")}
+            self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps…")}
         self.lapsChanged.emit()
         self._laps_generation += 1
         job = (key, folder, vehicle, self._laps_generation)
@@ -521,7 +549,7 @@ class StatsSelection(StatsHost):
         if not self.selected_stats_key:
             return {"visible": False, "reason": ""}
         if not vehicle:
-            return {"visible": False, "reason": tr("Select a vehicle to compare its lap times.")}
+            return {"visible": False, "reason": tr("Select a car to compare its lap times.")}
         data = self.selected_stats_dict.get(vehicle, {})
         reference = self.reference_of(vehicle)
         if reference is None:
@@ -547,7 +575,7 @@ class StatsSelection(StatsHost):
             if level == len(LEVELS) - 1 and faster_limit:
                 limit_text = f"> {calc.sec2laptime_full(faster_limit)}"
             else:
-                limit_text = f"≤ {calc.sec2laptime_full(limit)}" if limit else "-"
+                limit_text = f"≤ {calc.sec2laptime_full(limit)}" if limit else MISSING
             mark = marks_by_level.get(level, [])
             ladder.append({"name": tr(name), "color": self.level_color(level), "limit": limit_text,
                            "marks": "  ".join(f"← {text}" for text in mark), "active": bool(mark), "pills": mark,
@@ -706,9 +734,11 @@ class StatsSelection(StatsHost):
                 "date": format_date(record.time),
                 "session": session_name(record.session),
                 "kind": session_kind(record.session),
-                "best": calc.sec2laptime_full(laptime) if laptime else "-",
+                "code": session_code(record.session),
+                "best": laptime_text(laptime),
                 "laps": f"{record.valid}/{record.valid + record.invalid}",
                 "result": race_result(record),
+                "resultTone": result_tone(record),
                 "podium": record.position if record.finish == 1 and 0 < record.position <= 3 else 0,
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005),
                 "tip": "\n".join(tip),
@@ -800,12 +830,27 @@ class StatsSelection(StatsHost):
         if not key:
             return ""
         if self.selected_stats_key:
-            candidates = [(self.selected_stats_key, key)]
-        else:
-            candidates = [(key, str(vehicle)) for vehicle in self.stats_temp.get(key, {})]
-        for track, vehicle in candidates:
-            folder = combo_name(track, self.class_of(vehicle))
-            if os.path.isdir(os.path.join(cfg.path.telemetry, folder)):
+            return self.lap_folder_of(self.selected_stats_key, key)
+        return self.lap_folder_of(key, "")
+
+    def lap_folders(self) -> dict[str, int]:
+        """Recorded laps folders (name: stamp) listed by the last reload; listed again only once the telemetry
+        folder changed since (folder added or removed: one stat here, never a check per vehicle)"""
+        stamp = folder_stamp(cfg.path.telemetry)
+        if stamp != self._lap_folders[0]:
+            self._lap_folders = list_lap_folders()
+        return self._lap_folders[1]
+
+    def lap_folder_of(self, track: str, vehicle: str) -> str:
+        """Recorded laps folder (track & class) of a track & vehicle (no vehicle: of any vehicle class of the track
+        in stats), empty if none"""
+        if not track:
+            return ""
+        vehicles = [vehicle] if vehicle else [str(name) for name in self.stats_temp.get(track, {})]
+        folders = self.lap_folders()
+        for name in vehicles:
+            folder = combo_name(track, self.class_of(name))
+            if folder in folders:
                 return folder
         return ""
 
@@ -817,29 +862,40 @@ class StatsSelection(StatsHost):
     @Slot()
     def openLapViewer(self):
         """Recorded laps of selected vehicle class in lap telemetry viewer, its personal best lap as reference"""
-        folder = self.lap_folder()
+        if self.selected_stats_key:
+            self.open_laps(self.selected_stats_key, self.selected_row_key())
+        else:
+            self.open_laps(self.selected_row_key(), "")
+
+    def open_laps(self, track: str, vehicle: str) -> bool:
+        """Recorded laps of a track & vehicle class in lap telemetry viewer, the vehicle personal best lap as
+        reference (no vehicle: laps of a class of the track), False with a warning if none recorded"""
+        folder = self.lap_folder_of(track, vehicle)
         if not folder:
-            self.warning(tr("No recorded lap for this vehicle class: enable the Recorder module, then drive a few laps."))
-            return
+            self.warning(tr("No recorded lap for this car class: enable the Recorder module, then drive a few laps."))
+            return False
         from ..tools_view import open_tool
 
-        window = self._window
-        parent = window.window() if getattr(window, "in_app_page", False) else window
-        viewer = open_tool("lap_viewer.LapViewer", parent)
+        viewer = open_tool("lap_viewer.LapViewer", self._window)
         backend = getattr(viewer, "backend", None)
         if backend is None:
-            return
+            return False
         if folder not in backend.tracks:  # recorded since lap viewer opened
             backend.refresh()
         backend.currentTrack = folder
-        if self.selected_stats_key:
-            path = self.best_lap_path(backend, self.selected_row_key())
+        if vehicle:
+            path = self.best_lap_path(backend, vehicle, track)
             if path:
                 backend.setReference(path)
+        return True
 
-    def best_lap_path(self, lap_backend, vehicle: str) -> str:
-        """Recorded lap file of vehicle personal best (else its fastest valid lap), empty if none"""
-        best = valid_laptime(self.selected_stats_dict.get(vehicle, {}).get("pb", 0))
+    def best_lap_path(self, lap_backend, vehicle: str, track: str = "") -> str:
+        """Recorded lap file of vehicle personal best (else its fastest valid lap), empty if none (track: of
+        selected track)"""
+        other_track = bool(track) and track != self.selected_stats_key
+        vehicles = self.stats_temp.get(track, {}) if other_track else self.selected_stats_dict
+        data = vehicles.get(vehicle, {}) if isinstance(vehicles, dict) else {}
+        best = valid_laptime(data.get("pb", 0) if isinstance(data, dict) else 0)
         laps = [entry for entry in getattr(lap_backend, "entries", [])
                 if entry.file.valid and entry.file.lap_time > 0 and lap_matches_vehicle(entry.info, vehicle)]
         if not laps:

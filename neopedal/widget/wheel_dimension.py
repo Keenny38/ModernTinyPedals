@@ -26,6 +26,7 @@ from math import isfinite
 from typing import TYPE_CHECKING
 
 from ..const_common import TEXT_NA
+from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
 
@@ -60,9 +61,8 @@ class Realtime(Overlay):
 
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
-        bar_width = font_m.width * 6 + bar_padx
 
-        # Front & rear tyre radius
+        # Front & rear tyre radius, after axle label
         wcfg = self.wcfg
         self.bars_radius = []
         for show, fg_color, bg_color, column, front in (
@@ -73,9 +73,10 @@ class Realtime(Overlay):
         ):
             if not show:
                 continue
+            prefix = f"{tr('F' if front else 'R')} "
             bar_radius = self.set_rawtext(
-                text=TEXT_NA,
-                width=bar_width,
+                text=f"{prefix}{TEXT_NA}",
+                width=font_m.width * (len(prefix) + 6) + bar_padx,
                 fixed_height=font_m.height,
                 offset_y=font_m.voffset,
                 fg_color=fg_color,
@@ -86,18 +87,18 @@ class Realtime(Overlay):
                 target=bar_radius,
                 column=column,
             )
-            self.bars_radius.append((bar_radius, front))
+            self.bars_radius.append((bar_radius, front, prefix))
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         wheels = minfo.wheels
-        for bar_radius, front in self.bars_radius:
-            self.update_radius(bar_radius, radius_text(wheels.wheelRadiusFront if front else wheels.wheelRadiusRear))
+        for bar_radius, front, prefix in self.bars_radius:
+            self.update_radius(bar_radius, radius_text(wheels.wheelRadiusFront if front else wheels.wheelRadiusRear), prefix)
 
     # GUI update methods
-    def update_radius(self, target, text):
+    def update_radius(self, target, text, prefix):
         """Tyre radius"""
         if target.last != text:
             target.last = text
-            target.text = text
+            target.text = f"{prefix}{text}"
             target.update()

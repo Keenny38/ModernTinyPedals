@@ -158,26 +158,28 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
     from neopedal.api_control import api
     from neopedal.replay import replay
     from neopedal.ui import replay_view
+    from neopedal.ui.quick import session_recorder_backend as recorder
 
     frame = bytes(ctypes.sizeof(lmu_data.LMUObjectOut))
     filename = write_replay(tmp_path, [frame, frame])
     restarts = []
-    monkeypatch.setattr(replay_view, "restart_api", lambda: restarts.append(replay.active))
-    monkeypatch.setattr(type(api), "name", property(lambda self: replay_view.API_LMU_NAME))
+    monkeypatch.setattr(recorder, "restart_api", lambda: restarts.append(replay.active))
+    monkeypatch.setattr(type(api), "name", property(lambda self: recorder.API_LMU_NAME))
     monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", len(frame)]])
-    monkeypatch.setattr(replay_view.QFileDialog, "getOpenFileName", lambda *args: (filename, ""))
+    monkeypatch.setattr(recorder.QFileDialog, "getOpenFileName", lambda *args: (filename, ""))
     dialog = replay_view.ReplayView(None)
+    backend = dialog.backend
     try:
-        assert not dialog.button_play.isEnabled()
-        dialog.open_replay()  # loaded in background
+        assert not backend.active
+        backend.openReplay()  # loaded in background
         assert not replay.active and dialog.loader.busy
         assert dialog.loader.wait(10)
         QCoreApplication.processEvents()  # finished signal from loading thread
         assert replay.active and restarts == [True]
-        assert dialog.button_play.isEnabled()
-        dialog.toggle_pause()
+        assert backend.active
+        backend.togglePause()
         assert replay.player is not None and replay.player.paused
-        dialog.stop_replay()
+        backend.backToGame()
         assert not replay.active and restarts == [True, False]
     finally:
         replay.unload()
@@ -401,6 +403,7 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
     from neopedal.api_control import api
     from neopedal.replay import replay
     from neopedal.ui import replay_view
+    from neopedal.ui.quick import session_recorder_backend as recorder
 
     size = ctypes.sizeof(lmu_data.LMUObjectOut)
     filename = str(tmp_path / "markers.tpreplay")
@@ -412,32 +415,35 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
         writer.write_marker(2.0, "lap", "3")
         writer.write_marker(6.0, "incident", "9g")
         writer.finish()
-    monkeypatch.setattr(replay_view, "restart_api", lambda: None)
-    monkeypatch.setattr(type(api), "name", property(lambda self: replay_view.API_LMU_NAME))
+    monkeypatch.setattr(recorder, "restart_api", lambda: None)
+    monkeypatch.setattr(type(api), "name", property(lambda self: recorder.API_LMU_NAME))
     monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", size]])
-    monkeypatch.setattr(replay_view.cfg.path, "telemetry", str(tmp_path))
+    monkeypatch.setattr(recorder.cfg.path, "telemetry", str(tmp_path))
     dialog = replay_view.ReplayView(None)
+    backend = dialog.backend
     try:
-        assert dialog.replay_list.topLevelItemCount() == 1
-        assert dialog.replay_list.topLevelItem(0).text(1) == "Spa"
-        dialog.replay_list.setCurrentItem(dialog.replay_list.topLevelItem(0))
-        dialog.open_selected()
+        backend.refreshList()  # replay headers read in background
+        deadline = time.monotonic() + 10
+        while backend.listing and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+        assert len(backend.replays) == 1 and backend.replays[0]["track"] == "Spa"
+        backend.openFile(backend.replays[0]["file"])
         assert dialog.loader.wait(10)
         QCoreApplication.processEvents()  # finished signal from loading thread
         assert replay.active
-        assert dialog.slider.laps == [2.0] and dialog.slider.incidents == [6.0]
-        assert dialog.combo_lap.count() == 1
+        assert backend.laps == [2.0] and backend.incidents == [6.0]
+        assert len(backend.lapItems) == 1
         replay.player.set_paused(True)
-        dialog.goto_lap(0)
+        backend.gotoLap(0)
         assert replay.player.position == pytest.approx(2.0)
-        dialog.goto_incident(1)
+        backend.gotoIncident(1)
         assert replay.player.position == pytest.approx(3.0)  # 3 seconds before incident
-        dialog.step(1)
+        backend.step(1)
         assert replay.player.position == pytest.approx(3.1)
-        dialog.set_section(0)
+        backend.setSection(0)
         replay.player.seek(5.0)
-        dialog.set_section(1)
-        assert dialog.button_section_save.isEnabled()
+        backend.setSection(1)
+        assert backend.canSave
         target = str(tmp_path / "part.tpreplay")
         suggested = []
 
@@ -445,16 +451,16 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
             suggested.append(default)
             return target, ""
 
-        monkeypatch.setattr(replay_view.QFileDialog, "getSaveFileName", save_name)
-        dialog.save_section()  # saved in background, overlays keep running
+        monkeypatch.setattr(recorder.QFileDialog, "getSaveFileName", save_name)
+        backend.saveSection()  # saved in background, overlays keep running
         assert dialog.export.wait(10)
         QCoreApplication.processEvents()  # finished signal from export thread
-        assert "frames" in dialog.label_section.text() and dialog.button_section_save.isEnabled()
+        assert "frames" in backend.sectionText and backend.canSave
         assert suggested[0].endswith("markers-3-5.tpreplay")
         part = ReplayFile(target)
         assert part.duration == pytest.approx(1.9)
         part.close()
-        dialog.stop_replay()
+        backend.backToGame()
     finally:
         replay.unload()
         dialog.close()

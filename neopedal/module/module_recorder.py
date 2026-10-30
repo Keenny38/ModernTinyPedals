@@ -43,14 +43,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from contextlib import suppress
 from itertools import islice
-from typing import NamedTuple
+from typing import IO, Any, NamedTuple
 
 from .. import app_signal, realtime_state
 from ..api_control import api
 from ..const_app import VERSION
 from ..module_info import minfo
 from ..replay import replay
-from ..userfile import flush_to_disk, replace_retry, temp_file_name, write_text_file
+from ..userfile import atomic_path, flush_to_disk, replace_retry, temp_file_name
 from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
@@ -654,16 +654,17 @@ def lap_filename(lap_number: int, lap_time: float, valid: bool = True, timestamp
     return f"{date} lap{lap_number:03d} {int(minutes)}m{seconds:06.3f}s{suffix}{ext}"
 
 
-def lap_text(rows: Sequence | LapSamples, info: dict | None = None, chunk_rows: int = LAP_TEXT_CHUNK) -> str:
-    """Lap file content
+def write_lap_rows(
+    file: IO[str], rows: Sequence | LapSamples, info: dict | None = None, chunk_rows: int = LAP_TEXT_CHUNK,
+) -> None:
+    """Write lap file content to text file (opened with newline="": csv line ends kept)
 
     Rows written by chunk, other threads (overlays) run in between: writing a whole lap at once
     holds the GIL for 100 ms or more (lap saver thread).
     """
-    buffer = io.StringIO()
     if info:
-        buffer.write(INFO_PREFIX + json.dumps(info) + "\n")
-    writer = csv.writer(buffer)
+        file.write(INFO_PREFIX + json.dumps(info) + "\n")
+    writer = csv.writer(file)
     writer.writerow(CSV_HEADER)
     remaining = iter(rows)
     chunk_rows = max(chunk_rows, 1)
@@ -673,7 +674,44 @@ def lap_text(rows: Sequence | LapSamples, info: dict | None = None, chunk_rows: 
         if len(chunk) < chunk_rows:
             break
         time.sleep(0)  # release GIL
+
+
+def lap_text(rows: Sequence | LapSamples, info: dict | None = None, chunk_rows: int = LAP_TEXT_CHUNK) -> str:
+    """Lap file content as text (tests, tools: saving streams it to the file, see write_lap_file)"""
+    buffer = io.StringIO()
+    write_lap_rows(buffer, rows, info, chunk_rows)
     return buffer.getvalue()
+
+
+def write_lap_file(filename: str, rows: Sequence | LapSamples, info: dict | None = None, compress: bool = False) -> bool:
+    """Write lap file (.csv, or gzip .csv.gz) atomically, returns True if saved
+
+    Rows are streamed by chunk straight into the temporary file (gzip: through the compressor), so a
+    long lap (100 Hz, Le Mans) never holds its whole text, nor its bytes, in memory. Flushed to disk
+    before replacing target (power loss never leaves an empty file).
+    """
+    def stream_rows(binary: Any) -> None:  # file or GzipFile (both buffers TextIOWrapper accepts)
+        """Rows encoded straight into binary stream (file or compressor), wrapper never closes the stream
+        (gzip trailer written by its own close, file flushed to disk & closed by its own with)"""
+        text = io.TextIOWrapper(binary, encoding="utf-8", newline="")
+        try:
+            write_lap_rows(text, rows, info)
+            text.flush()
+        finally:
+            text.detach()
+
+    try:
+        with atomic_path(filename) as temp_filename, open(temp_filename, "wb") as file:
+            if compress:
+                with gzip.GzipFile(fileobj=file, mode="wb", compresslevel=6) as gzip_file:
+                    stream_rows(gzip_file)
+            else:
+                stream_rows(file)
+            flush_to_disk(file)
+        return True
+    except OSError as error:
+        logger.error("RECORDER: failed saving %s: %s", filename, error)
+        return False
 
 
 def write_gzip_file(filename: str, text: str) -> bool:
@@ -707,8 +745,7 @@ def save_lap(
         app_signal.error.emit(f"Telemetry recorder: unable to create folder ({error.strerror}).")
         return False
     filename = lap_filename(lap_number, lap_time, valid, timestamp, compress)
-    write = write_gzip_file if compress else write_text_file
-    if not write(os.path.join(folder, filename), lap_text(rows, info)):
+    if not write_lap_file(os.path.join(folder, filename), rows, info, compress):
         app_signal.error.emit(f"Telemetry recorder: unable to save lap {lap_number}, see log for details.")
         return False
     logger.info("RECORDER: saved %s (%s samples)", filename, len(rows))

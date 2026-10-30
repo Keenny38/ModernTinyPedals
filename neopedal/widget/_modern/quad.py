@@ -114,8 +114,14 @@ class QuadMixin:
     quad_slots: tuple[SectionSlot, ...]
 
     def build_quads(self: Any, sections: list[Section], horizontal: bool = False,
-                    center_width: float = 0.0, show_labels: bool = True) -> tuple[float, float]:
-        """Section geometry, returns widget size"""
+                    center_width: float = 0.0, show_labels: bool | None = None) -> tuple[float, float]:
+        """Section geometry, returns widget size
+
+        Args:
+            show_labels: section labels shown, None: "show_caption" option (see ModernOverlay.caption_shown).
+        """
+        if show_labels is None:
+            show_labels = self.caption_shown()
         unit = self.unit
         pad = unit * 0.35
         gap = unit * 0.16
@@ -169,7 +175,7 @@ class QuadMixin:
         """Panel, section labels"""
         theme = self.theme
         if show_panel:
-            panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+            panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for slot in self.quad_slots:
             if slot.label.height() and slot.section.label:
                 self.draw_text(painter, slot.label, tr(slot.section.label), "label", theme.text_muted, CENTER)

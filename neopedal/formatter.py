@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 
 from .regex_pattern import ABBR_PATTERN, rex_invalid_char
+from .validator import avoid_reserved_filename
 
 
 def uppercase_abbr(name: str) -> str:
@@ -91,12 +92,13 @@ def rgb_to_gray(rgb: list[int]) -> int:
     return (rgb[0] * 3 + rgb[1] * 6 + rgb[2]) // 10
 
 
-@lru_cache(maxsize=20)
+@lru_cache(maxsize=256)
 def random_color_class(name: str) -> str:
     """Generate random color for vehicle class
 
     Own random generator seeded by name: same color every time, global random state left alone
-    (also called from server threads, see stream_overlay).
+    (also called from server threads, see stream_overlay). Cached for every class of a session (rF2 mods can
+    have dozens: overlays ask colors of each row at every update).
     """
     max_value = 225
     min_value = 25
@@ -142,14 +144,18 @@ def shorten_driver_name(name: str) -> str:
     return parts[0] if parts else ""
 
 
+_control_char = re.compile(r"[\x00-\x1f]")
+
+
 def strip_invalid_char(name: str) -> str:
-    """Strip invalid characters, and trailing space & dot (not allowed at end of Windows file name)
+    """Strip invalid characters (control characters too), and trailing space & dot (not allowed at end of
+    Windows file name), "_" added after a Windows device name (CON: CON_)
 
     Name made only of invalid characters gives "unknown", empty name stays empty.
     """
-    stripped = rex_invalid_char.sub("", name).rstrip(" .")
+    stripped = _control_char.sub("", rex_invalid_char.sub("", name)).rstrip(" .")
     if stripped or not name:
-        return stripped
+        return avoid_reserved_filename(stripped)
     return "unknown"
 
 

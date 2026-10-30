@@ -23,6 +23,11 @@ Item {
     readonly property real plotWidth: Math.max(width - plotX - nameWidth, 1)
     readonly property real plotHeight: Math.max(height - plotY - theme.em * 2.0, 1)
     property int hovered: -1  // series index under mouse
+    property int hoverLap: -1  // lap under mouse & place of the hovered car there (tooltip)
+    property int hoverPlace: 0
+    // Place table of the lap under the mouse, asked to the backend once per lap (not per mouse move)
+    property int cachedLap: -1
+    property var cachedPlaces: []
     property real reveal: 1
     readonly property bool revealed: reveal >= 1
     readonly property int picked: seriesIndex(backend.selectedEntry)
@@ -68,14 +73,20 @@ Item {
         if (laps <= 0 || series.length === 0) return -1
         var lap = Math.round((mouseX - plotX) / plotWidth * laps)
         lap = Math.max(Math.min(lap, laps), 0)
-        var best = -1, bestDistance = theme.em * 1.2
-        var atLap = backend.placesAt(lap)  // place tables of backend: no scan of points per mouse move
+        var best = -1, bestDistance = theme.em * 1.2, bestPlace = 0
+        if (lap !== cachedLap) {  // place tables of backend: one call per lap crossed, no scan of points
+            cachedPlaces = backend.placesAt(lap)
+            cachedLap = lap
+        }
+        var atLap = cachedPlaces
         for (var i = 0; i < series.length; i++) {
             var place = atLap[i]
             if (!(place > 0)) continue
             var distance = Math.abs(py(place) - mouseY)
-            if (distance < bestDistance) { bestDistance = distance; best = i }
+            if (distance < bestDistance) { bestDistance = distance; best = i; bestPlace = place }
         }
+        hoverLap = best >= 0 ? lap : -1
+        hoverPlace = bestPlace
         return best
     }
     function sendView() {
@@ -90,7 +101,7 @@ Item {
         else settleTimer.restart()
     }
 
-    onData_Changed: { hovered = -1; if (active) revealAnimation.restart() }
+    onData_Changed: { hovered = -1; cachedLap = -1; cachedPlaces = []; if (active) revealAnimation.restart() }
     onActiveChanged: if (active) { sizeChanged(); revealAnimation.restart() }
     onPlotWidthChanged: sizeChanged()
     onPlotHeightChanged: sizeChanged()
@@ -118,15 +129,15 @@ Item {
     Row {
         x: chart.plotX
         y: theme.em * 0.6
-        spacing: theme.em * 1.2
+        spacing: theme.space6
         visible: chart.series.length > 0
         Row {
-            spacing: theme.em * 0.4
+            spacing: theme.space3
             Rectangle { width: theme.em * 1.2; height: Math.round(chart.wideWidth); radius: height / 2; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }
             Text { text: i18n.tr("Your car"); color: theme.dimText; font.pointSize: theme.fontSmall }
         }
         Row {
-            spacing: theme.em * 0.4
+            spacing: theme.space3
             Rectangle { width: theme.em * 1.2; height: Math.round(chart.thickWidth); radius: height / 2; color: theme.text; anchors.verticalCenter: parent.verticalCenter }
             Text { text: i18n.tr("Car picked"); color: theme.dimText; font.pointSize: theme.fontSmall }
         }
@@ -148,12 +159,13 @@ Item {
                     y: parent.gridY
                     width: chart.plotWidth
                     height: 1
-                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.06 : 0.08)
+                    color: theme.chartGrid
                 }
                 Text {
                     x: chart.plotX - theme.em * 0.5 - width
                     y: parent.gridY + 0.5 - height / 2
                     text: parent.place
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontCaption
                     font.features: { "tnum": 1 }
@@ -168,6 +180,7 @@ Item {
                 x: chart.px(lap) - width / 2
                 y: chart.plotY + chart.plotHeight + theme.em * 0.5
                 text: lap === 0 ? i18n.tr("Grid") : lap
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontCaption
                 font.features: { "tnum": 1 }
@@ -239,32 +252,24 @@ Item {
             width: Math.min(implicitWidth, Math.max(chart.width - x, theme.em * 2))  // cut at the chart edge
             elide: Text.ElideRight
             text: "P" + modelData.place + "  " + modelData.name
+            textFormat: Text.PlainText
             color: modelData.color
             font.pointSize: theme.fontSmall
             font.weight: Font.DemiBold
         }
     }
 
-    // Hovered car: name, number & place at lap under mouse
-    Rectangle {
+    // Hovered car: number, name & place at lap under mouse (grid at lap 0), tooltip of the app look
+    TpToolTip {
         id: hoverTip
-        visible: chart.hovered >= 0 && area.containsMouse
         readonly property var item: chart.hovered >= 0 ? chart.series[chart.hovered] : null
-        x: Math.min(area.mouseX + theme.em, chart.width - width - theme.em * 0.5)
-        y: Math.max(area.mouseY - height - theme.em * 0.6, 0)
-        width: tipText.implicitWidth + theme.em * 1.2
-        height: tipText.implicitHeight + theme.em * 0.6
-        radius: theme.radiusMd
-        color: theme.raised
-        border.width: 1
-        border.color: theme.border
-        Text {
-            id: tipText
-            anchors.centerIn: parent
-            text: hoverTip.item ? (hoverTip.item.number !== "" ? "#" + hoverTip.item.number + "  " : "") + hoverTip.item.name : ""
-            color: theme.text
-            font.weight: Font.DemiBold
-        }
+        parent: chart
+        visible: item !== null && area.containsMouse
+        text: item === null ? ""
+            : (item.number !== "" ? "#" + item.number + "  " : "") + item.name + "\n"
+              + (chart.hoverLap === 0 ? i18n.tr("Grid") : i18n.tr("Lap") + " " + chart.hoverLap) + ": P" + chart.hoverPlace
+        x: Math.max(0, Math.min(area.mouseX + theme.em, chart.width - width - theme.space4))
+        y: Math.max(area.mouseY - height - theme.space4, 0)
     }
 
     MouseArea {

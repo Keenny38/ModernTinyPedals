@@ -32,6 +32,8 @@ from ._base import Overlay
 if TYPE_CHECKING:
     from ..template.widget_config_types import TrackClockConfig
 
+COUNTDOWN_UNKNOWN = "--:--:--"  # same width as countdown (-0:00:00)
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -146,9 +148,9 @@ class Realtime(Overlay):
         if self.wcfg["show_sunlight_phase_countdown"]:
             sun_phases = minfo.mapping.sunlightPhases
 
-            if sun_phases is None:
-                countdown = 0.0
-                next_phase_index = 0
+            if sun_phases is None:  # sunrise & sunset not known: no countdown
+                countdown = -1.0
+                next_phase_index = -1
             else:
                 # Select upcoming phase
                 for next_phase_time, next_phase_index in sun_phases:  # noqa: B007, used after loop
@@ -186,17 +188,20 @@ class Realtime(Overlay):
             target.update()
 
     def update_countdown(self, target, data):
-        """Sunlight phase countdown"""
+        """Sunlight phase countdown, dashes if not known (negative)"""
         if target.last != data:
             target.last = data
-            target.text = f"-{calc.sec2countdown(abs(data))}"
+            target.text = f"-{calc.sec2countdown(data)}" if data >= 0 else COUNTDOWN_UNKNOWN
             target.update()
 
     def update_phase_sign(self, target, data):
-        """Upcoming phase sign"""
+        """Upcoming phase sign, in color of period in progress (night before sunrise...)"""
         if target.last != data:
             target.last = data
-            if data == 0:  # sunrise
+            if data < 0:  # not known
+                sign_index = 0
+                color_index = 0
+            elif data == 0:  # sunrise
                 sign_index = 1
                 color_index = 1
             elif data == 1:  # sunrise

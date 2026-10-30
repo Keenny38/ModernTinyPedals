@@ -310,7 +310,7 @@ def test_tyre_planner_texts_translated(french):
     plan.assign(0, 0, "Medium #1")
     plan.assign(1, 0, "Medium #2")
     view = plan.view()
-    assert view["rows"][0]["change"] == "N/D" and view["rows"][1]["change"] == "+4.5s"
+    assert view["rows"][0]["change"] == "—" and view["rows"][1]["change"] == "+4,5 s"  # missing value, spaced unit
     status = view["status"]
     assert i18n.trm(f"Stock: {status['stock']} / {status['maximum']} ({i18n.tr('invalid')})") == (
         "Stock : 6 / 4 (invalide)")

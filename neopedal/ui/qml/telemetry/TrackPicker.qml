@@ -122,7 +122,7 @@ AbstractButton {
     background: Rectangle {
         radius: theme.radiusLg
         color: picker.down || popup.visible ? theme.hover
-             : picker.hovered ? Qt.rgba(theme.hover.r, theme.hover.g, theme.hover.b, 0.7) : "transparent"
+             : picker.hovered ? theme.surfaceHover : "transparent"
         border.width: popup.visible ? 1 : 0
         border.color: theme.accent
         Behavior on color { ColorAnimation { duration: theme.motionFast } }
@@ -133,7 +133,7 @@ AbstractButton {
         Icon {  // globe (All Tracks), map pin
             glyph: picker.allTracks ? "" : ""
             color: theme.accent
-            size: theme.em * 1.25
+            size: theme.iconMd
             Layout.leftMargin: theme.space3
             visible: iconShown && !logoItem.shown  // circuit logo of game shown instead
         }
@@ -146,6 +146,7 @@ AbstractButton {
         }
         Text {
             text: picker.currentLabel
+            textFormat: Text.PlainText
             color: theme.text
             font.pointSize: theme.fontLarge
             font.weight: Font.DemiBold
@@ -156,7 +157,7 @@ AbstractButton {
         Icon {
             glyph: ""  // chevron down
             fallback: "▾"
-            size: theme.em * 0.8
+            size: theme.iconSm
             color: picker.hovered || popup.visible ? theme.text : theme.dimText
             rotation: popup.visible && iconShown ? 180 : 0
             Layout.rightMargin: theme.space3
@@ -185,7 +186,7 @@ AbstractButton {
                 Layout.fillWidth: true
                 implicitHeight: Math.round(theme.fieldHeight)
                 searchDelay: 120  // list filtered once typing settles
-                placeholderText: i18n.tr("Search track...")
+                placeholderText: i18n.tr("Search track…")
                 onSearchChanged: picker.applyFilter()
                 Keys.onDownPressed: {
                     picker.applyFilter()
@@ -223,6 +224,7 @@ AbstractButton {
                     required property int index
                     width: ListView.view.width
                     height: Math.round(theme.rowCompact)
+                    verticalPadding: 0  // style padding (12) is taller than the row: content pushed down
                     highlighted: ListView.isCurrentItem || hovered
                     Accessible.name: entryItem.label
                     onClicked: picker.choose(entryItem.key)
@@ -240,6 +242,7 @@ AbstractButton {
                         }
                         Text {
                             text: entryItem.label
+                            textFormat: Text.PlainText
                             color: theme.text
                             font.weight: entryItem.key === picker.current ? Font.DemiBold : Font.Normal
                             font.italic: entryItem.key === ""
@@ -250,11 +253,12 @@ AbstractButton {
                             visible: entryItem.current
                             fallback: "⚑"
                             glyph: ""  // flag: track of running session
-                            size: theme.em * 0.8
+                            size: theme.iconSm
                             color: theme.accent
                         }
                         Text {
                             text: entryItem.date === "-" ? "" : entryItem.date
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
@@ -269,6 +273,7 @@ AbstractButton {
             Text {
                 visible: list.count === 0 && !picker.busy
                 text: picker.emptyText
+                textFormat: Text.PlainText
                 color: theme.dimText
                 Layout.margins: theme.space3
             }

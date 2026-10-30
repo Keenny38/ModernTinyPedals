@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "../components"
 
 // Driving activity of each day: one column per week (Monday on top), the last weeks that fit the width,
 // month names above, day color by driving time (accent, stronger for longer), summary & legend below.
@@ -24,7 +25,7 @@ Item {
 
     function dayColor(level) {
         if (level < 0) return "transparent"
-        if (level === 0) return theme.dark ? Qt.lighter(theme.base, 1.25) : Qt.darker(theme.base, 1.06)
+        if (level === 0) return theme.surfaceSunken
         return Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, [0, 0.32, 0.52, 0.76, 1][level])
     }
 
@@ -42,6 +43,7 @@ Item {
             x: activity.labelWidth + column * activity.step
             y: 0
             text: modelData.text
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontCaption
         }
@@ -56,6 +58,7 @@ Item {
             width: activity.labelWidth - theme.em * 0.4
             y: activity.monthHeight + index * 2 * activity.step + (activity.cell - height) / 2
             text: modelData
+            textFormat: Text.PlainText
             color: theme.dimText
             horizontalAlignment: Text.AlignRight
             font.pointSize: theme.fontTiny
@@ -118,7 +121,7 @@ Item {
         }
         onExited: activity.hovered = -1
     }
-    ToolTip {
+    TpToolTip {
         parent: activity
         visible: activity.hovered >= 0
         text: visible ? activity.days[activity.hovered].tip : ""
@@ -135,6 +138,7 @@ Item {
         spacing: theme.space2
         Text {
             text: activity.activityData.summary || ""
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight

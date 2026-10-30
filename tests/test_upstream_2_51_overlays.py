@@ -11,6 +11,7 @@ from neopedal.api_control import api
 from neopedal.module_info import minfo
 from neopedal.setting import cfg
 from neopedal.widget._modern import create_widget
+from neopedal.widget._modern.base import DASH
 
 
 @pytest.fixture
@@ -47,9 +48,9 @@ def test_wheel_dimension_shows_measured_radius(make, monkeypatch, modern):
     widget = make("wheel_dimension", modern, display_order_front_tyre_radius=2, display_order_rear_tyre_radius=1)
     widget.timerEvent(None)
     if modern:
-        assert [value.text for value in widget.state] == ["n/a", "338mm"]  # display order: rear first
+        assert [value.text for value in widget.state] == [DASH, "338mm"]  # display order: rear first, dash
     else:
-        assert [bar.text for bar, _ in widget.bars_radius] == ["338mm", "n/a"]
+        assert [bar.text for bar, *_ in widget.bars_radius] == ["F 338mm", "R n/a"]  # axle label
     assert widget.grab().width() > 0
 
 

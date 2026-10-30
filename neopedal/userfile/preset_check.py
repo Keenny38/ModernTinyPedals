@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..setting_validator import PresetValidator
+from ..validator import load_json_strict
 
 
 def check_preset(raw: Mapping[str, Any], dict_def: dict) -> tuple[dict, list[str]]:
@@ -63,7 +64,7 @@ def check_preset_file(filename: str, filepath: str, dict_def: dict) -> tuple[dic
         ValueError: not a JSON preset.
     """
     with open(f"{filepath}{filename}", encoding="utf-8-sig") as file:
-        raw = json.load(file)
+        raw = load_json_strict(file.read(), allow_nan=True)  # nested too deeply: ValueError
     if not isinstance(raw, dict):
         raise ValueError("not a preset")
     return check_preset(raw, dict_def)
@@ -71,4 +72,4 @@ def check_preset_file(filename: str, filepath: str, dict_def: dict) -> tuple[dic
 
 def _text(value: Any) -> str:
     text = json.dumps(value, ensure_ascii=False)
-    return text if len(text) <= 40 else f"{text[:37]}..."
+    return text if len(text) <= 40 else f"{text[:39]}…"

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 from typing import Any
 
 from PySide6.QtCore import Property, QObject, Slot
@@ -34,6 +33,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from ...i18n import tr, trm
 from ...process.game_info import IMMOVABLE, Incident
+from . import last_folder
 from .game_camera import Command
 from .models import DictListModel
 from .replays_base import ReplaysBase
@@ -232,7 +232,7 @@ class ReplaysIncidents(ReplaysBase):
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None and self._incidents_model.rows:
             clipboard.setText(self.incidents_text("\t"))
-            self.notify(trm(f"{len(self._incidents_model.rows)} incident(s) copied to the clipboard"))
+            self.notify(trm(f"{len(self._incidents_model.rows)} incident(s) copied"))
 
     @Slot()
     def exportIncidents(self):
@@ -240,9 +240,11 @@ class ReplaysIncidents(ReplaysBase):
         if not self._incidents_model.rows:
             return
         filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export Incidents"),
-                                                  os.path.join(os.path.expanduser("~"), "incidents.csv"), "CSV (*.csv)")
+                                                  last_folder.start_path("incidents_export", "incidents.csv"),
+                                                  "CSV (*.csv)")
         if not filename:
             return
+        last_folder.remember("incidents_export", filename)
         try:
             with open(filename, "w", encoding="utf-8-sig", newline="") as file:
                 file.write(self.incidents_text(","))

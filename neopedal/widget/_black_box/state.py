@@ -287,6 +287,10 @@ class StintTracker:
     __slots__ = ("wear_sum", "wear_count", "pressure_sum", "pressure_count", "previous")
 
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Forget current & previous stint (new session or car)"""
         self.wear_sum = self.pressure_sum = 0.0
         self.wear_count = self.pressure_count = 0
         self.previous: tuple[float, float] | None = None

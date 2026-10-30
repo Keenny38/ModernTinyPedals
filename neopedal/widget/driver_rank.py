@@ -89,7 +89,8 @@ class Realtime(Overlay):
         shown = [key for key in ITEMS if self.wcfg[f"show_{key}"]]
         prefix_just = max((len(self.wcfg[f"prefix_{key}"]) for key in shown), default=0) if self.wcfg["layout"] == 0 else 0
         self.prefixes = {key: self.wcfg[f"prefix_{key}"].ljust(prefix_just) for key in shown}
-        self.value_width = 8 if self.show_progress else 10  # "P3  100%", "1.25/10", "Platinum 3"
+        # "P3  100%", "Platinum 3", "10.25/12.5" (track limits: 10 even with progress)
+        self.value_width = 8 if self.show_progress and "track_limits" not in shown else 10
         self.bars = {}
         for key in shown:
             sample = f"{self.prefixes[key]}{'8' * self.value_width}"

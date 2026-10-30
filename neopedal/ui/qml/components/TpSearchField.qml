@@ -50,11 +50,11 @@ TextField {
         onTriggered: field.searchChanged(field.text)
     }
 
-    implicitHeight: Math.round(theme.em * 2.3)
+    implicitHeight: Math.round(theme.controlHeight)
     placeholderTextColor: theme.dimText
     color: theme.text
     selectionColor: theme.accentFill
-    selectedTextColor: "white"
+    selectedTextColor: theme.accentInk
     selectByMouse: true
     leftPadding: theme.iconFont !== "" ? theme.em * 2.1 : theme.em * 0.7
     rightPadding: clearButton.visible ? clearButton.width + theme.em * 0.4 : theme.em * 0.7
@@ -62,10 +62,10 @@ TextField {
     Accessible.name: placeholderText
 
     background: Rectangle {
-        radius: theme.radiusLg
-        color: theme.base
+        radius: theme.radiusSm
+        color: theme.surfaceSunken
         border.width: field.activeFocus ? 1.5 : 1
-        border.color: field.activeFocus ? theme.accent : field.hovered ? Qt.lighter(theme.border, 1.2) : theme.border
+        border.color: field.activeFocus ? theme.accent : field.hovered ? theme.strokeStrong : theme.border
         Behavior on border.color { ColorAnimation { duration: theme.motionFast } }
     }
     Icon {
@@ -73,18 +73,18 @@ TextField {
         x: theme.em * 0.7
         anchors.verticalCenter: parent.verticalCenter
         color: field.activeFocus ? theme.accent : theme.dimText
-        size: theme.em * 0.95
+        size: theme.iconSm
     }
     TpButton {
         id: clearButton
         visible: field.text !== ""
         flat: true
-        glyph: ""  // cancel
+        glyph: theme.glyphs.remove
         fallback: "✕"
         tip: i18n.tr("Clear")
         size: "sm"
         anchors.right: parent.right
-        anchors.rightMargin: theme.em * 0.3
+        anchors.rightMargin: theme.space2
         anchors.verticalCenter: parent.verticalCenter
         onClicked: { field.clearSearch(); field.forceActiveFocus() }
     }

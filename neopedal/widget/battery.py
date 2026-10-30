@@ -22,6 +22,7 @@ Battery Widget
 
 from typing import TYPE_CHECKING
 
+from ..const_common import TEXT_PLACEHOLDER
 from ..module_info import minfo
 from ._base import Overlay
 from ._common import warning_flash
@@ -144,9 +145,10 @@ class Realtime(Overlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        hybrid = minfo.hybrid
         # Battery charge & usage
         if self.wcfg["show_battery_charge"]:
-            battery_charge = minfo.hybrid.batteryCharge
+            battery_charge = hybrid.batteryCharge
 
             if battery_charge >= self.wcfg["high_battery_threshold"]:
                 batt_warning = 2
@@ -155,24 +157,28 @@ class Realtime(Overlay):
             else:
                 batt_warning = 0
 
-            if self.wcfg["show_battery_charge_warning_flash"]:
-                batt_highlight = self.warn_flash.send(batt_warning)
-                if batt_highlight:
-                    padding = 0.00000001  # add padding for switching state
-                else:
-                    batt_warning = 0
-                    padding = 0
+            if not has_battery(hybrid):  # car without hybrid system: no low battery warning
+                self.update_charge(self.bar_charge, -1.0, 0)
             else:
-                padding = 0
+                if self.wcfg["show_battery_charge_warning_flash"]:
+                    batt_highlight = self.warn_flash.send(batt_warning)
+                    if batt_highlight:
+                        padding = 0.00000001  # add padding for switching state
+                    else:
+                        batt_warning = 0
+                        padding = 0
+                else:
+                    padding = 0
 
-            self.update_charge(self.bar_charge, battery_charge + padding, batt_warning)
+                self.update_charge(self.bar_charge, battery_charge + padding, batt_warning)
 
-        if 0 <= minfo.delta.lapTimeCurrent < self.freeze_duration:
-            battery_drain = minfo.hybrid.batteryDrainLast
-            battery_regen = minfo.hybrid.batteryRegenLast
+        # Last lap usage shown after line, if a full lap was recorded
+        if 0 <= minfo.delta.lapTimeCurrent < self.freeze_duration and has_last_lap(hybrid):
+            battery_drain = hybrid.batteryDrainLast
+            battery_regen = hybrid.batteryRegenLast
         else:
-            battery_drain = minfo.hybrid.batteryDrain
-            battery_regen = minfo.hybrid.batteryRegen
+            battery_drain = hybrid.batteryDrain
+            battery_regen = hybrid.batteryRegen
 
         if self.wcfg["show_battery_drain"]:
             self.update_drain(self.bar_drain, battery_drain)
@@ -181,20 +187,20 @@ class Realtime(Overlay):
             self.update_regen(self.bar_regen, battery_regen)
 
         if self.wcfg["show_estimated_net_change"]:
-            net_change = minfo.hybrid.batteryNetChange
+            net_change = hybrid.batteryNetChange
             self.update_net(self.bar_net, net_change)
 
         # Motor activation timer
         if self.wcfg["show_activation_timer"]:
-            active_timer = minfo.hybrid.motorActiveTimer
+            active_timer = hybrid.motorActiveTimer
             self.update_timer(self.bar_timer, active_timer)
 
     # GUI update methods
     def update_charge(self, target, data, color_index):
-        """Battery charge"""
+        """Battery charge, -1 if no battery"""
         if target.last != data:
             target.last = data
-            target.text = f"B{data:>7.2f}"
+            target.text = f"B{TEXT_PLACEHOLDER:>7}" if data < 0 else f"B{data:>7.2f}"
             target.bg = self.bar_style_charge[color_index]
             target.update()
 
@@ -202,21 +208,21 @@ class Realtime(Overlay):
         """Battery drain"""
         if target.last != data:
             target.last = data
-            target.text = f"-{data:>7.2f}"
+            target.text = f"{change_text(data, '-'):>8}"
             target.update()
 
     def update_regen(self, target, data):
         """Battery regen"""
         if target.last != data:
             target.last = data
-            target.text = f"+{data:>7.2f}"
+            target.text = f"{change_text(data, '+'):>8}"
             target.update()
 
     def update_net(self, target, data):
-        """Battery charge net change"""
+        """Battery charge net change, none (0) until a full lap is recorded"""
         if target.last != data:
             target.last = data
-            target.text = f"N{data:>+7.2f}"
+            target.text = f"N{change_text(data, '') if data else TEXT_PLACEHOLDER:>7}"
             target.update()
 
     def update_timer(self, target, data):
@@ -225,3 +231,21 @@ class Realtime(Overlay):
             target.last = data
             target.text = f"{data:>7.2f}s"
             target.update()
+
+
+def has_battery(hybrid) -> bool:
+    """Electric motor & battery available (no motor state & empty battery: car without hybrid system)"""
+    return hybrid.motorState > 0 or hybrid.batteryCharge > 0
+
+
+def has_last_lap(hybrid) -> bool:
+    """Battery usage of a full lap recorded (none after reset, or module started mid-lap)"""
+    return hybrid.batteryDrainLast > 0 or hybrid.batteryRegenLast > 0
+
+
+def change_text(value: float, sign: str) -> str:
+    """Battery charge change: sign "-" drain, "+" regen, "" net (sign of value), no sign when shown as 0"""
+    text = f"{abs(value):.2f}"
+    if text == "0.00":
+        return text
+    return (sign or ("-" if value < 0 else "+")) + text

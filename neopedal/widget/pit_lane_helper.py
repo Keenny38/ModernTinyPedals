@@ -37,6 +37,7 @@ from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
 from ._race_aids import ClassicCells, HiddenPreview, finite, option_colors
+from .flag import LIMITER_OFF, PitLimiterWatch
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import PitLaneHelperConfig
@@ -106,6 +107,12 @@ class PitLaneMixin:
         self.symbol_fuel = units.set_symbol_fuel(self.cfg.units["fuel_unit"])
         self.box_reference = 0.0  # distance to box when helper shown (bar empty)
         self.box_passed = False
+        self.limiter_watch = PitLimiterWatch()  # same limiter warning as Flag overlay
+
+    def post_update(self):
+        """Updates paused (garage, monitor): pit lane entered again from there"""
+        super().post_update()  # type: ignore[misc]
+        self.limiter_watch.reset()
 
     def labels(self) -> tuple[str, ...]:
         """Labels of shown readings (speed unit after speed & limit)"""
@@ -148,16 +155,19 @@ class PitLaneMixin:
         speed_text = f"{min(self.unit_speed(speed), 999):.0f}" if finite(speed) else DASH
         if finite(limit) and limit > 0:
             limit_text = f"{min(self.unit_speed(limit), 999):.0f}"
-            speed_state = DANGER if speed > limit + SPEED_TOLERANCE else OK
+            # Against pit speed limit near & in pit lane only (shown always: not colored on whole lap)
+            speed_state = (DANGER if speed > limit + SPEED_TOLERANCE else OK) if active else UNKNOWN
         else:
             limit_text = DASH
             speed_state = UNKNOWN
+        # Pit lane driven without limiter since entry (or garage exit): limiter released at lane exit is no danger
+        limiter_off = self.limiter_watch.update() == LIMITER_OFF
         if not api.read.switch.speed_limiter_available():
             limiter, limiter_state = DASH, UNKNOWN
         elif self.limiter_on():
             limiter, limiter_state = tr("On"), OK
         else:
-            limiter, limiter_state = tr("Off"), DANGER if in_lane and speed > 1 else WARNING
+            limiter, limiter_state = tr("Off"), DANGER if limiter_off else WARNING if active else UNKNOWN
         box, fraction = self.read_box(position, track_length, active)
         return PitReading(
             visible=visible,

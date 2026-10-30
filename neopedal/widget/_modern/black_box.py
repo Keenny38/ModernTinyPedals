@@ -149,6 +149,7 @@ class Realtime(Restyled, Classic):
 
     color_tokens = COLOR_TOKENS
     options = restyled_options("black_box", COLOR_TOKENS)
+    led_cache: tuple | None = None  # LED count & colors (see led_colors)
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
@@ -183,34 +184,52 @@ class Realtime(Restyled, Classic):
     def draw_leds(self, painter: QPainter, rect: QRectF):
         """RPM LEDs: capsules lighting up from green to red, all flash over shift point, unlit
         ones keep a faint tint of their zone color"""
-        wcfg = self.wcfg
-        theme = self.theme
         count, ratio, start, redline, over = self.led_levels()
         flash_off = over and self.flash_off()
         gap = rect.height() * 0.3
         led_w = (rect.width() - gap * (count - 1)) / count
-        inactive = QColor(wcfg["indicator_inactive_color"])
+        inactive, shift, zones = self.led_colors(count)
         radius = min(led_w, rect.height()) / 2 * min(self.theme_corner(), 1.0)
         grow = min(rect.height() * 0.18, 4.0)
         for led in range(count):
             led_rect = QRectF(rect.left() + led * (led_w + gap), rect.top(), led_w, rect.height())
-            position = led / max(count - 1, 1)
-            key = "rpm_led_low_color" if position < 0.5 else "rpm_led_mid_color" if position < 0.8 else "rpm_led_high_color"
-            zone = QColor(wcfg[key])
+            zone = zones[led]
             if over:
                 lit = not flash_off
-                color = QColor(wcfg["rpm_led_shift_color"])
+                color = shift
             else:
                 lit = self.led_lit(led, count, ratio, start, redline)
                 color = zone
             rounded(painter, led_rect, radius, inactive)
             if not lit:
-                rounded(painter, led_rect, radius, theme.tint(zone, LED_ZONE_ALPHA))
+                rounded(painter, led_rect, radius, zone[1])
                 continue
-            rounded(painter, led_rect.adjusted(-grow, -grow, grow, grow), radius + grow, theme.tint(color, LED_GLOW_ALPHA))
-            rounded(painter, led_rect, radius, color)
+            rounded(painter, led_rect.adjusted(-grow, -grow, grow, grow), radius + grow, color[2])
+            rounded(painter, led_rect, radius, color[0])
             rounded(painter, QRectF(led_rect.left() + radius * 0.3, led_rect.top() + led_rect.height() * 0.12,
                                     led_rect.width() - radius * 0.6, led_rect.height() * 0.3), radius * 0.6, LED_SHINE)
+
+    def led_colors(self, count: int) -> tuple[QColor, tuple[QColor, QColor, QColor], tuple]:
+        """RPM LED colors made once per LED count (not per LED at every repaint): unlit LED, shift color & color of
+        each LED zone (low, mid, high), each as (color, unlit tint, glow)"""
+        cached = self.led_cache
+        if cached is not None and cached[0] == count:
+            return cached[1]
+        wcfg = self.wcfg
+        theme = self.theme
+
+        def shades(key: str) -> tuple[QColor, QColor, QColor]:
+            color = QColor(wcfg[key])
+            return color, theme.tint(color, LED_ZONE_ALPHA), theme.tint(color, LED_GLOW_ALPHA)
+
+        low, mid, high = shades("rpm_led_low_color"), shades("rpm_led_mid_color"), shades("rpm_led_high_color")
+        zones = []
+        for led in range(count):
+            position = led / max(count - 1, 1)
+            zones.append(low if position < 0.5 else mid if position < 0.8 else high)
+        colors = (QColor(wcfg["indicator_inactive_color"]), shades("rpm_led_shift_color"), tuple(zones))
+        self.led_cache = (count, colors)
+        return colors
 
     def theme_corner(self) -> float:
         """Global corner roundness, 1 = default"""

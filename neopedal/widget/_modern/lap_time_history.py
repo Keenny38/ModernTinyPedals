@@ -34,9 +34,10 @@ from PySide6.QtGui import QPainter
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
+from ...fuel_strategy import history_laps
 from ...module_info import ConsumptionDataSet, minfo
 from .._common import delta_shown
-from .base import DASH, ModernOverlay, display_order_options
+from .base import DASH, ModernOverlay, display_order_options, lap_delta_color, laptime_text, signed
 from .draw import panel
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
 
@@ -51,7 +52,8 @@ class Realtime(TableMixin, ModernOverlay):
 
     options = (
         "font_size", "lap_time_history_count", "show_empty_history", "show_laps", "show_time",
-        "show_delta", "decimal_places_delta", "show_fuel", "show_fuel_sign", "decimal_places_fuel",
+        "show_invalid_lap_in_red", "show_delta", "decimal_places_delta", "show_fuel", "show_fuel_sign",
+        "decimal_places_fuel",
         "show_virtual_energy_if_available", "show_fuel_ratio", "decimal_places_fuel_ratio",
         "show_wear", "show_wear_sign", "decimal_places_wear", *display_order_options("lap_time_history"),
     )
@@ -67,11 +69,13 @@ class Realtime(TableMixin, ModernOverlay):
         self.dec_fuel = max(int(wcfg["decimal_places_fuel"]), 0)
         self.dec_ratio = max(int(wcfg["decimal_places_fuel_ratio"]), 0)
         self.dec_wear = max(int(wcfg["decimal_places_wear"]), 0)
+        self.invalid_red = wcfg["show_invalid_lap_in_red"]  # else * prefix, as driver lists
         columns = []
         if wcfg["show_laps"]:
             columns.append(Column("laps", self.text_width("dim", "888"), label="Lap"))
         if wcfg["show_time"]:
-            columns.append(Column("time", self.text_width("value", "8:88.888"), RIGHT, "Time"))
+            columns.append(Column("time", self.text_width("value", "8:88.888" if self.invalid_red else "*8:88.888"),
+                                  RIGHT, "Time"))
         if wcfg["show_delta"]:
             columns.append(Column("delta", self.text_width("dim", f"+88.{'8' * self.dec_delta}"), RIGHT, "Delta"))
         if wcfg["show_fuel"]:
@@ -97,7 +101,7 @@ class Realtime(TableMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         """Panel, header & recent laps (they only change when a lap is completed)"""
-        panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         self.draw_header(painter)
         self.draw_rows(painter, self.history_rows, start=1)
 
@@ -112,7 +116,7 @@ class Realtime(TableMixin, ModernOverlay):
         else:
             fuel, sign = self.unit_fuel(minfo.fuel.estimatedConsumption), self.sign_fuel
         current = self.lap_row(
-            api.read.lap.number() + 1, minfo.delta.lapTimeEstimated, True,
+            api.read.lap.completed_laps() + 1, minfo.delta.lapTimeEstimated, True,  # lap driven, as history numbers
             minfo.delta.deltaLast if delta_shown("Last") else None,
             fuel, sign, minfo.hybrid.fuelEnergyRatio, calc.mean(minfo.wheels.estimatedTreadWear), current=True,
         )
@@ -128,7 +132,8 @@ class Realtime(TableMixin, ModernOverlay):
         self.refresh((current, self.history_version))
 
     def history(self, dataset, energy_type: bool) -> tuple:
-        """Rows of recent laps"""
+        """Rows of recent laps (placeholder entry of a history without laps left out)"""
+        dataset = history_laps(dataset)
         rows: list[Row | None] = []
         for index in range(self.history_slot):
             if index < len(dataset):
@@ -161,19 +166,21 @@ class Realtime(TableMixin, ModernOverlay):
             if key == "laps":
                 cells.append(Cell(TEXT, f"{lap}", "dim", theme.text_muted))
             elif key == "time":
+                invalid = not valid and not current
                 if laptime <= 0:
                     color = theme.text_faint
-                elif not valid and not current:
+                elif invalid and self.invalid_red:
                     color = theme.negative
                 else:
                     color = theme.text
-                cells.append(Cell(TEXT, calc.sec2laptime_full(laptime)[:8], "value", color))
+                text = laptime_text(laptime, not invalid or self.invalid_red, running=current)  # else * prefix
+                cells.append(Cell(TEXT, text, "value", color))
             elif key == "delta":
                 if delta is None or (not current and (laptime <= 0 or abs(delta) > 99)):
                     cells.append(Cell(TEXT, DASH, "dim", theme.text_faint))
                 else:
-                    text = f"{calc.sym_max(delta, 99.9):+.{self.dec_delta}f}"
-                    cells.append(Cell(TEXT, text, "dim", theme.negative if delta > 0 else theme.positive))
+                    delta = calc.sym_max(delta, 99.9)
+                    cells.append(Cell(TEXT, signed(delta, self.dec_delta), "dim", lap_delta_color(theme, delta)))
             elif key == "fuel":
                 cells.append(Cell(TEXT, f"{fuel:.{self.dec_fuel}f}{sign}", "dim", theme.text_dim))
             elif key == "ratio":

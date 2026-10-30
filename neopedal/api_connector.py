@@ -27,6 +27,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from time import monotonic
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from pyLMUSharedMemory import lmu_data
@@ -44,6 +45,7 @@ from .adapter import (
     rf2_reader,
     rf2_restapi,
 )
+from .adapter._sync import STOP_TIMEOUT
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
 from .process.garage import reset_rf2_setup_parts
 from .replay import ReplayPlayer, replay, replay_mismatch, rest_snapshot
@@ -192,9 +194,15 @@ class SimLMU(Connector):
             self._restapi.start()  # 2
 
     def stop(self):
+        # Both threads signalled first, then waited with one shared deadline: they stop in parallel
+        # (joined one after the other on the GUI thread, a slow one made the other wait its full timeout too)
+        deadline = monotonic() + STOP_TIMEOUT
         if not self._replaying:
-            self._restapi.stop()  # 1 unload first
-        self._shmmapi.stop()  # 2
+            self._restapi.request_stop()  # 1 unload first
+        self._shmmapi.request_stop()  # 2
+        if not self._replaying:
+            self._restapi.wait_stopped(deadline=deadline)
+        self._shmmapi.wait_stopped(deadline=deadline)
 
     def raw_data(self) -> Any:
         if self._replaying or self._shmmapi.isPaused:
@@ -282,9 +290,15 @@ class SimRF2(Connector):
             self._restapi.start()  # 2
 
     def stop(self):
+        # Both threads signalled first, then waited with one shared deadline: they stop in parallel
+        # (joined one after the other on the GUI thread, a slow one made the other wait its full timeout too)
+        deadline = monotonic() + STOP_TIMEOUT
         if not self._replaying:
-            self._restapi.stop()  # 1 unload first
-        self._shmmapi.stop()  # 2
+            self._restapi.request_stop()  # 1 unload first
+        self._shmmapi.request_stop()  # 2
+        if not self._replaying:
+            self._restapi.wait_stopped(deadline=deadline)
+        self._shmmapi.wait_stopped(deadline=deadline)
 
     def raw_data(self) -> Any:
         if self._replaying or self._shmmapi.isPaused:

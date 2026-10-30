@@ -224,8 +224,12 @@ class Realtime(Overlay):
 
         # Fuel or energy
         self.update_energy_type(self.bars_delta[self.column_index_last], energy_type)
-        # Last lap consumption
-        self.update_target_use(self.bars_target_use[self.column_index_last], fuel_used_last_raw, energy_type)
+        # Last lap consumption, none until a lap is completed
+        self.update_target_use(
+            self.bars_target_use[self.column_index_last],
+            fuel_used_last_raw if fuel_used_last_raw > 0 else -MAX_SECONDS,
+            energy_type,
+        )
 
         # Update slots
         for index in range(1 + self.column_index_last, self.total_slot):
@@ -235,8 +239,10 @@ class Realtime(Overlay):
             # Total laps + extra laps
             if index == self.center_slot:
                 target_laps = f"{laps_done}/{laps_done + total_laps_target:d}"
-            else:
+            elif total_laps_target > 0:
                 target_laps = f"{laps_done + total_laps_target:d}"
+            else:  # less laps than none left (no estimate yet, end of stint)
+                target_laps = TEXT_PLACEHOLDER
             self.update_total_laps(self.bars_target_lap[index], target_laps)
 
             # Target & delta consumption
@@ -270,8 +276,7 @@ class Realtime(Overlay):
             if data > -MAX_SECONDS:
                 if not energy_type:
                     data = self.unit_fuel(data)
-                delta_text = f"{data:+.{self.decimals_delta}f}"[:self.char_width]
-                color_index = (data >= 0)
+                delta_text, color_index = signed_delta(data, self.decimals_delta, self.char_width)
             else:
                 delta_text = TEXT_PLACEHOLDER
                 color_index = 2
@@ -306,3 +311,11 @@ class Realtime(Overlay):
             target.last = data
             target.text = f"{data:.0f}m"[:self.char_width]
             target.update()
+
+
+def signed_delta(delta: float, decimals: int, width: int) -> tuple[str, int]:
+    """Delta consumption text & color index: 0 gain (saving more than needed), 1 loss, 2 neutral (shown
+    as 0, without sign)"""
+    if round(delta, decimals) == 0:
+        return f"{0:.{decimals}f}"[:width], 2
+    return f"{delta:+.{decimals}f}"[:width], int(delta > 0)

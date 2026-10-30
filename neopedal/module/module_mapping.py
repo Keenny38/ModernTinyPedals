@@ -286,14 +286,15 @@ def record_track_map(output: MappingInfo, filepath: str, min_node_distance: floa
                 continue
             last_reset = reset
 
-            # Check if same map loaded
+            # Check if same map loaded: same track & file time (maps of 2 tracks can share a file time)
+            last_filename = filename
             filename = api.read.session.track_name()
             modified = file_last_modified(
                 filepath=filepath,
                 filename=filename,
                 extension=FileExt.SVG,
             )
-            map_exist = (last_modified == modified > 0)
+            map_exist = (last_filename == filename and last_modified == modified > 0)
             last_modified = modified
             if map_exist:
                 continue

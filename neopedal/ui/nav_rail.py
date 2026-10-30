@@ -45,6 +45,19 @@ PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
 
 # Short rail label of tools (rail buttons are narrow), full name in tooltip
 TOOL_SHORT_LABELS = {page.name: page.short_label for page in tool_pages() if page.short_label}
+# Rail label of pages named in plural there (English: "Modules", "Presets", "Hotkeys")
+PAGE_SHORT_LABELS = {page.name: page.short_label for page in main_pages() if page.short_label}
+
+
+def rail_text(short: str, full: str) -> str:
+    """Rail label in app language: short label (plural page names, short tool names), else full label"""
+    return tr(short) if short else tr(full)
+
+
+def page_name(index: int) -> str:
+    """Name of main window page in app language, as in the rail (plural: "Modules", "Presets", "Hotkeys")"""
+    key, label, *_ = NAV_PAGES[index]
+    return rail_text(PAGE_SHORT_LABELS.get(key, ""), label)
 
 
 class RailEntry(NamedTuple):
@@ -62,7 +75,8 @@ class RailEntry(NamedTuple):
 def rail_entries() -> dict[str, RailEntry]:
     """Every possible rail entry by key, pages first then tools"""
     entries = {
-        key: RailEntry(key, label, label, glyph, letter, page=index)
+        key: RailEntry(key, PAGE_SHORT_LABELS.get(key, label), PAGE_SHORT_LABELS.get(key, label), glyph, letter,
+                       page=index)  # page named the same in tooltip, quick access (plural "Modules")
         for index, (key, label, glyph, letter) in enumerate(NAV_PAGES)
     }
     for _, tools in TOOL_SECTIONS:
@@ -105,7 +119,8 @@ class RailEditor(BaseEditor):
     TITLE = "Customize Navigation Bar"
     HELP = (
         "Drag entries to reorder, or use the arrows. Add entries from the list on the right. "
-        "Ctrl+1 to Ctrl+9 open the first 9 entries, hidden pages stay in command palette (Ctrl+K)."
+        "Ctrl+1 to Ctrl+9 open the first 9 entries, hidden pages stay in the More menu at the bottom of the bar "
+        "and in command palette (Ctrl+K)."
     )
 
     def __init__(self, parent, on_saved=None):

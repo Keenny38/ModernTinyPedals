@@ -40,10 +40,15 @@ from PySide6.QtCore import QObject
 
 from .async_request import forget_hostname, resolve_hostname
 from .game_rest_cache import lmu_address, rest_cache
+from .http_limits import MAX_BODY, BodyTooLarge, deadline_response_class, read_body
 from .jobs import Job, WorkerPool, get_courier, weak_callback
 from .perf_monitor import timed_call
 
-COMMAND_TIMEOUT = 3.0
+COMMAND_TIMEOUT = 3.0  # seconds per connection step & read
+# Seconds an answer (status, headers, body) is read in at most, at least: another program listening on the game port
+# (game closed) sending a byte now and then never holds a worker
+REQUEST_SECONDS = 10.0
+STATUS_TOO_LARGE = 413  # status given for an answer whose body is above the size limit (body never read)
 SHARED_MAX_AGE = 2.0  # seconds a route answer read by connector or another page is reused
 GAME_WORKERS = 4  # worker threads shared by every game request
 WORKER_LABEL = "Game request"
@@ -82,11 +87,12 @@ def game_command(method: str, resource: str, body: str | None = None) -> bool:
     try:
         connection = http.client.HTTPConnection(resolve_hostname(host, port, COMMAND_TIMEOUT), port,
                                                 timeout=COMMAND_TIMEOUT)
+        connection.response_class = deadline_response_class(REQUEST_SECONDS)  # type: ignore[assignment]
         if body is None and method == "PUT":
             body = "{}"
         connection.request(method, resource, body=body, headers={"Content-Type": "application/json"})
         response = connection.getresponse()
-        response.read()
+        read_body(response.read, MAX_BODY, response.length)  # answer drained (size bounded)
         return response.status < 300
     except OSError:  # connection error: host resolved again next time
         forget_hostname(host, port)
@@ -127,27 +133,43 @@ class GameConnection:
             self.connection.close()
             self.connection = None
 
-    def request(self, method: str, resource: str, body: str | None = None) -> tuple[int, bytes]:
-        """Status & body of answer, (0, b"") if no answer"""
+    def request(self, method: str, resource: str, body: str | None = None,
+                max_body: int = MAX_BODY) -> tuple[int, bytes]:
+        """Status & body of answer, (0, b"") if no answer (or not read in REQUEST_SECONDS),
+        (STATUS_TOO_LARGE, b"") if its body is above max_body bytes"""
         if self.failed or self.address is None:
             return 0, b""
         host, port = self.address
         for attempt in range(2):  # connection closed by game since last request: once more on a new one
+            reused = self.connection is not None
+            sent = False
             try:
                 if self.connection is None:
                     self.connection = http.client.HTTPConnection(
                         resolve_hostname(host, port, self.timeout), port, timeout=self.timeout)
+                # Answer read in REQUEST_SECONDS at most (a request of a job: connection kept)
+                self.connection.response_class = deadline_response_class(  # type: ignore[assignment]
+                    max(REQUEST_SECONDS, self.timeout * 3))
                 self.connection.request(method, resource, body=body, headers={
                     "Content-Type": "application/json", "Accept": "application/json"})
+                sent = True
                 response = self.connection.getresponse()
-                data = response.read()
+                try:
+                    data = read_body(response.read, max_body, response.length)
+                except BodyTooLarge:  # rest of body unread: connection never used again
+                    self.close()
+                    self.answered = True
+                    return STATUS_TOO_LARGE, b""
                 if response.will_close:
                     self.close()
                 self.answered = True
                 return response.status, data
             except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError):
                 self.close()
-                if attempt:
+                # Sent again only when the game cannot have acted on it: a GET (no side effect), or a request
+                # not written to a kept connection the game had closed meanwhile. A command (POST, PUT) sent and
+                # left unanswered fails: sent twice, the game could act twice (pit menu written, replay toggled)
+                if attempt or not (method == "GET" or (reused and not sent)):
                     break
             except OSError:  # not running: host resolved again next time
                 forget_hostname(host, port)
@@ -166,7 +188,7 @@ class GameConnection:
             return None
         try:
             return json.loads(data) if decode is None else decode(data.decode("utf-8"))
-        except ValueError:  # also UnicodeDecodeError
+        except (ValueError, RecursionError):  # also UnicodeDecodeError, RecursionError: nested too deeply
             return None
 
     def send(self, method: str, resource: str, body: str | None = None) -> bool:

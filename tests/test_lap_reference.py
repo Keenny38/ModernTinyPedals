@@ -144,7 +144,7 @@ def test_viewer_levels_in_table(viewer):
     assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "Competitive"
     assert viewer.cell("LMP2_ELMS - Oreca", "gap").text == f"{121.5 / 120.48 * 100:.2f} %"
     assert viewer.cell("Hyper - Ferrari", "level").text == "Alien"
-    assert viewer.cell("Oreca 07", "level").text == "-"  # class unknown
+    assert viewer.cell("Oreca 07", "level").text == "—"  # class unknown
 
 
 def test_viewer_tiles(viewer):
@@ -170,7 +170,7 @@ def test_viewer_reference_card(viewer):
 def test_viewer_reference_off_and_download(viewer, monkeypatch):
     viewer.setCompare(False)
     assert cfg.user.config["driver_stats_viewer"]["enable_lap_reference"] is False
-    assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "-"
+    assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "—"
     # Download (page job, sheet with Spa LMP2 only)
     only_lmp2 = HEADER + SHEET.splitlines(keepends=True)[2]
     monkeypatch.setattr(lap_reference, "fetch_sheet", lambda url, timeout=15: only_lmp2)
@@ -198,7 +198,10 @@ def test_viewer_change_sheet_url(viewer, monkeypatch):
                         staticmethod(lambda *args, **kwargs: warnings.append(args)))
     viewer.changeSheetUrl()
     dialog = dialogs[0]
-    assert not dialog._on_accept("https://example.com/sheet") and warnings
+    # Not a sheet address: told, then asked again with the address typed
+    assert dialog._on_accept("https://example.com/sheet") and warnings
+    assert len(dialogs) == 2 and dialogs[1].text() == "https://example.com/sheet"
+    dialogs[1].deleteLater()
     assert dialog._on_accept("https://docs.google.com/spreadsheets/d/abc/edit#gid=5")
     assert cfg.user.config["driver_stats_viewer"]["lap_reference_sheet_url"].endswith("gid=5")
     dialog.deleteLater()

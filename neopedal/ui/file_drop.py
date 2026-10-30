@@ -23,10 +23,11 @@ consumption history, race plan or tyre plan (opened in Race Calculator, which ta
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import zipfile
+from collections.abc import Mapping
+from typing import Any
 
 from PySide6.QtCore import QMimeData
 
@@ -35,7 +36,8 @@ from ..const_file import FileExt
 from ..i18n import tr, trm
 from ..setting import cfg
 from ..userfile import write_json
-from ..validator import is_allowed_filename
+from ..userfile.private_option import keep_receiver_options
+from ..validator import is_allowed_filename, load_json_strict
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +105,10 @@ def unique_preset_name(folder: str, filename: str) -> str:
     return candidate
 
 
-def import_preset_file(path: str, folder: str) -> str:
+def import_preset_file(path: str, folder: str, receiver: Mapping[str, Mapping[str, Any]] | None = None) -> str:
     """Copy preset json to settings folder (never overwrites), returns new file name
+
+    Local file & game connection options get the values of receiver (loaded preset), see private_option.
 
     Raises:
         ValueError: not a preset.
@@ -114,8 +118,8 @@ def import_preset_file(path: str, folder: str) -> str:
         raise ValueError("file too large")
     with open(path, encoding="utf-8") as file:
         try:
-            data = json.load(file)
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            data = load_json_strict(file.read())
+        except (ValueError, UnicodeDecodeError) as error:  # also nested too deeply
             raise ValueError("invalid json file") from error
     if not isinstance(data, dict) or not all(isinstance(value, dict) for value in data.values()):
         raise ValueError("not a preset file")
@@ -124,9 +128,12 @@ def import_preset_file(path: str, folder: str) -> str:
     base = os.path.splitext(os.path.basename(path))[0]
     if not is_allowed_filename(base) or not any(name in data for name in WIDGET_FILENAME):
         raise ValueError("not a widget preset (global config & style presets are not imported)")
+    kept = keep_receiver_options(data, receiver)
     filename = unique_preset_name(folder, os.path.basename(path))
     write_json(os.path.join(folder, filename), data, indent=4, raise_error=True)
     logger.info("PRESET: imported %s", filename)
+    if kept:
+        logger.info("PRESET: local file & game connection options kept as receiver's: %s", ", ".join(kept))
     return filename
 
 
@@ -145,7 +152,7 @@ def handle_drop(window, paths: list[str]) -> list[str]:
                 app_signal.refresh.emit(True)
             if kind == DROP_PRESET:
                 try:
-                    filename = import_preset_file(path, cfg.path.settings)
+                    filename = import_preset_file(path, cfg.path.settings, cfg.user.setting)
                 except (OSError, ValueError) as error:
                     messages.append(trm(f"Unable to import <b>{name}</b>: {tr(str(error))}"))
                     continue

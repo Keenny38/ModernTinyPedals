@@ -19,7 +19,7 @@
 """
 Tyre load Widget, modern design
 
-Load per tyre (or share of total load), gauge of load share, warning when load is low.
+Load per tyre (or share of total load), gauge of load share (full at 50%), warning when load is low.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from ... import calculation as calc
 from ...api_control import api
+from ..tyre_load import FULL_GAUGE_RATIO
 from .gauge_quad import GaugeQuad
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class Realtime(GaugeQuad):
     sample = "88888"
 
     def setup(self):
-        self.low = self.wcfg["low_load_threshold"]
+        self.low = self.wcfg["low_load_threshold"]  # percent with load ratio shown, else Newtons
         self.show_ratio = self.wcfg["show_tyre_load_ratio"]
 
     def read(self) -> tuple:
@@ -54,5 +55,5 @@ class Realtime(GaugeQuad):
         for load in loads:
             ratio = calc.part_to_whole_ratio(load, total) * 100
             value = ratio if self.show_ratio else load
-            tiles.append(self.gauge(value, value, ratio / 50, self.theme.accent, value <= self.low))
+            tiles.append(self.gauge(value, value, ratio / FULL_GAUGE_RATIO, self.theme.accent, value <= self.low))
         return tuple(tiles)

@@ -1,40 +1,81 @@
-"""Preset management dialogs: create, duplicate, rename, restore backup, transfer settings"""
+"""Preset management: create, duplicate, rename, restore backup, transfer settings (Presets page panels)"""
 
 import json
 import os
+import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QMessageBox
 
 from neopedal.setting import cfg
-from neopedal.ui._common import BaseDialog
+
+
+class Host:
+    """Presets page host: questions answered yes, warnings recorded"""
+
+    def __init__(self):
+        self.warnings = []
+
+    def confirm_operation(self, title="Confirm", message=""):
+        return True
+
+    def warn(self, text):
+        self.warnings.append(text)
+
+    def delete_preset(self, preset_filename):
+        return False
+
+    def undo_delete(self, entry=None):
+        return False
+
+    def export_package(self, preset_filename):
+        pass
+
+    def import_package(self):
+        pass
+
+    def open_page(self, name):
+        pass
 
 
 @pytest.fixture
 def presets(ui_env, monkeypatch):
-    """Settings folder with presets a & b, questions answered yes, warnings recorded"""
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
-    monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
+    """Settings folder with presets a & b, toasts of the page recorded"""
+    from neopedal.ui.quick.preset_backend import PresetBackend
+
     folder = cfg.path.settings
     for name in ("a", "b"):
         with open(f"{folder}{name}.json", "w", encoding="utf-8") as file:
             json.dump({"speedometer": {"enable": True, "font_size": 15}}, file)
-    return warnings
+    os.utime(f"{folder}default.json", (1, 1))  # oldest: b first in destinations (newest first), whatever the clock
+    backend = PresetBackend(None, Host())
+    backend.toasts = []
+    backend.toastShown.connect(lambda text, error, undo: backend.toasts.append((text, error)))
+    backend.set_active(True)
+    yield backend
+    backend.release()
+    backend.deleteLater()
+    flush()
 
 
 def flush():
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QCoreApplication.processEvents()
 
 
-def create(mode: str = "", source: str = "", name: str = ""):
-    from neopedal.ui.preset_management import CreatePreset
+def wait(busy, timeout: float = 10.0):
+    deadline = time.monotonic() + timeout
+    while busy() and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    QCoreApplication.processEvents()
+    assert not busy()
 
-    dialog = CreatePreset(None, title="Test", mode=mode, source_filename=source)
-    dialog.preset_entry.setText(name)
-    dialog.create_preset()
-    return dialog
+
+def create(mode: str = "", source: str = "", name: str = "") -> str:
+    from neopedal.ui.preset_management import apply_preset_name
+
+    return apply_preset_name(name, mode, source)
 
 
 def exists(name: str) -> bool:
@@ -42,101 +83,86 @@ def exists(name: str) -> bool:
 
 
 def test_create_preset_checks_name(presets):
-    create(name="")
-    create(name="A")  # same name as a.json, any case
-    assert len(presets) == 2
-    create(name="new")
+    assert create(name="") == "Invalid preset name."
+    assert create(name="A") == "Preset already exists."  # same name as a.json, any case
+    assert create(name="new") == ""
     assert exists("new.json")
-    flush()
 
 
 def test_duplicate_and_rename_preset(presets):
-    create(mode="duplicate", source="a.json", name="copy")
+    assert create(mode="duplicate", source="a.json", name="copy") == ""
     assert exists("copy.json") and exists("a.json")
-    create(mode="rename", source="b.json", name="renamed")
+    assert create(mode="rename", source="b.json", name="renamed") == ""
     assert exists("renamed.json") and not exists("b.json")
-    flush()
 
 
-def test_rename_locked_file_warns(presets, monkeypatch):
+def test_rename_locked_file_told(presets, monkeypatch):
     from neopedal.ui import preset_management
 
     def locked(*args):
         raise PermissionError("locked by another program")
 
     monkeypatch.setattr(preset_management.os, "rename", locked)
-    dialog = create(mode="rename", source="b.json", name="other")
-    assert presets and exists("b.json")
-    dialog.close()
-    flush()
+    error = create(mode="rename", source="b.json", name="other")
+    assert "locked by another program" in error and exists("b.json")
 
 
-def test_restore_backup_list_restore_delete(presets, monkeypatch):
-    from neopedal.ui import preset_management
-
+def test_restore_backup_list_restore_delete(presets):
+    backups = presets.backups
     folder = cfg.path.settings
     with open(f"{folder}a.json.backup-2026-10-03-12-00-00-000000", "w", encoding="utf-8") as file:
         json.dump({"speedometer": {"enable": False}}, file)
     with open(f"{folder}b.json.backup-2026-10-03-12-00-00-000000", "w", encoding="utf-8") as file:
         file.write("broken")
-    opened = []
-    monkeypatch.setattr(preset_management.CreatePreset, "open", lambda self: opened.append(self.source_filename))
-    dialog = preset_management.RestoreBackup(None)
-    try:
-        names = [dialog.listbox_backup.item(row).text() for row in range(dialog.listbox_backup.count())]
-        assert len(names) == 2  # broken backup listed too (shown in red)
-        assert dialog.is_checking()  # listed at once, files checked in background (restore checks if not yet)
-        dialog.restore()  # nothing selected
-        assert presets
-        rows = {dialog.listbox_backup.item(row).text(): row for row in range(dialog.listbox_backup.count())}
-        dialog.listbox_backup.setCurrentRow(rows["b.json.backup-2026-10-03-12-00-00-000000"])
-        dialog.restore()  # invalid backup
-        assert len(presets) == 2 and not opened
-        dialog.listbox_backup.setCurrentRow(rows["a.json.backup-2026-10-03-12-00-00-000000"])
-        dialog.restore()  # asks new preset name
-        assert opened == ["a.json.backup-2026-10-03-12-00-00-000000"]
-        dialog.listbox_backup.setCurrentRow(rows["b.json.backup-2026-10-03-12-00-00-000000"])
-        dialog.delete()
-        assert not exists("b.json.backup-2026-10-03-12-00-00-000000")
-        assert dialog.listbox_backup.count() == 1
-    finally:
-        dialog.set_unmodified()
-        dialog.close()
-        flush()
+    backups.refresh()
+    names = [row["key"] for row in backups.model.rows]
+    assert len(names) == 2 and backups.count == 2  # broken backup listed too (marked once checked)
+    assert all(row["status"] == "checking" for row in backups.model.rows) or backups.checking
+    assert backups.prepareRestore("b.json.backup-2026-10-03-12-00-00-000000") == ""  # invalid: told
+    assert presets.toasts[-1] == ("Selected backup file is invalid and cannot be restored.", True)
+    assert backups.prepareRestore("a.json.backup-2026-10-03-12-00-00-000000") == "preset"  # name asked by page
+    assert presets.suggestName("restore", "a.json.backup-2026-10-03-12-00-00-000000") == "a (2)"
+    assert presets.applyName("restore", "a.json.backup-2026-10-03-12-00-00-000000", "a restored") == ""
+    assert exists("a restored.json") and not exists("a.json.backup-2026-10-03-12-00-00-000000")
+    assert presets.toasts[-1] == ("Preset restored: a restored", False)
+    assert [row["key"] for row in backups.model.rows] == ["b.json.backup-2026-10-03-12-00-00-000000"]
+    wait(lambda: backups.checking)
+    assert backups.model.rows[0]["status"] == "invalid"
+    backups.remove("b.json.backup-2026-10-03-12-00-00-000000")
+    assert not exists("b.json.backup-2026-10-03-12-00-00-000000") and backups.count == 0
+
+
+def transfer_ready(presets, settings=("speedometer",), types=("font",)):
+    transfer = presets.transfer
+    transfer.start()
+    transfer.setDestination("b")
+    for key in settings:
+        transfer.toggleSetting(key)
+    for key in types:
+        transfer.toggleType(key)
+    return transfer
 
 
 def test_transfer_selected_option_types(presets, monkeypatch):
-    from neopedal.ui import preset_management
-
-    monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
     cfg.user.setting["speedometer"]["font_size"] = 31
     cfg.user.setting["speedometer"]["position_x"] = 444
-    dialog = preset_management.PresetTransfer(None)
-    try:
-        assert "a" not in [dialog.dest_selector.itemText(index) for index in range(dialog.dest_selector.count())]
-        dialog.dest_selector.setCurrentText("b")
-        dialog.transfer()  # nothing selected
-        assert presets
-
-        def check(listbox, keys):
-            for row in range(listbox.count()):
-                checkbox = listbox.itemWidget(listbox.item(row))
-                checkbox.setChecked(checkbox.key_name in keys)
-
-        check(dialog.listbox_setting, {"speedometer"})
-        dialog.transfer()  # no option type selected
-        assert len(presets) == 2
-        check(dialog.listbox_options, {"font"})
-        dialog.transfer()
-        with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
-            saved = json.load(file)["speedometer"]
-        assert saved["font_size"] == 31  # font transferred
-        assert saved.get("position_x") != 444  # position not selected
-    finally:
-        dialog.set_unmodified()
-        dialog.close()
-        flush()
+    transfer = presets.transfer
+    transfer.start()
+    assert transfer.source == "a" and "a" not in transfer.destinations and transfer.destination == "b"
+    assert not transfer.transfer()  # nothing selected
+    assert transfer.error == "No preset setting selected. Select at least one setting and try again."
+    transfer.toggleSetting("speedometer")
+    assert not transfer.transfer() and transfer.error.startswith("No option type selected.")
+    transfer.toggleType("font")
+    assert transfer.settingCount == 1 and transfer.typeCount == 1 and transfer.error == ""
+    assert transfer.confirmText.startswith("Transfer selected settings from a.json to b.json?")
+    assert transfer.transfer()
+    with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
+        saved = json.load(file)["speedometer"]
+    assert saved["font_size"] == 31  # font transferred
+    assert saved.get("position_x") != 444  # position not selected
+    assert presets.toasts[-1] == ("Settings are transferred from a.json to b.json.", False)
 
 
 @pytest.mark.parametrize("name", [
@@ -182,7 +208,6 @@ def test_rename_loaded_preset_follows_new_name(loaded_a, monkeypatch):
     assert exists("renamed.json") and not exists("a.json")
     # Even if reload is refused (config page with unsaved changes), saves go to renamed preset
     assert cfg.filename.setting == "renamed.json" and reloaded == [True]
-    flush()
 
 
 def test_duplicate_loaded_preset_flushes_first(loaded_a):
@@ -191,51 +216,39 @@ def test_duplicate_loaded_preset_flushes_first(loaded_a):
     assert calls == ["flush"] and exists("copy.json") and cfg.filename.setting == "a.json"
     create(mode="duplicate", source="b.json", name="copy b")  # not loaded: no flush needed
     assert calls == ["flush"]
-    flush()
 
 
 @pytest.mark.parametrize("change", ["loaded", "locked"])
 def test_transfer_refused_if_destination_loaded_or_locked_meanwhile(presets, monkeypatch, change):
-    from neopedal.ui import preset_management
-
-    monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
     monkeypatch.setattr(cfg.user, "filelock", {})
-    dialog = preset_management.PresetTransfer(None)
-    try:
-        dialog.dest_selector.setCurrentText("b")
-        for listbox in (dialog.listbox_setting, dialog.listbox_options):
-            for row in range(listbox.count()):
-                listbox.itemWidget(listbox.item(row)).setChecked(True)
-        with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
-            before = file.read()
-        if change == "loaded":  # auto-loaded since page was opened
-            monkeypatch.setattr(cfg.filename, "setting", "b.json")
-        else:
-            cfg.user.filelock["b.json"] = {"version": "1.0"}
-        dialog.transfer()
-        assert presets == ["Destination preset is now loaded or locked, choose another preset."]
-        with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
-            assert file.read() == before
-        choices = [dialog.dest_selector.itemText(index) for index in range(dialog.dest_selector.count())]
-        assert "b" not in choices
-        assert dialog.loaded_preset == cfg.filename.setting[:-5]
-    finally:
-        dialog.set_unmodified()
-        dialog.close()
-        flush()
+    transfer = presets.transfer
+    transfer.start()
+    transfer.setDestination("b")
+    transfer.setAllSettings(True)
+    transfer.setAllTypes(True)
+    with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
+        before = file.read()
+    if change == "loaded":  # auto-loaded since panel was opened
+        monkeypatch.setattr(cfg.filename, "setting", "b.json")
+    else:
+        cfg.user.filelock["b.json"] = {"version": "1.0"}
+    assert not transfer.transfer()
+    assert transfer.error == "Destination preset is now loaded or locked, choose another preset."
+    with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
+        assert file.read() == before
+    assert "b" not in transfer.destinations
+    assert transfer.source == cfg.filename.setting[:-5]
 
 
-def test_list_header_select_all(presets):
-    from neopedal.ui import preset_management
-
-    dialog = preset_management.PresetTransfer(None)
-    try:
-        header = dialog.findChild(preset_management.ListHeader)
-        header.button_select_all()
-        assert len(tuple(dialog.get_setting_selection(dialog.listbox_setting))) == dialog.listbox_setting.count()
-        header.button_deselect_all()
-        assert not tuple(dialog.get_setting_selection(dialog.listbox_setting))
-    finally:
-        dialog.close()
-        flush()
+def test_transfer_select_all_and_none(presets):
+    transfer = presets.transfer
+    transfer.start()
+    transfer.setAllSettings(True)
+    assert transfer.settingCount == transfer.settingTotal == len(cfg.user.setting)
+    transfer.setAllSettings(False)
+    assert transfer.settingCount == 0
+    transfer.setAllTypes(True)
+    assert transfer.typeCount == transfer.typeTotal
+    transfer.setAllTypes(False)
+    assert transfer.typeCount == 0

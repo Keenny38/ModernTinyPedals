@@ -33,6 +33,7 @@ from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen, QPoly
 
 from .. import realtime_state, units
 from ..api_control import api
+from ..demo_state import drawing_demo
 from ..i18n import tr_overlay as tr
 from ._base import Overlay
 from ._modern.quad import heat_color
@@ -89,6 +90,12 @@ class TemperatureTrend:
             samples.clear()
         self.sums = [0.0] * 4
         self.count = 0
+        self.version += 1
+
+    def fill(self, samples: tuple[tuple[float, ...], ...]):
+        """Samples of each tyre set at once (overlay picture on simulated race)"""
+        for wheel_samples, values in zip(self.samples, samples):
+            wheel_samples.extend(values)
         self.version += 1
 
     def update(self, elapsed: float, lap: int, temperatures: tuple[float, ...]):
@@ -154,6 +161,10 @@ class TyreTrendMixin:
         self.charts: tuple[WheelChart, ...] = (WheelChart(),) * 4
         self.line_width = 1.5
 
+    def vehicle_reset(self):
+        """Compounds read again (followed car changed while spectating, session changed, back to garage)"""
+        self.compounds.reset()
+
     def read_trend(self, chart_rects: tuple[QRectF, ...]) -> tuple:
         """Sample temperatures, charts if changed; state: (chart serial, texts, heat colors)"""
         self.compounds.update()
@@ -162,6 +173,10 @@ class TyreTrendMixin:
             self.vehicle_resets = realtime_state.resets
             self.vehicle_name = api.read.vehicle.vehicle_name()
         self.trend.follow((api.read.session.identifier()[0], api.read.vehicle.slot_id(), self.vehicle_name))
+        if not self.trend.samples[0] and drawing_demo():  # overlay picture: trend of simulated race
+            from ..demo_data import tyre_temperature_trend
+
+            self.trend.fill(tuple(tyre_temperature_trend(value, self.trend.size) for value in temperatures[:4]))
         self.trend.update(api.read.timing.elapsed(), api.read.lap.completed_laps(), temperatures)
         optimal: tuple[float, ...] = (0.0,) * 4
         if self.show_optimal:  # 0 = unknown

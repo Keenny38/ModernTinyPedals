@@ -1,5 +1,9 @@
-# Release build (Windows executable): pinned runtime & build tools, used by the Build and Release workflow
+# Release build (Windows executable): pinned runtime & build tools
 #   pip install -r requirements-build.txt
+# The Build and Release workflow installs the hash-pinned lock made from this file (every dependency, also the
+# ones of pyinstaller & openvr, with the sha256 of each file): pip install --require-hashes --no-deps
+# --only-binary :all: -r requirements-build-lock.txt. Regenerate it after changing this file or requirements-lock.txt:
+#   uv pip compile --generate-hashes --python-version 3.13 --python-platform windows requirements-build.txt -o requirements-build-lock.txt
 -r requirements-lock.txt
 pyinstaller==6.22.3
 openvr==2.12.1401

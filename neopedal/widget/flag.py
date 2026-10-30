@@ -28,6 +28,7 @@ from .. import calculation as calc
 from .. import units
 from ..api_control import api
 from ..const_common import MAX_SECONDS
+from ..formatter import class_alias
 from ..module_info import minfo
 from ..penalty_info import label as penalty_label
 from ._base import Overlay
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 FCY_PHASES = {1: "", 2: "", 3: " LDR", 4: " PIT", 5: " END", 6: " GO", 7: " RED"}
 SPEED_TOLERANCE = 0.2  # m/s over pit speed limit still under it (limiter oscillation)
 BLUE_GAP_MAX = 30.0  # seconds: blue flag shows gap of car behind up to this, else time under blue flag
+FLAG_GAP_GRACE = 0.5  # seconds: flag lost this long at most is the same flag (no restart of time & flash)
 # Speed limiter state
 LIMITER_HIDDEN = 0
 LIMITER_ON = 1
@@ -95,9 +97,32 @@ def heavy_damage() -> float | None:
 
 
 def blue_flag_gap() -> float:
-    """Time gap (seconds) of nearest car behind (the one lapping under blue flag), MAX_SECONDS if too far"""
-    gap = minfo.vehicles.nearestTraffic
+    """Time gap (seconds) of nearest car behind lapping player (under blue flag), MAX_SECONDS if too far"""
+    gap = minfo.vehicles.nearestBlueGap
     return gap if 0 <= gap < BLUE_GAP_MAX else MAX_SECONDS
+
+
+def blue_flag_class(classes: Mapping) -> str:
+    """Class alias (vehicle class editor) of nearest car behind lapping player, "" if unknown"""
+    return class_alias(minfo.vehicles.nearestBlueClass, classes)
+
+
+def pit_lane_open() -> bool:
+    """Pit lane open: session started, not closed by full course yellow (closed, or open to lead lap cars only
+    while player is a lap or more behind leader)"""
+    if not api.read.session.pit_open():
+        return False
+    fcy_state = api.read.session.yellow_flag_state()
+    if fcy_state == 2:
+        return False
+    return fcy_state != 3 or api.read.lap.behind_leader() < 1
+
+
+def lap_text(laps: float, dash: str = "-") -> str:
+    """Laps, one decimal under 10, dash if unknown (nan) or too many to show"""
+    if not -99.5 < laps < 999.5:
+        return dash
+    return f"{laps:.0f}" if laps > 9.94 else f"{laps:.1f}"
 
 
 class PitLimiterWatch:
@@ -449,6 +474,7 @@ class Realtime(Overlay):
         if self.wcfg["show_pit_timer"]:
             if in_pits and api.read.vehicle.in_garage():
                 pitting_state = MAX_SECONDS
+                self.pit_timer.reset()  # pit lane time counted again from garage exit
             else:
                 pitting_state = self.pit_timer.update(in_pits, lap_etime)
             self.update_pit_timer(self.bar_pit_timer, pitting_state)
@@ -535,7 +561,7 @@ class Realtime(Overlay):
                         text_pit = f"{prefix}{timer:>6.6}"
                     else:
                         text_pit = timer
-                elif api.read.session.pit_open():
+                elif pit_lane_open():
                     color_index = 0
                     timer = f"{data:.2f}"
                     prefix = self.wcfg["pit_in_text"]
@@ -583,7 +609,7 @@ class Realtime(Overlay):
         speed = api.read.vehicle.speed()
         limit = pit_speed_limit()
         if wcfg["show_speed_limit_difference"] and limit:
-            value = f"{self.unit_speed(speed - limit):+.{self.decimals_speed}f}"
+            value = f"{self.unit_speed(speed - limit):+z.{self.decimals_speed}f}"
         else:
             value = f"{self.unit_speed(speed):.{self.decimals_speed}f}"
         if prefix:
@@ -611,12 +637,7 @@ class Realtime(Overlay):
 
     def blue_flag_text(self, seconds: float) -> str:
         """Class of car lapping (4 characters) & its time gap, or time under blue flag"""
-        class_name = minfo.vehicles.nearestBlueClass
-        class_style = self.cfg.user.classes.get(class_name)
-        if class_style is not None:
-            class_name = class_style["alias"]
-        if not class_name:
-            class_name = "BLUE"
+        class_name = blue_flag_class(self.cfg.user.classes) or "BLUE"
         gap = blue_flag_gap() if self.wcfg["show_blue_flag_gap"] else MAX_SECONDS
         if gap == MAX_SECONDS:
             return f"{class_name:<4.4}{seconds:3.0f}"
@@ -643,7 +664,7 @@ class Realtime(Overlay):
         if target.last != data:
             target.last = data
             if data != MAX_SECONDS:
-                distance = f"{self.unit_dist(data):+.0f}{self.symbol_dist}"
+                distance = f"{self.unit_dist(data):+z.0f}{self.symbol_dist}"
                 prefix = self.wcfg["yellow_flag_text"]
                 if prefix:
                     text_yellow = f"{prefix}{distance:>6.6}"
@@ -833,7 +854,7 @@ class Realtime(Overlay):
             if shown is not None:
                 prefix = self.wcfg["damage_text"]
                 if shown < 1:  # aero damage unknown or none: body, wheel
-                    target.text = prefix
+                    target.text = prefix or "DAMAGE"
                 else:
                     target.text = f"{prefix:<3}{shown:>3}%" if prefix else f"{shown}%"
                 target.update()
@@ -880,10 +901,7 @@ class Realtime(Overlay):
 
         est_laps = run_laps(minfo.fuel, minfo.energy)
         safe_laps = calc.pit_in_countdown_laps(est_laps, api.read.lap.progress())
-
-        safe_text = f"{safe_laps:.0f}" if safe_laps > 9.94 else f"{safe_laps:.1f}"
-        est_text = f"{est_laps:.0f}" if est_laps > 9.94 else f"{est_laps:.1f}"
-        return f"{safe_text:<3}≤{est_text:>3}"
+        return f"{lap_text(safe_laps):<3}≤{lap_text(est_laps):>3}"
 
     def yellow_flag_state(self, in_race: bool) -> float:
         """Yellow flag state"""
@@ -950,6 +968,9 @@ class TrafficTimer:
 
     def update(self, in_pits: bool, elapsed_time: float) -> float:
         """Check incoming traffic and time gap"""
+        if in_pits and api.read.vehicle.in_garage():  # no traffic to watch in garage
+            self._last_in_pits = in_pits
+            return MAX_SECONDS
         if self._last_in_pits > in_pits:
             self._timer_start = elapsed_time
         elif not in_pits:
@@ -979,21 +1000,22 @@ class BlueFlagTimer:
 
     __slots__ = (
         "_timer_start",
+        "_last_seen",
         "_race_only",
     )
 
     def __init__(self, race_only: bool):
         self._timer_start = 0.0
+        self._last_seen = 0.0
         self._race_only = race_only
 
     def update(self, in_race: bool, elapsed_time: float) -> float:
-        """Check blue flag state"""
-        if not self._race_only or in_race:
-            if api.read.session.blue_flag():
-                if not self._timer_start:
-                    self._timer_start = elapsed_time
-                return elapsed_time - self._timer_start
-            self._timer_start = 0
+        """Check blue flag state, time under it kept through a flag lost FLAG_GAP_GRACE at most"""
+        if (not self._race_only or in_race) and api.read.session.blue_flag():
+            if not self._timer_start or not 0 <= elapsed_time - self._last_seen <= FLAG_GAP_GRACE:
+                self._timer_start = elapsed_time
+            self._last_seen = elapsed_time
+            return elapsed_time - self._timer_start
         return MAX_SECONDS
 
     def reset(self):

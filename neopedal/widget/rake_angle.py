@@ -54,46 +54,51 @@ class Realtime(Overlay):
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
         self.prefix_text = self.wcfg["prefix_rake_angle"]
         self.sign_text = "°" if self.wcfg["show_degree_sign"] else ""
-        self.decimals = max(int(self.wcfg["decimal_places"]), 1)
+        self.decimals = max(int(self.wcfg["decimal_places"]), 0)
 
         # Rake angle
         self.bar_style_rake = (
             self.wcfg["background_color_rake_angle"],
             self.wcfg["warning_color_negative_rake"],
         )
-        text_rake = self.format_rake(0)
+        text_width = len(self.format_rake(-100))  # widest: 3 digits ride height difference
         self.bar_rake = self.set_rawtext(
-            text=text_rake,
-            width=font_m.width * len(text_rake) + bar_padx,
+            text=self.format_rake(0),
+            width=font_m.width * text_width + bar_padx,
             fixed_height=font_m.height,
             offset_y=font_m.voffset,
             fg_color=self.wcfg["font_color_rake_angle"],
             bg_color=self.bar_style_rake[0],
-            last=0,
         )
         layout.addWidget(self.bar_rake, 0, 0)
         self.calc_ema_rake = calc.ema_filter(self.wcfg["rake_angle_smoothing_samples"])
+        self.ema_rake = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Rake angle
-        ema_rake = self.calc_ema_rake(self.bar_rake.last, calc.rake(*api.read.wheel.ride_height()))
-        self.update_rake(self.bar_rake, ema_rake)
+        self.ema_rake = self.calc_ema_rake(self.ema_rake, calc.rake(*api.read.wheel.ride_height()))
+        self.update_rake(self.bar_rake, self.ema_rake)
 
     # GUI update methods
     def update_rake(self, target, data):
-        """Rake data"""
-        if target.last != data:
-            target.last = data
-            target.text = self.format_rake(data)
-            target.bg = self.bar_style_rake[data < 0]
+        """Rake data, repainted on text change only"""
+        text = self.format_rake(data)
+        if target.last != text:
+            target.last = text
+            target.text = text
+            target.bg = self.bar_style_rake[self.rounded_angle(data) < 0]  # negative rake as shown
             target.update()
+
+    def rounded_angle(self, rake):
+        """Rake angle (degree) rounded to shown decimals"""
+        return round(calc.slope_angle(rake, self.wcfg["wheelbase"]), self.decimals)
 
     def format_rake(self, rake):
         """Format rake"""
-        rake_angle = f"{calc.slope_angle(rake, self.wcfg['wheelbase']):+.{self.decimals}f}"
+        rake_angle = f"{self.rounded_angle(rake):+z.{self.decimals}f}"
         if self.wcfg["show_ride_height_difference"]:
-            ride_diff = f"({abs(rake):02.0f})"
+            ride_diff = f"({min(abs(rake), 999):02.0f})"
         else:
             ride_diff = ""
-        return f"{self.prefix_text}{rake_angle:.{self.decimals + 3}}{self.sign_text}{ride_diff:.4}"
+        return f"{self.prefix_text}{rake_angle:.{self.decimals + 3}}{self.sign_text}{ride_diff}"

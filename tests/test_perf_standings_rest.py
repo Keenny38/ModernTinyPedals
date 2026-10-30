@@ -41,7 +41,7 @@ def test_classic_standings_gap_texts(widgets, decimals):  # noqa: F811
         assert widget.gap_text(widget.gap_key_race(gap, position), decimals) == old
     for best, leader_best in ((90.5, 90.5), (91.2345, 90.5), (0.0, 90.5), (89.0, 90.5)):
         time = best - leader_best
-        old = (leader if time == 0 and best > 0 else "0.0" if time < 0 or best < 1 else f"{time:.{decimals}f}")
+        old = (leader if time == 0 and best > 0 else "-" if time < 0 or best < 1 else f"{time:.{decimals}f}")
         assert widget.gap_text(widget.gap_key_best(best, leader_best), decimals) == old
     assert widget.gap_key_race(1.2341, 2) == widget.gap_key_race(1.2342, 2)  # same text: same key
     gap = widget.bars_gap[0]

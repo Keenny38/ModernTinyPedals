@@ -29,7 +29,7 @@ from ..api_control import api
 from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
-from ._pedal_alert import PedalAlertMixin
+from ._pedal_alert import PedalAlertMixin, wheel_lock
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import TrailingConfig
@@ -49,6 +49,7 @@ PLOT_NAMES = (
 )
 
 HIDDEN = -999.0  # plot value of mark not shown (wheel lock, slip, TC & ABS activation)
+MARK_PLOTS = ("tc_activation", "abs_activation", "wheel_lock", "wheel_slip")  # plot values below 0 while not shown
 PEDAL_BARS = ("ffb", "clutch", "brake", "throttle")  # pedal bars, in drawn order
 
 
@@ -76,15 +77,10 @@ class TrailingMixin(PedalAlertMixin):
         self.bar_keys = tuple(
             name for name in PEDAL_BARS if self.wcfg["show_pedal_bars"] and self.wcfg[f"show_{name}_bar"])
         self.setup_alerts(self.bar_keys)
-        self.max_brake_pressure = 0.01
         self.max_speed = 0.0
         # Last data
         self.last_lap_etime = -1.0
         self.update_plot = 0
-
-    def post_update(self):
-        """Peak brake pressure found again for next car"""
-        self.max_brake_pressure = 0.01
 
     def plot_paused(self) -> bool:
         """Whether plot stops: elapsed time unchanged (game paused) for more than max paused frames"""
@@ -139,10 +135,8 @@ class TrailingMixin(PedalAlertMixin):
                     speed = 0
                 values.append(speed)
             elif plot_name == "wheel_lock":
-                wheel_lock = min(abs(min(minfo.wheels.slipRatio)), 1)
-                if wheel_lock < wcfg["wheel_lock_threshold"] or brake_raw <= 0.02:
-                    wheel_lock = HIDDEN
-                values.append(wheel_lock)
+                lock = wheel_lock()
+                values.append(HIDDEN if lock < wcfg["wheel_lock_threshold"] or brake_raw <= 0.02 else lock)
             elif plot_name == "wheel_slip":
                 wheel_slip = min(max(minfo.wheels.slipRatio), 1)
                 if wheel_slip < wcfg["wheel_slip_threshold"] or throttle_raw <= 0.02:
@@ -165,9 +159,7 @@ class TrailingMixin(PedalAlertMixin):
             elif name == "brake":
                 raw = inputs.brake_raw()
                 if wcfg["show_pedal_bar_brake_pressure"]:
-                    pressure = sum(api.read.brake.pressure())
-                    self.max_brake_pressure = max(self.max_brake_pressure, pressure)
-                    values.append((pressure / self.max_brake_pressure, raw))
+                    values.append((self.brake_pressure_share(), raw))
                 else:
                     values.append((raw if wcfg["show_raw_brake"] else inputs.brake(), raw))
             elif name == "clutch":
@@ -274,7 +266,8 @@ class Realtime(TrailingMixin, Overlay):
         for plot_name in self.plot_names:
             setattr(self, f"data_{plot_name}", self.create_data_samples(max_samples))
 
-        self.draw_queue = tuple(d[1:] for d in sorted(self.config_display_order(PLOT_NAMES), reverse=True))
+        self.draw_queue = tuple(d[1:] for d in sorted(  # by display order only (equal orders: samples not compared)
+            self.config_display_order(PLOT_NAMES), key=lambda d: d[0], reverse=True))
         self.draw_background()
 
     def timerEvent(self, event):
@@ -384,12 +377,29 @@ class Realtime(TrailingMixin, Overlay):
         self.pixmap_plot_section.fill(Qt.GlobalColor.transparent)
         painter = QPainter(self.pixmap_plot_section)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        for data, pen, line_style in self.draw_queue:
+        for data, pen, line_style, mark in self.draw_queue:
             painter.setPen(pen)
             if line_style:
                 painter.drawPoints(data)
+            elif mark:
+                self.draw_mark_line(painter, data)
             else:
                 painter.drawPolyline(data)
+
+    def draw_mark_line(self, painter: QPainter, data):
+        """Solid line of mark plot, broken where mark not shown (value below plot): no vertical stroke where
+        mark appears or disappears, a lone sample drawn as point"""
+        low = self.margin  # plot value 0
+        last = None
+        for point in data:
+            if point.y() < low:
+                last = None
+                continue
+            if last is None:
+                painter.drawPoint(point)
+            else:
+                painter.drawLine(last, point)
+            last = point
 
     # Additional methods
     def create_data_samples(self, max_samples):
@@ -436,4 +446,5 @@ class Realtime(TrailingMixin, Overlay):
                 getattr(self, f"data_{plot_name}"),  # data
                 pen,  # pen style
                 self.wcfg[f"{plot_name}_line_style"],  # line style
+                plot_name in MARK_PLOTS,  # line broken where mark not shown
             )

@@ -4,7 +4,9 @@ import QtQuick.Layouts
 import NeoPedal
 import "../components"
 
-// Simple view (page mode shown over charts): what each lap does at chart cursor, drawn like overlays. Pedals & steering
+// Simple view (page mode shown over charts): what each lap does at chart cursor, drawn like overlays. Summary band on
+// top whatever is picked: delta & speed at cursor (lap against reference lap), delta over the whole lap (hover moves the
+// cursor, click keeps it, corners where time is lost shaded & numbered as in the synthesis band above it). Pedals & steering
 // wheel card of each lap (clutch, brake & throttle capsules, steering wheel turned by real angle when recorded, gear &
 // speed), side by side when wide enough, then groups of channels (timing, engine, tyres, brakes, chassis, electronics,
 // track, math channels): values of main lap (lap card clicked, else reference lap), other laps as marks of their color.
@@ -33,6 +35,21 @@ Item {
         return 0
     }
     readonly property var mainLap: laps[mainIndex] || null
+    // Summary band: lap whose gap shows (main lap if it has one, else first lap with one: reference lap picked)
+    readonly property var gapLap: {
+        if (mainLap && mainLap.delta !== "") return mainLap
+        for (var i = 0; i < laps.length; i++) if (laps[i].delta !== "") return laps[i]
+        return null
+    }
+    readonly property string referenceKey: {
+        var legend = chart ? chart.legendLaps : []
+        for (var i = 0; i < legend.length; i++) if (legend[i].reference) return legend[i].key
+        return ""
+    }
+    readonly property var referenceLap: {
+        for (var i = 0; i < laps.length; i++) if (laps[i].lap === referenceKey) return laps[i]
+        return null
+    }
     // Lap cards side by side when wide enough, same size (40 em at most: ultrawide screens keep cards readable,
     // centered); height fills room left by groups (compact above many groups, scrolls past a few rows)
     readonly property int cardColumns: Math.max(1, Math.min(shownLaps.length,
@@ -61,6 +78,12 @@ Item {
         anchors.fill: parent
         spacing: theme.space3
 
+        SummaryBand {
+            objectName: "simpleSummary"
+            Layout.fillWidth: true
+            visible: root.chart ? root.chart.legendLaps.length > 0 : false
+        }
+
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -71,7 +94,7 @@ Item {
                 compact: true
                 loading: root.laps.length === 0 && backend.loading
                 empty: root.laps.length === 0 && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: "\uE9D2"  // chart
                 text: root.layout.length === 0 ? i18n.tr("Nothing picked: choose what is shown with Show")
                                                : i18n.tr("Move over track map, drag bar below or play lap to see driver inputs")
@@ -122,6 +145,7 @@ Item {
                         Text {
                             width: column.width - theme.em
                             text: i18n.tr("Values of %1, other laps as marks").arg(root.mainLap ? root.mainLap.label : "")
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             font.pointSize: theme.fontSmall
                             elide: Text.ElideRight
@@ -151,6 +175,228 @@ Item {
         }
     }
 
+    // Delta & speed at cursor, delta over the whole lap, corners where time is lost
+    component SummaryBand: ColumnLayout {
+        id: band
+
+        // Read only while shown (simple view hidden: no line nor list kept)
+        readonly property var line: root.visible ? backend.dashboard.deltaLine : ({})
+        readonly property var series: line.series || []
+        readonly property var losses: root.visible ? backend.cornerTable.coaching.slice(0, 3) : []
+        // Axis range of each loss corner (shaded on the delta line), worked out when corners change
+        readonly property var lossRanges: losses.map(function(tip) { return backend.cornerTable.range(tip.index) })
+        readonly property string versusText: root.gapLap === null ? ""
+            : i18n.tr("%1 against %2").arg(root.gapLap.label)
+                  .arg(backend.idealTime !== "" ? i18n.tr("Ideal") : root.referenceLap ? root.referenceLap.label : "")
+
+        spacing: theme.space2
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: theme.space3
+
+            // Gap of lap at cursor: signed value & words under it (color on top only)
+            ReadingTile {
+                objectName: "deltaTile"
+                caption: band.versusText !== "" ? i18n.tr("Delta") + " · " + band.versusText : i18n.tr("Delta")
+                lapColor: root.gapLap ? root.gapLap.color : "transparent"
+                value: root.gapLap ? root.gapLap.delta : "—"
+                valueColor: !root.gapLap || root.gapLap.deltaValue === 0 ? theme.text
+                            : root.gapLap.deltaValue > 0 ? theme.loss : theme.gain
+                detail: !root.gapLap || root.gapLap.deltaValue === 0 ? ""
+                        : root.gapLap.deltaValue > 0 ? "▼ " + i18n.tr("Slower") : "▲ " + i18n.tr("Faster")
+            }
+            // Speed of the same lap, difference with reference lap
+            ReadingTile {
+                id: speedTile
+                objectName: "speedTile"
+                readonly property var lap: root.gapLap || root.mainLap
+                readonly property real diff: lap && root.referenceLap && lap !== root.referenceLap
+                                             && lap.speedValue >= 0 && root.referenceLap.speedValue >= 0
+                                             ? lap.speedValue - root.referenceLap.speedValue : NaN
+                caption: i18n.tr("Speed")
+                lapColor: lap ? lap.color : "transparent"
+                value: lap && lap.speed !== "" ? lap.speed + " " + lap.speedUnit : "—"
+                detail: isNaN(diff) || Math.round(diff) === 0 ? ""
+                        : (diff > 0 ? "+" : "−") + Math.abs(Math.round(diff)) + " " + lap.speedUnit
+            }
+
+            // Delta of each compared lap over the whole lap (above zero: slower), losses shaded & numbered, zoomed part
+            // of charts, cursor. Hover moves the cursor, click keeps the position (as on charts)
+            Rectangle {
+                id: strip
+                objectName: "deltaStrip"
+                Layout.fillWidth: true
+                Layout.minimumWidth: theme.em * 8
+                Layout.preferredHeight: theme.em * 3.6
+                Layout.alignment: Qt.AlignVCenter
+                radius: theme.radiusSm
+                color: theme.plotBase
+                border.width: 1
+                border.color: theme.plotBorder
+                Accessible.role: Accessible.Graphic
+                Accessible.name: i18n.tr("Delta over the whole lap")
+
+                Item {
+                    id: plot
+                    readonly property real low: band.line.low !== undefined ? band.line.low : -1
+                    readonly property real high: band.line.high !== undefined ? band.line.high : 1
+                    readonly property real span: root.chart ? Math.max(root.chart.maxX, 1e-9) : 1
+                    readonly property real sx: width / span
+                    readonly property real sy: height / Math.max(high - low, 1e-9)
+                    readonly property real zeroY: height + low * sy
+                    function xAt(px) { return Math.max(0, Math.min(px / Math.max(width, 1), 1)) * span }
+                    anchors.fill: parent
+                    anchors.margins: theme.space1
+                    clip: true
+
+                    Repeater {  // corners where time is lost, numbered as in the synthesis band above (LapSummaryBand)
+                        model: band.lossRanges
+                        Rectangle {
+                            required property var modelData
+                            required property int index
+                            visible: modelData.length === 2
+                            x: visible ? modelData[0] * plot.sx : 0
+                            width: visible ? Math.max((modelData[1] - modelData[0]) * plot.sx, 2) : 0
+                            height: plot.height
+                            color: theme.tint(theme.loss, "subtle")
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: index + 1
+                                textFormat: Text.PlainText
+                                color: theme.text
+                                font.pointSize: theme.fontMicro
+                                font.weight: Font.Bold
+                            }
+                        }
+                    }
+                    Rectangle {  // zoomed part of charts
+                        readonly property var shown: root.chart ? root.chart.viewRange : [0, 0]
+                        visible: root.chart ? root.chart.zoomed : false
+                        x: shown[0] * plot.sx
+                        width: Math.max((shown[1] - shown[0]) * plot.sx, 2)
+                        height: plot.height
+                        color: theme.tint(theme.accent, "subtle")
+                        border.width: 1
+                        border.color: theme.accent
+                    }
+                    Rectangle {  // zero
+                        visible: plot.low < 0 && plot.high > 0
+                        y: Math.round(plot.zeroY)
+                        width: plot.width
+                        height: 1
+                        color: theme.plotBorder
+                    }
+                    Item {  // lines in data units: one transform for all
+                        transform: Matrix4x4 {
+                            matrix: Qt.matrix4x4(plot.sx, 0, 0, 0, 0, -plot.sy, 0, plot.zeroY, 0, 0, 1, 0, 0, 0, 0, 1)
+                        }
+                        Repeater {
+                            model: band.series
+                            GpuShape {
+                                required property var modelData
+                                key: modelData.key
+                                color: modelData.color
+                                revision: backend.revision
+                                opacity: root.chart ? root.chart.lapOpacity(modelData.lap) : 1
+                            }
+                        }
+                    }
+                    Rectangle {  // cursor
+                        visible: root.chart ? root.chart.hasCursor : false
+                        x: visible ? Math.round(root.chart.cursorX * plot.sx) : 0
+                        width: 1
+                        height: plot.height
+                        color: theme.text
+                    }
+                }
+                TpText {
+                    anchors.centerIn: parent
+                    width: Math.min(implicitWidth, parent.width - theme.space4)
+                    visible: band.series.length === 0
+                    role: "caption"
+                    text: i18n.tr("Check a second lap to compare")
+                }
+                MouseArea {
+                    id: stripArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.CrossCursor
+                    // Playback moves the cursor: hover left out meanwhile (as on charts & map)
+                    onPositionChanged: function(mouse) {
+                        if (root.chart && !root.chart.playing) root.chart.setCursor(plot.xAt(mouse.x - plot.x), "mouse")
+                    }
+                    onExited: if (root.chart && !root.chart.playing) root.chart.restoreCursor()
+                    onClicked: function(mouse) { backend.setPinned(plot.xAt(mouse.x - plot.x)) }
+                }
+                TpToolTip {
+                    visible: stripArea.containsMouse && band.series.length > 0
+                    delay: theme.tipDelay
+                    text: i18n.tr("Delta over the whole lap: above the line slower, below faster · click: keep position")
+                }
+            }
+        }
+
+    }
+
+    // Large reading of summary band: what (lap color dot & caption), value, words under it (never color alone)
+    component ReadingTile: Rectangle {
+        id: tile
+        property string caption
+        property color lapColor: "transparent"
+        property string value
+        property color valueColor: theme.text
+        property string detail
+        implicitWidth: Math.max(tileColumn.implicitWidth, theme.em * 7) + theme.space4 * 2
+        implicitHeight: theme.em * 3.6
+        Layout.preferredWidth: implicitWidth
+        Layout.maximumWidth: theme.em * 16
+        Layout.preferredHeight: implicitHeight
+        radius: theme.radiusMd
+        color: theme.alternate
+        border.width: 1
+        border.color: theme.cardBorder
+        Accessible.role: Accessible.StaticText
+        Accessible.name: caption + " " + value + " " + detail
+        Column {
+            id: tileColumn
+            x: theme.space4
+            anchors.verticalCenter: parent.verticalCenter
+            Row {
+                spacing: theme.space2
+                ColorDot {
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: Math.round(theme.em * 0.5)
+                    color: tile.lapColor
+                    visible: tile.lapColor.a > 0
+                }
+                TpText {
+                    // cut to the tile (16 em at most): long lap names
+                    width: Math.min(implicitWidth, tile.Layout.maximumWidth - theme.space4 * 2 - theme.em)
+                    role: "caption"
+                    text: tile.caption
+                }
+            }
+            Row {
+                spacing: theme.space3
+                TpText {
+                    id: tileValue
+                    role: "numeric"
+                    text: tile.value
+                    color: tile.valueColor
+                    font.pointSize: theme.fontSubtitle
+                    font.weight: Font.Bold
+                }
+                TpText {
+                    anchors.baseline: tileValue.baseline
+                    role: "caption"
+                    text: tile.detail
+                    color: theme.dimOn(tile.color)
+                }
+            }
+        }
+    }
+
     component InputsCard: Rectangle {
         id: card
 
@@ -162,7 +408,7 @@ Item {
         readonly property bool pinned: lap !== null && root.chart && root.chart.pinnedKey === lap.lap
 
         radius: theme.radiusLg
-        color: cardArea.pressed ? theme.border : cardArea.containsMouse ? theme.hover : theme.alternate
+        color: cardArea.pressed ? theme.surfaceSunken : cardArea.containsMouse ? theme.hover : theme.alternate
         border.width: pinned ? 2 : 1
         border.color: lap ? theme.tint(lap.color, pinned ? 1 : 0.45) : theme.border
         function pin() { if (card.lap && root.chart) root.chart.pinnedKey = card.pinned ? "" : card.lap.lap }
@@ -199,6 +445,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: card.lap ? card.lap.label : ""
+                textFormat: Text.PlainText
                 color: theme.text
                 font.bold: true
                 elide: Text.ElideRight
@@ -206,6 +453,7 @@ Item {
             Text {
                 visible: card.lap !== null && card.lap.speed !== ""
                 text: card.lap ? card.lap.speed + " " + card.lap.speedUnit : ""
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.features: { "tnum": 1 }
             }
@@ -219,6 +467,7 @@ Item {
                     id: gearText
                     anchors.centerIn: parent
                     text: card.lap ? card.lap.gear : ""
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.bold: true
                 }
@@ -271,6 +520,7 @@ Item {
             id: reading
             anchors.horizontalCenter: parent.horizontalCenter
             text: Math.round(Math.max(gauge.value, 0) * 100)
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }
@@ -300,6 +550,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             y: track.y + track.height + theme.em * 0.15
             text: gauge.label
+            textFormat: Text.PlainText
             color: theme.dimText
             font.bold: true
             font.pointSize: theme.fontSmall
@@ -328,7 +579,7 @@ Item {
             width: wheel.size
             height: width
             radius: width / 2
-            color: theme.base
+            color: theme.surfaceCard
             border.width: 1
             border.color: theme.border
         }
@@ -356,7 +607,7 @@ Item {
                         width: wheel.rimRadius * 0.2
                         height: wheel.rimRadius * 0.73
                         antialiasing: true  // turned
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.55)
+                        color: theme.tint(theme.text, "outline")
                     }
                 }
             }
@@ -365,7 +616,7 @@ Item {
                 radius: width / 2
                 color: "transparent"
                 border.width: wheel.rimWidth
-                border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.85)
+                border.color: theme.text
             }
             Rectangle {  // top center stripe
                 x: parent.width / 2 - width / 2
@@ -382,7 +633,7 @@ Item {
                 radius: width / 2
                 color: theme.raised
                 border.width: Math.max(wheel.rimWidth * 0.3, 1)
-                border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
+                border.color: theme.tint(theme.text, "strong")
             }
         }
         Rectangle {  // reading over hub
@@ -390,11 +641,12 @@ Item {
             width: angleText.implicitWidth + theme.em * 0.6
             height: angleText.implicitHeight + theme.em * 0.2
             radius: theme.radiusSm
-            color: Qt.rgba(theme.base.r, theme.base.g, theme.base.b, 0.9)
+            color: theme.surfaceCard
             Text {
                 id: angleText
                 anchors.centerIn: parent
                 text: wheel.realAngle ? Math.round(Math.abs(wheel.angle)) + "°" : Math.round(Math.abs(wheel.steering) * 100) + "%"
+                textFormat: Text.PlainText
                 color: theme.text
                 font.bold: true
                 font.features: { "tnum": 1 }
@@ -438,7 +690,7 @@ Item {
             x: group.pad
             y: groupTitle.y + groupTitle.height + theme.em * 0.4
             width: group.width - group.pad * 2
-            spacing: theme.em * 0.6
+            spacing: theme.space4
             Repeater {
                 model: group.items
                 Item {
@@ -521,6 +773,7 @@ Item {
             id: barLabel
             width: parent.width - barValue.width - theme.em * 0.4
             text: bar.titleText
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight
@@ -529,7 +782,8 @@ Item {
             id: barValue
             anchors.right: parent.right
             anchors.baseline: barLabel.baseline
-            text: bar.main ? bar.main.t : "–"
+            text: bar.main ? bar.main.t : "—"
+            textFormat: Text.PlainText
             color: theme.text
             font.bold: true
             font.features: { "tnum": 1 }
@@ -584,7 +838,7 @@ Item {
         implicitHeight: theme.em * 1.6
         Row {
             anchors.verticalCenter: parent.verticalCenter
-            spacing: theme.em * 0.4
+            spacing: theme.space3
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: theme.em * 1.05
@@ -592,12 +846,13 @@ Item {
                 radius: width / 2
                 color: light.main && light.main.on ? theme.warning : theme.raised
                 border.width: 1
-                border.color: light.main && light.main.on ? Qt.lighter(theme.warning, 1.3) : theme.border
+                border.color: light.main && light.main.on ? theme.tintInk(theme.warning) : theme.border
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, light.width - theme.em * 1.5 - others.width)
                 text: light.info.title
+                textFormat: Text.PlainText
                 color: light.main && light.main.on ? theme.text : theme.dimText
                 font.pointSize: theme.fontLabel
                 elide: Text.ElideRight
@@ -639,6 +894,7 @@ Item {
             id: wheelsLabel
             width: parent.width
             text: wheels.titleText
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight
@@ -648,7 +904,7 @@ Item {
             y: wheelsLabel.height + theme.em * 0.3
             width: parent.width
             columns: 2
-            spacing: theme.em * 0.3
+            spacing: theme.space2
             Repeater {
                 model: 4
                 Rectangle {
@@ -664,13 +920,15 @@ Item {
                         x: theme.em * 0.35
                         y: theme.em * 0.15
                         text: wheels.names[tile.index]
+                        textFormat: Text.PlainText
                         color: tile.hot ? theme.inkOn(tile.color) : theme.dimOn(theme.raised)
                         font.pointSize: theme.fontTiny
                     }
                     Text {
                         anchors.centerIn: parent
                         anchors.verticalCenterOffset: -theme.em * 0.1
-                        text: wheels.main && wheels.main.t[tile.index] !== "" ? wheels.main.t[tile.index] : "–"
+                        text: wheels.main && wheels.main.t[tile.index] !== "" ? wheels.main.t[tile.index] : "—"
+                        textFormat: Text.PlainText
                         color: tile.hot ? theme.inkOn(tile.color) : theme.text
                         font.bold: true
                         font.features: { "tnum": 1 }
@@ -727,6 +985,7 @@ Item {
             id: gLabel
             width: parent.width - gValue.width
             text: gview.info.title
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             elide: Text.ElideRight
@@ -735,7 +994,8 @@ Item {
             id: gValue
             anchors.right: parent.right
             anchors.baseline: gLabel.baseline
-            text: gview.main ? (Math.sqrt(gview.main.x * gview.main.x + gview.main.y * gview.main.y) * gview.limit).toFixed(1).replace(".", theme.decimalPoint) + " G" : "–"
+            text: gview.main ? (Math.sqrt(gview.main.x * gview.main.x + gview.main.y * gview.main.y) * gview.limit).toFixed(1).replace(".", theme.decimalPoint) + " G" : "—"
+            textFormat: Text.PlainText
             color: theme.text
             font.bold: true
             font.features: { "tnum": 1 }
@@ -756,13 +1016,13 @@ Item {
                     width: ringRadius * 2
                     height: width
                     radius: ringRadius
-                    color: index === 0 ? theme.tint(theme.text, 0.04) : "transparent"
+                    color: index === 0 ? theme.tint(theme.text, "stripe") : "transparent"
                     border.width: 1
-                    border.color: theme.tint(theme.text, 0.15)
+                    border.color: theme.tint(theme.text, "selected")
                 }
             }
-            Rectangle { x: 0; y: plot.height / 2; width: plot.width; height: 1; color: theme.text; opacity: 0.1 }
-            Rectangle { x: plot.width / 2; y: 0; width: 1; height: plot.height; color: theme.text; opacity: 0.1 }
+            Rectangle { x: 0; y: plot.height / 2; width: plot.width; height: 1; color: theme.chartAxis }
+            Rectangle { x: plot.width / 2; y: 0; width: 1; height: plot.height; color: theme.chartAxis }
             Repeater {
                 model: gview.entries.length
                 Rectangle {

@@ -109,7 +109,7 @@ def test_changelog_image_file(tmp_path, monkeypatch, update_repo):
         return Response(served[0])
 
     served = [png]
-    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(update, "open_url", urlopen)
     path = update.changelog_image_file(SHOT)  # downloaded once, then kept
     assert path == str(tmp_path / "cache" / "2026-10-18-corner-coach.png")
     assert Path(path).read_bytes() == png
@@ -208,6 +208,7 @@ def test_update_check_lists_skipped_versions(monkeypatch, language):
         return "" if code == "fr" else CHANGELOG  # not translated: English sections
 
     monkeypatch.setattr(update, "request_latest_release", latest)
+    monkeypatch.setattr(update, "verified_release", lambda *args: None)  # signed manifest: test_signed_release.py
     monkeypatch.setattr(update, "fetch_changelog", fetch)
     monkeypatch.setattr(update, "current_language", lambda: language)
     monkeypatch.setattr(version, "__version__", "0.24.0")

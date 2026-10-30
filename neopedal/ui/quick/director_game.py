@@ -98,7 +98,7 @@ class SharedConnection:
             return None
         try:
             return json.loads(data) if decode is None else decode(data.decode("utf-8"))
-        except ValueError:  # also UnicodeDecodeError
+        except (ValueError, RecursionError):  # also UnicodeDecodeError, RecursionError: nested too deeply
             return None
 
 
@@ -200,12 +200,13 @@ class GameStatePoll(DirectorPart):
 
     def needs_fresh(self) -> bool:
         """Answers wanted every second: page shown, automatic cuts, overlays following the car on air, events log,
-        instant replay, broadcast graphics source showing (asked lately)"""
+        instant replay, broadcast graphics source showing (asked lately), game answering without the session shown
+        (session left or not: told soon)"""
         from ...stream_director import director_feed, live_feed
 
         page = self.page
         return (page.shown or page.mode == "auto" or page.follow_overlays or page.log.log_events
-                or page.instant or director_feed.watched() or live_feed.watched())
+                or page.instant or page.game_lost or director_feed.watched() or live_feed.watched())
 
     def poll_game(self) -> dict[str, Any]:
         """Game state (background thread of state requests): one connection kept from answer to answer

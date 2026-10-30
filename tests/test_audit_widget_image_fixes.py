@@ -66,6 +66,8 @@ def test_gear_negative_consumption_rate_while_refuelling(widgets, monkeypatch, m
 # --- Damage: impact of previous session (game impact time kept, elapsed restarted) not shown
 def test_modern_damage_old_session_impact_hidden(widgets, monkeypatch):
     widget = widgets("damage", show_last_impact_cone=True, last_impact_cone_duration=5)
+    reader(monkeypatch, "vehicle", "impact_magnitude", 2000.0)  # real impact (light ones not shown)
+    reader(monkeypatch, "vehicle", "impact_position", (0.5, 2.0))
     reader(monkeypatch, "vehicle", "impact_time", 500.0)
     for elapsed in (10.0, 501.0):  # old impact, also once elapsed catches up with it
         reader(monkeypatch, "timing", "elapsed", elapsed)
@@ -82,6 +84,8 @@ def test_modern_damage_old_session_impact_hidden(widgets, monkeypatch):
 
 def test_classic_damage_old_session_impact_hidden(widgets, monkeypatch):
     widget = widgets("damage", modern=False, show_last_impact_cone=True, last_impact_cone_duration=5)
+    reader(monkeypatch, "vehicle", "impact_magnitude", 2000.0)  # real impact (light ones not shown)
+    reader(monkeypatch, "vehicle", "impact_position", (0.5, 2.0))
     reader(monkeypatch, "vehicle", "impact_time", 500.0)
     reader(monkeypatch, "timing", "elapsed", 10.0)
     widget.timerEvent(None)
@@ -305,7 +309,7 @@ class FakeGame:
         self.answers: dict[str, tuple[int, bytes]] = {}
         self.asked: list[str] = []
 
-    def __call__(self, resource: str) -> tuple[int, bytes]:
+    def __call__(self, resource: str, max_body: int | None = None) -> tuple[int, bytes]:
         resource.encode("ascii")  # real connection fails on a non-ASCII path
         self.asked.append(resource)
         return self.answers.get(resource, (404, b"<html>not found</html>"))

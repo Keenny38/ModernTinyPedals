@@ -56,6 +56,17 @@ class ReplaysPlayback(ReplaysBase):
         """Replay of live session opened from page: back to live possible"""
         return self.rewatching and self.state == REPLAY
 
+    @Property(str, notify=ReplaysBase.playbackChanged)
+    def playingReplay(self) -> str:
+        """Replay open in game, opened from page (game tells no name: "" if opened in game), "" if none"""
+        return self.playing if self.state == REPLAY and self.play_sent is None else ""
+
+    @Property(str, notify=ReplaysBase.playbackChanged)
+    def openingReplay(self) -> str:
+        """Replay opened from page that the game is opening (command not answered, replay not loaded yet), "" if
+        none"""
+        return self.playing if self.playing and (self.play_sent is not None or self.state != REPLAY) else ""
+
     @Property(list, constant=True)
     def playbackModes(self) -> list[dict]:
         """Replay speeds (menu): command, label"""

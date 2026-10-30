@@ -28,12 +28,19 @@ from typing import TYPE_CHECKING
 
 from ...module_info import minfo
 from ...template.widget.drivers_ui import RIVALS_COLUMNS
+from .base import DASH, signed
 from .drivers import DRIVER_OPTIONS, Context, DriverTable, live_trends
-from .rows import laptime_text
 from .table import RIGHT, TEXT, Cell, Column, Row
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import RivalsConfig
+
+
+def interval_text(gap: float | int, ahead: bool, decimals: int) -> str:
+    """Interval of car ahead (-) or behind (+) to player: seconds, or laps (whole number: 1L), dash if none"""
+    if isinstance(gap, int):
+        return f"{'-' if ahead else '+'}{gap}L" if gap > 0 else DASH
+    return signed(-gap if ahead else gap, decimals)
 
 
 class Realtime(DriverTable):
@@ -47,8 +54,8 @@ class Realtime(DriverTable):
         "column_delta_laptime", "number_of_delta_laptime", "show_inverted_delta_laptime_layout",
         "display_order_delta_laptime",
         "column_time_interval", "decimal_places_time_interval", "display_order_time_interval",
-        "column_track_limits", "display_order_track_limits", "column_driver_ranks", "show_driver_badge",
-        "display_order_driver_ranks", "column_gap_trend", "display_order_gap_trend",
+        "column_track_limits", "display_order_track_limits", "column_driver_ranks", "column_driver_badge",
+        "display_order_driver_ranks", "display_order_driver_badge", "column_gap_trend", "display_order_gap_trend",
     )
 
     def __init__(self, config, widget_name):
@@ -69,18 +76,16 @@ class Realtime(DriverTable):
         if key == "time_interval":
             if player is None:
                 return Cell()
-            ahead = veh.positionOverall < player.positionOverall
+            ahead = extra.get("ahead", False)  # by row (positions may be equal: start of session)
             gap = player.gapBehindNextInClass if ahead else veh.gapBehindNextInClass
-            sign = "-" if ahead else "+"
-            text = f"{sign}{gap}L" if isinstance(gap, int) else f"{sign}{gap:.{self.int_decimals}f}"
-            return Cell(TEXT, text, "strong", theme.positive if ahead else theme.warning)
+            return Cell(TEXT, interval_text(gap, ahead, self.int_decimals), "strong", theme.text)  # neutral as lists
         return Cell()
 
     def laptime_cell(self, veh, ctx: Context) -> Cell:
-        """Last lap in race (or if best lap column shown), else best lap"""
+        """Last lap in race (or if best lap column shown), else best lap (purple if fastest of class), as standings"""
         if ctx.in_race or self.wcfg["column_best_laptime"]:
             return super().laptime_cell(veh, ctx)
-        return Cell(TEXT, laptime_text(veh.bestLapTime), "dim", self.theme.text_dim)
+        return self.best_lap_cell(veh, ctx)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -96,10 +101,10 @@ class Realtime(DriverTable):
         """Car ahead & car behind in player class"""
         rows: list[Row | None] = []
         if ctx.player is not None:
-            for index in (ctx.player.classAheadIndex, ctx.player.classBehindIndex):
+            for ahead, index in ((True, ctx.player.classAheadIndex), (False, ctx.player.classBehindIndex)):
                 if 0 <= index < len(data_set):
                     veh = data_set[index]
-                    rows.append(self.driver_row(veh, ctx, **self.position_trend(veh, index, ctx)))
+                    rows.append(self.driver_row(veh, ctx, ahead=ahead, **self.position_trend(veh, index, ctx, ahead)))
                 else:
                     rows.append(None)
         self.refresh(tuple(rows))

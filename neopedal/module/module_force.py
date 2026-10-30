@@ -20,12 +20,18 @@
 Force module
 """
 
+from math import nan
+
 from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
+from ..const_common import FLOAT_INF, MIN_IMPACT_MAGNITUDE
 from ..module_info import ForceInfo, minfo
 from ..validator import generator_init
 from ._base import WAIT_STATE_CHANGE, DataModule, data_stamp
+
+# Downforce not provided by game (LMU: front & rear always 0) once both stay 0 above this speed (m/s)
+DOWNFORCE_CHECK_SPEED = 20.0
 
 
 class Realtime(DataModule):
@@ -125,6 +131,7 @@ def calc_force(
 ):
     """Calculate force data"""
     last_reset = None  # reset check
+    last_impact_time = -FLOAT_INF  # game time of last impact (light impacts ignored)
 
     calc_ema_gforce = calc.ema_filter(max_avg_g_samples, 3)
     calc_max_lgt = transient_max(max_g_reset_delay)
@@ -153,6 +160,8 @@ def calc_force(
             avg_lat_gforce_ema = 0.0
             max_braking_rate = 0
             delta_braking_rate = 0
+            downforce_missing = False
+            last_impact_time = -FLOAT_INF
 
         # Read telemetry
         elapsed = api.read.timing.elapsed()
@@ -177,11 +186,20 @@ def calc_force(
         )
         max_avg_lat_gforce = calc_max_avg_lat.send((avg_lat_gforce_ema, elapsed))
 
-        # Downforce
-        dforce_ratio = calc.force_ratio(dforce_f, dforce_f + dforce_r)
+        # Downforce, NaN if not provided by game (0 while moving, until not 0)
+        if dforce_f or dforce_r:
+            downforce_missing = False
+        elif not downforce_missing and api.read.vehicle.speed() > DOWNFORCE_CHECK_SPEED:
+            downforce_missing = True
+        if downforce_missing:
+            dforce_f = dforce_r = dforce_ratio = nan
+        else:
+            dforce_ratio = calc.force_ratio(dforce_f, dforce_f + dforce_r)
 
-        # Braking rate (longitudinal G force)
-        if brake_raw > 0.02 and elapsed - api.read.vehicle.impact_time() > 2:
+        # Braking rate (longitudinal G force), not within 2 seconds after impact
+        if api.read.vehicle.impact_magnitude() >= MIN_IMPACT_MAGNITUDE:
+            last_impact_time = api.read.vehicle.impact_time()
+        if brake_raw > 0.02 and not 0 <= elapsed - last_impact_time <= 2:
             braking_rate = lgt_gforce_raw
         else:
             braking_rate = 0.0

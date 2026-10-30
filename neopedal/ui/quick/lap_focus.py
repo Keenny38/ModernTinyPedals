@@ -22,6 +22,9 @@ then a corner of the reference lap shown in the Corners tab with charts zoomed o
 
 Laps load in background: the corner is picked once the reference lap is shown with its corners found (lap viewer
 tells each chart rebuild), within FOCUS_TIMEOUT_MS.
+
+Guided analysis ("Analyze My Last Lap"): best lap against newest lap, then the Corners tab and charts zoomed on the
+corner where the newest lap loses most time (LostCornerFocus, same wait).
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QTimer
 
+from ...i18n import tr
 from .lap_actions import path_key
 
 FOCUS_TIMEOUT_MS = 30_000  # laps not shown by then (huge files, other laps picked meanwhile): corner left alone
@@ -83,6 +87,53 @@ class CornerFocus(QObject):
         with suppress(RuntimeError, TypeError):  # already disconnected
             self._backend.chartChanged.disconnect(self.check)
         self.deleteLater()
+
+
+class LostCornerFocus(QObject):
+    """Guided analysis: waits for best & last laps to be shown with their corners, then opens the Corners tab on the
+    corner where the last lap loses most time (once); tells the page when there is none"""
+
+    def __init__(self, backend: Any, reference: str, compared: str):
+        super().__init__(backend)
+        self._backend = backend
+        self._reference = path_key(reference)
+        self._compared = path_key(compared)
+        self._done = False
+        backend.chartChanged.connect(self.check)
+        QTimer.singleShot(FOCUS_TIMEOUT_MS, self, self.stop)
+
+    def check(self):
+        backend = self._backend
+        if self._done or path_key(backend.reference_key or "-") != self._reference:
+            return
+        if {path_key(lap.key) for lap in backend.data.laps} != {self._reference, self._compared}:
+            return  # other laps still shown (charts of best & last lap being built)
+        lost = backend.cornerTable.lost_corners()
+        backend.setSideTab(CORNERS_TAB)
+        if lost:
+            backend.setSelectedCorner(lost[0])
+            backend.lostCornersShown.emit()  # charts zoomed on worst corner, steps through the others
+        else:
+            backend.set_status(tr("No corner where the last lap loses time against the best lap"))
+        self.stop()
+
+    def stop(self):
+        if self._done:
+            return
+        self._done = True
+        with suppress(RuntimeError, TypeError):  # already disconnected
+            self._backend.chartChanged.disconnect(self.check)
+        self.deleteLater()
+
+
+def analyze_last_lap(backend: Any, best: str, last: str) -> LostCornerFocus | None:
+    """Best lap against last lap (compare preset already applied by the page), then the corner where the last lap
+    loses most time; None if the last lap is the best one (nothing to compare)"""
+    if not best or not last or path_key(best) == path_key(last):
+        return None
+    focus = LostCornerFocus(backend, best, last)
+    QTimer.singleShot(0, focus, focus.check)  # laps already read: charts may be built at once
+    return focus
 
 
 def show_laps(backend: Any, reference: str, compared: str = "", apex: float = -1.0) -> bool:

@@ -107,12 +107,12 @@ class Realtime(InstrumentMixin, ModernOverlay):
                 lights.append(Light(locking, theme.negative if locking else None))
             else:
                 slipping = self.wheel_slipping()
-                lights.append(Light(slipping, theme.orange if slipping else None))
+                lights.append(Light(slipping, theme.warning if slipping else None))
         self.refresh(tuple(lights))
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
 
     def paint(self, painter: QPainter):
         theme = self.theme

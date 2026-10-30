@@ -37,6 +37,7 @@ from PySide6.QtCore import Property, Signal, Slot
 from ...i18n import tr
 from ...process import director as dr
 from ...setting import cfg
+from . import last_folder
 from .director_shared import KIND_TEXTS, LOG_FLUSH_SECONDS, LOG_FOLDER, DirectorPart, car_label, clock_text, safe_name
 from .formatting import clock_seconds, iso_day
 
@@ -188,9 +189,11 @@ class EventsLog(DirectorPart):
         track, session = page.session_key[:2]
         name = "-".join(part for part in (track, session, time.strftime("%Y-%m-%d-%H%M")) if part)
         path, _ = QFileDialog.getSaveFileName(parent if isinstance(parent, QWidget) else None,
-                                              tr("Export Events"), f"{name}.csv", "CSV (*.csv)")
+                                              tr("Export Events"), last_folder.start_path("director_events", f"{name}.csv"),
+                                              "CSV (*.csv)")
         if not path:
             return
+        last_folder.remember("director_events", path)
         try:
             with open(path, "w", encoding="utf-8-sig", errors="replace", newline="") as file:
                 writer = csv.writer(file)
@@ -203,4 +206,4 @@ class EventsLog(DirectorPart):
         except (OSError, csv.Error) as error:
             page.notify(f"{tr('Events not saved')}: {error}", True)
             return
-        page.notify(tr("Events saved"))
+        page.notify(tr("Events saved"), file=path)

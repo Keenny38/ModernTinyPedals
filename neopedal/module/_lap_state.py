@@ -22,13 +22,17 @@ Reset, lap waiting for validation & save state of lap data generators
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from time import monotonic
 from typing import Any
 
 from .. import realtime_state
+from ..userfile.data_saver import SYNC_SAVE_TIMEOUT, wait_data_saver
 from . import _base
 from ._base import MODULE_STOP, PENDING_CHECK, PendingLap
+
+logger = logging.getLogger(__name__)
 
 # Step of a data generator tick, returned by LapState.receive
 SKIP = 0  # value handled, nothing else to do this tick
@@ -48,12 +52,16 @@ class LapState:
         pending: lap just completed waiting for validation, None if none.
         delayed_save: data recorded and not saved yet (save callback clears it once saved).
         next_checkpoint: monotonic time of next save while driving (checkpoint enabled).
+        sync_save: save callbacks write synchronously: module stopping (MODULE_STOP, written before module
+            reports stopped) or player inactive (PENDING_CHECK, nothing waits for module output); else
+            (while driving) saves are queued to the data saver thread, see userfile.data_saver.
     """
 
     __slots__ = (
         "pending",
         "delayed_save",
         "next_checkpoint",
+        "sync_save",
         "_last_reset",
         "_sent_reset",
         "_on_resolved",
@@ -81,6 +89,7 @@ class LapState:
         self.pending: PendingLap | None = None
         self.delayed_save = False
         self.next_checkpoint = 0.0
+        self.sync_save = False
         self._last_reset: Any = None  # reset of data loaded
         self._sent_reset: Any = None  # last reset value sent
         self._on_resolved = on_resolved
@@ -108,6 +117,7 @@ class LapState:
 
     def receive(self, reset: Any) -> int:
         """Step of tick for value sent to generator: SKIP, UPDATE or LOAD"""
+        self.sync_save = reset is MODULE_STOP or reset is PENDING_CHECK
         if reset is PENDING_CHECK:
             # Player inactive: only validate lap just completed (data of lap kept until reset)
             if not self._reset_on_check or self._last_reset == self._sent_reset:  # no reset waiting
@@ -133,6 +143,9 @@ class LapState:
         # Delay reset until driving (module stopping: data saved only)
         if reset is MODULE_STOP or not realtime_state.active:
             return SKIP
+        # Saves queued to the data saver thread written before generator loads its files back
+        if not wait_data_saver(SYNC_SAVE_TIMEOUT):
+            logger.warning("data saving not finished before reload")
         self._last_reset = reset
         if self._checkpoint:
             self.delayed_save = False

@@ -18,7 +18,7 @@ def test_status_palette_shared_by_every_surface(themed):
     from neopedal.stream_overlay import results_html
     from neopedal.template.setting_status_colors import STATUS_COLORS, status_css
     from neopedal.ui.quick import Theme
-    from neopedal.web_dashboard import DASHBOARD_HTML
+    from neopedal.web_dashboard import dashboard_html
     from neopedal.widget._modern.theme import build_theme
 
     themed("Modern Dark")
@@ -32,13 +32,15 @@ def test_status_palette_shared_by_every_surface(themed):
     assert overlay.positive.name().upper() == STATUS_COLORS["gain"][0]
     assert overlay.negative.name().upper() == STATUS_COLORS["loss"][0]
     assert overlay.orange.name().upper() == STATUS_COLORS["warning"][0]
+    assert overlay.warning.name().upper() == STATUS_COLORS["warning"][0]  # one warning color
     assert overlay.caution.name().upper() == STATUS_COLORS["gold"][0]
     assert overlay.accent.name().upper() == STATUS_COLORS["player"][0]
     css = status_css()
     assert "--purple:#c084fc;" in css and "--warn:#fb923c;" in css and "--player:#38bdf8;" in css
     for page in (director_html("en", "x"), results_html()):
         assert css in page and "@@" not in page
-    assert "--green:#4ade80;" in DASHBOARD_HTML and "--yellow:#facc15;" in DASHBOARD_HTML and "@@status" not in DASHBOARD_HTML
+    page = dashboard_html()
+    assert "--green:#4ade80;" in page and "--yellow:#facc15;" in page and "@@status" not in page
 
 
 def test_pit_finish_penalty_meanings():

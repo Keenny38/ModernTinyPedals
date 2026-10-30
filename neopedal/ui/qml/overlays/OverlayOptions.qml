@@ -5,16 +5,30 @@ import "../components"
 
 // Overlay Options page: options of every overlay. Overlays on the left (by category, with unsaved edits,
 // errors & search matches; a choice list on narrow pages), options of the selected overlay in section
-// cards, live preview on the right (wide pages). Search in this overlay or in every overlay, "Modified"
-// filter. Edits of any overlay stay pending until applied: bar at the bottom with Undo, Redo, Discard &
-// Apply (Ctrl+S). After Discard the bar stays a few seconds with Undo.
+// cards, live preview on the right (wide pages; a drawer opened by "Preview" on narrower ones). Search in this
+// overlay or in every overlay (Ctrl+F), filters menu (changed only, used only, advanced options). The overlay
+// switch of the header turns it on or off at once (as on the Overlays page); edits of options stay pending
+// until applied: unsaved changes bar at the bottom (TpPendingBar, as on Settings) with Undo, Redo, Discard &
+// Apply (Ctrl+S). After Discard the bar stays a few seconds with Undo. Rows: more actions with "⋯", right click
+// or Menu key.
 TpPage {
     id: page
 
     readonly property bool narrow: width < theme.bpNarrow
     readonly property bool previewShown: width >= theme.em * 74  // content-tuned: navigation + options + 21 em preview
     readonly property var info: backend.overlayInfo
-    property var menuData: null  // option row of the "more" menu
+    readonly property bool everyOverlay: backend.filtering && backend.scopeAll  // results of every overlay shown
+    readonly property int filterCount: (backend.modifiedOnly ? 1 : 0) + (backend.usedOnly ? 1 : 0)
+    property bool previewOpen: false  // preview drawer (pages too narrow for the preview panel)
+    property var menuData: null  // option row of the more actions menu
+
+    function openRowMenu(data, anchor, x, y) {
+        page.menuData = data
+        if (x < 0)
+            rowMenu.toggleBelow(anchor, true)  // right aligned under the row's "⋯" button (or the row)
+        else
+            rowMenu.popup(anchor, x, y)
+    }
 
     // Field being edited committed (Apply, Ctrl+S: buttons & shortcuts take no focus): focus left
     function commitEdits() {
@@ -23,6 +37,12 @@ TpPage {
     function focusSearch() {
         search.forceActiveFocus()
         search.selectAll()
+    }
+    function isFind(event) {
+        return event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier
+    }
+    function drawerOpen() {
+        return previewOpen && !previewShown
     }
     function showSelectedOverlay() {
         var index = backend.navIndex(backend.overlay)
@@ -41,9 +61,17 @@ TpPage {
 
     Component.onCompleted: Qt.callLater(page.showSelectedOverlay)
 
+    // Ctrl+F searches this page (taken before the app's own Ctrl+F shortcut), Esc closes the preview drawer first
+    Keys.onShortcutOverride: function(event) {
+        if (isFind(event) || (event.key === Qt.Key_Escape && drawerOpen()))
+            event.accepted = true
+    }
     Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier)) {
+        if (isFind(event)) {
             page.focusSearch()
+            event.accepted = true
+        } else if (event.key === Qt.Key_Escape && drawerOpen()) {
+            page.previewOpen = false
             event.accepted = true
         }
     }
@@ -79,6 +107,7 @@ TpPage {
 
     TpMenu {
         id: rowMenu
+        objectName: "optionMenu"
         TpMenuItem {
             text: i18n.tr("Reset to Default")
             enabled: page.menuData !== null && page.menuData.modified && !page.menuData.locked
@@ -89,26 +118,103 @@ TpPage {
             enabled: page.menuData !== null && page.menuData.shared > 0 && page.menuData.error === ""
             onTriggered: backend.applyToAll(page.menuData.key)
         }
+        TpMenuItem {
+            readonly property bool shown: page.menuData !== null && page.menuData.kind === "path"
+            visible: shown
+            height: shown ? implicitHeight : 0
+            text: i18n.tr("Open Folder")
+            onTriggered: backend.openFolder(page.menuData.key)
+        }
         MenuSeparator {}
         TpMenuItem {
-            text: i18n.tr("Copy Option Name")
+            text: i18n.tr("Copy Option Key")
             onTriggered: backend.copyText(page.menuData.option)
         }
         onClosed: list.forceActiveFocus()
     }
-    TextMetrics { id: shareMetrics; text: i18n.tr("Import Overlay Settings...") }
     TpMenu {
         id: shareMenu
-        width: Math.max(theme.em * 13, shareMetrics.advanceWidth + theme.em * 3.8)  // longest item never cut
         TpMenuItem {
-            text: i18n.tr("Export Overlay Settings...")
+            text: i18n.tr("Export Overlay Settings…")
             onTriggered: backend.exportOverlays()
         }
         TpMenuItem {
-            text: i18n.tr("Import Overlay Settings...")
+            text: i18n.tr("Import Overlay Settings…")
             onTriggered: backend.importOverlays()
         }
         onClosed: list.forceActiveFocus()
+    }
+    // Filters of the options list: checked entries follow the backend (binding put back after each click)
+    TpMenu {
+        id: filtersMenu
+        objectName: "filtersMenu"
+        TpMenuItem {
+            objectName: "changedOnlyItem"
+            text: i18n.tr("Changed Only")
+            checkable: true
+            checked: backend.modifiedOnly
+            onTriggered: {
+                backend.setModifiedOnly(!backend.modifiedOnly)
+                checked = Qt.binding(function() { return backend.modifiedOnly })
+            }
+        }
+        TpMenuItem {
+            objectName: "usedOnlyItem"
+            text: i18n.tr("Used Only")
+            checkable: true
+            checked: backend.usedOnly
+            onTriggered: {
+                backend.setUsedOnly(!backend.usedOnly)
+                checked = Qt.binding(function() { return backend.usedOnly })
+            }
+        }
+        TpMenuItem {  // simple mode overlays: every option, including colors, thresholds and labels
+            objectName: "advancedItem"
+            readonly property bool shown: page.info.simpleMode === true && !page.everyOverlay
+            visible: shown
+            height: shown ? implicitHeight : 0
+            text: i18n.tr("Advanced Options")
+            checkable: true
+            checked: backend.advanced
+            onTriggered: {
+                backend.setAdvanced(!backend.advanced)
+                checked = Qt.binding(function() { return backend.advanced })
+            }
+        }
+    }
+    // Display profiles of the overlay: shown items saved as one (then picked in Display Profile)
+    TpMenu {
+        id: profileMenu
+        objectName: "profileMenu"
+        TpMenuItem {
+            text: i18n.tr("Save shown items as:")
+            enabled: false
+        }
+        Instantiator {
+            model: page.info.userProfiles || []
+            delegate: TpMenuItem {
+                required property var modelData
+                text: modelData.label
+                onTriggered: backend.saveUserProfile(modelData.name)
+            }
+            onObjectAdded: function(index, object) { profileMenu.insertItem(index + 1, object) }
+            onObjectRemoved: function(index, object) { profileMenu.removeItem(object) }
+        }
+    }
+    // Color themes: every color of the overlay set to one (pending edits)
+    TpMenu {
+        id: themeMenu
+        objectName: "themeMenu"
+        Instantiator {
+            model: page.info.themes || []
+            delegate: TpMenuItem {
+                required property var modelData
+                text: modelData.label
+                onTriggered: backend.applyColorTheme(modelData.name)
+            }
+            onObjectAdded: function(index, object) { themeMenu.insertItem(index, object) }
+            onObjectRemoved: function(index, object) { themeMenu.removeItem(object) }
+        }
     }
 
     RowLayout {
@@ -120,12 +226,12 @@ TpPage {
             visible: !page.narrow
             Layout.fillHeight: true
             Layout.preferredWidth: Math.round(theme.em * 15.5)
-            color: theme.dark ? Qt.darker(theme.window, 1.12) : Qt.darker(theme.window, 1.025)
+            color: theme.surfaceSunken  // overlay list: below the options
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: theme.space4
-                spacing: theme.em * 0.5
+                spacing: theme.space3
 
                 TpSearchField {
                     id: navSearch
@@ -160,10 +266,10 @@ TpPage {
                     section.delegate: Item {
                         required property string section
                         width: ListView.view.width
-                        height: Math.round(theme.em * 1.9)
+                        height: Math.round(theme.headerHeight)
                         TpSectionLabel {
                             anchors.left: parent.left
-                            anchors.leftMargin: theme.em * 0.5
+                            anchors.leftMargin: theme.space3
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: theme.space2
@@ -220,41 +326,33 @@ TpPage {
                             anchors.rightMargin: theme.space2
                             anchors.verticalCenter: parent.verticalCenter
                             text: entry.label
+                            textFormat: Text.PlainText
                             color: entry.dimmed ? theme.dimOn(entry.color) : theme.text
                             font.weight: entry.selected ? Font.DemiBold : Font.Normal
                             elide: Text.ElideRight
                         }
-                        Text {  // options changed from default
+                        TpText {  // options changed from default
                             id: customized
+                            role: "caption"
+                            tabular: true
+                            elide: Text.ElideNone
                             visible: !badge.visible && entry.customized > 0
                             anchors.right: parent.right
                             anchors.rightMargin: theme.space4
                             anchors.verticalCenter: parent.verticalCenter
                             text: visible ? entry.customized : ""
                             color: theme.dimOn(entry.color)
-                            font.pointSize: theme.fontCaption
-                            font.features: { "tnum": 1 }
                         }
-                        Rectangle {
+                        TpCountBadge {  // same badge as the Settings sections: invalid values in error tone with "!"
                             id: badge
                             visible: entry.badgeCount > 0
                             anchors.right: parent.right
-                            anchors.rightMargin: theme.em * 0.5
+                            anchors.rightMargin: theme.space3
                             anchors.verticalCenter: parent.verticalCenter
-                            height: Math.round(theme.em * 1.3)
-                            width: Math.max(height, badgeText.implicitWidth + theme.space4)
-                            radius: height / 2
-                            color: entry.errors > 0 && !(backend.filtering && backend.scopeAll) ? theme.lossFill
-                                 : backend.filtering && backend.scopeAll ? theme.hover : theme.accentFill
-                            Text {
-                                id: badgeText
-                                anchors.centerIn: parent
-                                text: entry.badgeCount
-                                color: backend.filtering && backend.scopeAll ? theme.text : theme.inkOn(badge.color)
-                                font.pointSize: theme.fontCaption
-                                font.weight: Font.DemiBold
-                                font.features: { "tnum": 1 }
-                            }
+                            size: "sm"
+                            text: entry.badgeCount
+                            tone: entry.errors > 0 && !(backend.filtering && backend.scopeAll) ? "error"
+                                : backend.filtering && backend.scopeAll ? "neutral" : "accent"
                         }
                         MouseArea {
                             id: entryArea
@@ -277,7 +375,7 @@ TpPage {
             visible: !page.narrow
             Layout.fillHeight: true
             Layout.preferredWidth: 1
-            color: theme.dark ? Qt.lighter(theme.window, 1.25) : theme.border
+            color: theme.strokeSubtle
         }
 
         // Options
@@ -300,46 +398,43 @@ TpPage {
                 onActivated: function(index) { backend.selectOverlay(keys[index]) }
             }
 
-            // Header
+            // Header: icon tile, title (TpText title role, as TpPageHeader), details, switch & actions toolbar. Own
+            // row: TpPageHeader has no leading icon nor shrinking toolbar
             RowLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: theme.em * 1.0
-                Layout.rightMargin: theme.em * 1.0
+                Layout.leftMargin: theme.padPopup
+                Layout.rightMargin: theme.padPopup
                 Layout.topMargin: theme.padPage
                 spacing: theme.padCard
                 TpIconTile {
                     Layout.preferredWidth: size
                     Layout.preferredHeight: size
-                    size: Math.round(theme.em * 2.6)
+                    size: Math.round(theme.iconHero)  // page badge
                     tint: backend.filtering && backend.scopeAll || page.info.color === "" ? theme.accent : page.info.color
                     glyph: backend.filtering && backend.scopeAll ? "" : ""  // search, sliders
                     fallbackText: page.info.label || ""
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
+                    Layout.preferredWidth: theme.em * 12  // room shared with the header actions (texts cut first)
+                    Layout.minimumWidth: theme.em * 6
                     spacing: 0
-                    Text {
+                    TpText {
                         Layout.fillWidth: true
+                        role: "title"
                         text: backend.filtering && backend.scopeAll
                               ? (backend.searching ? i18n.tr("Search results") : i18n.tr("Modified options"))
                               : page.info.label
-                        color: theme.text
-                        font.pointSize: theme.fontTitle
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                        Accessible.role: Accessible.Heading
-                        Accessible.name: text
                     }
-                    Text {
+                    TpText {
                         Layout.fillWidth: true
+                        color: theme.dimText
                         text: backend.filtering && backend.scopeAll
                               ? i18n.trm("Found: " + backend.matchCount) + "  ·  " + i18n.tr("Every overlay")
                               : [page.info.category, page.info.design, i18n.trm("Options: " + page.info.optionCount),
                                  page.info.customized > 0 ? i18n.trm("Modified: " + page.info.customized) : "",
                                  i18n.trm("Preset: " + page.info.preset)]
                                 .filter(function(part) { return part !== "" }).join("  ·  ")
-                        color: theme.dimText
-                        elide: Text.ElideRight
                     }
                 }
                 TpButton {  // display profile set: some options follow it (click: show the option)
@@ -351,60 +446,97 @@ TpPage {
                     tip: i18n.tr("Options set by this profile show its value: changing one switches to Custom. Click to show the option.")
                     onClicked: backend.showOption(page.info.profileOption)
                 }
-                Pill {
-                    visible: !(backend.filtering && backend.scopeAll) && page.info.name !== ""
-                    text: page.info.enabled ? i18n.tr("On") : i18n.tr("Off")
-                    tint: page.info.enabled ? theme.gain : theme.dimText
-                    solid: page.info.enabled
-                    tip: i18n.tr("Overlay state (saved)")
+                // On or off at once (as on the Overlays page), never a pending edit
+                TpSwitch {
+                    objectName: "overlayEnabledSwitch"
+                    visible: !page.everyOverlay && page.info.name !== ""
+                    checkable: false  // follows backend
+                    checked: page.info.enabled === true
+                    text: page.info.enabled ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                    tip: i18n.tr("Turn this overlay on or off now (not a pending change)")
+                    onClicked: backend.setOverlayEnabled(!page.info.enabled)
                 }
-                TpButton {
-                    visible: !backend.filtering
-                    flat: true
-                    glyph: ""  // chevron up
-                    fallback: "▲"
-                    tip: i18n.tr("Collapse All")
-                    onClicked: backend.setAllCollapsed(true)
-                }
-                TpButton {
-                    visible: !backend.filtering
-                    flat: true
-                    glyph: ""  // chevron down
-                    fallback: "▼"
-                    tip: i18n.tr("Expand All")
-                    onClicked: backend.setAllCollapsed(false)
-                }
-                TpButton {
-                    visible: !(backend.filtering && backend.scopeAll)
-                    flat: true
-                    glyph: ""  // undo
-                    fallback: "↺"
-                    text: page.narrow ? "" : i18n.tr("Reset Overlay")
-                    tip: i18n.tr("Every option of this overlay back to default (saved with Apply)")
-                    onClicked: backend.resetOverlay()
-                }
-                TpButton {
-                    id: shareButton
-                    flat: true
-                    glyph: ""  // export
-                    fallback: "⇪"
-                    text: page.narrow ? "" : i18n.tr("Share")
-                    tip: i18n.tr("Export or import overlay settings as a file")
-                    onClicked: shareMenu.popup(shareButton, 0, shareButton.height)
+                // Header actions: texts, then icons only, then a "⋯" menu as room runs out
+                TpToolbar {
+                    objectName: "headerToolbar"
+                    Layout.fillWidth: true
+                    TpAction {
+                        name: "testOnScreenButton"
+                        text: backend.testing ? i18n.tr("Stop Test") : i18n.tr("Test on Screen")
+                        glyph: ""  // monitor
+                        fallback: "▶"
+                        tip: i18n.tr("Overlays on screen show the race situation chosen under the preview for a few seconds (saved values)")
+                        priority: 4
+                        flat: true
+                        checked: backend.testing
+                        onTriggered: backend.testOnScreen()
+                    }
+                    TpAction {
+                        name: "previewDrawerButton"
+                        shown: !page.previewShown && !page.everyOverlay
+                        text: i18n.tr("Preview")
+                        glyph: ""  // view
+                        fallback: "◧"
+                        tip: i18n.tr("Show or hide the live preview")
+                        priority: 3
+                        flat: true
+                        checked: page.previewOpen
+                        onTriggered: {
+                            page.previewOpen = !page.previewOpen
+                            page.forceActiveFocus()  // Esc reaches the page: closes the preview, never the page
+                        }
+                    }
+                    TpAction {
+                        shown: !page.everyOverlay
+                        text: i18n.tr("Reset Overlay")
+                        glyph: theme.glyphs.reset
+                        fallback: "↺"
+                        tip: i18n.tr("Every option of this overlay back to default (saved with Apply)")
+                        priority: 2
+                        flat: true
+                        onTriggered: backend.resetOverlay()
+                    }
+                    TpAction {
+                        text: i18n.tr("Share")
+                        glyph: theme.glyphs.share
+                        fallback: "⇪"
+                        tip: i18n.tr("Export or import overlay settings as a file")
+                        priority: 1
+                        flat: true
+                        onTriggered: function(source) { shareMenu.toggleBelow(source) }
+                    }
+                    TpAction {
+                        shown: !backend.filtering
+                        glyph: ""  // chevron up
+                        fallback: "▲"
+                        tip: i18n.tr("Collapse All")
+                        flat: true
+                        onTriggered: backend.setAllCollapsed(true)
+                    }
+                    TpAction {
+                        shown: !backend.filtering
+                        glyph: ""  // chevron down
+                        fallback: "▼"
+                        tip: i18n.tr("Expand All")
+                        flat: true
+                        onTriggered: backend.setAllCollapsed(false)
+                    }
+                    onMenuClosed: list.forceActiveFocus()
                 }
             }
 
             // Search & filters
             Flow {
                 Layout.fillWidth: true
-                Layout.leftMargin: theme.em * 1.0
-                Layout.rightMargin: theme.em * 1.0
+                Layout.leftMargin: theme.padPopup
+                Layout.rightMargin: theme.padPopup
                 Layout.topMargin: theme.space4
                 Layout.bottomMargin: theme.space3
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 TpSearchField {
                     id: search
-                    width: Math.max(theme.em * 12, Math.min(theme.em * 22, parent.width - scope.width - modifiedSwitch.width - theme.em * 1.5))
+                    objectName: "optionSearch"
+                    width: Math.max(theme.em * 12, Math.min(theme.em * 22, parent.width - scope.width - filtersButton.width - theme.em * 1.5))
                     placeholderText: i18n.tr("Search options") + "   Ctrl+F"
                     onSearchChanged: function(text) { backend.setSearch(text) }
                     onExitField: list.forceActiveFocus()
@@ -420,54 +552,38 @@ TpPage {
                     ToolTip.delay: theme.tipDelay
                     MouseArea { id: scopeArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                 }
-                TpSwitch {
-                    id: modifiedSwitch
-                    checkable: false
-                    checked: backend.modifiedOnly
-                    text: i18n.tr("Changed only")
-                    tip: i18n.tr("Show only options changed from default")
-                    onClicked: backend.setModifiedOnly(!backend.modifiedOnly)
+                // Filters, display profiles & color themes: buttons opening a menu (never a list whose arrows
+                // would apply an entry)
+                TpButton {
+                    id: filtersButton
+                    objectName: "filtersButton"
+                    flat: true
+                    glyph: ""  // filter
+                    fallback: "▾"
+                    text: i18n.tr("Filters") + (page.filterCount > 0 ? " (" + page.filterCount + ")" : "") + " ▾"
+                    tip: i18n.tr("Changed Only: options changed from default. Used Only: hides options doing nothing with current values.")
+                    checked: page.filterCount > 0 || filtersMenu.visible
+                    onClicked: filtersMenu.toggleBelow(filtersButton)
                 }
-                TpSwitch {
-                    checkable: false
-                    checked: backend.usedOnly
-                    text: i18n.tr("Used only")
-                    tip: i18n.tr("Hide options doing nothing with current values (greyed out)")
-                    onClicked: backend.setUsedOnly(!backend.usedOnly)
-                }
-                TpSwitch {
-                    visible: page.info.simpleMode && !(backend.filtering && backend.scopeAll)
-                    checkable: false
-                    checked: backend.advanced
-                    text: i18n.tr("Advanced Options")
-                    tip: i18n.tr("Show every option, including colors, thresholds and labels")
-                    onClicked: backend.setAdvanced(!backend.advanced)
-                }
-                TpCombo {  // user display profiles: current display saved as one
-                    visible: page.info.userProfiles.length > 0 && !(backend.filtering && backend.scopeAll)
-                    width: theme.em * 11
-                    model: [{ label: i18n.tr("Save as Profile...") }].concat(page.info.userProfiles)
-                    textRole: "label"
-                    currentIndex: 0
+                TpButton {
+                    id: profileButton
+                    objectName: "profileButton"
+                    visible: (page.info.userProfiles || []).length > 0 && !page.everyOverlay
+                    flat: true
+                    text: i18n.tr("Profile") + " ▾"
                     tip: i18n.tr("Save shown items as a display profile, then pick it in Display Profile (saved with Apply or Save)")
-                    onActivated: function(index) {
-                        if (index > 0)
-                            backend.saveUserProfile(page.info.userProfiles[index - 1].name)
-                        currentIndex = 0
-                    }
+                    checked: profileMenu.visible
+                    onClicked: profileMenu.toggleBelow(profileButton)
                 }
-                TpCombo {
-                    visible: page.info.themes.length > 0 && !(backend.filtering && backend.scopeAll)
-                    width: theme.em * 11
-                    model: [{ label: i18n.tr("Color Theme...") }].concat(page.info.themes)
-                    textRole: "label"
-                    currentIndex: 0
+                TpButton {
+                    id: themeButton
+                    objectName: "themeButton"
+                    visible: (page.info.themes || []).length > 0 && !page.everyOverlay
+                    flat: true
+                    text: i18n.tr("Theme") + " ▾"
                     tip: i18n.tr("Set every color to a theme (saved only with Apply or Save)")
-                    onActivated: function(index) {
-                        if (index > 0)
-                            backend.applyColorTheme(page.info.themes[index - 1].name)
-                        currentIndex = 0
-                    }
+                    checked: themeMenu.visible
+                    onClicked: themeMenu.toggleBelow(themeButton)
                 }
             }
 
@@ -487,19 +603,15 @@ TpPage {
                     boundsBehavior: Flickable.StopAtBounds
                     reuseItems: true  // rows of other options & overlays reuse delegates (see OverlayOptionRow)
                     cacheBuffer: Math.round(theme.em * 30)
-                    leftMargin: theme.em * 1.0
-                    rightMargin: theme.em * 1.0
+                    leftMargin: theme.padPopup
+                    rightMargin: theme.padPopup
                     bottomMargin: theme.space6
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                     Keys.onUpPressed: contentY = Math.max(originY, contentY - theme.em * 3)
                     Keys.onDownPressed: contentY = Math.max(originY, Math.min(originY + contentHeight - height, contentY + theme.em * 3))
                     delegate: OverlayOptionRow {
                         width: list.width - list.leftMargin - list.rightMargin
-                        onMenuRequested: function(data, anchor) {
-                            page.menuData = data
-                            var point = anchor.mapToItem(page, 0, anchor.height)
-                            rowMenu.popup(page, point.x + anchor.width - rowMenu.implicitWidth, point.y)
-                        }
+                        onMenuRequested: function(data, anchor, x, y) { page.openRowMenu(data, anchor, x, y) }
                     }
                     footer: Item {
                         width: list.width - list.leftMargin - list.rightMargin
@@ -512,12 +624,13 @@ TpPage {
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
                             text: i18n.trm("More options found: " + backend.truncatedCount) + "  ·  " + i18n.tr("Type more words to narrow the search")
+                            textFormat: Text.PlainText
                             color: theme.dimText
                         }
                     }
 
-                    EmptyState {
-                        visible: list.count === 0
+                    TpStateView {
+                        empty: list.count === 0
                         width: list.width - list.leftMargin - list.rightMargin
                         topPadding: theme.em * 3
                         glyph: backend.searching ? "" : ""  // search, check
@@ -566,15 +679,16 @@ TpPage {
                         }
                     }
 
-                    visible: page.previewShown && !(backend.filtering && backend.scopeAll)
+                    visible: (page.previewShown || page.previewOpen) && !page.everyOverlay
                     Layout.fillHeight: true
-                    Layout.preferredWidth: expanded ? Math.max(Math.round(theme.em * 21), Math.round(parent.width * 0.5))
-                                                    : Math.round(theme.em * 21)
+                    Layout.preferredWidth: Math.min(expanded ? Math.max(Math.round(theme.em * 21), Math.round(parent.width * 0.5))
+                                                             : Math.round(theme.em * 21),
+                                                    page.previewShown ? parent.width : Math.round(parent.width * 0.5))
                     Behavior on Layout.preferredWidth { NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
-                    Layout.bottomMargin: theme.em * 1.0
-                    Layout.rightMargin: theme.em * 1.0
-                    radius: theme.radiusXl
-                    color: theme.base
+                    Layout.bottomMargin: theme.padPopup
+                    Layout.rightMargin: theme.padPopup
+                    radius: theme.radiusLg
+                    color: theme.surfaceCard
                     border.width: 1
                     border.color: theme.cardBorder
 
@@ -594,7 +708,7 @@ TpPage {
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: theme.padCard
-                        spacing: theme.em * 0.5
+                        spacing: theme.space3
                         RowLayout {
                             Layout.fillWidth: true
                             Icon { glyph: ""; color: theme.dimText }  // view
@@ -613,6 +727,7 @@ TpPage {
                                     text: backend.previewCompare && page.info.canCompare
                                           ? page.info.otherDesign + " · " + page.info.designOptions
                                           : i18n.tr("Simulated race values")
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     font.pointSize: theme.fontSmall
                                     elide: Text.ElideRight
@@ -623,6 +738,16 @@ TpPage {
                                 checked: backend.previewEnabled
                                 tip: i18n.tr("Draw overlay with unsaved values")
                                 onClicked: backend.setPreviewEnabled(!backend.previewEnabled)
+                            }
+                            TpButton {  // opened by the header's Preview button: closed here (or Esc)
+                                objectName: "closePreviewButton"
+                                visible: !page.previewShown
+                                flat: true
+                                size: "sm"
+                                glyph: "\uE711"  // cancel
+                                fallback: "✕"
+                                tip: i18n.tr("Close Preview")
+                                onClicked: page.previewOpen = false
                             }
                         }
                         Rectangle {  // dark stage: overlays are drawn for a game picture
@@ -637,7 +762,7 @@ TpPage {
                             Flickable {
                                 id: previewFlick
                                 anchors.fill: parent
-                                anchors.margins: theme.em * 0.5
+                                anchors.margins: theme.space3
                                 contentWidth: Math.max(width, previewImage.width)
                                 contentHeight: Math.max(height, previewImage.height)
                                 boundsBehavior: Flickable.StopAtBounds
@@ -696,9 +821,10 @@ TpPage {
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
                                 text: backend.previewState === 0 ? i18n.tr("Preview off")
-                                    : backend.previewState === 1 ? i18n.tr("Drawing preview...")
+                                    : backend.previewState === 1 ? i18n.tr("Drawing preview…")
                                     : backend.previewState === 3 ? i18n.tr("Preview not available for this overlay")
                                     : i18n.tr("Invalid value, preview not updated")
+                                textFormat: Text.PlainText
                                 color: theme.stageText
                             }
                         }
@@ -771,114 +897,40 @@ TpPage {
                                 tip: i18n.tr("Race situation of preview: shows what overlays draw only then")
                                 onActivated: function(index) { backend.setPreviewScenario(index) }
                             }
-                            TpButton {
-                                flat: true
-                                checked: backend.testing
-                                text: backend.testing ? i18n.tr("Stop Test") : i18n.tr("Test on Screen")
-                                tip: i18n.tr("Overlays on screen show this race situation for a few seconds (saved values)")
-                                onClicked: backend.testOnScreen()
-                            }
                         }
                     }
                 }
             }
 
-            // Pending changes. After Discard the bar stays a few seconds with Undo (Ctrl+Z works too)
-            Rectangle {
-                id: bar
-                readonly property bool pending: backend.pendingCount > 0
-                readonly property bool shown: pending || undoGrace.running
-                visible: shown || heightAnim.running  // no hidden buttons in Tab order
-                enabled: shown
-                Layout.fillWidth: true
-                Layout.preferredHeight: shown ? barRow.implicitHeight + theme.em * 1.0 : 0
-                clip: true
-                color: theme.dark ? Qt.lighter(theme.window, 1.1) : Qt.darker(theme.window, 1.04)
-                Behavior on Layout.preferredHeight { NumberAnimation { id: heightAnim; duration: theme.motionBase; easing.type: Easing.OutCubic } }
-                Rectangle { width: parent.width; height: 1; color: theme.border }
-                Timer { id: undoGrace; interval: 6000 }  // restarted by Discard
-                onPendingChanged: if (pending) undoGrace.stop()  // undone: normal bar again
-
-                RowLayout {
-                    id: barRow
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.topMargin: theme.em * 0.5
-                    anchors.leftMargin: theme.em * 1.0
-                    anchors.rightMargin: theme.em * 1.0
-                    spacing: theme.em * 0.5
-                    Icon {
-                        glyph: backend.errorCount > 0 ? "" : bar.pending ? "" : ""  // warning, edit, check
-                        fallback: backend.errorCount > 0 ? "!" : ""
-                        color: backend.errorCount > 0 ? theme.loss : theme.accent
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: !bar.pending ? i18n.tr("Changes discarded")
-                              : backend.errorCount > 0
-                              ? i18n.trm("Fix " + backend.errorCount + " invalid value(s) to save") + "  ·  " + backend.firstError
-                              : i18n.trm("Unsaved changes: " + backend.pendingCount)
-                                + (backend.pendingOverlays > 1 ? "  ·  " + i18n.trm("Overlays: " + backend.pendingOverlays) : "")
-                        color: backend.errorCount > 0 ? theme.loss : theme.text
-                        elide: Text.ElideRight
-                        Accessible.role: Accessible.AlertMessage
-                        Accessible.name: text
-                    }
-                    TpButton {  // invalid value: show it (keyboard reachable, was a click on the text)
-                        visible: backend.errorCount > 0
-                        flat: true
-                        text: i18n.tr("Show")
-                        tip: backend.firstError
-                        onClicked: backend.showFirstError()
-                    }
-                    TpButton {
-                        flat: true
-                        glyph: ""  // undo
-                        fallback: i18n.tr("Undo")
-                        text: bar.pending ? "" : i18n.tr("Undo")
-                        tip: i18n.tr("Undo (Ctrl+Z)")
-                        enabled: backend.canUndo
-                        onClicked: {
-                            page.commitEdits()  // field being edited left first: shows undone value, never sent again
-                            backend.undo()
-                        }
-                    }
-                    TpButton {
-                        visible: bar.pending
-                        flat: true
-                        glyph: ""  // redo
-                        fallback: i18n.tr("Redo")
-                        tip: i18n.tr("Redo (Ctrl+Y)")
-                        enabled: backend.canRedo
-                        onClicked: {
-                            page.commitEdits()  // field being edited left first: shows redone value, never sent again
-                            backend.redo()
-                        }
-                    }
-                    TpButton {
-                        visible: bar.pending
-                        text: i18n.tr("Discard")
-                        tip: i18n.tr("Drop every unsaved change")
-                        onClicked: {
-                            page.commitEdits()  // focus left: typed value dropped too, field shows saved value
-                            backend.discard()
-                            undoGrace.restart()
-                        }
-                    }
-                    TpButton {
-                        visible: bar.pending
-                        accent: true
-                        text: i18n.tr("Apply")
-                        tip: i18n.tr("Save & apply (Ctrl+S)")
-                        enabled: backend.errorCount === 0
-                        onClicked: {
-                            page.commitEdits()
-                            backend.apply()
-                        }
-                    }
+            // Unsaved changes. After Discard the bar stays a few seconds with Undo (Ctrl+Z works too)
+            TpPendingBar {
+                objectName: "pendingBar"
+                pendingCount: backend.pendingCount
+                errorCount: backend.errorCount
+                firstError: backend.firstError
+                detail: backend.pendingOverlays > 1 ? i18n.trm("Overlays: " + backend.pendingOverlays) : ""
+                canUndo: backend.canUndo
+                canRedo: backend.canRedo
+                onShowErrorRequested: backend.showFirstError()
+                onUndoRequested: {
+                    page.commitEdits()  // field being edited left first: shows undone value, never sent again
+                    backend.undo()
+                }
+                onRedoRequested: {
+                    page.commitEdits()  // field being edited left first: shows redone value, never sent again
+                    backend.redo()
+                }
+                onDiscardRequested: {
+                    page.commitEdits()  // focus left: typed value dropped too, field shows saved value
+                    backend.discard()
+                }
+                onApplyRequested: {
+                    page.commitEdits()
+                    backend.apply()
                 }
             }
         }
     }
+    // Dialogs & toasts asked by the backend (confirmations, alerts, messages with Undo)
+    TpDialogHost {}
 }

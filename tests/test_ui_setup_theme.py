@@ -1,9 +1,5 @@
 """Option finder & preset comparison tests (headless), setup wizard tests: test_setup_wizard.py"""
 
-import time
-
-from PySide6.QtCore import QCoreApplication
-
 from neopedal.setting import cfg
 
 
@@ -48,42 +44,3 @@ def test_preset_diff_and_copy():
     assert copy_values(preset_a, preset_b, [("speed", "font_size"), ("missing", "key")]) == 1
     assert preset_a["speed"]["font_size"] == 20
 
-
-def test_preset_compare_dialog(ui_env, monkeypatch):
-    from neopedal.setting import cfg
-    from neopedal.ui import preset_compare
-
-    settings = cfg.path.settings
-    other = dict(cfg.user.setting)
-    other["speedometer"] = {**cfg.user.setting["speedometer"], "font_size": 99}
-    import json
-
-    with open(f"{settings}other.json", "w", encoding="utf-8") as file:
-        json.dump(other, file)
-    monkeypatch.setattr(type(cfg), "is_loaded", lambda self, name: False)
-    dialog = preset_compare.PresetCompare(None, preset_a="default.json", preset_b="other.json")
-    try:
-        assert dialog.is_loading() and dialog.table.rowCount() == 0  # presets read in background
-        deadline = time.monotonic() + 5
-        while dialog.is_loading() and time.monotonic() < deadline:
-            QCoreApplication.processEvents()
-        rows = [dialog.table.item(row, 0).data(0x0100) for row in range(dialog.table.rowCount())]
-        assert ("speedometer", "font_size") in rows
-        row = rows.index(("speedometer", "font_size"))
-        dialog.edit_filter.setText("zzzz")
-        assert not dialog.table.isRowHidden(row)  # applied once typing pauses
-        dialog.filter_now()
-        assert dialog.table.isRowHidden(row)
-        dialog.edit_filter.setText("speedometer FONT")
-        dialog.filter_now()
-        assert not dialog.table.isRowHidden(row)
-        dialog.table.selectRow(row)
-        dialog.copy_selected(to_a=True)
-        assert dialog.presets["default.json"]["speedometer"]["font_size"] == 99
-        assert dialog.table.rowCount() == len(rows) - 1
-        dialog.saving()
-        with open(f"{settings}default.json", encoding="utf-8") as file:
-            assert json.load(file)["speedometer"]["font_size"] == 99
-    finally:
-        dialog.set_unmodified()
-        dialog.close()

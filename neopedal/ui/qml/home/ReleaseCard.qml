@@ -73,6 +73,7 @@ Card {
                             Layout.alignment: Qt.AlignTop
                             visible: entry.modelData.bullet
                             text: entry.modelData.level > 0 ? "◦" : "•"
+                            textFormat: Text.PlainText
                             color: theme.dimText
                             Accessible.ignored: true
                         }
@@ -99,9 +100,9 @@ Card {
                     size: "sm"
                     accent: !running
                     glyph: running ? "" : ""  // sliders, play
-                    text: (running ? i18n.tr("Options of") : i18n.tr("Try")) + " " + overlayName
+                    text: running ? i18n.trm("Options: " + overlayName) : i18n.trm("Try " + overlayName)
                     tip: running ? i18n.tr("Open the options of this overlay")
-                                 : i18n.tr("Turn this overlay on in the loaded preset")
+                                 : i18n.tr("Turn this overlay on in the loaded preset (Undo in the message shown after)")
                     onClicked: running ? backend.overlayOptions(modelData) : backend.tryOverlay(modelData)
                 }
             }

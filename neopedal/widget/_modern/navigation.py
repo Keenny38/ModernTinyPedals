@@ -32,7 +32,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QPixmap, QRadialGradient
 
 from ... import calculation as calc
-from ...module_info import minfo
+from ...module_info import NO_TRACK_MAP, minfo
 from .._common import player_vehicle
 from .._painter import layer_fits
 from ..navigation import NavigationMixin
@@ -88,7 +88,7 @@ class Realtime(NavigationMixin, ModernOverlay):
         self.pen_car.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         self.layer: QPixmap | None = None
         self.alpha_mask: QPixmap | None = None
-        self.update_map(-1)
+        self.update_map(NO_TRACK_MAP.lastModified)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -145,7 +145,8 @@ class Realtime(NavigationMixin, ModernOverlay):
 
     def draw_map(self, painter: QPainter):
         """Road, start & sector lines around car"""
-        if not self.map_path:
+        map_path = self.view_map_path()
+        if not map_path:
             return
         offset_x, offset_y, rotation = self.map_view()
         painter.save()
@@ -153,9 +154,9 @@ class Realtime(NavigationMixin, ModernOverlay):
         painter.rotate(rotation)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(self.pen_edge)
-        painter.drawPath(self.map_path)
+        painter.drawPath(map_path)
         painter.setPen(self.pen_road)
-        painter.drawPath(self.map_path)
+        painter.drawPath(map_path)
         if self.wcfg["show_sector_line"] and self.sector_path:
             painter.setPen(self.pen_sector)
             painter.drawPath(self.sector_path)

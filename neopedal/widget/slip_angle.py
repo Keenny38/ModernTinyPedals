@@ -132,7 +132,7 @@ class Realtime(Overlay):
     # GUI update methods
     def update_slip_angle(self, target, data, color_index):
         """Slip angle"""
-        if target.last != data:
+        if target.changed(data, color_index):
             target.last = data
             target.input_color = self.slip_angle_color[color_index]
-            target.update_input(abs(data))
+            target.update_input(data)

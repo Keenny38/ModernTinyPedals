@@ -1,14 +1,18 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// Small rounded tag: tinted outline (or solid fill), optional icon glyph or status dot (pulsing: a few
-// pulses when the state starts). maximumTextWidth > 0: long texts cut with "..." (full text in tooltip)
+// Small rounded tag: tinted outline (or solid fill: error badges), optional icon glyph (fallback text without icon
+// font) or status dot (pulsing: a few pulses when the state starts). maximumTextWidth > 0: long texts cut with "..."
+// (full text in tooltip). onStage: drawn over an overlay preview (always dark): stage backdrop & ink when not solid.
+//   Pill { text: i18n.tr("Error"); solid: true; tint: theme.lossFill; glyph: ""; fallback: "!"; tip: ... }
 Rectangle {
     id: pill
     property string text: ""
     property string glyph: ""
+    property string fallback: ""
     property color tint: theme.accent
     property bool solid: false
+    property bool onStage: false
     property bool dot: false
     property bool pulsing: false
     property string tip: ""
@@ -16,14 +20,14 @@ Rectangle {
     property string size: "md"  // "sm": in dense rows
     // Text over solid fill: dark on light colors, white on dark ones
     readonly property color fillInk: theme.inkOn(tint)
-    readonly property color ink: solid ? fillInk : theme.dark ? Qt.lighter(tint, 1.35) : Qt.darker(tint, 1.25)
+    readonly property color ink: solid ? fillInk : onStage ? theme.stageInk : theme.tintInk(tint)
 
-    implicitHeight: Math.round(theme.em * (size === "sm" ? 1.25 : 1.45))
-    implicitWidth: row.implicitWidth + theme.em * (size === "sm" ? 0.7 : 0.9)
+    implicitHeight: Math.round(size === "sm" ? theme.chipHeightSm : theme.chipHeight)
+    implicitWidth: row.implicitWidth + (size === "sm" ? theme.em * 0.7 : theme.em * 0.9)
     radius: height / 2
-    color: solid ? tint : Qt.rgba(tint.r, tint.g, tint.b, theme.tintSelected)
+    color: solid ? tint : onStage ? theme.stageScrim : theme.tint(tint, "selected")
     border.width: solid ? 0 : 1
-    border.color: Qt.rgba(tint.r, tint.g, tint.b, 0.5)
+    border.color: onStage ? theme.tint(theme.stageInk, "strong") : theme.tint(tint, "outline")
 
     Accessible.role: Accessible.StaticText
     Accessible.name: tip !== "" ? text + ", " + tip : text
@@ -41,13 +45,15 @@ Rectangle {
         }
         Icon {
             glyph: pill.glyph
-            size: theme.em * 0.72
+            fallback: pill.fallback
+            size: theme.iconXs
             color: pill.ink
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
             id: label
             text: pill.text
+            textFormat: Text.PlainText
             visible: text !== ""
             width: pill.maximumTextWidth > 0 ? Math.min(implicitWidth, pill.maximumTextWidth) : implicitWidth
             elide: Text.ElideRight

@@ -126,3 +126,15 @@ class WearSections(Overlay):
         target.text = "FAIL" if failed else wear_text(data)
         target.fg = style[warn]
         target.update()
+
+    @staticmethod
+    def show_wear(target, data, style, warn):
+        """Wheel value drawn again once its text or color changes, not on every change of the raw value
+        (continuous wear: shown digits move far less often than the value)"""
+        text = wear_text(data)
+        shown = (text, warn)
+        if target.last != shown:
+            target.last = shown
+            target.text = text
+            target.fg = style[warn]
+            target.update()

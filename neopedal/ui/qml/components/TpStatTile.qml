@@ -8,7 +8,7 @@ import QtQuick.Layouts
 Card {
     id: tile
     property string title: ""
-    property string value: "-"
+    property string value: "—"  // missing value: em dash on every page (MISSING)
     property string detail: ""
     property string tip: ""
     property string glyph: ""
@@ -19,7 +19,7 @@ Card {
     property real ratio: -1  // share bar 0..1 under the detail, -1: none (room kept when barSpace)
     property bool barSpace: false  // keep the bar height even without bar: same height as tiles with one
     property bool animateValue: false  // brief fade in when the value changes
-    readonly property bool empty: value === "" || value === "-"
+    readonly property bool empty: value === "" || value === "—" || value === "-"
     readonly property color stripColor: warning ? theme.loss : tint
     readonly property real strip: Math.max(2, Math.round(theme.em * 0.25))
 
@@ -52,9 +52,10 @@ Card {
         RowLayout {
             spacing: theme.space3
             Layout.fillWidth: true
-            Icon { glyph: tile.glyph; size: theme.em * 0.85; color: tile.stripColor }
+            Icon { glyph: tile.glyph; size: theme.iconSm; color: tile.stripColor }
             Text {
                 text: tile.title
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
@@ -62,7 +63,7 @@ Card {
             }
         }
         RowLayout {
-            spacing: theme.em * 0.5
+            spacing: theme.space3
             Layout.fillWidth: true
             Rectangle {  // level letter: level told without color
                 visible: tile.letter !== ""
@@ -74,6 +75,7 @@ Card {
                 Text {
                     anchors.centerIn: parent
                     text: tile.letter
+                    textFormat: Text.PlainText
                     color: theme.inkOn(tile.tint)  // readable on level color
                     font.pointSize: theme.fontSmall
                     font.weight: Font.Bold
@@ -84,11 +86,12 @@ Card {
                 glyph: ""  // warning
                 fallback: "!"
                 color: theme.loss
-                size: theme.em * 1.1
+                size: theme.iconMd
             }
             Text {
                 id: valueText
-                text: tile.value !== "" ? tile.value : "-"
+                text: tile.value !== "" ? tile.value : "—"
+                textFormat: Text.PlainText
                 color: tile.warning ? theme.loss : tile.valueColor ? tile.valueColor : tile.empty ? theme.dimText : theme.text
                 font.pointSize: theme.fontTitle
                 font.weight: Font.DemiBold
@@ -102,6 +105,7 @@ Card {
         }
         Text {
             text: tile.detail !== "" ? tile.detail : " "
+            textFormat: Text.PlainText
             color: theme.dimText
             font.pointSize: theme.fontSmall
             font.features: { "tnum": 1 }

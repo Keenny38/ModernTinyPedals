@@ -41,6 +41,7 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._common import player_vehicle
 from ._painter import fill_rect
+from ._race_aids import other_level
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import RadarConfig
@@ -105,6 +106,7 @@ class RadarMixin:
         # Last data
         self.last_veh_data_version = None
         self.last_radar_key: tuple | None = ()  # () = never drawn
+        self.shown_cars: tuple = ()  # (car, collision level) in visible range at last radar_key, drawn
         self.autohide_timer_start = 1.0
         self.show_radar = True
         self.always_show = True
@@ -124,26 +126,38 @@ class RadarMixin:
 
     def radar_key(self, ratio: float) -> tuple:
         """What radar draws: fade, cars in range (position in half device pixels, heading in degrees, status
-        & collision course), so that no car in range or cars barely moving never repaint"""
+        & collision course), so that no car in range or cars barely moving never repaint; cars in range kept for
+        drawing (shown_cars, collision course worked out once)"""
         visible = self.visible_range
         step = self.global_scale * ratio * 2
         orientation = self.wcfg["show_vehicle_orientation"]
         collision = self.wcfg["show_collision_course"]
         cars = []
-        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
-            if veh_info.isPlayer:
-                continue
+        shown = []
+        for veh_info in self.cars_around():
             pos_x = veh_info.relativeRotatedPositionX
             pos_y = veh_info.relativeRotatedPositionY
             if not (visible.behind > pos_y > -visible.ahead and -visible.side < pos_x < visible.side):
                 continue
+            level = self.collision_level(veh_info) if collision else 0
+            shown.append((veh_info, level))
             cars.append((
                 round(pos_x * step), round(pos_y * step),
                 whole(calc.degrees(veh_info.relativeOrientationRadians)) if orientation else 0,
-                veh_info.positionOverall == 1, veh_info.inPit, veh_info.isYellow, veh_info.isLapped,
-                self.collision_level(veh_info) if collision else 0,
+                veh_info.positionOverall == 1, veh_info.inPit, veh_info.isYellow, veh_info.isLapped, level,
             ))
+        self.shown_cars = tuple(shown)
         return whole(self.radar_alpha() * 255), *cars
+
+    @staticmethod
+    def cars_around():
+        """Other cars around player: garage left out (cars parked beside pit lane), also cars on another road
+        level (bridge, crossing)"""
+        vehicles = minfo.vehicles
+        return (
+            car for car in islice(vehicles.dataSet, vehicles.totalVehicles)
+            if not (car.isPlayer or car.inPit == 2 or other_level(car))
+        )
 
     def radar_alpha(self) -> float:
         """Radar opacity while fading with nearest car distance (1 = fully shown)"""
@@ -205,10 +219,9 @@ class RadarMixin:
         # Quick check straight range vehicles
         if minfo.vehicles.nearestLine > self.straight_range:
             return False
-        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
+        for veh_info in self.cars_around():
             # -x = left, +x = right, -y = ahead, +y = behind
-            if (not veh_info.isPlayer and
-                hide_range.behind > veh_info.relativeRotatedPositionY > -hide_range.ahead and
+            if (hide_range.behind > veh_info.relativeRotatedPositionY > -hide_range.ahead and
                 -hide_range.side < veh_info.relativeRotatedPositionX < hide_range.side):
                 return True
         return False
@@ -348,7 +361,7 @@ class Realtime(RadarMixin, Overlay):
             # Draw marks
             painter.drawPixmap(0, 0, self.pixmap_marks)
             # Draw vehicles
-            self.draw_vehicle(painter, self.visible_range, self.indicator_dimension)
+            self.draw_vehicle(painter, self.indicator_dimension)
             # Apply mask
             if self.wcfg["show_edge_fade_out"]:
                 painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
@@ -496,47 +509,43 @@ class Realtime(RadarMixin, Overlay):
             painter.resetTransform()
             painter.setOpacity(1)
 
-    def draw_vehicle(self, painter, visible_range: DistanceRect, indicator: IndicatorDimension):
+    def draw_vehicle(self, painter, indicator: IndicatorDimension):
         """Draw opponents vehicles"""
         painter.setPen(self.pen_veh)
         # Real size in meters
         nearest_left = -indicator.max_range_x
         nearest_right = indicator.max_range_x
 
-        # Draw opponent vehicle within radar range
-        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
-            if veh_info.isPlayer:
-                continue
+        # Draw opponent vehicle within radar range (visible_range, at last radar_key)
+        for veh_info, collision_level in self.shown_cars:
             # -x = left, +x = right, -y = ahead, +y = behind
             raw_pos_x = veh_info.relativeRotatedPositionX
             raw_pos_y = veh_info.relativeRotatedPositionY
-            if (visible_range.behind > raw_pos_y > -visible_range.ahead and
-                -visible_range.side < raw_pos_x < visible_range.side):
 
-                # Find nearest vehicle coordinates
-                if (self.wcfg["show_overlap_indicator"] and
-                    abs(raw_pos_x) < indicator.max_range_x and
-                    abs(raw_pos_y) < indicator.max_range_y):
-                    if -indicator.min_range_x > raw_pos_x > nearest_left:
-                        nearest_left = raw_pos_x
-                    if indicator.min_range_x < raw_pos_x < nearest_right:
-                        nearest_right = raw_pos_x
+            # Find nearest vehicle coordinates
+            if (self.wcfg["show_overlap_indicator"] and
+                abs(raw_pos_x) < indicator.max_range_x and
+                abs(raw_pos_y) < indicator.max_range_y):
+                if -indicator.min_range_x > raw_pos_x > nearest_left:
+                    nearest_left = raw_pos_x
+                if indicator.min_range_x < raw_pos_x < nearest_right:
+                    nearest_right = raw_pos_x
 
-                # Transform position
-                painter.translate(  # scale vehicle position coordinate to global scale
-                    raw_pos_x * self.global_scale + self.area_center,
-                    raw_pos_y * self.global_scale + self.area_center,
-                )
-                if self.wcfg["show_vehicle_orientation"]:
-                    painter.rotate(calc.degrees(-veh_info.relativeOrientationRadians))
+            # Transform position
+            painter.translate(  # scale vehicle position coordinate to global scale
+                raw_pos_x * self.global_scale + self.area_center,
+                raw_pos_y * self.global_scale + self.area_center,
+            )
+            if self.wcfg["show_vehicle_orientation"]:
+                painter.rotate(calc.degrees(-veh_info.relativeOrientationRadians))
 
-                # Draw vehicle
-                if self.wcfg["show_collision_course"]:
-                    self.draw_collision_course(painter, veh_info)
+            # Draw vehicle
+            if collision_level:
+                self.draw_collision_course(painter, collision_level)
 
-                painter.setBrush(self.color_lap_diff(veh_info))
-                painter.drawRoundedRect(self.veh_shape, self.veh_radius, self.veh_radius)
-                painter.resetTransform()
+            painter.setBrush(self.color_lap_diff(veh_info))
+            painter.drawRoundedRect(self.veh_shape, self.veh_radius, self.veh_radius)
+            painter.resetTransform()
 
         # Draw overlap indicator below vehicle shape
         if self.wcfg["show_overlap_indicator"]:
@@ -546,25 +555,24 @@ class Realtime(RadarMixin, Overlay):
             else:
                 self.draw_warning_rect(painter, nearest_left, nearest_right, indicator)
 
-    def draw_collision_course(self, painter, veh_info):
-        """Draw collision course"""
-        level = self.collision_level(veh_info)
-        if level:
-            if level == 2:
-                coll_color = self.wcfg["collision_course_critical_color"]
-            else:
-                coll_color = self.wcfg["collision_course_nearby_color"]
-            fill_rect(painter, self.coll_shape, coll_color)
+    def draw_collision_course(self, painter, level: int):
+        """Draw collision course (level 1 nearby, 2 critical)"""
+        if level == 2:
+            coll_color = self.wcfg["collision_course_critical_color"]
+        else:
+            coll_color = self.wcfg["collision_course_nearby_color"]
+        fill_rect(painter, self.coll_shape, coll_color)
 
     # Additional methods
     def color_lap_diff(self, veh_info):
-        """Compare lap differences & set color"""
-        if veh_info.positionOverall == 1:
-            return self.brush_veh["leader"]
+        """Car color by race status, same order as modern design: yellow flag (slow on track) first, then pit,
+        leader, laps"""
+        if veh_info.isYellow and not veh_info.inPit:
+            return self.brush_veh["yellow"]
         if veh_info.inPit:
             return self.brush_veh["in_pit"]
-        if veh_info.isYellow:
-            return self.brush_veh["yellow"]
+        if veh_info.positionOverall == 1:
+            return self.brush_veh["leader"]
         if veh_info.isLapped > 0:
             return self.brush_veh["laps_ahead"]
         if veh_info.isLapped < 0:

@@ -343,7 +343,7 @@ def presets_page(ui_env, monkeypatch):
     flush()
 
 
-@pytest.mark.parametrize("action", ["Duplicate...", "Rename..."])
+@pytest.mark.parametrize("action", ["Duplicate…", "Rename…"])
 def test_preset_name_dialog_keeps_focus(presets_page, action):
     view, backend = presets_page.view, presets_page.backend
     root = view.rootObject()
@@ -456,6 +456,7 @@ def test_settings_navigation_kept_while_typing(settings_window):
     for value in typed:  # keys typed: pending count of category changed (new list each time)
         backend.typeText(row["key"], str(value))
         wait(0.1)
+    wait(0.3)  # counts & categories follow typing after TYPING_REFRESH_MS (150 ms, audit PERF-066)
     shown = {entry["key"]: entry["changed"] for entry in root.property("categories")}
     assert shown[backend.category] == 1  # badge of category updated
     assert len([item for item in entries() if item.property("auditKept")]) == 1  # delegate kept, not rebuilt

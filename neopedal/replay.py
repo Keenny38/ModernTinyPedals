@@ -61,6 +61,7 @@ from typing import Any, BinaryIO, NamedTuple
 from . import app_signal
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
 from .userfile import replace_retry
+from .validator import load_json_strict
 
 logger = logging.getLogger(__name__)
 
@@ -152,19 +153,44 @@ def rest_snapshot(dataset: Any) -> dict:
     return {name: plain(getattr(dataset, name)) for name in getattr(type(dataset), "__slots__", ())}
 
 
+_SNAPSHOT_WARNED: set[str] = set()  # fields of invalid snapshot values already logged (once per field)
+
+
 def apply_rest_snapshot(dataset: Any, data: dict) -> None:
-    """Set Rest API data set from snapshot, keeping value types (named tuples, tuples)"""
+    """Set Rest API data set from snapshot, keeping value types (named tuples, tuples)
+
+    A value of another shape (file of another version, corrupt: nodes of another length, scalar for a tuple)
+    keeps the current value & is logged once: a bad field must never stop the replay (sync thread).
+    """
     for name in getattr(type(dataset), "__slots__", ()):
         if name not in data:
             continue
         current, value = getattr(dataset, name), data[name]
-        if isinstance(current, tuple) and isinstance(value, list):
+        if isinstance(current, tuple):
+            if not isinstance(value, list):
+                _warn_snapshot(name, value)
+                continue
             if current and isinstance(current[0], tuple) and hasattr(current[0], "_fields"):
                 node_type = type(current[0])
-                value = tuple(node_type(*item) for item in value)
+                fields = len(node_type._fields)
+                if not all(isinstance(item, (list, tuple)) and len(item) == fields for item in value):
+                    _warn_snapshot(name, value)
+                    continue
+                try:
+                    value = tuple(node_type(*item) for item in value)
+                except (TypeError, ValueError):
+                    _warn_snapshot(name, value)
+                    continue
             else:
                 value = tuple(value)
         setattr(dataset, name, value)
+
+
+def _warn_snapshot(name: str, value: Any) -> None:
+    """Log invalid snapshot value of field, once per field"""
+    if name not in _SNAPSHOT_WARNED:
+        _SNAPSHOT_WARNED.add(name)
+        logger.warning("replay: Rest API snapshot value of %s ignored (%s)", name, type(value).__name__)
 
 
 XOR_BLOCK = 16384  # bytes compared per slice, only differing slices are XORed
@@ -305,7 +331,7 @@ def read_header(file: BinaryIO) -> dict:
     else:
         raise ValueError("not a NeoPedal replay file")
     try:
-        header = json.loads(line[len(MAGIC):])
+        header = load_json_strict(line[len(MAGIC):], allow_nan=True)
     except ValueError as error:
         raise ValueError("invalid replay header") from error
     if not isinstance(header, dict):
@@ -356,7 +382,7 @@ def read_summary(file: BinaryIO, frame_header: struct.Struct = FRAME_HEADER) -> 
         payload = file.read(length)
         if len(fields) > 3 and zlib.crc32(payload) != fields[3]:
             return {}
-        summary = json.loads(payload)
+        summary = load_json_strict(payload, allow_nan=True)
     except (OSError, ValueError, struct.error):
         return {}
     return summary if isinstance(summary, dict) else {}
@@ -573,11 +599,11 @@ class ReplayFile:
     def _read_extra(self, elapsed: float, frame_type: int, payload: bytes):
         try:
             if frame_type == MARKER_FRAME:
-                data = json.loads(payload)
+                data = load_json_strict(payload, allow_nan=True)
                 if isinstance(data, dict):
                     self.markers.append(Marker(elapsed, str(data.get("kind", "")), str(data.get("text", ""))))
             elif frame_type == SUMMARY_FRAME:
-                data = json.loads(payload)
+                data = load_json_strict(payload, allow_nan=True)
                 if isinstance(data, dict):
                     self.summary = data
         except (zlib.error, ValueError):
@@ -626,7 +652,7 @@ class ReplayFile:
         data = None
         if not self._rest_crcs or zlib.crc32(payload) == self._rest_crcs[index]:
             with suppress(zlib.error, ValueError):
-                data = json.loads(bounded_decompress(payload, MAX_REST_SIZE))
+                data = load_json_strict(bounded_decompress(payload, MAX_REST_SIZE), allow_nan=True)
         if not isinstance(data, dict):
             if index not in self._rest_corrupt:
                 self._rest_corrupt.add(index)
@@ -895,7 +921,8 @@ class ReplayMMap:
     """
 
     __slots__ = (
-        "_primary", "_struct", "_buffer", "_player", "_offset", "_end", "_rest_target", "_rest_index", "update", "data",
+        "_primary", "_struct", "_buffer", "_player", "_offset", "_end", "_whole", "_rest_target", "_rest_index",
+        "update", "data",
     )
 
     def __init__(
@@ -912,6 +939,7 @@ class ReplayMMap:
         self._end = offset + ctypes.sizeof(data_struct)
         if self._end > player.replay.frame_size:
             raise ValueError("replay frame smaller than shared memory structure")
+        self._whole = offset == 0 and self._end == player.replay.frame_size
         self._buffer = bytearray(player.current_frame()[offset:self._end])
         self._rest_target = rest_target
         self._rest_index = -1
@@ -936,7 +964,10 @@ class ReplayMMap:
     def __update(self) -> None:
         player = self._player
         frame = player.current_frame() if self._primary or not player.last_frame else player.last_frame
-        self._buffer[:] = frame[self._offset:self._end]
+        if self._whole:
+            self._buffer[:] = frame  # one zone (LMU): whole frame, no slice
+        else:
+            self._buffer[:] = memoryview(frame)[self._offset:self._end]  # view: zone copied once, into buffer
         if self._rest_target is not None:
             index = self._player.current_rest()
             if index != self._rest_index and index >= 0:
@@ -1107,16 +1138,25 @@ class ReplayControl:
             closing.join(timeout)
         return not self.recording_closing
 
-    def stop_recording(self) -> None:
-        """Stop recording and wait for file to close"""
+    def stop_recording(self, timeout: float = 5.0) -> None:
+        """Stop recording and wait (bounded) for file to close
+
+        Waited outside the recording lock: a recorder module starting its recording meanwhile is refused
+        (previous recording still closing) instead of blocked, see wait_closed & recording_closing.
+
+        Args:
+            timeout: longest wait (seconds) for the file to close, 0 to only signal the recorder.
+        """
         with self._rec_lock:
             self._rec_event.set()
-            if self._rec_thread is not None:
-                self._rec_thread.join(5)
-                if self._rec_thread.is_alive():
-                    logger.warning("replay: recording not closed after 5s, still closing")
-                    self._rec_closing = self._rec_thread
-                self._rec_thread = None
+            thread, self._rec_thread = self._rec_thread, None
+            if thread is None:
+                return
+            self._rec_closing = thread  # until closed: new recording refused, waited by wait_closed
+        if timeout > 0:
+            thread.join(timeout)
+        if thread.is_alive():
+            logger.warning("replay: recording not closed after %gs, still closing", timeout)
 
     def __recording(
         self, filename: str, sources: RecordingSources, rate: int, header_extra: dict | None,
@@ -1128,10 +1168,16 @@ class ReplayControl:
         last_lap = None
         elapsed = 0.0
         writer = None
+        # Frames scheduled by deadline: wait is the interval minus processing time (copy, XOR, compression),
+        # so the recorded rate is the header rate. Over a period late (busy disk): realigned, never a burst.
+        deadline = time.monotonic() + interval
         try:
             with open(filename, "wb") as file:
                 try:
-                    while not stop_event.wait(interval):
+                    while not stop_event.wait(max(deadline - time.monotonic(), 0.0)):
+                        deadline += interval
+                        if deadline < time.monotonic():
+                            deadline = time.monotonic() + interval
                         if sources.active is not None and not sources.active():
                             continue
                         data = sources.frame()

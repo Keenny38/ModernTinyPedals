@@ -1,4 +1,7 @@
-"""Editor tests: tyre compounds, brakes, tracks info & vehicle brands (add, edit, validate, delete, save)"""
+"""Editor tests: tyre compounds, brakes, tracks info & vehicle brands (add, edit, validate, delete, save)
+
+Editors are table editor pages (quick/table_editor.py): rows edited through the backend as the QML page does.
+"""
 
 import json
 import sys
@@ -14,13 +17,12 @@ from neopedal.ui._common import BaseEditor
 
 @pytest.fixture
 def editor_env(ui_env, monkeypatch):
-    """Editors confirm every question, warnings recorded, no module reload after saving
+    """Warnings recorded, no module reload after saving
 
     Exceptions raised in Qt slots (cell changed...) only print a traceback, they fail the test here.
     """
     warnings = []
     slot_errors = []
-    monkeypatch.setattr(BaseEditor, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(BaseEditor, "reloading", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
     monkeypatch.setattr(sys, "excepthook", lambda *exc_info: slot_errors.append(exc_info[1]))
@@ -40,8 +42,22 @@ def close_editor(editor):
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def column_texts(table, column: int) -> list[str]:
-    return [table.item(row, column).text() for row in range(table.rowCount())]
+def column_texts(editor, column: int) -> list[str]:
+    """Texts of a column, as shown"""
+    backend = editor.backend
+    return [backend.display(column, row[column]) for row in backend.rows]
+
+
+def set_cell(editor, row: int, column: int, text: str) -> bool:
+    backend = editor.backend
+    return backend.setCell(backend.keys[row], column, text)
+
+
+def select_rows(editor, *rows: int):
+    backend = editor.backend
+    backend.select(backend.keys[rows[0]], 0, 0)
+    for row in rows[1:]:
+        backend.select(backend.keys[row], 0, 1)
 
 
 # --- Tyre compounds
@@ -62,21 +78,20 @@ def test_compound_add_from_session_then_new_name(compound_editor, editor_env):
 
     api.read.vehicle.total_vehicles = lambda: 2
     api.read.tyre.compound_class = lambda index=None: ("Medium", "Medium", "Wet", "Wet") if index else ("Soft",) * 4
-    compound_editor.add_compound()
-    names = column_texts(compound_editor.table_compounds, 0)
+    compound_editor.backend.addRow()
+    names = column_texts(compound_editor, 0)
     assert names[0] == "Soft" and sorted(names[1:]) == ["Medium", "Wet"]  # missing session compounds only
-    compound_editor.add_compound()  # nothing new in session: generic name
-    compound_editor.add_compound()
-    names = column_texts(compound_editor.table_compounds, 0)
+    compound_editor.backend.addRow()  # nothing new in session: generic name
+    compound_editor.backend.addRow()
+    names = column_texts(compound_editor, 0)
     assert names[-2:] == ["New Compound Name 1", "New Compound Name 2"]
 
 
 def test_compound_symbol_one_letter_and_saved(compound_editor, editor_env):
-    table = compound_editor.table_compounds
-    table.item(0, 1).setText("Hard")
-    assert table.item(0, 1).text() == "H"
-    table.item(0, 1).setText("")
-    assert table.item(0, 1).text() == "?"
+    assert set_cell(compound_editor, 0, 1, "Hard")
+    assert column_texts(compound_editor, 1) == ["H"]
+    assert set_cell(compound_editor, 0, 1, "")
+    assert column_texts(compound_editor, 1) == ["?"]
     assert compound_editor.is_modified()
     compound_editor.applying()
     assert cfg.user.compounds["Soft"]["symbol"] == "?"
@@ -86,17 +101,18 @@ def test_compound_symbol_one_letter_and_saved(compound_editor, editor_env):
 
 
 def test_compound_delete_sort_reset(compound_editor, editor_env):
-    table = compound_editor.table_compounds
-    compound_editor.delete_compound()  # nothing selected
-    assert editor_env.warnings
-    compound_editor.add_compound_entry(1, "Alpha")
-    compound_editor.sort_compound()
-    assert column_texts(table, 0) == ["Alpha", "Soft"]
-    table.selectRow(0)
-    compound_editor.delete_compound()
-    assert column_texts(table, 0) == ["Soft"]
-    compound_editor.reset_setting()
-    assert table.rowCount() == len(cfg.default.compounds)
+    backend = compound_editor.backend
+    assert backend.selectedCount == 0
+    backend.deleteSelected()  # nothing selected: nothing done, no warning (Delete disabled in page)
+    assert not editor_env.warnings and len(backend.rows) == 1
+    backend.append_rows([backend.new_row("Alpha")])
+    backend.sortBy(0)
+    assert column_texts(compound_editor, 0) == ["Alpha", "Soft"]
+    select_rows(compound_editor, 0)
+    backend.deleteSelected()
+    assert column_texts(compound_editor, 0) == ["Soft"]
+    backend.resetToDefault()
+    assert len(backend.rows) == len(cfg.default.compounds)
 
 
 # --- Brakes
@@ -113,10 +129,9 @@ def brake_editor(editor_env, monkeypatch):
 
 
 def test_brake_thickness_validated_and_saved(brake_editor):
-    table = brake_editor.table_brakes
-    table.item(0, 1).setText("not a number")
-    assert table.item(0, 1).text() == "10.0"  # invalid input reverted
-    table.item(0, 1).setText("12.5")
+    assert not set_cell(brake_editor, 0, 1, "not a number")
+    assert column_texts(brake_editor, 1) == ["10"]  # invalid input refused
+    assert set_cell(brake_editor, 0, 1, "12,5")  # decimal comma accepted
     brake_editor.applying()
     assert cfg.user.brakes["GT3 - Front Brake"]["failure_thickness"] == 12.5
 
@@ -127,20 +142,21 @@ def test_brake_add_from_session(brake_editor):
     api.read.vehicle.total_vehicles = lambda: 1
     api.read.vehicle.class_name = lambda index=None: "LMP2"
     api.read.vehicle.vehicle_name = lambda index=None: "Oreca"
-    brake_editor.add_brake()
-    names = column_texts(brake_editor.table_brakes, 0)
+    brake_editor.backend.addRow()
+    names = column_texts(brake_editor, 0)
     assert len(names) == 3 and all("LMP2" in name or "Oreca" in name for name in names[1:])
-    brake_editor.add_brake()  # front & rear already listed
-    assert column_texts(brake_editor.table_brakes, 0)[-1] == "New Brake Name 1"
+    brake_editor.backend.addRow()  # front & rear already listed
+    assert column_texts(brake_editor, 0)[-1] == "New Brake Name 1"
 
 
 def test_brake_delete_and_reset(brake_editor, editor_env):
-    brake_editor.table_brakes.selectRow(0)
-    brake_editor.delete_brake()
-    assert brake_editor.table_brakes.rowCount() == 0
-    brake_editor.reset_setting()
-    brake_editor.sort_brake()
-    assert brake_editor.table_brakes.rowCount() == len(cfg.default.brakes)
+    backend = brake_editor.backend
+    select_rows(brake_editor, 0)
+    backend.deleteSelected()
+    assert len(backend.rows) == 0
+    backend.resetToDefault()
+    backend.sortBy(0)
+    assert len(backend.rows) == len(cfg.default.brakes)
 
 
 # --- Track info
@@ -152,6 +168,8 @@ def track_editor(editor_env, monkeypatch):
         "Spa": {"pit_entry": 6800.0, "pit_exit": 300.0, "pit_speed": 16.67, "speed_trap": 2000.0,
                 "sunrise": "06:30", "sunset": "21:15", "preset": "spa_race"},
     }, raising=False)
+    monkeypatch.setitem(cfg.user.setting["units"], "distance_unit", "Meter")
+    monkeypatch.setitem(cfg.user.setting["units"], "speed_unit", "m/s")
     editor = TrackInfoEditor(None)
     yield editor
     close_editor(editor)
@@ -165,17 +183,18 @@ def test_track_info_saved_unchanged(track_editor):
 
 
 def test_track_info_clock_and_number_validation(track_editor):
-    table = track_editor.table_tracks
-    table.item(0, 6).setText("7:5")
-    assert table.item(0, 6).text() == "07:05"
-    table.item(0, 7).setText("25:70")  # clamped to end of day
-    assert table.item(0, 7).text() == "24:00"
-    table.item(0, 7).setText("dusk")  # invalid: previous value kept
-    assert table.item(0, 7).text() == "24:00"
-    table.item(0, 1).setText("x")
-    assert table.item(0, 1).text() == "6800.0"
-    table.item(0, 5).setText("-90")  # track map orientation (Orient column)
-    table.item(0, 8).setText("  other  ")
+    track_editor.backend._presets = ("other", "spa_race")  # existing presets
+    assert set_cell(track_editor, 0, 6, "7:5")
+    assert column_texts(track_editor, 6) == ["07:05"]
+    assert set_cell(track_editor, 0, 7, "25:70")  # clamped to end of day
+    assert column_texts(track_editor, 7) == ["24:00"]
+    assert not set_cell(track_editor, 0, 7, "dusk")  # invalid: previous value kept
+    assert column_texts(track_editor, 7) == ["24:00"]
+    assert not set_cell(track_editor, 0, 1, "x")
+    assert column_texts(track_editor, 1) == ["6800"]
+    assert set_cell(track_editor, 0, 5, "-90")  # track map orientation
+    assert not set_cell(track_editor, 0, 8, "missing")  # primary preset: existing presets only
+    assert set_cell(track_editor, 0, 8, "  other  ")
     track_editor.applying()
     assert cfg.user.tracks["Spa"]["sunrise"] == "07:05"
     assert cfg.user.tracks["Spa"]["orientation"] == -90.0
@@ -186,9 +205,9 @@ def test_track_info_add_current_track(track_editor):
     from neopedal.api_control import api
 
     api.read.session.track_name = lambda: "Monza"
-    track_editor.add_track()
-    track_editor.add_track()  # Monza listed: generic name
-    assert column_texts(track_editor.table_tracks, 0) == ["Spa", "Monza", "New Track Name 1"]
+    track_editor.backend.addRow()
+    track_editor.backend.addRow()  # Monza listed: generic name
+    assert column_texts(track_editor, 0) == ["Spa", "Monza", "New Track Name 1"]
     track_editor.applying()
     assert cfg.user.tracks["Monza"]["sunrise"] == "06:00"  # defaults
 
@@ -196,32 +215,38 @@ def test_track_info_add_current_track(track_editor):
 def test_track_info_speed_trap_from_telemetry(track_editor, editor_env):
     from neopedal.api_control import api
 
-    table = track_editor.table_tracks
-    track_editor.set_position_from_tele()  # nothing selected
-    assert len(editor_env.warnings) == 1
-    table.setCurrentCell(0, 4)
+    backend = track_editor.backend
+    asked = []
+    track_editor.ask = lambda title, text, action_text, on_result: asked.append((title, text, on_result))
+    key = backend.keys[0]
     api.read.session.track_name = lambda: "Monza"
-    track_editor.set_position_from_tele()  # other track
-    assert len(editor_env.warnings) == 2
+    backend.cellAction(key, 4)  # other track
+    assert len(editor_env.warnings) == 1
     api.read.session.track_name = lambda: "Spa"
     api.read.vehicle.in_pits = lambda: True
-    track_editor.set_position_from_tele()  # in pits
-    assert len(editor_env.warnings) == 3
+    backend.cellAction(key, 4)  # in pits
+    assert len(editor_env.warnings) == 2 and not asked
     api.read.vehicle.in_pits = lambda: False
     api.read.lap.distance = lambda: 1234.56789
-    track_editor.set_position_from_tele()
-    assert table.item(0, 4).text() == "1234.5679"
+    backend.cellAction(key, 4)
+    assert asked and asked[0][0] == "Set from Telemetry" and "1234.5679" in asked[0][1]
+    assert column_texts(track_editor, 4) == ["2000"]  # set once confirmed
+    asked[0][2](True)
+    assert column_texts(track_editor, 4) == ["1234.5679"]
+    backend.cellAction(key, 3)  # pit speed: no cell action
+    assert len(asked) == 1
 
 
 def test_track_info_delete_sort_reset(track_editor):
-    track_editor.add_track_entry(1, "Aragon", {})
-    track_editor.sort_track()
-    assert column_texts(track_editor.table_tracks, 0) == ["Aragon", "Spa"]
-    track_editor.table_tracks.selectRow(1)
-    track_editor.delete_track()
-    assert column_texts(track_editor.table_tracks, 0) == ["Aragon"]
-    track_editor.reset_setting()
-    assert track_editor.table_tracks.rowCount() == len(cfg.default.tracks)
+    backend = track_editor.backend
+    backend.append_rows([backend.new_row("Aragon")])
+    backend.sortBy(0)
+    assert column_texts(track_editor, 0) == ["Aragon", "Spa"]
+    select_rows(track_editor, 1)
+    backend.deleteSelected()
+    assert column_texts(track_editor, 0) == ["Aragon"]
+    backend.resetToDefault()
+    assert len(backend.rows) == len(cfg.default.tracks)
 
 
 # --- Heatmap
@@ -235,28 +260,28 @@ def heatmap_editor(editor_env):
 
 
 def test_heatmap_add_sort_and_save(heatmap_editor):
-    table = heatmap_editor.table_heatmap
-    rows = table.rowCount()
-    heatmap_editor.add_temperature()
-    assert table.rowCount() == rows + 1
-    table.item(0, 0).setText("999")  # moved to the end when sorted
-    heatmap_editor.sort_temperature()
-    assert table.item(rows, 0).text() == "999"
+    backend = heatmap_editor.backend
+    rows = len(backend.rows)
+    backend.addRow()
+    assert len(backend.rows) == rows + 1
+    assert set_cell(heatmap_editor, 0, 0, "999")  # moved to the end when sorted
+    backend.sortBy(0)
+    assert column_texts(heatmap_editor, 0)[rows] == "999"
     heatmap_editor.applying()
-    assert "999.0" in cfg.user.heatmap[heatmap_editor.selected_heatmap_key]
+    assert "999.0" in cfg.user.heatmap[backend.selected_key]
 
 
 def test_heatmap_reset_is_undoable(heatmap_editor):
-    table = heatmap_editor.table_heatmap
-    default_rows = table.rowCount()
-    table.selectRow(0)
-    heatmap_editor.delete_temperature(0)
-    assert table.rowCount() == default_rows - 1
+    backend = heatmap_editor.backend
+    default_rows = len(backend.rows)
+    select_rows(heatmap_editor, 0)
+    backend.deleteSelected()
+    assert len(backend.rows) == default_rows - 1
     heatmap_editor.set_unmodified()
-    heatmap_editor.reset_heatmap()
-    assert table.rowCount() == default_rows and heatmap_editor.is_modified()
+    backend.resetToDefault()
+    assert len(backend.rows) == default_rows and heatmap_editor.is_modified()
     heatmap_editor.undo()
-    assert table.rowCount() == default_rows - 1
+    assert len(backend.rows) == default_rows - 1
 
 
 # --- Vehicle brands
@@ -271,41 +296,38 @@ def brand_editor(editor_env, monkeypatch):
 
 
 def test_brand_import_lmu_file_keeps_user_names(brand_editor, editor_env, tmp_path, monkeypatch):
-    from neopedal.ui import vehicle_brand_editor
-
     data = [{"desc": "Ferrari 296 #51", "manufacturer": "Scuderia"}, {"desc": "Porsche 963 #6", "manufacturer": "Porsche"}]
     filename = tmp_path / "vehicles.json"
     filename.write_text(json.dumps(data), encoding="utf-8")
-    monkeypatch.setattr(vehicle_brand_editor.QFileDialog, "getOpenFileName", lambda *args, **kwargs: (str(filename), ""))
-    brand_editor.import_from_file()
+    monkeypatch.setattr(brand_editor, "open_file", lambda file_filter: str(filename))
+    brand_editor.backend.importFrom(3)  # JSON file
     brand_editor.applying()
     assert cfg.user.brands == {"Ferrari 296 #51": "Ferrari", "Porsche 963 #6": "Porsche"}  # user entry wins
 
 
 def test_brand_import_rf2_format(brand_editor):
-    brand_editor.parse_brand_data([{"name": "Oreca 07 #22", "manufacturer": "Oreca", "vehFile": "x"}])
-    assert brand_editor.table_brands.rowCount() == 2
+    brand_editor.backend.import_vehicles([{"name": "Oreca 07 #22 1.0", "manufacturer": "Oreca", "vehFile": "x"}])
+    assert len(brand_editor.backend.rows) == 2
+    assert column_texts(brand_editor, 0)[0] == "Oreca 07 #22"  # version cut
     assert brand_editor.is_modified()  # imported data asks to be saved on close
 
 
 def test_reset_is_one_undo_step(brand_editor):
-    """Reset rebuilt table from old table data (reset did nothing), see BaseEditor.replace_table_data"""
-    brand_editor.reset_setting()
-    assert brand_editor.table_brands.rowCount() == len(cfg.default.brands)
+    backend = brand_editor.backend
+    backend.resetToDefault()
+    assert len(backend.rows) == len(cfg.default.brands)
     brand_editor.undo()
-    assert column_texts(brand_editor.table_brands, 0) == ["Ferrari 296 #51"]
+    assert column_texts(brand_editor, 0) == ["Ferrari 296 #51"]
     brand_editor.redo()
-    assert brand_editor.table_brands.rowCount() == len(cfg.default.brands)
+    assert len(backend.rows) == len(cfg.default.brands)
 
 
 def test_brand_import_invalid_file(brand_editor, editor_env, tmp_path, monkeypatch):
-    from neopedal.ui import vehicle_brand_editor
-
     filename = tmp_path / "bad.json"
     filename.write_text('[{"other": 1}]', encoding="utf-8")
-    monkeypatch.setattr(vehicle_brand_editor.QFileDialog, "getOpenFileName", lambda *args, **kwargs: (str(filename), ""))
-    brand_editor.import_from_file()
-    assert editor_env.warnings and brand_editor.table_brands.rowCount() == 1
+    monkeypatch.setattr(brand_editor, "open_file", lambda file_filter: str(filename))
+    brand_editor.backend.importFrom(3)
+    assert editor_env.warnings and len(brand_editor.backend.rows) == 1
 
 
 def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeypatch):
@@ -315,7 +337,7 @@ def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeyp
         raise OSError("refused")
 
     monkeypatch.setattr(vehicle_brand_editor, "resolve_hostname", refused)
-    brand_editor.import_from_lmu()
+    brand_editor.backend.importFrom(0)
     # Request runs in background: warning shown once its answer comes back
     deadline = time.monotonic() + 5
     while not editor_env.warnings and time.monotonic() < deadline:
@@ -326,25 +348,25 @@ def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeyp
 def test_brand_add_delete_sort_reset(brand_editor):
     from neopedal.api_control import api
 
+    backend = brand_editor.backend
     api.read.vehicle.total_vehicles = lambda: 1
     api.read.vehicle.vehicle_name = lambda index=None: "Alpine A424 #35"
     api.read.vehicle.vehicle_model = lambda index=None: "Alpine A424"
-    brand_editor.add_brand()
-    brand_editor.add_brand()
-    table = brand_editor.table_brands
-    assert column_texts(table, 0) == ["Ferrari 296 #51", "Alpine A424 #35", "New Vehicle Name 1"]
-    brand_editor.sort_brand()  # by brand name
-    assert column_texts(table, 1)[0] <= column_texts(table, 1)[-1]
-    table.selectRow(0)
-    brand_editor.delete_brand()
-    assert table.rowCount() == 2
-    brand_editor.reset_setting()
-    assert table.rowCount() == len(cfg.default.brands)
+    backend.addRow()
+    backend.addRow()
+    assert column_texts(brand_editor, 0) == ["Ferrari 296 #51", "Alpine A424 #35", "New Vehicle Name 1"]
+    backend.sortBy(1)  # by brand name
+    assert column_texts(brand_editor, 1)[0] <= column_texts(brand_editor, 1)[-1]
+    select_rows(brand_editor, 0)
+    backend.deleteSelected()
+    assert len(backend.rows) == 2
+    backend.resetToDefault()
+    assert len(backend.rows) == len(cfg.default.brands)
 
 
-# --- Bulk actions: one undo step, table read back once (not after every cell)
+# --- Bulk actions: one undo step, rows read once (not after every cell)
 def count_reads(editor, monkeypatch) -> list:
-    """Table read backs for undo history"""
+    """Snapshots read for undo history"""
     reads: list = []
     original = editor._undo_capture
 
@@ -359,64 +381,59 @@ def count_reads(editor, monkeypatch) -> list:
 def test_brand_add_from_session_is_one_undo_step(brand_editor, monkeypatch):
     from neopedal.api_control import api
 
+    backend = brand_editor.backend
     api.read.vehicle.total_vehicles = lambda: 40
     api.read.vehicle.vehicle_name = lambda index=None: f"Car #{index}"
     api.read.vehicle.vehicle_model = lambda index=None: "Model"
     reads = count_reads(brand_editor, monkeypatch)
-    brand_editor.add_brand()
-    table = brand_editor.table_brands
-    assert table.rowCount() == 41 and brand_editor.is_modified()
-    assert len(reads) <= 2  # was once per cell (O(n²) on big tables)
+    backend.addRow()
+    assert len(backend.rows) == 41 and brand_editor.is_modified()
+    assert len(reads) <= 2
     brand_editor.undo()
-    assert column_texts(table, 0) == ["Ferrari 296 #51"]
+    assert column_texts(brand_editor, 0) == ["Ferrari 296 #51"]
     brand_editor.redo()
-    assert table.rowCount() == 41
-    brand_editor.add_brand()  # all listed already: new name entry
-    assert column_texts(table, 0)[-1] == "New Vehicle Name 1"
+    assert len(backend.rows) == 41
+    backend.addRow()  # all listed already: new name entry
+    assert column_texts(brand_editor, 0)[-1] == "New Vehicle Name 1"
 
 
 def test_batch_replace_is_one_undo_step(brand_editor, monkeypatch):
-    from neopedal.ui._common import TableBatchReplace
-
-    brand_editor.parse_brand_data([{"desc": f"Car #{index}", "manufacturer": "Acme"} for index in range(30)])
-    table = brand_editor.table_brands
-    before = column_texts(table, 1)
+    backend = brand_editor.backend
+    backend.import_vehicles([{"desc": f"Car #{index}", "manufacturer": "Acme"} for index in range(30)])
+    before = column_texts(brand_editor, 1)
     reads = count_reads(brand_editor, monkeypatch)
-    dialog = TableBatchReplace(brand_editor, {"Brand name": 1}, table)
-    dialog.search_selector.setCurrentText("Acme")
-    dialog.replace_entry.setText("Globex")
-    dialog.replacing()
-    assert column_texts(table, 1).count("Globex") == 30
+    assert backend.replace(1, "Acme", "Globex", False, False) == 30
+    assert column_texts(brand_editor, 1).count("Globex") == 30
     assert len(reads) <= 2
     brand_editor.undo()
-    assert column_texts(table, 1) == before
-    dialog.close()
+    assert column_texts(brand_editor, 1) == before
 
 
 def test_class_and_compound_add_from_session_one_undo_step(compound_editor, monkeypatch):
     from neopedal.api_control import api
 
+    backend = compound_editor.backend
     api.read.vehicle.total_vehicles = lambda: 3
     api.read.tyre.compound_class = lambda index=None: (f"C{index}", f"C{index}", "Wet", "Wet")
     reads = count_reads(compound_editor, monkeypatch)
-    compound_editor.add_compound()
-    table = compound_editor.table_compounds
-    assert column_texts(table, 0)[0] == "Soft" and table.rowCount() == 5  # Soft + C0..C2 + Wet
-    assert table.currentRow() == 4  # last added selected
+    backend.addRow()
+    assert column_texts(compound_editor, 0)[0] == "Soft" and len(backend.rows) == 5  # Soft + C0..C2 + Wet
+    assert backend.currentIndex == 4  # last added selected
     assert len(reads) <= 2
     compound_editor.undo()
-    assert column_texts(table, 0) == ["Soft"]
+    assert column_texts(compound_editor, 0) == ["Soft"]
 
 
 def test_brake_add_from_session_one_undo_step(brake_editor, monkeypatch):
     from neopedal.api_control import api
 
+    backend = brake_editor.backend
     api.read.vehicle.total_vehicles = lambda: 2
     api.read.vehicle.class_name = lambda index=None: "LMP2"
     api.read.vehicle.vehicle_name = lambda index=None: f"Oreca {index}"
-    rows = brake_editor.table_brakes.rowCount()
-    brake_editor.add_brake()
-    assert brake_editor.table_brakes.rowCount() > rows
-    assert brake_editor.table_brakes.currentRow() == brake_editor.table_brakes.rowCount() - 1
+    rows = len(backend.rows)
+    backend.addRow()
+    assert len(backend.rows) > rows
+    assert backend.currentIndex == len(backend.rows) - 1
     brake_editor.undo()
-    assert brake_editor.table_brakes.rowCount() == rows
+    assert len(backend.rows) == rows

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QMessageBox
 from neopedal import app_signal, update
 from neopedal.const_app import APP_ID
 from neopedal.setting import cfg
+from tests import signed_release
 
 DIGEST = "a" * 64
 ASSET = update.InstallerAsset("Setup.exe", "https://github.com/x/Setup.exe", DIGEST)
@@ -113,7 +114,7 @@ def test_failed_download_leaves_no_file(monkeypatch, tmp_path, failure):
     def urlopen(url, timeout=0):
         return FakeResponse(content, fail=failure == "network")
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(update, "open_url", urlopen)
     with pytest.raises((OSError, ValueError)):
         update.download_installer(ASSET._replace(sha256=digest), str(tmp_path))
     assert not list(tmp_path.iterdir())  # no partial nor invalid installer kept
@@ -123,11 +124,19 @@ def test_download_replaces_previous_file(monkeypatch, tmp_path):
     content = b"new installer"
     digest = hashlib.sha256(content).hexdigest()
     (tmp_path / "Setup.exe").write_bytes(b"old")
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda url, timeout=0: FakeResponse(content))
+    monkeypatch.setattr(update, "open_url", lambda url, timeout=0: FakeResponse(content))
     path = update.download_installer(ASSET._replace(sha256=digest), str(tmp_path))
     with open(path, "rb") as file:
         assert file.read() == content
     assert [item.name for item in tmp_path.iterdir()] == ["Setup.exe"]
+
+
+def downloaded(tmp_path, content: bytes = b"MZ installer") -> str:
+    """Installer file written by the updater (hash remembered for run_installer)"""
+    path = tmp_path / "Setup.exe"
+    path.write_bytes(content)
+    update.remember_installer(str(path), hashlib.sha256(content).hexdigest())
+    return str(path)
 
 
 # Item 35: installer signature checked before running
@@ -137,17 +146,18 @@ def test_download_replaces_previous_file(monkeypatch, tmp_path):
     (update.SIGNATURE_UNKNOWN, True),
     (update.SIGNATURE_INVALID, False),
 ])
-def test_run_installer_checks_signature(monkeypatch, signature, started):
+def test_run_installer_checks_signature(monkeypatch, tmp_path, signature, started):
     runs = []
+    path = downloaded(tmp_path)
     monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
-    monkeypatch.setattr(update, "installer_signature", lambda path: signature)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(signature))
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
     if started:
-        update.run_installer("Setup.exe")
-        assert runs and runs[0][0] == "Setup.exe" and "/SILENT" in runs[0]
+        update.run_installer(path)
+        assert runs and runs[0][0] == path and "/SILENT" in runs[0]
     else:
         with pytest.raises(ValueError):
-            update.run_installer("Setup.exe")
+            update.run_installer(path)
         assert not runs
 
 
@@ -162,39 +172,41 @@ def test_run_installer_checks_signature(monkeypatch, signature, started):
     ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNKNOWN, True),
     ("someone/fork", update.SIGNATURE_INVALID, False),
 ])
-def test_run_installer_custom_repository_requires_signature(ui_env, monkeypatch, repo, signature, started):
+def test_run_installer_custom_repository_requires_signature(ui_env, monkeypatch, tmp_path, repo, signature, started):
     runs = []
+    path = downloaded(tmp_path)
     monkeypatch.setitem(cfg.application, "update_repository", repo)
-    monkeypatch.setattr(update, "installer_signature", lambda path: signature)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(signature))
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
     if started:
-        update.run_installer("Setup.exe", "")
+        update.run_installer(path, "")
         assert runs and "/SILENT" in runs[0]
     else:
         with pytest.raises(ValueError):
-            update.run_installer("Setup.exe", "")
+            update.run_installer(path, "")
         assert not runs
 
 
-def test_run_installer_start_error_raised(monkeypatch):
+def test_run_installer_start_error_raised(monkeypatch, tmp_path):
     def refused(args, **kwargs):
         raise PermissionError(13, "blocked")
 
-    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(update.SIGNATURE_UNSIGNED))
     monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
     monkeypatch.setattr(update.subprocess, "Popen", refused)
     with pytest.raises(OSError):
-        update.run_installer("Setup.exe")
+        update.run_installer(downloaded(tmp_path))
 
 
-def test_run_installer_install_folder(monkeypatch):
+def test_run_installer_install_folder(monkeypatch, tmp_path):
     runs = []
-    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    path = downloaded(tmp_path)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(update.SIGNATURE_UNSIGNED))
     monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
     monkeypatch.setattr(update, "install_folder", lambda: "E:/NeoPedal/")
-    update.run_installer("Setup.exe")  # folder of install_folder by default
-    update.run_installer("Setup.exe", "")  # installer picks it
+    update.run_installer(path)  # folder of install_folder by default
+    update.run_installer(path, "")  # installer picks it
     assert runs[0][-1] == f"/DIR={os.path.normpath('E:/NeoPedal')}"
     assert not any(arg.startswith("/DIR") for arg in runs[1])
 
@@ -305,7 +317,7 @@ def test_install_folder(monkeypatch, frozen_exe):
 
 
 def test_signature_check_errors_are_unknown(monkeypatch):
-    def broken(path):
+    def broken(path, *args):
         raise OSError("wintrust unavailable")
 
     monkeypatch.setattr(update, "_win_verify_trust", broken)
@@ -350,9 +362,14 @@ def test_checker_finds_update(checker, monkeypatch):
     checker, states = checker
     checked = threading.Event()  # answer held until checking state seen (else may end first: flaky)
 
+    response, files = signed_release.signed_release(
+        "99.0.0", {"NeoPedal-99.0.0-setup.zip": b"zip"}, body="### Added\n\n- New")
+    signed_release.use_test_key(monkeypatch)
+    signed_release.serve(monkeypatch, files)
+
     async def request(repo):
         checked.wait(5)
-        return release_response("v99.0.0")
+        return response
 
     monkeypatch.setattr(update, "request_latest_release", request)
     checker.check(True)
@@ -486,13 +503,12 @@ def test_unsigned_installer_of_custom_repository_refused(updates, monkeypatch, m
 
     runs = []
     monkeypatch.setitem(cfg.application, "update_repository", "someone/fork")
-    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(update.SIGNATURE_UNSIGNED))
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
-    installer = tmp_path / "Setup.exe"
-    installer.write_bytes(b"MZ")
+    installer = downloaded(tmp_path, b"MZ")
     window = FakeWindow()
-    assert not notification.install_update(window, str(installer))
-    assert not runs and not installer.exists()
+    assert not notification.install_update(window, installer)
+    assert not runs and not os.path.exists(installer)
     assert window.calls == ["close pages", "cancel"]
     assert "custom update repository is not signed" in messages["warnings"][0]  # not "signature not valid"
 
@@ -503,18 +519,17 @@ def test_installer_checked_against_repository_found_at_check(updates, monkeypatc
 
     runs = []
     monkeypatch.setitem(cfg.application, "update_repository", "")  # blanked after check
-    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(update.SIGNATURE_UNSIGNED))
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
     monkeypatch.setattr(update, "install_folder", lambda: "")
     window = FakeWindow()
-    assert notification.install_update(window, "Setup.exe", update.FORK_REPO_NAME)  # official release
+    assert notification.install_update(window, downloaded(tmp_path), update.FORK_REPO_NAME)  # official release
     assert runs and window.calls == ["close pages", "quit"]
     monkeypatch.setitem(cfg.application, "update_repository", update.FORK_REPO_NAME)  # set back after check
-    installer = tmp_path / "Setup.exe"
-    installer.write_bytes(b"MZ")
+    installer = downloaded(tmp_path, b"MZ")
     window = FakeWindow()
-    assert not notification.install_update(window, str(installer), "someone/fork")  # found in a fork
-    assert len(runs) == 1 and not installer.exists()
+    assert not notification.install_update(window, installer, "someone/fork")  # found in a fork
+    assert len(runs) == 1 and not os.path.exists(installer)
     assert "custom update repository is not signed" in messages["warnings"][0]
 
 
@@ -541,13 +556,17 @@ def test_download_keeps_repository_of_check(updates, monkeypatch, messages):
     installs = []
     monkeypatch.setattr(update.update_checker, "installer", ASSET._replace(repository="someone/fork"))
     monkeypatch.setattr(notification, "download_installer", lambda asset, **kwargs: "Setup.exe")
-    monkeypatch.setattr(
-        notification, "install_update", lambda window, path, repository=None: installs.append((path, repository)))
+    monkeypatch.setattr(notification, "installer_signer", lambda path, repository=None: f"Signer of {repository}")
+    monkeypatch.setattr(notification, "install_update", lambda window, path, repository=None, signer=None:
+                        installs.append((path, repository, signer)))
     monkeypatch.setattr(notification, "main_window", lambda: None)
     assert updates.download(auto_install=True)
     monkeypatch.setattr(update.update_checker, "installer", ASSET._replace(repository=update.FORK_REPO_NAME))
     assert wait_for(lambda: not updates.busy)
-    assert installs == [("Setup.exe", "someone/fork")]
+    assert installs == [("Setup.exe", "someone/fork", "Signer of someone/fork")]
+    # Custom repository: asked first even from the What's New install button, repository & signer shown
+    assert len(messages["questions"]) == 1
+    assert "someone/fork" in messages["questions"][0] and "Signer of someone/fork" in messages["questions"][0]
 
 
 def test_download_runs_once(updates, monkeypatch, messages):
@@ -571,7 +590,7 @@ def test_download_runs_once(updates, monkeypatch, messages):
         assert updates.download(auto_install=True)
         assert not updates.download(auto_install=True)  # second Install (reopened page): ignored
         button.install_from_notes()
-        assert updates.busy and button.text() == "Downloading Update..." and not button.install_update.isEnabled()
+        assert updates.busy and button.text() == "Downloading Update…" and not button.install_update.isEnabled()
         release.set()
         assert wait_for(lambda: not updates.busy)
         assert len(downloads) == 1 and installs == ["Setup.exe"] and not messages["questions"]  # no second question
@@ -649,7 +668,7 @@ def test_prompt_never_pops_hidden_window(window, updates, monkeypatch):
     assert not window.isVisible()  # started hidden in tray
     from neopedal.ui.notification import UpdatesNotifyButton
 
-    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button = window.statusBar().findChild(UpdatesNotifyButton)
     button.checking(False)
     assert not window.isVisible()  # not shown over the game
     assert messages and "v99.0.0" in messages[0]
@@ -664,7 +683,7 @@ def test_prompt_shown_when_window_visible(window, updates, monkeypatch):
 
     window.show()
     try:
-        button = window.centralWidget().findChild(UpdatesNotifyButton)
+        button = window.statusBar().findChild(UpdatesNotifyButton)
         button.checking(False)
         pages = window.centralWidget().dialog_pages()
         assert len(pages) == 1 and pages[0].dialog.prompt
@@ -676,14 +695,14 @@ def test_update_notice_kept_after_language_change(window, updates):
     from neopedal.ui.notification import UpdatesNotifyButton
 
     UpdatesNotifyButton.prompted_version = update.update_checker.message()  # already proposed
-    window.centralWidget().findChild(UpdatesNotifyButton).checking(False)
+    window.statusBar().findChild(UpdatesNotifyButton).checking(False)
     window.retranslate()
-    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button = window.statusBar().findChild(UpdatesNotifyButton)
     assert button.isVisibleTo(window) and "99.0.0" in button.text()
     assert not window.centralWidget().dialog_pages()  # not proposed again
     button.dismiss()
     window.retranslate()
-    assert not window.centralWidget().findChild(UpdatesNotifyButton).isVisibleTo(window)  # dismissed stays hidden
+    assert not window.statusBar().findChild(UpdatesNotifyButton).isVisibleTo(window)  # dismissed stays hidden
 
 
 def test_latest_release_follows_redirect_when_direct_request_empty(monkeypatch):
@@ -784,7 +803,7 @@ def test_automatic_check_keeps_notice_and_dismissal(window, updates):
     from neopedal.ui.notification import UpdatesNotifyButton
 
     UpdatesNotifyButton.prompted_version = update.update_checker.message()  # already proposed
-    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button = window.statusBar().findChild(UpdatesNotifyButton)
     button.checking(False)
     assert button.isVisibleTo(window)
     button.checking(True)  # automatic check: notice shown kept, no "Checking" message
@@ -806,7 +825,7 @@ def test_automatic_check_pops_up_only_in_active_window(window, updates, monkeypa
                         lambda self, prompt=False, bring_to_front=True: shown.append(bring_to_front))
     window.show()
     try:
-        window.centralWidget().findChild(UpdatesNotifyButton).checking(False)
+        window.statusBar().findChild(UpdatesNotifyButton).checking(False)
     finally:
         window.hide()
     assert shown == [in_front]  # not active: what's new waits inside app, not over the game

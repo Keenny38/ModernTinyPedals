@@ -353,23 +353,25 @@ def test_qml_page_loads_with_recent_menus(page, host, out):  # noqa: F811
 
     view = page.ensure_view()
     menu = view.rootObject().findChild(QObject, "loadFileMenu")
-    assert menu_texts(menu) == ["Load File...", "", "No recent files"]
+    assert menu_texts(menu) == ["Load File…", "", "No recent files"]
     host.open_path = history_file(out / "Spa.consumption")
     page.backend.loadFile()  # first of Recent menus, after the Load File action
     page.backend.setTab(1)
     QCoreApplication.processEvents()
     assert not view.errors(), [error.toString() for error in view.errors()]
-    assert menu_texts(menu) == ["Load File...", "", "Spa.consumption"]
+    assert menu_texts(menu) == ["Load File…", "", "Spa.consumption"]
 
 
 @pytest.mark.parametrize("language", ["English", "Français"])
 def test_header_fits_page_width(ui_env, host, monkeypatch, language):  # noqa: F811
-    """Header row never wider than the page: labels, then switch labels & logo dropped as room runs out (last level:
-    narrowest header, fits page minimum width with real fonts, not offscreen font boxes)"""
+    """Header row never wider than the page: toolbar actions with text, then icons only, then in its "..." menu as
+    room runs out (calculator on / off always a button), source & race status kept (real fonts not needed: the
+    toolbar measures its own buttons)"""
     from PySide6.QtCore import QCoreApplication, QEvent, QObject
 
     from neopedal import i18n
     from neopedal.ui import race_calculator
+    from tests.test_audit_g_qml_pages import item_named
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
@@ -381,16 +383,25 @@ def test_header_fits_page_width(ui_env, host, monkeypatch, language):  # noqa: F
         dialog.backend.setGameData(True)
         root = dialog.ensure_view().rootObject()
         header = root.findChild(QObject, "headerRow")
-        levels = []
+        toolbar = root.findChild(QObject, "headerToolbar")
+        switch = item_named(root, "gameDataSwitch")  # toolbar button (Repeater item)
+        modes = []
         for width in (520, 650, 760, 900, 1100, 1900, 760):
             dialog.resize(width, 700)
             for _ in range(5):
                 QCoreApplication.processEvents()
-            levels.append(root.property("headerLevel"))
-            fits = header.property("implicitWidth") <= root.property("width")
-            assert fits or levels[-1] == 2, (width, levels[-1])
-        assert levels[0] == 2 and levels[5] == 0 and levels[2] == levels[6]  # same level back at same width
-        assert levels[:6] == sorted(levels[:6], reverse=True)
+            assert header.property("width") <= root.property("width"), width
+            assert switch.property("visible"), width  # pinned: never in the menu
+            shown = [item for item in header.childItems() if item.isVisible()]
+            used = sum(item.width() for item in shown) + header.property("spacing") * (len(shown) - 1)
+            assert used <= header.property("width") + 1, (width, used)  # nothing pushed out of the row
+            buttons = toolbar.childItems()[-1]  # row of buttons, right aligned in the toolbar
+            assert buttons.x() >= 0 and buttons.width() <= toolbar.property("width") + 1, width
+            modes.append(list(toolbar.property("modes").toVariant()) if hasattr(toolbar.property("modes"), "toVariant")
+                         else list(toolbar.property("modes")))
+        assert all(mode == 0 for mode in modes[5])  # wide page: every action with its text
+        assert modes[2] == modes[6]  # same layout back at same width
+        assert sum(modes[0]) >= sum(modes[5])  # narrow page: icons only or in the menu
     finally:
         i18n.set_language("English")
         dialog.set_unmodified()

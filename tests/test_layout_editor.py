@@ -1,9 +1,9 @@
-"""Layout editor: snapping, dragging and applying widget positions"""
+"""Placing overlays: snapping & screenshot screen of the Overlays page screen view (formerly the Layout Editor
+tool), layout profiles per screen setup"""
 
 from PySide6.QtCore import QPoint, QRect
 
-from neopedal.ui import layout_editor
-from neopedal.ui.layout_editor import LayoutEditor, snap_position
+from neopedal.ui.quick.overlay_screen import snap_position
 
 SCREEN = QRect(0, 0, 1920, 1080)
 
@@ -36,7 +36,7 @@ def test_snap_per_screen_center():
 def test_screenshot_mapped_to_matching_screen():
     from PySide6.QtCore import QSize
 
-    from neopedal.ui.layout_editor import screen_for_image
+    from neopedal.ui.quick.overlay_screen import screen_for_image
 
     left, right = QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)
     screens = [(left, 1.0), (right, 1.0)]
@@ -46,92 +46,6 @@ def test_screenshot_mapped_to_matching_screen():
     assert screen_for_image(QSize(3840, 2160), [(left, 2.0), (right, 1.0)], right) == left
     # Unknown size: fallback (primary/current screen), never the whole virtual desktop
     assert screen_for_image(QSize(4480, 1440), screens, left) == left
-
-
-def test_canvas_background_drawn_on_one_screen(ui_env):
-    from PySide6.QtGui import QPixmap
-
-    from neopedal.ui.layout_editor import LayoutCanvas
-
-    canvas = LayoutCanvas(None)
-    try:
-        canvas.screens = [QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)]
-        canvas.screen_rect = QRect(0, 0, 4480, 1440)
-        canvas.set_background(QPixmap(2560, 1440), QRect(1920, 0, 2560, 1440))
-        assert canvas.screen_rect == canvas.background_rect == QRect(1920, 0, 2560, 1440)
-        canvas.resize(512, 288)
-        assert canvas.to_view(canvas.background_rect) == canvas.view_rect()
-        # Guides per screen: box centered on right screen
-        canvas.boxes = {"gear": QRect(0, 0, 100, 40)}
-        canvas.select("gear")
-        canvas.move_selected(QPoint(3148, 700), snap=True)
-        assert canvas.boxes["gear"].topLeft() == QPoint(3150, 700)
-        assert 3200 in canvas._guides[0]
-    finally:
-        canvas.deleteLater()
-
-
-def test_background_scaled_once_per_size(ui_env):
-    from PySide6.QtGui import QColor, QPixmap
-
-    from neopedal.ui.layout_editor import LayoutCanvas
-
-    canvas = LayoutCanvas(None)
-    try:
-        screenshot = QPixmap(1920, 1080)
-        screenshot.fill(QColor(200, 0, 0))
-        canvas.set_background(screenshot, QRect(0, 0, 1920, 1080))
-        canvas.resize(640, 360)
-        canvas.grab()  # painted
-        scaled = canvas._scaled
-        assert not scaled.isNull() and scaled.width() < screenshot.width()
-        canvas.boxes = {"gear": QRect(0, 0, 100, 40)}
-        canvas.select("gear")
-        canvas.move_selected(QPoint(300, 200), snap=False)  # dragging: painted again, same size
-        canvas.grab()
-        assert canvas._scaled.cacheKey() == scaled.cacheKey()
-        canvas.resize(800, 450)
-        canvas.grab()
-        assert canvas._scaled.cacheKey() != scaled.cacheKey()  # scaled again for new size
-        canvas.set_background(QPixmap(), QRect(0, 0, 1920, 1080))
-        canvas.grab()  # no background: nothing scaled
-    finally:
-        canvas.deleteLater()
-
-
-class FakeWidget:
-    def __init__(self, rect):
-        self.rect = QRect(rect)
-
-    def geometry(self):
-        return self.rect
-
-    def move(self, x, y):
-        self.rect.moveTo(x, y)
-
-
-def test_apply_moves_widgets_and_saves(ui_env, monkeypatch):
-    from neopedal.setting import cfg
-
-    widgets = {"speedometer": FakeWidget(QRect(10, 10, 80, 30)), "gear": FakeWidget(QRect(400, 400, 60, 60))}
-    monkeypatch.setattr(layout_editor.wctrl, "_active_modules", widgets)
-    monkeypatch.setattr(layout_editor.wctrl, "active_modules", widgets)
-    for name, widget in widgets.items():
-        cfg.user.setting[name]["position_x"] = widget.rect.x()
-        cfg.user.setting[name]["position_y"] = widget.rect.y()
-    dialog = LayoutEditor(None)
-    try:
-        canvas = dialog.canvas
-        assert set(canvas.boxes) == set(widgets)
-        canvas.select("gear")
-        canvas.move_selected(QPoint(200, 300), snap=False)
-        assert dialog.apply() == 1
-        assert widgets["gear"].rect.topLeft() == QPoint(200, 300)
-        assert (cfg.user.setting["gear"]["position_x"], cfg.user.setting["gear"]["position_y"]) == (200, 300)
-        assert ui_env  # preset saved
-        assert dialog.apply() == 0
-    finally:
-        dialog.close()
 
 
 def test_layout_profiles_per_screen_setup(tmp_path):

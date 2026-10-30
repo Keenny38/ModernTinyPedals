@@ -3,10 +3,10 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../components"
 
-// Race calculator page: data source & race plan actions, race setup, key figures & strategy timeline
-// (shared by all tabs), then Fuel (inputs, pit stop plan, scenarios, consumption history), Tyres (tyre
-// wear & rules, tyre plan, stock), Team (stints of the team car from the game) and Live (every input
-// value the game gives, race under way, tyres offered) tabs.
+// Race calculator page: data source (file or game session) & race plan actions, race setup, key figures &
+// strategy timeline (shared by all tabs), then Fuel (inputs, pit stop plan, scenarios, consumption history), Tyres
+// (tyre wear & rules, tyre plan, stock), Team (stints of the team car from the game) and Live (every input value
+// the game gives & which ones inputs follow, race under way, tyres offered) tabs. First use: 3 questions first.
 // Inputs are applied on Enter or leaving a field, Up / Down step them, Ctrl+Z / Ctrl+Y undo & redo.
 TpPage {
     id: page
@@ -16,31 +16,31 @@ TpPage {
     readonly property var header: backend.header
     readonly property var calc: backend.calc
     readonly property var tiles: backend.tiles
-    readonly property bool compact: width < theme.bpWide  // icon buttons, tiles on two rows
-    // Header: button labels (0), icon buttons (1), switches without labels & no circuit logo (2), chosen from
-    // header width at current level & label widths of hidden probes: fits in any language, no binding loop
-    property int headerLevel: 0
+    readonly property bool compact: width < theme.bpWide  // tiles on two rows, no circuit logo, no race status
+    readonly property bool hasRecentFiles: (backend.recentFiles.history || []).length > 0
     readonly property color tyreColor: theme.seriesTyre
 
-    onWidthChanged: updateHeaderLevel()
-    Component.onCompleted: updateHeaderLevel()
-
-    function updateHeaderLevel() {
-        const slack = Math.max(0, sourceChip.implicitWidth - theme.em * 8)  // source chip elided down to 8 em
-        const full = headerRow.implicitWidth - slack + (headerLevel >= 1 ? labelProbes.buttons : 0)
-                     + (headerLevel >= 2 ? labelProbes.switches : 0)
-        const room = width - theme.padPage * 2  // page margins
-        const level = !compact && full <= room ? 0 : full - labelProbes.buttons <= room ? 1 : 2
-        if (level !== headerLevel)
-            headerLevel = level
-    }
     // File names & sources shown in rich text: never read as markup
     function esc(text) {
         return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
+    // Source "File" chosen: files loaded before in a menu under the control, else the file dialog
+    function chooseFile(source) {
+        if (page.hasRecentFiles)
+            loadFileMenu.toggleBelow(source)
+        else
+            backend.loadFile()
+    }
+    function chooseSource(index, source) {
+        if (index === 1)
+            backend.loadLive()  // also when already the source: laps & followed values filled in again
+        else
+            page.chooseFile(source)
+    }
 
     function tileGlyph(key) {
-        return { fuel: "", energy: "", pits: "", stint: "", refill: "", tyres: "" }[key] || ""
+        return { fuel: "", energy: "", pits: "", stint: "", refill: "",
+                 tyres: "" }[key] || ""
     }
     function tileTint(key) {
         return { fuel: theme.seriesFuel, energy: theme.seriesEnergy, pits: theme.accent, stint: theme.seriesStint, refill: theme.seriesRefill,
@@ -52,70 +52,59 @@ TpPage {
         anchors.margins: theme.padPage
         spacing: theme.space4
 
-        // Calculator on / off, then while on: data source, live, undo & redo, race plan & data actions
+        // Data source (file or game session) & what it is, race status, then undo & redo, race plan, reset and
+        // calculator on / off (toolbar: texts, then icons, then a "..." menu as room runs out)
         RowLayout {
             id: headerRow
             objectName: "headerRow"
             Layout.fillWidth: true
-            spacing: theme.em * 0.5
-            onImplicitWidthChanged: page.updateHeaderLevel()
+            spacing: theme.space4
 
-            RaceSwitch {
-                objectName: "gameDataSwitch"
-                Layout.fillWidth: false
-                wrap: false
-                // Narrow page: label only while off (state easy to miss from the switch alone)
-                text: page.headerLevel >= 1 && page.header.gameData ? "" : page.header.gameData ? i18n.tr("Enabled") : i18n.tr("Disabled")
-                tip: i18n.tr("Race Calculator on or off")
-                on: page.header.gameData
-                onSwitched: function(on) { backend.setGameData(on) }
-                Accessible.name: i18n.tr("Race Calculator on or off")
+            GameLogo {  // circuit logo of game (no room taken while there is none)
+                id: trackLogo
+                visible: shown && page.header.gameData && !page.compact
+                source: page.header.trackLogo || ""
+                boxWidth: theme.em * 3.0
+                boxHeight: theme.em * 1.8
             }
-            Item { Layout.fillWidth: true; visible: !page.header.gameData }
-            RowLayout {
-                Layout.fillWidth: true
+            TpSegmented {
+                id: sourceControl
+                objectName: "sourceControl"
                 visible: page.header.gameData
-                spacing: theme.em * 0.5
-                GameLogo {  // circuit logo of game (no room taken while there is none)
-                    id: trackLogo
-                    visible: shown && page.headerLevel < 2
-                    source: page.header.trackLogo || ""
-                    boxWidth: theme.em * 3.0
-                    boxHeight: theme.em * 1.8
+                name: i18n.tr("Data Source")
+                options: [i18n.tr("File"), i18n.tr("Game Session")]
+                currentIndex: page.header.live ? 1 : 0
+                onActivated: function(index) { page.chooseSource(index, sourceControl) }
+                HoverHandler { id: sourceControlHover }
+                ToolTip.visible: sourceControlHover.hovered
+                ToolTip.text: i18n.tr("File: laps of a consumption history file. Game Session: laps of the session driven, inputs filled in from them and from the game (Live tab: values followed, Follow Live). Choose it again to fill in again.")
+                ToolTip.delay: theme.tipDelay
+            }
+            RowLayout {  // what the source is: track & class of the session (pulsing dot), or file name
+                id: sourceInfo
+                objectName: "sourceInfo"
+                visible: page.header.gameData
+                Layout.fillWidth: true
+                Layout.minimumWidth: theme.em * 4
+                Layout.preferredWidth: theme.em * 4  // grows with the room left, never squeezes the actions
+                Layout.maximumWidth: sourceDot.width + sourceText.implicitWidth + spacing
+                spacing: theme.space3
+                Accessible.role: Accessible.StaticText
+                Accessible.name: sourceText.text
+                TpPulseDot {
+                    id: sourceDot
+                    visible: page.header.live
+                    width: Math.round(theme.em * 0.55)
+                    color: theme.live
+                    pulsing: page.header.live && page.header.gameData  // no animation while hidden (off)
                 }
-                Rectangle {  // source chip: live (pulsing dot) or file
-                    id: sourceChip
-                    readonly property color tone: page.header.live ? theme.live : theme.accent
-                    implicitHeight: Math.round(theme.em * 2)
-                    implicitWidth: Math.min(sourceDot.width + sourceText.implicitWidth + theme.em * 1.6, theme.em * 24)
-                    Layout.minimumWidth: theme.em * 5
-                    Layout.maximumWidth: theme.em * 24
-                    Layout.fillWidth: false
-                    radius: height / 2
-                    color: theme.tint(tone, "subtle")
-                    border.width: 1
-                    border.color: theme.tint(tone, 0.5)
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: (page.header.live ? i18n.tr("Live") : i18n.tr("File")) + " · " + page.header.source
-                    TpPulseDot {
-                        id: sourceDot
-                        x: theme.em * 0.6
-                        width: Math.round(theme.em * 0.55)
-                        color: sourceChip.tone
-                        anchors.verticalCenter: parent.verticalCenter
-                        pulsing: page.header.live && page.header.gameData  // no animation while hidden (off)
-                        pulseDuration: 900
-                    }
-                    Text {
-                        id: sourceText
-                        x: sourceDot.x + sourceDot.width + theme.space3
-                        width: parent.width - x - theme.em * 0.6
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "<b>" + (page.header.live ? i18n.tr("Live") : i18n.tr("File")) + "</b> · " + page.esc(page.header.source)
-                        textFormat: Text.StyledText
-                        color: theme.text
-                        elide: Text.ElideRight
-                    }
+                Text {
+                    id: sourceText
+                    Layout.fillWidth: true
+                    text: page.header.source
+                    textFormat: Text.PlainText
+                    color: theme.text
+                    elide: Text.ElideRight
                     HoverHandler { id: sourceHover }
                     ToolTip.visible: sourceHover.hovered
                     ToolTip.text: !sourceHover.hovered ? ""
@@ -123,140 +112,132 @@ TpPage {
                                   : i18n.trm("File Source: " + page.header.source)
                     ToolTip.delay: theme.tipDelay
                 }
-                RaceSwitch {
-                    Layout.fillWidth: false
-                    wrap: false
-                    text: page.headerLevel >= 2 ? "" : i18n.tr("Follow Live")
-                    tip: i18n.tr("Inputs follow each new lap of the live session")
-                    Accessible.name: i18n.tr("Follow Live")
-                    on: page.header.followLive
-                    onSwitched: function(on) { backend.setFollowLive(on) }
-                }
-                RaceSwitch {
-                    Layout.fillWidth: false
-                    wrap: false
-                    text: page.headerLevel >= 2 ? "" : i18n.tr("Live Race")
-                    Accessible.name: i18n.tr("Live Race")
-                    tip: i18n.tr("During a race: plan of the rest of the race from now (laps & time done, fuel, energy & tyres of the car, stops done)")
-                    on: page.header.liveRace
-                    onSwitched: function(on) { backend.setLiveRace(on) }
-                }
-                Pill {  // live race status
-                    visible: backend.liveStatus !== ""
-                    text: backend.liveStatus
-                    tint: theme.dimText
-                    maximumTextWidth: theme.em * 12
-                    tip: backend.liveTip
-                }
-                Item { Layout.fillWidth: true }
-                TpButton {
-                    flat: true
-                    glyph: ""  // undo
+            }
+            Pill {  // live race status: plan of the rest of the race (values read in its tooltip)
+                objectName: "liveRaceStatus"
+                visible: page.header.gameData && backend.liveStatus !== "" && !page.compact
+                text: backend.liveStatus
+                tint: theme.live
+                dot: true
+                maximumTextWidth: theme.em * 12
+                tip: backend.liveTip
+            }
+            TpToolbar {
+                id: toolbar
+                objectName: "headerToolbar"
+                Layout.fillWidth: true
+                onMenuClosed: page.forceActiveFocus()
+                TpAction {
+                    name: "undoButton"
+                    shown: page.header.gameData
+                    glyph: theme.glyphs.undo
                     fallback: "↶"
                     tip: i18n.tr("Undo (Ctrl+Z)")
-                    enabled: backend.canUndo
-                    onClicked: backend.undo()
-                    Accessible.name: i18n.tr("Undo")
-                }
-                TpButton {
                     flat: true
+                    priority: 1
+                    enabled: backend.canUndo
+                    onTriggered: backend.undo()
+                }
+                TpAction {
+                    name: "redoButton"
+                    shown: page.header.gameData
                     glyph: ""  // redo
                     fallback: "↷"
                     tip: i18n.tr("Redo (Ctrl+Y)")
+                    flat: true
                     enabled: backend.canRedo
-                    onClicked: backend.redo()
-                    Accessible.name: i18n.tr("Redo")
+                    onTriggered: backend.redo()
                 }
-                TpButton {
-                    id: planButton
+                TpAction {
+                    name: "planButton"
+                    shown: page.header.gameData
+                    text: i18n.tr("Race Plan")
                     glyph: ""  // document
                     fallback: i18n.tr("Race Plan")
-                    text: page.headerLevel >= 1 ? "" : i18n.tr("Race Plan")
                     tip: i18n.tr("Race setup, fuel & tyre plan in one file, to keep or share")
+                    priority: 3
                     checked: planMenu.visible
-                    onClicked: planMenu.popup(planButton, 0, planButton.height + 4)
-                    Accessible.name: i18n.tr("Race Plan")
-                    TpMenu {
-                        id: planMenu
-                        TpMenuItem { text: i18n.tr("Open Race Plan..."); onTriggered: backend.openRacePlan() }
-                        RaceRecentMenu { kind: "race_plan" }
-                        TpMenuItem { text: i18n.tr("Save Race Plan As..."); onTriggered: backend.saveRacePlan() }
-                        MenuSeparator {}
-                        TpMenuItem {
-                            text: i18n.tr("Save for Current Car & Track")
-                            enabled: page.header.combo !== ""
-                            onTriggered: backend.saveComboPlan()
-                        }
-                        TpMenuItem {
-                            text: i18n.tr("Open Plan of Car & Track Automatically")
-                            checkable: true
-                            checked: page.header.autoCombo
-                            onTriggered: backend.setAutoComboPlan(checked)
-                        }
-                    }
+                    onTriggered: function(source) { planMenu.toggleBelow(source) }
                 }
-                TpButton {
-                    id: loadLiveButton
-                    glyph: ""  // refresh
-                    fallback: i18n.tr("Load Live")
-                    text: page.headerLevel >= 1 ? "" : i18n.tr("Load Live")
-                    tip: i18n.tr("Laps of current session and every followed value of the game (Live tab): race length, pit stop times, tyres...")
-                    onClicked: backend.loadLive()
-                    Accessible.name: i18n.tr("Load Live")
-                }
-                TpButton {
-                    id: loadFileButton
-                    readonly property bool hasRecent: (backend.recentFiles.history || []).length > 0
-                    glyph: ""  // folder open
-                    fallback: i18n.tr("Load File")
-                    text: page.headerLevel >= 1 ? "" : i18n.tr("Load File")
-                    tip: i18n.tr("Consumption history file")
-                    checked: loadFileMenu.visible
-                    // Files loaded before: menu of the button (no room in the row for a drop-down of its own)
-                    onClicked: hasRecent ? loadFileMenu.popup(loadFileButton, 0, loadFileButton.height + 4) : backend.loadFile()
-                    Accessible.name: i18n.tr("Load File")
-                    RaceRecentMenu {
-                        id: loadFileMenu
-                        objectName: "loadFileMenu"
-                        kind: "history"
-                        first: 2
-                        TpMenuItem { text: i18n.tr("Load File") + "..."; onTriggered: backend.loadFile() }
-                        MenuSeparator {}
-                    }
-                }
-                TpButton {
-                    id: resetButton
-                    glyph: ""  // clear
+                TpAction {
+                    name: "resetButton"
+                    shown: page.header.gameData
+                    text: i18n.tr("Reset to Zero")
+                    glyph: theme.glyphs.reset
                     fallback: i18n.tr("Reset to Zero")
-                    text: page.headerLevel >= 1 ? "" : i18n.tr("Reset to Zero")
                     // Done at once, Undo in the toast (and Ctrl+Z)
                     tip: i18n.tr("Reset to Zero") + ": " + i18n.tr("Clear every input")
-                    onClicked: backend.resetValues()
-                    Accessible.name: i18n.tr("Reset to Zero")
+                    priority: 2
+                    onTriggered: backend.resetValues()
+                }
+                TpAction {  // calculator on / off: never in the "..." menu, its text kept longest
+                    name: "gameDataSwitch"
+                    text: page.header.gameData ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                    glyph: ""  // power
+                    fallback: page.header.gameData ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                    tip: i18n.tr("Race Calculator on or off")
+                    checkable: true
+                    checked: page.header.gameData
+                    pinned: true
+                    priority: 4
+                    onTriggered: backend.setGameData(!page.header.gameData)
                 }
             }
         }
+        // Menus of the header (outside the toolbar: shown under the button or "..." button they come from)
+        TpMenu {
+            id: planMenu
+            objectName: "planMenu"
+            onClosed: page.forceActiveFocus()
+            TpMenuItem { text: i18n.tr("Open Race Plan…"); onTriggered: backend.openRacePlan() }
+            RaceRecentMenu { kind: "race_plan" }
+            TpMenuItem { text: i18n.tr("Save Race Plan As…"); onTriggered: backend.saveRacePlan() }
+            MenuSeparator {}
+            TpMenuItem {
+                text: i18n.tr("Save for Current Car & Track")
+                enabled: page.header.combo !== ""
+                onTriggered: backend.saveComboPlan()
+            }
+            TpMenuItem {
+                text: i18n.tr("Open Plan of Car & Track Automatically")
+                checkable: true
+                checked: page.header.autoCombo
+                onTriggered: backend.setAutoComboPlan(checked)
+            }
+        }
+        // Source "File": files loaded before, then the file dialog
+        RaceRecentMenu {
+            id: loadFileMenu
+            objectName: "loadFileMenu"
+            kind: "history"
+            first: 2
+            onClosed: page.forceActiveFocus()
+            TpMenuItem { text: i18n.tr("Load File") + "…"; onTriggered: backend.loadFile() }
+            MenuSeparator {}
+        }
 
-        Item {  // hidden probes: extra width of header labels in current language (see updateHeaderLevel)
-            id: labelProbes
-            visible: false
-            readonly property real buttons: probePlan.implicitWidth + probeLive.implicitWidth + probeFile.implicitWidth
-                                            + probeReset.implicitWidth - 4 * probeIcon.implicitWidth
-                                            + (page.header.gameData ? probeEnabled.implicitWidth - probeBare.implicitWidth : 0)
-            readonly property real switches: probeFollow.implicitWidth + probeLiveRace.implicitWidth
-                                             - 2 * probeBare.implicitWidth
-                                             + (trackLogo.shown ? trackLogo.fitWidth + theme.em * 0.5 : 0)  // + circuit logo & spacing
-            onButtonsChanged: page.updateHeaderLevel()
-            onSwitchesChanged: page.updateHeaderLevel()
-            TpButton { id: probeIcon; glyph: planButton.glyph; fallback: planButton.fallback }
-            TpButton { id: probePlan; glyph: planButton.glyph; text: i18n.tr("Race Plan") }
-            TpButton { id: probeLive; glyph: loadLiveButton.glyph; text: i18n.tr("Load Live") }
-            TpButton { id: probeFile; glyph: loadFileButton.glyph; text: i18n.tr("Load File") }
-            TpButton { id: probeReset; glyph: resetButton.glyph; text: i18n.tr("Reset to Zero") }
-            RaceSwitch { id: probeBare; wrap: false }
-            RaceSwitch { id: probeEnabled; wrap: false; text: i18n.tr("Enabled") }
-            RaceSwitch { id: probeFollow; wrap: false; text: i18n.tr("Follow Live") }
-            RaceSwitch { id: probeLiveRace; wrap: false; text: i18n.tr("Live Race") }
+        // Race of the game under way, plan not made from now: planning the rest of the race proposed (never forced)
+        RowLayout {
+            objectName: "liveRaceProposal"
+            Layout.fillWidth: true
+            visible: page.header.gameData && backend.raceProposal
+            spacing: theme.space2
+            TpNotice {
+                tone: theme.live
+                glyph: ""  // flag
+                fallback: "⚑"
+                text: i18n.tr("A race is running: plan the rest of the race from now (laps & time done, fuel, energy & tyres of the car, stops done)?")
+                actionText: i18n.tr("Plan From Now")
+                onAction: backend.setLiveRace(true)
+            }
+            TpButton {
+                flat: true
+                glyph: theme.glyphs.close
+                fallback: "×"
+                tip: i18n.tr("Not Now")
+                onClicked: backend.dismissLiveRace()
+                Accessible.name: i18n.tr("Not Now")
+            }
         }
 
         // Calculator off: nothing read from the game, nothing shown
@@ -265,9 +246,10 @@ TpPage {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: !page.header.gameData
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - theme.em * 2, theme.em * 34)
+                empty: true
                 glyph: ""  // calculator
                 title: i18n.tr("Race Calculator is off")
                 text: i18n.tr("The game is not asked anything and the calculator shows nothing. Inputs, tyre plan & race plan are kept. Turn it on to plan a race.")
@@ -276,12 +258,25 @@ TpPage {
             }
         }
 
+        // First use: race length, pit stop time & data source asked, then the whole page
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: page.header.gameData && page.header.quickSetup === true
+            RaceQuickSetup {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: Math.max(0, (parent.height - height) / 3)
+                width: Math.min(parent.width, theme.em * 40)
+                store: page
+            }
+        }
+
         // Calculator on: race setup, key figures, strategy timeline, tabs
         ColumnLayout {
             objectName: "calculatorContent"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: page.header.gameData
+            visible: page.header.gameData && page.header.quickSetup !== true
             spacing: theme.space4
 
             // Race setup: race type & length, formation, pit stop time, safety margin
@@ -368,41 +363,16 @@ TpPage {
     }
 
     // Consumption history, race plan & tyre plan files dropped on page: opened like their Open action
-    DropArea {
+    TpDropZone {
         id: dropArea
         objectName: "raceDropArea"
         anchors.fill: parent
         enabled: page.header.gameData
-        onEntered: function(drag) { drag.accepted = drag.hasUrls && backend.canDrop(drag.urls) }
-        onDropped: function(drop) {
-            if (!drop.hasUrls) return
-            drop.acceptProposedAction()
-            var urls = drop.urls
-            Qt.callLater(function() { backend.dropFiles(urls) })  // warnings shown once the drop is over
-        }
+        text: i18n.tr("Drop consumption history, race plan or tyre plan files to open them")
+        accepts: function(urls) { return backend.canDrop(urls) }
+        onFilesDropped: function(urls) { backend.dropFiles(urls) }  // warnings shown once the drop is over
     }
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: theme.space3
-        visible: dropArea.containsDrag
-        radius: theme.radiusXl
-        color: theme.tint(theme.accent, "subtle")
-        border.width: 2
-        border.color: theme.accent
-        Column {
-            anchors.centerIn: parent
-            width: parent.width - theme.em * 2
-            spacing: theme.space4
-            Icon { anchors.horizontalCenter: parent.horizontalCenter; glyph: ""; size: theme.em * 3; color: theme.accent }  // download
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                text: i18n.tr("Drop consumption history, race plan or tyre plan files to open them")
-                color: theme.text
-                font.weight: Font.DemiBold
-                font.pointSize: theme.fontHeading
-            }
-        }
-    }
+
+    // Dialogs & toasts asked by the backend (file errors, confirmations, toasts)
+    TpDialogHost {}
 }

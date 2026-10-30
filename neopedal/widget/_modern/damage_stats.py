@@ -29,8 +29,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
-from ...const_common import TEXT_NA
-from .base import ModernOverlay, display_order_options
+from ..damage_stats import tyre_integrity
+from .base import DASH, ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
@@ -89,9 +89,9 @@ class Realtime(StatsMixin, ModernOverlay):
                 damage = max(api.read.wheel.suspension_damage())
                 value = 1 - damage if damage >= 0 else float(not any(api.read.wheel.is_detached()))
             else:
-                value = min(api.read.tyre.wear())
+                value = tyre_integrity()
             if value == -1:
-                values.append(Value(TEXT_NA, theme.text_faint))
+                values.append(Value(DASH, theme.text_faint))
                 continue
             value = max(value, 0.0)
             low = value <= self.wcfg[f"low_{key}_integrity_threshold"]

@@ -23,24 +23,26 @@ Column {
     Icon {
         anchors.horizontalCenter: parent.horizontalCenter
         glyph: state.glyph
-        size: theme.em * (state.compact ? 1.6 : 2.6)
+        size: state.compact ? theme.iconLg : theme.iconHero
         color: theme.dimText
     }
-    Text {
+    TpText {
         width: parent.width
         visible: text !== ""
+        role: "subtitle"
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
+        elide: Text.ElideNone
         text: state.title
-        color: theme.text
         font.pointSize: state.compact ? theme.fontPoint : theme.fontSubtitle
-        font.weight: Font.DemiBold
     }
-    Text {
+    TpText {
         width: parent.width
         visible: text !== ""
+        role: state.compact ? "caption" : "body"
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
+        elide: Text.ElideNone
         text: state.text
         color: theme.dimText
         font.pointSize: state.compact ? theme.fontSmall : theme.fontPoint

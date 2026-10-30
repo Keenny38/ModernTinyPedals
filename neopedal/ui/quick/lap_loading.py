@@ -101,7 +101,7 @@ def read_limits_cache(cache: str, names: list[str], base_key: str) -> tuple | No
                 lap_map.MapLine([p[0] for p in saved[side]], [p[1] for p in saved[side]], [p[2] for p in saved[side]])
                 for side in ("left", "right")))
         return limits, str(saved.get("source", "estimated")), [float(value) for value in saved["sectors"]][:2]
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
+    except (OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
         return None
 
 
@@ -369,9 +369,9 @@ class LapLoading(BackendBase):
         self._loader.start()
         self._load_timer.start()
         if paths:
-            self.set_status(trm(f"Loading {len(paths)} lap{'s' if len(paths) > 1 else ''}..."), False)
+            self.set_status(trm(f"Loading {len(paths)} lap{'s' if len(paths) > 1 else ''}…"), False)
         else:  # laps loaded: imported laps compared in background
-            self.set_status(tr("Reading laps..."), False)
+            self.set_status(tr("Reading laps…"), False)
 
     @Slot()
     def check_background_load(self):
@@ -411,7 +411,8 @@ class LapLoading(BackendBase):
     def is_loading(self) -> bool:
         """Laps or lap infos loading, charts built, importing or exporting in background"""
         return (self._loader is not None or self._exports.exporting() or self._exports.importing() or self.reading_infos()
-                or bool(self._chart_afters) or self._placing > 0 or self.map_pending() or self._limits_reading)
+                or bool(self._chart_afters) or self._placing > 0 or self.map_pending() or self._limits_reading
+                or self._file_actions > 0)
 
     def map_pending(self) -> bool:
         """Track map built, its shapes sized for map scale being built in background (shown once ready)"""

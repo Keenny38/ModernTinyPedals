@@ -60,6 +60,9 @@ if TYPE_CHECKING:
 # Python data() call per cell & value)
 TIMING_CELL_ROLES = (*TIMING_ROLES, "cells")
 TONE_MARKS = {"fastest": "◆ ", "gain": "● "}  # marks besides colors (colorblind): best of class, personal best
+# Lap & sector times: record mark right of the time, as every page (TpLapTime: ◆ purple first, ● green)
+TIME_KEYS = frozenset(("best", "last", "s1", "s2", "s3"))
+TIME_MARKS = {"fastest": " ◆", "gain": " ●"}
 
 
 def timing_cell(row: dict[str, Any], key: str) -> dict[str, Any]:
@@ -73,6 +76,8 @@ def timing_cell(row: dict[str, Any], key: str) -> dict[str, Any]:
         return {"text": ("▼ " if trend < 0 else "▲ " if trend > 0 else "• ") + value, "tone": tone or "accent"}
     if key == "change":
         return {"text": value, "tone": ("gain" if row["changeValue"] > 0 else "loss") if value else ""}
+    if key in TIME_KEYS:
+        return {"text": value + TIME_MARKS.get(tone, "") if value else value, "tone": tone}
     cell = {"text": TONE_MARKS.get(tone, "") + value, "tone": tone}
     if key == "energy":
         cell["level"] = row["energyLevel"]

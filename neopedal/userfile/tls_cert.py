@@ -95,21 +95,34 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-    # Both written in full first, then replaced (never a truncated file); key readable by current user only (POSIX)
+    # Both written in full first, then replaced (never a truncated file); key readable by current user only:
+    # mode on POSIX, DACL on Windows (a config folder moved to a shared disk would let other accounts read it,
+    # the rename keeps the DACL set on the new file)
     _write_new(key_file, key_bytes, 0o600)
+    _restrict_key(f"{key_file}.tmp")
     _write_new(cert_file, cert.public_bytes(serialization.Encoding.PEM), 0o644)
     replace_retry(f"{key_file}.tmp", key_file)
     replace_retry(f"{cert_file}.tmp", cert_file)
+    _forget_fingerprint(cert_file)
     logger.info("WEB DASHBOARD: created self-signed certificate for %s", ", ".join(["localhost", *addresses]))
 
 
 def _write_new(filename: str, data: bytes, mode: int) -> None:
-    """Write data to filename.tmp, flushed to disk"""
+    """Write data to filename.tmp (no disk flush: a pair lost or damaged by a crash is made again, see
+    load_certificate, and the flush froze the GUI thread for up to hundreds of ms on a busy disk)"""
     fd = os.open(f"{filename}.tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "wb") as file:
         file.write(data)
-        file.flush()
-        os.fsync(file.fileno())
+
+
+def _restrict_key(path: str) -> None:
+    """Private key file accessible by the user running the app only (Windows DACL, POSIX mode); never fatal"""
+    from ..vr_shared import restrict_to_user  # ctypes only (no Qt), same ACL code as the OpenXR layer folder
+
+    try:
+        restrict_to_user(path, 0o600)
+    except OSError as error:  # access not changed: key kept with the folder's access
+        logger.warning("WEB DASHBOARD: private key access not restricted to current user (%s)", error)
 
 
 def server_context(folder: str, addresses: list[str]) -> ssl.SSLContext:
@@ -136,15 +149,41 @@ def load_certificate(context: ssl.SSLContext, folder: str, addresses: list[str])
             context.load_cert_chain(cert_file, key_file)
 
 
+_fingerprints: dict[str, tuple[tuple[int, int], str]] = {}  # certificate file: ((mtime ns, size), fingerprint)
+_fingerprints_lock = threading.Lock()
+
+
+def _forget_fingerprint(cert_file: str) -> None:
+    with _fingerprints_lock:
+        _fingerprints.pop(cert_file, None)
+
+
 def fingerprint(folder: str) -> str:
-    """SHA-256 fingerprint of certificate, to check it on the other device"""
+    """SHA-256 fingerprint of certificate, to check it on the other device
+
+    Kept by certificate file (modified time & size): asked at every refresh of the settings page on the UI
+    thread, the certificate is read & parsed (cryptography import) only once per certificate.
+    """
+    cert_file, _ = cert_paths(folder)
+    try:
+        stat = os.stat(cert_file)
+    except OSError:
+        _forget_fingerprint(cert_file)
+        return ""
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    with _fingerprints_lock:
+        cached = _fingerprints.get(cert_file)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes
 
-    cert_file, _ = cert_paths(folder)
     try:
         with open(cert_file, "rb") as file:
             cert = x509.load_pem_x509_certificate(file.read())
     except (OSError, ValueError):
         return ""
-    return cert.fingerprint(hashes.SHA256()).hex(":").upper()
+    text = cert.fingerprint(hashes.SHA256()).hex(":").upper()
+    with _fingerprints_lock:
+        _fingerprints[cert_file] = (stamp, text)
+    return text

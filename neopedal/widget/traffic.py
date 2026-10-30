@@ -148,69 +148,11 @@ class Realtime(Overlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         veh_data = minfo.vehicles.dataSet
-        player_laptime = api.read.timing.estimated_laptime()
-
-        ahead_overtake_laps = MAX_SECONDS
-        ahead_overtake_timegap = 0.0
-        ahead_overtake_index = -1
-
-        behind_overtake_laps = MAX_SECONDS
-        behind_overtake_timegap = 0.0
-        behind_overtake_index = -1
-
-        leader_overtake_laps = 0.0
-        leader_overtake_timegap = 0.0
-        leader_overtake_index = minfo.vehicles.leaderIndex
-
-        if player_laptime > 0:
-            relative_ahead = minfo.relative.relativeAhead
-            relative_behind = minfo.relative.relativeBehind
-            delta_time_interval_ahead = minfo.relative.relativeDeltaAhead
-            delta_time_interval_behind = minfo.relative.relativeDeltaBehind
-
-            # Ahead
-            for ahead_timegap, ahead_index in relative_ahead:
-                if veh_data[ahead_index].inPit:
-                    continue
-
-                avg_delta_timegap = delta_time_interval_ahead[ahead_index].long
-
-                if avg_delta_timegap > 0:
-                    ahead_laps = ahead_timegap / avg_delta_timegap / player_laptime
-                else:
-                    ahead_laps = 0
-
-                if 0 < ahead_laps < ahead_overtake_laps:
-                    ahead_overtake_laps = ahead_laps
-                    ahead_overtake_timegap = ahead_timegap
-                    ahead_overtake_index = ahead_index
-
-            if ahead_overtake_laps >= MAX_SECONDS:
-                ahead_overtake_laps = 0.0
-
-            # Behind
-            for behind_timegap, behind_index in relative_behind:
-                if veh_data[behind_index].inPit:
-                    continue
-
-                avg_delta_timegap = delta_time_interval_behind[behind_index].long
-
-                if avg_delta_timegap > 0:
-                    behind_laps = -behind_timegap / avg_delta_timegap / player_laptime
-                else:
-                    behind_laps = 0
-
-                if 0 < behind_laps < behind_overtake_laps:
-                    behind_overtake_laps = behind_laps
-                    behind_overtake_timegap = behind_timegap
-                    behind_overtake_index = behind_index
-
-                if behind_index == leader_overtake_index:
-                    leader_overtake_laps = behind_laps
-                    leader_overtake_timegap = behind_timegap
-
-            if behind_overtake_laps >= MAX_SECONDS:
-                behind_overtake_laps = 0.0
+        (
+            (ahead_overtake_laps, ahead_overtake_timegap, ahead_overtake_index),
+            (leader_overtake_laps, leader_overtake_timegap, leader_overtake_index),
+            (behind_overtake_laps, behind_overtake_timegap, behind_overtake_index),
+        ) = traffic_cars()
 
         if self.wcfg["show_class"]:
             if self.show_slower_ahead:
@@ -242,30 +184,30 @@ class Realtime(Overlay):
                 self.update_time(self.bar_time[2], behind_overtake_timegap)
 
     # GUI update methods
-    def update_laps(self, target, *data):
-        """Traffic laps"""
-        if target.last != data:
-            target.last = data
-            laps = data[0]
-            if laps > 0:
-                text = f"{laps:.{self.decimals_laps}f}"[:self.lap_width].strip(".")
-                text = f"{text}L"
-            else:
-                text = TEXT_PLACEHOLDER
+    def update_laps(self, target, laps, lap_progress):
+        """Traffic laps, keyed on text & highlight shown (changes too small to show never repaint)"""
+        if laps > 0:
+            text = f"{laps:.{self.decimals_laps}f}"[:self.lap_width].strip(".")
+            text = f"{text}L"
+        else:
+            text = TEXT_PLACEHOLDER
+        highlight = self.wcfg["enable_traffic_highlight_from_current_lap"] and 0 < laps <= lap_progress
+        if target.last != (text, highlight):
+            target.last = (text, highlight)
             target.text = text
             if self.wcfg["enable_traffic_highlight_from_current_lap"]:
-                target.fg, target.bg = self.bar_style_laps[0 < laps <= data[1]]
+                target.fg, target.bg = self.bar_style_laps[highlight]
             target.update()
 
     def update_time(self, target, data):
-        """Time interval"""
-        if target.last != data:
-            target.last = data
-            if data != 0:
-                text = f"{abs(data):.{self.decimals_time}f}"[:self.lap_width].strip(".")
-                text = f"{text}s"
-            else:
-                text = TEXT_PLACEHOLDER
+        """Time interval, keyed on text shown"""
+        if data != 0:
+            text = f"{abs(data):.{self.decimals_time}f}"[:self.lap_width].strip(".")
+            text = f"{text}s"
+        else:
+            text = TEXT_PLACEHOLDER
+        if target.last != text:
+            target.last = text
             target.text = text
             target.update()
 
@@ -306,6 +248,42 @@ class Realtime(Overlay):
         layout.addWidget(bar_temp[2], row_index, self.wcfg["display_order_faster"])
         if not self.show_faster_behind:
             bar_temp[2].hide()
+
+
+def traffic_cars() -> tuple[tuple[float, float, int], tuple[float, float, int], tuple[float, float, int]]:
+    """Slower car ahead player catches first, race leader, faster car behind catching player first, for classic &
+    modern design: (laps until caught, time gap, car index), laps & gap 0 if none or unknown (index -1: no car);
+    cars in pits left out, leader too while player leads (no car to watch)"""
+    veh_data = minfo.vehicles.dataSet
+    player_laptime = api.read.timing.estimated_laptime()
+    leader_index = minfo.vehicles.leaderIndex
+    if leader_index == minfo.vehicles.playerIndex:
+        leader_index = -1
+    ahead = behind = (MAX_SECONDS, 0.0, -1)
+    leader = (0.0, 0.0, leader_index)
+    if player_laptime > 0:
+        relative = minfo.relative
+        for gap, index in relative.relativeAhead:
+            if index < 0 or veh_data[index].inPit:  # index -1: empty list entry
+                continue
+            avg = relative.relativeDeltaAhead[index].long
+            laps = gap / avg / player_laptime if avg > 0 else 0
+            if 0 < laps < ahead[0]:
+                ahead = (laps, gap, index)
+        for gap, index in relative.relativeBehind:
+            if index < 0 or veh_data[index].inPit:
+                continue
+            avg = relative.relativeDeltaBehind[index].long
+            laps = -gap / avg / player_laptime if avg > 0 else 0
+            if 0 < laps < behind[0]:
+                behind = (laps, gap, index)
+            if index == leader_index:
+                leader = (laps, gap, index)
+    if ahead[0] >= MAX_SECONDS:
+        ahead = (0.0, 0.0, -1)
+    if behind[0] >= MAX_SECONDS:
+        behind = (0.0, 0.0, -1)
+    return ahead, leader, behind
 
 
 def class_and_driver(veh_data: Sequence[VehicleDataSet], index: int) -> tuple[str, str]:

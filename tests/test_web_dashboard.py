@@ -208,17 +208,17 @@ def test_session_expires_when_unused(dashboard):
     get("/?code=TESTCODE", opener=opener)
     assert get("/api/telemetry", opener=opener)[0] == 200
     now = time.monotonic()
-    for times in DashboardHandler.sessions.values():
-        times[:] = [now - 3600, now - 60]  # used a minute ago: kept, last use updated
+    for session in DashboardHandler.sessions.values():
+        session.created, session.last_used = now - 3600, now - 60  # used a minute ago: kept, last use updated
     assert get("/api/telemetry", opener=opener)[0] == 200
-    assert next(iter(DashboardHandler.sessions.values()))[1] > now - 1
-    for times in DashboardHandler.sessions.values():
-        times[:] = [now - 3600, now - SESSION_IDLE_SECONDS - 1]  # unused for too long
+    assert next(iter(DashboardHandler.sessions.values())).last_used > now - 1
+    for session in DashboardHandler.sessions.values():
+        session.created, session.last_used = now - 3600, now - SESSION_IDLE_SECONDS - 1  # unused for too long
     assert get("/api/telemetry", opener=opener)[0] == 401
     assert not DashboardHandler.sessions
     get("/?code=TESTCODE", opener=opener)
-    for times in DashboardHandler.sessions.values():
-        times[:] = [now - SESSION_MAX_SECONDS - 1, now]  # in use, but too old
+    for session in DashboardHandler.sessions.values():
+        session.created, session.last_used = now - SESSION_MAX_SECONDS - 1, now  # in use, but too old
     assert get("/api/telemetry", opener=opener)[0] == 401
 
 
@@ -610,7 +610,7 @@ def test_slow_login_body_closed_at_deadline(monkeypatch):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         with socket.create_connection(("127.0.0.1", httpd.server_port), timeout=5) as client:
-            client.sendall(b"POST /login HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\ncode=")
+            client.sendall(b"POST /login HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 500\r\n\r\ncode=")
             client.settimeout(0.1)
             start = time.monotonic()
             closed = False

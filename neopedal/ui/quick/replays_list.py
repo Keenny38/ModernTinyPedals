@@ -30,9 +30,9 @@ from typing import Any
 from PySide6.QtCore import Property, QDate, QObject, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 
-from ...i18n import trm
+from ...i18n import tr, trm
 from ...process.game_info import GameReplay, replay_title
-from . import replay_files
+from . import dialogs, replay_files
 from .formatting import clock_minutes, date_text, day_text
 from .game_camera import Command
 from .models import DictListModel
@@ -229,14 +229,24 @@ class ReplaysList(ReplaysBase):
         message = f"Open replay <b>{replay.name}</b> in the game?"
         if self.state == SESSION:
             message = f"You are in a session: opening a replay may leave it.<br><br>{message}"
-        if self._window.confirm_operation("Watch in Game", message):
-            self.playing = replay.name
-            command = play_replay(replay.name)
-            self.action, self.action_deadline = action, time.monotonic() + ACTION_WAIT
-            self.action_generation = self.state_generation + 1  # state asked once game accepted the replay
-            self.play_command = command if action is not None else None
-            self.play_sent = command
-            self.send(command)
+        name = replay.name
+
+        def confirmed(chosen: bool):
+            if chosen:
+                self.open_replay(name, action)
+
+        dialogs.confirm(self._window, tr("Watch in Game"), trm(message), tr("Watch in Game"), confirmed)
+
+    def open_replay(self, name: str, action: ReplayAction | None):
+        """Replay opened in game (confirmed), then action done once it is open"""
+        self.playing = name
+        command = play_replay(name)
+        self.action, self.action_deadline = action, time.monotonic() + ACTION_WAIT
+        self.action_generation = self.state_generation + 1  # state asked once game accepted the replay
+        self.play_command = command if action is not None else None
+        self.play_sent = command
+        self.playbackChanged.emit()  # replay opening (openingReplay)
+        self.send(command)
 
     def watch_named(self, name: str, action: ReplayAction | None = None):
         """Replay of name opened in game (race results): at once if game lists it, else once it answers"""

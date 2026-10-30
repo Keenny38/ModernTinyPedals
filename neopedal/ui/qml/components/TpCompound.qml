@@ -16,6 +16,7 @@ Rectangle {
     Text {
         anchors.centerIn: parent
         text: badge.letter
+        textFormat: Text.PlainText
         color: theme.inkOn(badge.fill)
         font.pixelSize: Math.max(7, Math.round(badge.height * 0.66))  // letter fills the badge, as in overlays
         font.weight: Font.Bold

@@ -3,12 +3,12 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQml.Models
 import "../components"
-import "../config"
 
 // Recorded laps grouped by session: click to compare (Shift+click: every lap between), flag (or double-click)
 // to set reference lap, click a sector time: zoom charts on sector, search by vehicle, session, conditions, note.
 // Right-click a lap or a session header: keep, note, move to trash, delta best... Keys (wherever focus is on the page,
 // text fields keep them): "/" search, Delete moves the highlighted lap (legend chip) or the checked laps to trash.
+// Header: "Compare Laps ▾" (compare presets, guided analysis), "⋯" (actions on checked laps, trash).
 Card {
     id: root
 
@@ -62,8 +62,8 @@ Card {
         id: recordedMenu
         onClosed: root.menuClosed()
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
-        Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exports.exportMotec(root.menuPath) }
-        Action { text: i18n.tr("Share Lap..."); onTriggered: backend.exports.shareLap(root.menuPath) }
+        Action { text: i18n.tr("Export MoTeC…"); onTriggered: backend.exports.exportMotec(root.menuPath) }
+        Action { text: i18n.tr("Share Lap…"); onTriggered: backend.exports.shareLap(root.menuPath) }
         MenuSeparator {}
         Action {
             text: i18n.tr("Keep Lap")
@@ -71,10 +71,10 @@ Card {
             checked: root.menuKept
             onTriggered: backend.keepLap(root.menuPath, checked)
         }
-        Action { text: i18n.tr("Note..."); onTriggered: backend.editNote(root.menuPath) }
-        Action { text: i18n.tr("Use as Delta Best..."); onTriggered: backend.exports.exportDeltaBest(root.menuPath) }
+        Action { text: i18n.tr("Note…"); onTriggered: backend.editNote(root.menuPath) }
+        Action { text: i18n.tr("Use as Delta Best…"); onTriggered: backend.exports.exportDeltaBest(root.menuPath) }
         Action {
-            text: i18n.tr("Setup Differences with Reference...")
+            text: i18n.tr("Setup Differences with Reference…")
             enabled: root.menuShown
             onTriggered: setupDiff.show(root.menuPath)
         }
@@ -90,19 +90,21 @@ Card {
         Action { text: i18n.tr("Keep Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "keep") }
         Action { text: i18n.tr("Stop Keeping Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "unkeep") }
         MenuSeparator {}
-        Action { text: i18n.tr("Move Session Laps to Trash..."); onTriggered: backend.sessionAction(root.menuSession, "delete") }
+        Action { text: i18n.tr("Move Session Laps to Trash…"); onTriggered: backend.sessionAction(root.menuSession, "delete") }
     }
     TpMenu {
         id: addedMenu
         onClosed: root.menuClosed()
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
-        Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exports.exportMotec(root.menuPath) }
-        Action { text: i18n.tr("Share Lap..."); onTriggered: backend.exports.shareLap(root.menuPath) }
+        Action { text: i18n.tr("Export MoTeC…"); onTriggered: backend.exports.exportMotec(root.menuPath) }
+        Action { text: i18n.tr("Share Lap…"); onTriggered: backend.exports.shareLap(root.menuPath) }
     }
     // Setup differences of a shown lap with reference lap (lap list menu)
-    SetupDiff { id: setupDiff }
+    CarSetupDiff { id: setupDiff }
+    // Compare presets (Compare ▾): laps checked for one look, reference set
     TpMenu {
-        id: selectMenu
+        id: compareMenu
+        objectName: "compareMenu"
         onClosed: root.keysToChart()
         Action { text: i18n.tr("Best vs Last Lap"); onTriggered: backend.compareBestLast() }
         Action { text: i18n.tr("3 Best Laps"); onTriggered: backend.compareBest(3) }
@@ -126,13 +128,79 @@ Card {
             }
         }
         MenuSeparator {}
-        Action { text: i18n.tr("Uncheck All"); onTriggered: backend.clearSelection() }
+        // Guided analysis: best vs last lap, Corners tool on the corner where most time is lost
+        Action { text: i18n.tr("Analyze My Last Lap"); onTriggered: backend.analyzeLastLap() }
         MenuSeparator {}
+        Action { text: i18n.tr("Uncheck All"); onTriggered: backend.clearSelection() }
+    }
+    // Actions on checked laps (⋯), trash
+    TpMenu {
+        id: bulkMenu
+        objectName: "bulkMenu"
+        onClosed: root.keysToChart()
         Action { text: i18n.tr("Keep Checked Laps"); onTriggered: backend.keepChecked(true) }
         Action { text: i18n.tr("Stop Keeping Checked Laps"); onTriggered: backend.keepChecked(false) }
-        Action { text: i18n.tr("Export Checked Laps (MoTeC)..."); onTriggered: backend.exports.exportMotecMany(false) }
-        Action { text: i18n.tr("Move Checked Laps to Trash..."); onTriggered: backend.deleteChecked() }
-        Action { text: i18n.tr("Recently Deleted Laps..."); onTriggered: recentlyDeleted.open() }
+        Action { text: i18n.tr("Export Checked Laps (MoTeC)…"); onTriggered: backend.exports.exportMotecMany(false) }
+        MenuSeparator {}
+        Action { text: i18n.tr("Move Checked Laps to Trash…"); onTriggered: backend.deleteChecked() }
+        Action { text: i18n.tr("Recently Deleted Laps…"); onTriggered: recentlyDeleted.open() }
+    }
+    // Sessions listed (practice, qualifying, race) & order of sessions and laps (filter button beside search)
+    TpMenu {
+        id: viewMenu
+        objectName: "viewMenu"
+        onClosed: root.keysToChart()
+        Action {
+            text: i18n.tr("Practice") + "  (" + (backend.sessionCounts.practice || 0) + ")"
+            checkable: true
+            checked: backend.sessionKinds.indexOf("practice") >= 0
+            onTriggered: backend.setSessionShown("practice", checked)
+        }
+        Action {
+            // Session header name (French: Qualifications, not Qualif)
+            text: i18n.tr("Qualify") + "  (" + (backend.sessionCounts.qualify || 0) + ")"
+            checkable: true
+            checked: backend.sessionKinds.indexOf("qualify") >= 0
+            onTriggered: backend.setSessionShown("qualify", checked)
+        }
+        Action {
+            text: i18n.tr("Race") + "  (" + (backend.sessionCounts.race || 0) + ")"
+            checkable: true
+            checked: backend.sessionKinds.indexOf("race") >= 0
+            onTriggered: backend.setSessionShown("race", checked)
+        }
+        MenuSeparator {}
+        Action {
+            text: i18n.tr("Newest Sessions First")
+            checkable: true
+            checked: backend.sessionOrder === "newest"
+            onTriggered: backend.setSessionOrder("newest")
+        }
+        Action {
+            text: i18n.tr("Oldest Sessions First")
+            checkable: true
+            checked: backend.sessionOrder === "oldest"
+            onTriggered: backend.setSessionOrder("oldest")
+        }
+        Action {
+            text: i18n.tr("Fastest Sessions First")
+            checkable: true
+            checked: backend.sessionOrder === "fastest"
+            onTriggered: backend.setSessionOrder("fastest")
+        }
+        MenuSeparator {}
+        Action {
+            text: i18n.tr("Laps in Driving Order")
+            checkable: true
+            checked: backend.lapOrder === "driven"
+            onTriggered: backend.setLapOrder("driven")
+        }
+        Action {
+            text: i18n.tr("Fastest Laps First")
+            checkable: true
+            checked: backend.lapOrder === "fastest"
+            onTriggered: backend.setLapOrder("fastest")
+        }
     }
     // Laps of trash folder, restored one by one (quick selection menu)
     RecentlyDeleted { id: recentlyDeleted; objectName: "recentlyDeleted"; onClosed: root.keysToChart() }
@@ -147,38 +215,76 @@ Card {
             title: i18n.tr("Laps")
             busy: backend.loading
             TpButton {
-                id: selectButton
-                glyph: ""  // multi select
-                fallback: "☰"
+                id: compareButton
+                objectName: "compareButton"
+                text: i18n.tr("Compare Laps") + " ▾"
                 flat: true
                 size: "sm"
                 tip: i18n.tr("Quick selection: best vs last lap, best laps, uncheck all")
-                checked: selectMenu.visible
-                onClicked: selectMenu.visible ? selectMenu.close()
-                                              : selectMenu.popup(selectButton, 0, selectButton.height + theme.space1)
+                checked: compareMenu.visible
+                onClicked: compareMenu.toggleBelow(compareButton)
+                // Narrow list: label cut before the switch is (full text in tooltip)
+                Layout.maximumWidth: implicitWidth
+                Layout.minimumWidth: Math.min(implicitWidth, theme.controlHeightSm * 2.5)
+                Layout.fillWidth: true
             }
-            TpSwitch {
-                text: i18n.tr("Clean only")
-                tip: i18n.tr("Hide invalid, out & in laps")
-                checked: backend.hideUnclean
-                onToggled: backend.setHideUnclean(checked)
+            TpButton {
+                id: bulkButton
+                objectName: "bulkButton"
+                glyph: theme.glyphs.more
+                fallback: "⋯"
+                flat: true
+                size: "sm"
+                tip: i18n.tr("Checked laps: keep, export, move to trash, recently deleted")
+                checked: bulkMenu.visible
+                onClicked: bulkMenu.toggleBelow(bulkButton, true)
             }
         }
 
-        // Search: every word found in lap name, time, session, vehicle, conditions, note or setup
-        TpSearchField {
-            id: searchField
+        // Search: every word found in lap name, time, session, vehicle, conditions, note or setup; clean laps
+        // switch beside it (header kept for title & menus: narrow list, French)
+        RowLayout {
             Layout.fillWidth: true
-            implicitHeight: Math.round(theme.fieldHeight)
-            searchDelay: 250
-            placeholderText: i18n.tr("Search laps: vehicle, session, note...")
-            Component.onCompleted: text = backend.filterText  // not bound: search stripped by backend, typed text kept
-            onSearchChanged: function(text) { backend.setFilter(text) }
-            onExitField: root.keysToChart()
-            Keys.onEscapePressed: { clearSearch(); root.keysToChart() }
-            Keys.onReturnPressed: root.keysToChart()
-            Keys.onEnterPressed: root.keysToChart()
-            Keys.onDownPressed: { list.forceActiveFocus(); list.currentIndex = Math.max(list.currentIndex, 0) }  // into the list
+            spacing: theme.space3
+
+            TpSearchField {
+                id: searchField
+                Layout.fillWidth: true
+                Layout.minimumWidth: theme.controlHeight * 3
+                implicitHeight: Math.round(theme.fieldHeight)
+                searchDelay: 250
+                placeholderText: i18n.tr("Search laps: car, session, note…")
+                Component.onCompleted: text = backend.filterText  // not bound: search stripped by backend, typed text kept
+                onSearchChanged: function(text) { backend.setFilter(text) }
+                onExitField: root.keysToChart()
+                Keys.onEscapePressed: { clearSearch(); root.keysToChart() }
+                Keys.onReturnPressed: root.keysToChart()
+                Keys.onEnterPressed: root.keysToChart()
+                Keys.onDownPressed: { list.forceActiveFocus(); list.currentIndex = Math.max(list.currentIndex, 0) }  // into the list
+            }
+            TpButton {
+                id: viewButton
+                objectName: "viewButton"
+                // Highlighted while sessions are left out or listed in another order
+                readonly property bool changed: backend.sessionKinds.length < 3 || backend.sessionOrder !== "newest"
+                                                || backend.lapOrder !== "driven"
+                glyph: ""  // filter
+                fallback: "≡"
+                flat: !changed
+                size: "sm"
+                tip: i18n.tr("Sessions shown (practice, qualifying, race) and sort order")
+                checked: viewMenu.visible
+                onClicked: viewMenu.toggleBelow(viewButton)
+            }
+            TpSwitch {
+                objectName: "cleanOnlySwitch"
+                text: i18n.tr("Clean only")
+                tip: i18n.tr("Hide invalid, out & in laps")
+                Layout.maximumWidth: implicitWidth
+                checkable: false  // follows the backend (never unbound by a click)
+                checked: backend.hideUnclean
+                onClicked: backend.setHideUnclean(!backend.hideUnclean)
+            }
         }
 
         ListView {
@@ -238,20 +344,26 @@ Card {
             footer: Item {
                 width: list.width
                 height: backend.noMatch ? noMatch.height + theme.em * 2.5 : 0
-                EmptyState {
+                TpStateView {
                     id: noMatch
                     readonly property bool searching: backend.filterText !== ""
+                    readonly property bool sessionsLeft: !searching && backend.sessionKinds.length < 3  // sessions filtered
                     y: theme.space6
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: backend.noMatch
+                    empty: backend.noMatch
                     glyph: searching ? "" : ""  // search, filter
-                    title: searching ? i18n.tr("No lap matches the search") : i18n.tr("No clean lap")
-                    text: searching ? i18n.tr("Search looks in lap number, time, session, vehicle, conditions, note and setup.")
-                                    : i18n.tr("Every lap is invalid, an out lap or an in lap.")
-                    actionText: searching ? i18n.tr("Clear Search") : i18n.tr("Show All Laps")
+                    title: searching ? i18n.tr("No lap matches the search")
+                         : sessionsLeft ? i18n.tr("No lap in the sessions shown") : i18n.tr("No clean lap")
+                    text: searching ? i18n.tr("Search looks in lap number, time, session, car, conditions, note and setup.")
+                        : sessionsLeft ? i18n.tr("Practice, qualifying or race sessions are left out (filter beside the search).")
+                        : i18n.tr("Every lap is invalid, an out lap or an in lap.")
+                    actionText: searching ? i18n.tr("Clear Search")
+                              : sessionsLeft ? i18n.tr("Show All Sessions") : i18n.tr("Show All Laps")
                     onAction: {
                         if (searching) {
                             searchField.clearSearch()
+                        } else if (sessionsLeft) {
+                            backend.showAllSessions()
                         } else {
                             backend.setHideUnclean(false)
                         }
@@ -290,7 +402,7 @@ Card {
                             anchors.fill: parent
                             anchors.topMargin: row.index > 0 ? theme.space3 : 0
                             radius: theme.radiusMd
-                            color: headerArea.pressed ? theme.border : theme.rowColor(headerArea.containsMouse, false)
+                            color: headerArea.pressed ? theme.surfaceSunken : theme.rowColor(headerArea.containsMouse, false)
                             Behavior on color { enabled: row.live; ColorAnimation { duration: theme.motionFast } }
                             FocusRing { visible: row.ListView.isCurrentItem && list.activeFocus }
                             RowLayout {
@@ -301,13 +413,14 @@ Card {
                                 Icon {
                                     glyph: ""  // chevron right
                                     fallback: "›"
-                                    size: theme.em * 0.75
+                                    size: theme.iconXs
                                     color: theme.dimText
                                     rotation: row.open ? 90 : 0
                                     Behavior on rotation { enabled: row.live; NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutCubic } }
                                 }
                                 Text {
                                     text: row.title
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -321,27 +434,17 @@ Card {
                                 }
                                 Text {
                                     text: row.info
+                                    textFormat: Text.PlainText
                                     visible: text !== ""
                                     color: theme.dimText
                                     font.pointSize: theme.fontSmall
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
                                 }
-                                Rectangle {
-                                    radius: height / 2
-                                    color: theme.hover
-                                    implicitWidth: countText.implicitWidth + theme.em * 0.9
-                                    implicitHeight: countText.implicitHeight + theme.em * 0.15
-                                    Text {
-                                        id: countText
-                                        anchors.centerIn: parent
-                                        text: row.count
-                                        color: theme.dimOn(theme.hover)
-                                        font.pointSize: theme.fontSmall
-                                    }
-                                }
+                                TpCountBadge { text: row.count }
                                 Text {
                                     text: row.time
+                                    textFormat: Text.PlainText
                                     color: theme.dimText
                                     font.features: { "tnum": 1 }
                                 }
@@ -388,10 +491,12 @@ Card {
                         required property string color
                         required property bool dim
                         required property bool fastest
+                        required property bool personalBest
                         required property bool error
                         required property string gap
                         required property string tip
                         required property string hint  // lap of another circuit than reference lap: never compared
+                        required property string compound  // tyre compound of lap ("" not recorded, session rows)
                         // Reused row (ListView.reuseItems, one pool per row type): fed other values at once, no animation
                         property bool live: true
                         ListView.onPooled: { live = false; opacity = 1 }  // remove transition may have faded it out
@@ -424,7 +529,7 @@ Card {
                                 anchors.left: parent.left
                                 anchors.top: parent.top
                                 anchors.bottom: parent.bottom
-                                anchors.margins: theme.em * 0.4
+                                anchors.margins: theme.space3
                                 color: row.color || "transparent"
                                 scale: row.color ? 1 : 0
                                 Behavior on scale { enabled: row.live; NumberAnimation { duration: theme.motionBase; easing.type: Easing.OutBack } }
@@ -455,7 +560,7 @@ Card {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: theme.em * 1.0
+                                anchors.leftMargin: theme.padPopup
                                 anchors.rightMargin: theme.space3
                                 spacing: theme.space3
                                 id: lapContent
@@ -474,7 +579,7 @@ Card {
                                         anchors.centerIn: parent
                                         glyph: row.error ? "" : ""  // warning, check mark
                                         fallback: row.error ? "!" : "✓"
-                                        size: theme.em * 0.75
+                                        size: theme.iconXs
                                         color: theme.inkOn(row.error ? theme.warning : (row.color || theme.accentFill))
                                         opacity: row.checked || row.error ? 1 : 0
                                         Behavior on opacity { enabled: row.live; NumberAnimation { duration: theme.motionFast } }
@@ -485,10 +590,11 @@ Card {
                                     Layout.fillWidth: true
                                     spacing: 0
                                     RowLayout {
-                                        spacing: theme.em * 0.4
+                                        spacing: theme.space3
                                         Text {
-                                            text: (row.fastest ? "★ " : "") + row.title
-                                            color: lapContent.other ? theme.dimText : row.fastest ? theme.gold : theme.text
+                                            text: row.title
+                                            textFormat: Text.PlainText
+                                            color: lapContent.other ? theme.dimText : theme.text
                                             font.weight: row.reference ? Font.Bold : Font.Normal
                                             font.italic: lapContent.other
                                         }
@@ -502,7 +608,7 @@ Card {
                                                 id: refText
                                                 anchors.centerIn: parent
                                                 text: i18n.tr("REF")
-                                                color: "white"
+                                                color: theme.accentInk
                                                 font.pointSize: theme.fontCaption
                                                 font.weight: Font.Bold
                                             }
@@ -511,15 +617,26 @@ Card {
                                         Text {
                                             visible: row.gap !== ""
                                             text: row.gap
+                                            textFormat: Text.PlainText
                                             color: theme.dimText
                                             font.pointSize: theme.fontCaption
                                             font.features: { "tnum": 1 }
                                         }
-                                        Text {
+                                        TpCompound {  // tyre compound badge, as Results, Stats & Calculator
+                                            visible: row.compound !== ""
+                                            name: row.compound.split("/")[0]  // front compound when they differ
+                                            HoverHandler { id: compoundHover }
+                                            ToolTip.visible: compoundHover.hovered
+                                            ToolTip.text: row.compound
+                                            ToolTip.delay: theme.tipDelay
+                                        }
+                                        // Session fastest lap: ◆ purple, personal best of track: ● green (shared mark)
+                                        TpLapTime {
                                             text: row.time
-                                            color: row.dim || lapContent.other ? theme.dimText : theme.text
-                                            font.features: { "tnum": 1 }
-                                            font.weight: Font.DemiBold
+                                            record: lapContent.other ? "" : row.fastest ? "session" : row.personalBest ? "personal" : ""
+                                            textColor: row.dim || lapContent.other ? theme.dimText : theme.text
+                                            strong: true
+                                            reserveMark: false
                                         }
                                     }
                                     RowLayout {
@@ -531,6 +648,7 @@ Card {
                                         Text {
                                             text: row.note === "" ? row.info
                                                 : (row.info !== "" ? row.info + " · " : "") + "“" + row.note + "”"
+                                            textFormat: Text.PlainText
                                             color: theme.dimText
                                             font.pointSize: theme.fontSmall
                                             elide: Text.ElideRight
@@ -547,7 +665,7 @@ Card {
                                     size: "sm"
                                     focusPolicy: Qt.NoFocus  // keys: Enter on the lap row sets reference (no hidden focus stop)
                                     tip: i18n.tr("Set as Reference")
-                                    opacity: row.reference ? 1 : (lapArea.containsMouse || hovered ? 0.8 : 0)
+                                    opacity: row.reference || lapArea.containsMouse || hovered ? 1 : 0  // revealed: hover, reference
                                     checked: row.reference
                                     Behavior on opacity { enabled: row.live; NumberAnimation { duration: theme.motionFast } }
                                     onClicked: backend.setReference(row.path)
@@ -562,6 +680,7 @@ Card {
         Text {
             visible: text !== ""
             text: backend.bestText
+            textFormat: Text.PlainText
             color: theme.purple
             font.weight: Font.DemiBold
             Layout.leftMargin: theme.space2
@@ -576,11 +695,11 @@ Card {
         compact: true
         loading: backend.loading && list.count === 0
         empty: !backend.loading && list.count === 0 && !backend.noMatch
-        loadingText: i18n.tr("Reading laps...")
+        loadingText: i18n.tr("Reading laps…")
         glyph: "\uE81C"  // history
         title: i18n.tr("No recorded lap")
         text: i18n.tr("Laps driven on this track are listed here once recorded. Laps from elsewhere: Import.")
-        actionText: i18n.tr("Add File...")
+        actionText: i18n.tr("Add File…")
         onAction: backend.exports.addFiles()
     }
 
@@ -592,6 +711,7 @@ Card {
         property int sector
         property var chart
         text: value
+        textFormat: Text.PlainText
         color: sectorArea.containsMouse ? theme.accent : best ? theme.purple : theme.dimText
         font.pointSize: theme.fontSmall
         font.features: { "tnum": 1 }
@@ -599,7 +719,7 @@ Card {
         MouseArea {
             id: sectorArea
             anchors.fill: parent
-            enabled: sectorText.value !== "-" && sectorText.chart !== undefined
+            enabled: sectorText.value !== "—" && sectorText.value !== "" && sectorText.chart !== undefined
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: sectorText.chart.zoomSector(sectorText.sector)

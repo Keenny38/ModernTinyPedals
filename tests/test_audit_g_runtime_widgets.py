@@ -48,13 +48,9 @@ def test_session_best_index_wraps_at_last_car(widgets, monkeypatch, modern):  # 
     reader(monkeypatch, "vehicle", "total_vehicles", 3)
     reader(monkeypatch, "timing", "best_laptime", best_laptime)
     for _ in range(9):
-        if modern:
-            widget.session_best()
-        else:
-            widget.timerEvent(None)
+        widget.timerEvent(None)
     assert set(asked) == {0, 1, 2}
-    best = widget.laptime_session_best if modern else widget.laptime_sbst
-    assert best == 91.0
+    assert widget.session_best.laptime == 91.0
 
 
 # --- 22: failed reload never runs its callbacks later, queued reload still runs
@@ -110,7 +106,7 @@ def test_recording_refused_while_previous_still_closing(tmp_path):
 # --- 24: unknown signature refused for a custom update repository
 @pytest.mark.parametrize("repo, refused", [("someone/fork", True), (update.FORK_REPO_NAME, False)])
 def test_unknown_signature_custom_repository(monkeypatch, repo, refused):
-    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNKNOWN)
+    monkeypatch.setattr(update, "check_signature", lambda path, **kwargs: update.Signature(update.SIGNATURE_UNKNOWN))
     if refused:
         with pytest.raises(update.UnsignedInstallerError):
             update.verify_installer("Setup.exe", repo)
@@ -138,8 +134,11 @@ def test_local_server_short_poll_interval():
 def test_non_ascii_session_cookie(monkeypatch):
     token = "abc"
     now = time.monotonic()
-    monkeypatch.setattr(DashboardHandler, "sessions", {token: [now, now]})
+    from neopedal.web_dashboard import Session
+
+    monkeypatch.setattr(DashboardHandler, "sessions", {token: Session(now, "127.0.0.1", True)})
     handler = DashboardHandler.__new__(DashboardHandler)
+    handler.client_address = ("127.0.0.1", 50000)
     handler.headers = {"Cookie": "np_session=été"}  # type: ignore[assignment]
     assert not handler.has_session()
     handler.headers = {"Cookie": f"np_session={token}"}  # type: ignore[assignment]

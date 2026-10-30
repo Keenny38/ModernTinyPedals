@@ -122,7 +122,8 @@ class Realtime(Overlay):
     # GUI update methods
     def update_slip_ratio(self, target, data):
         """Slip ratio"""
-        if target.last != data:
+        critical = data > self.opt_range
+        if target.changed(data, critical):
             target.last = data
-            target.input_color = self.slip_ratio_color[data > self.opt_range]
+            target.input_color = self.slip_ratio_color[critical]
             target.update_input(data)

@@ -440,6 +440,7 @@ def test_elevation_profile_and_position(widgets, monkeypatch):
     minfo.mapping.trackMap = minfo.mapping.trackMap._replace(elevations=tuple(points), sectors=(60, 130),
                                                              lastModified=123.0)
     reader(monkeypatch, "lap", "progress", 0.5)
+    reader(monkeypatch, "lap", "distance", 1990.0)  # profile scale: first node 0, last 3980 m
     reader(monkeypatch, "vehicle", "position_vertical", 12.34)
     widget = widgets("elevation")
     image = update(widget)

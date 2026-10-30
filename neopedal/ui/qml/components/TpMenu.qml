@@ -1,7 +1,11 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// Popup menu: rounded, fades in, items highlighted on hover, check marks, separators (MenuSeparator {})
+// Popup menu: flyout surface with a soft shadow, fades in, items highlighted on hover, check marks, separators
+// (MenuSeparator {}). Menu of a button: toggleBelow(button) opens it below the button (theme gap), a second click
+// on the same button closes it (instead of closing & opening again), keyboard focus back on the button after Esc.
+//   TpButton { id: more; onClicked: moreMenu.toggleBelow(more); TpMenu { id: moreMenu; ... } }
+//   moreMenu.toggleBelow(hudButton, true)  // right edges aligned (button at the page's right edge)
 Menu {
     id: menu
     padding: 4
@@ -26,6 +30,30 @@ Menu {
     implicitWidth: Math.min(Math.max(theme.em * 13, widestItem + leftPadding + rightPadding),
                             parent && parent.Window.window ? parent.Window.width - theme.em : theme.em * 40)
 
+    // Button the menu was opened from by toggleBelow (null: opened otherwise). A press on it does not close the
+    // menu (close policy: outside of its parent, the button), its click then closes it: one click, one toggle.
+    property Item toggleSource: null
+    property bool refocusSource: false  // button had keyboard focus: given back when the menu closes
+    function toggleBelow(source, alignRight) {
+        if (visible) {
+            close()
+            if (toggleSource === source)
+                return
+        }
+        toggleSource = source
+        refocusSource = source.activeFocus === true
+        measureItems()
+        popup(source, alignRight === true ? source.width - Math.max(width, implicitWidth) : 0, source.height + theme.space1)
+    }
+    closePolicy: toggleSource !== null ? Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                                       : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    onClosed: {
+        var source = toggleSource
+        toggleSource = null
+        if (source !== null && refocusSource)
+            source.forceActiveFocus()
+    }
+
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: theme.motionFast }
         NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: theme.motionFast; easing.type: Easing.OutCubic }
@@ -35,9 +63,10 @@ Menu {
     background: Rectangle {
         implicitWidth: theme.em * 13
         radius: theme.radiusLg
-        color: theme.raised
+        color: theme.surfaceFlyout
         border.width: 1
-        border.color: theme.border
+        border.color: theme.strokeSubtle
+        TpShadow {}
     }
 
     delegate: TpMenuItem {}

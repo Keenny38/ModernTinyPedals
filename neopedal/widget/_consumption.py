@@ -21,10 +21,14 @@ Fuel & virtual energy classic widget base
 
 Upper row: remaining, refill, consumption (+ pit stops, delta, widget own cells), lower row:
 estimated laps & minutes, saving target (+ early pit stops, end remaining...), level bar between.
+Each cell is shown by its own option ("show_<cell name>"): a hidden cell leaves its place empty while
+the cell above or below it is shown (columns of both rows stay aligned), a column with no cell is left out.
 """
 
 from collections.abc import Callable
 from typing import Any, NamedTuple
+
+from PySide6.QtWidgets import QGridLayout
 
 from ._base import Overlay
 from ._common import warning_flash
@@ -36,13 +40,14 @@ LOW_PADDING = 0.00000001  # value padding while low warning shown (cell drawn ag
 
 
 class Shown(NamedTuple):
-    """Options of cells & warning shown"""
+    """Options of warning & level bar shown"""
 
     flash: bool  # low amount warning flash
     absolute: bool  # absolute refill amount
-    pits: bool  # pit stop counts
-    delta: bool  # delta consumption & end remaining
     level: bool  # level bar
+
+
+Cell = tuple[str, str]  # cell name (option names: decimal_places_<name>...), option showing it
 
 
 class ConsumptionBars(Overlay):
@@ -55,11 +60,11 @@ class ConsumptionBars(Overlay):
     refill: str  # refill option name
     amount: str  # amount option name
 
-    def set_consumption_bars(self, extra_cells: tuple[tuple[str, str, bool, int], ...] = ()):
+    def set_consumption_bars(self, extra_columns: tuple[tuple[Cell, Cell], ...] = ()):
         """Cells, captions & level bar
 
         Args:
-            extra_cells: widget own cells (attribute, option name, lower row, column).
+            extra_columns: widget own cells after common ones, (upper cell, lower cell) of each column.
         """
         wcfg = self.wcfg
         layout = self.set_grid_layout(gap=wcfg["bar_gap"])
@@ -78,7 +83,7 @@ class ConsumptionBars(Overlay):
         bar_padx = self.set_padding(wcfg["font_size"], wcfg["bar_padding"])
         self.bar_width = max(wcfg["bar_width"], 3)
         self.style_width = font_m.width * self.bar_width + bar_padx
-        self.column_count = 0
+        self.cells: dict[str, Any] = {}  # shown value cells by name
 
         # Create layout
         self.layout_upper = self.set_grid_layout()
@@ -103,28 +108,39 @@ class ConsumptionBars(Overlay):
         self.bar_style_need = (wcfg[f"background_color_{refill}"], low_color)
         caption_need = (f"caption_text_absolute_{refill}" if wcfg[f"show_absolute_{refill}"]
                         else f"caption_text_{refill}")
-        self.bar_curr = self.set_cell("remaining", False, 1, bg_color=self.bar_style_curr[0])
-        self.bar_need = self.set_cell(refill, False, 2, bg_color=self.bar_style_need[0], caption=caption_need)
-        self.bar_laps = self.set_cell("estimated_laps", True, 1)
-        self.bar_mins = self.set_cell("estimated_minutes", True, 2)
-        self.bar_used = self.set_cell("estimated_consumption", False, 3)
-        self.bar_save = self.set_cell("saving_target", True, 3)
-        if wcfg["show_estimated_pitstop_count"]:
+        backgrounds = {"remaining": self.bar_style_curr[0], refill: self.bar_style_need[0]}
+        captions = {refill: caption_need}
+        columns: tuple[tuple[Cell, Cell], ...] = (
             # Estimate pit stop counts when pitting at end of current stint, or end of current lap
-            self.bar_pits = self.set_cell("pitstop_count", False, 0)
-            self.bar_early = self.set_cell("early_pitstop_count", True, 0)
-        if wcfg["show_delta_consumption_and_end_remaining"]:
-            self.bar_delta = self.set_cell("delta_consumption", False, 4)
-            self.bar_end = self.set_cell("end_remaining", True, 4)
-        for attr, name, lower, column in extra_cells:
-            setattr(self, attr, self.set_cell(name, lower, column))
+            (("pitstop_count", "show_estimated_pitstop_count"), ("early_pitstop_count", "show_early_pitstop_count")),
+            (("remaining", "show_remaining"), ("estimated_laps", "show_estimated_laps")),
+            ((refill, f"show_{refill}"), ("estimated_minutes", "show_estimated_minutes")),
+            (("estimated_consumption", "show_estimated_consumption"), ("saving_target", "show_saving_target")),
+            (("delta_consumption", "show_delta_consumption"), ("end_remaining", "show_end_remaining")),
+            *extra_columns,
+        )
+        column = 0
+        for pair in columns:
+            shown = tuple(bool(wcfg[option]) for _, option in pair)
+            if not any(shown):  # column left out
+                continue
+            for lower, ((name, _), cell_shown) in enumerate(zip(pair, shown)):
+                if cell_shown:
+                    self.cells[name] = self.set_cell(name, bool(lower), column, backgrounds.get(name, ""),
+                                                     captions.get(name, ""))
+            column += 1
+        self.column_count = column
+        # Empty place of a hidden cell (row showing any cell): columns of both rows aligned
+        for row_layout in (self.layout_upper, self.layout_lower):
+            if row_layout.count():
+                fill_columns(row_layout, column, self.style_width)
 
         # Level bar
         amount = self.amount
         if wcfg[f"show_{amount}_level_bar"]:
             self.bar_level = FuelLevelBar(
                 self,
-                width=(font_m.width * self.bar_width + bar_padx) * self.column_count,
+                width=(font_m.width * self.bar_width + bar_padx) * max(self.column_count, 1),  # one cell wide if none
                 height=max(wcfg[f"{amount}_level_bar_height"], 1),
                 start_mark_width=max(wcfg[f"starting_{amount}_level_mark_width"], 1),
                 refill_mark_width=max(wcfg[f"{refill}_level_mark_width"], 1),
@@ -142,8 +158,6 @@ class ConsumptionBars(Overlay):
         self.shown = Shown(
             wcfg[f"show_low_{amount}_warning_flash"],
             wcfg[f"show_absolute_{refill}"],
-            wcfg["show_estimated_pitstop_count"],
-            wcfg["show_delta_consumption_and_end_remaining"],
             wcfg[f"show_{amount}_level_bar"],
         )
         if self.shown.flash:
@@ -168,8 +182,6 @@ class ConsumptionBars(Overlay):
         bar.decimals = max(wcfg[f"decimal_places_{name}"], 0)
         layout = self.layout_lower if lower else self.layout_upper
         layout.addWidget(bar, 1, column)
-        if not lower:
-            self.column_count += 1
         if wcfg["show_caption"]:
             font_cap_m = self.font_cap_m
             cap_temp = self.set_rawtext(
@@ -195,23 +207,22 @@ class ConsumptionBars(Overlay):
             padding = 0
         absolute = shown.absolute
         data = consumption_data(source, convert, absolute)
+        update = self.update_cell
 
         # Remaining & total needed
-        self.update_value(self.bar_curr, data.remaining + padding, self.bar_style_curr[is_low])
-        self.update_value(self.bar_need, data.needed + padding, self.bar_style_need[is_low], "" if absolute else "+")
+        update("remaining", data.remaining + padding, self.bar_style_curr[is_low])
+        update(self.refill, data.needed + padding, self.bar_style_need[is_low], "" if absolute else "+")
         # Estimated laps & minutes can last, consumption, one less pit consumption
-        self.update_value(self.bar_laps, data.laps)
-        self.update_value(self.bar_mins, data.minutes)
-        self.update_value(self.bar_used, data.used)
-        self.update_value(self.bar_save, data.save)
+        update("estimated_laps", data.laps)
+        update("estimated_minutes", data.minutes)
+        update("estimated_consumption", data.used)
+        update("saving_target", data.save)
         # Estimate pit stop counts when pitting at end of current stint, or current lap
-        if shown.pits:
-            self.update_value(self.bar_pits, data.pits_end)
-            self.update_value(self.bar_early, data.pits_early)
+        update("pitstop_count", data.pits_end)
+        update("early_pitstop_count", data.pits_early)
         # Delta consumption & estimated end remaining
-        if shown.delta:
-            self.update_value(self.bar_delta, data.delta, None, "+")
-            self.update_value(self.bar_end, data.end)
+        update("delta_consumption", data.delta, None, "+")
+        update("end_remaining", data.end)
 
         # Level bar
         if shown.level:
@@ -227,11 +238,29 @@ class ConsumptionBars(Overlay):
                 )
 
     # GUI update methods
+    def update_cell(self, name: str, data, color=None, sign=""):
+        """Update value cell by name, if shown"""
+        target = self.cells.get(name)
+        if target is not None:
+            self.update_value(target, data, color, sign)
+
     def update_value(self, target, data, color=None, sign=""):
-        """Update value cell (color: background of low amount warning)"""
-        if target.last != data:
-            target.last = data
-            target.text = f"{data:{sign}.{target.decimals}f}"[:self.bar_width].strip(".")
+        """Update value cell (color: background of low amount warning)
+
+        Drawn again once its text or color changes, not on every change of the raw amount (continuous value
+        of the fuel module: a repaint of every cell on every update while the shown digits do not move).
+        """
+        text = f"{data:{sign}z.{target.decimals}f}"[:self.bar_width].strip(".")
+        shown = (text, color)
+        if target.last != shown:
+            target.last = shown
+            target.text = text
             if color:  # low amount warning
                 target.bg = color
             target.update()
+
+
+def fill_columns(layout: QGridLayout, count: int, width: int):
+    """Keep place of hidden cells in a row: every column of row at least cell wide"""
+    for column in range(count):
+        layout.setColumnMinimumWidth(column, width)

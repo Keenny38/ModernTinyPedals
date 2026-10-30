@@ -47,7 +47,7 @@ def heatmap_around(optimal: int) -> tuple:
 
 
 class TyreCompounds:
-    """Tyre compounds read while in pits (or when pit state changes), heatmap per wheel
+    """Tyre compounds read while in pits (or when pit state changes, or after reset), heatmap per wheel
 
     Heatmap of a wheel: centered on optimal temperature given by game (LMU) if optimal option,
     else heatmap of compound (auto matching), else fixed heatmap.
@@ -86,6 +86,11 @@ class TyreCompounds:
                 for optimal, heat in zip(self.optimal, self.compound_heat)
             ]
         return changed
+
+    def reset(self):
+        """Read compounds again on next update (followed car changed, session changed, back to garage: see overlay
+        vehicle_reset), whatever pit state"""
+        self.last_in_pits = -1
 
     def update_compounds(self) -> bool:
         """Read compounds while in pits or when pit state changes, True if changed"""

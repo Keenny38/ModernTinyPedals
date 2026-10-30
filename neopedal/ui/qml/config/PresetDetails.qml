@@ -3,16 +3,31 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "../components"
 
-// Details of selected preset (Presets page, wide windows): load, actions, auto load tags (car classes,
-// tracks: add & remove), preset hotkeys, overlays & modules it turns on, file info.
+// Details of selected preset (Presets page, wide windows): load, actions, auto load tags (car classes for every
+// session or one session, tracks: add & remove), preset hotkeys, overlays & modules it turns on, file info. Compare
+// opens the comparison panel of the page (this preset with the loaded one).
 Card {
     id: details
     property var info: ({ "found": false })
     signal nameRequested(string mode)  // duplicate, rename
     signal classMenuRequested(Item item)
     signal trackMenuRequested(Item item)
+    signal compareRequested()
 
     readonly property bool found: info.found === true
+    // Classes this preset can still be set for, in any session (classChoices: lists by session, "" every session)
+    readonly property bool hasClassChoices: {
+        var choices = info.classChoices || {}
+        for (var session in choices)
+            if (choices[session].length > 0)
+                return true
+        return false
+    }
+
+    function sessionLabel(session) {
+        return session === "practice" ? i18n.tr("Practice") : session === "qualify" ? i18n.tr("Qualify")
+             : session === "race" ? i18n.tr("Race") : i18n.tr("Every session")
+    }
 
     component SectionTitle: TpSectionLabel {
         Layout.fillWidth: true
@@ -33,16 +48,17 @@ Card {
                 x: theme.em * 0.4
                 anchors.verticalCenter: parent.verticalCenter
                 glyph: action.glyph
-                size: theme.em * 0.95
+                size: theme.iconSm
                 color: action.danger ? theme.loss : theme.dimText
             }
             Text {
                 id: actionText
                 anchors.left: actionIcon.visible ? actionIcon.right : parent.left
-                anchors.leftMargin: theme.em * 0.6
+                anchors.leftMargin: theme.space4
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: action.text
+                textFormat: Text.PlainText
                 color: action.danger ? theme.loss : theme.text
                 elide: Text.ElideRight
             }
@@ -82,13 +98,14 @@ Card {
         ColumnLayout {
             id: column
             width: flick.width - theme.em * 0.6
-            spacing: theme.em * 0.4
+            spacing: theme.space3
             visible: details.found
 
             // Name & load
             Text {
                 Layout.fillWidth: true
                 text: details.info.name || ""
+                textFormat: Text.PlainText
                 color: theme.text
                 font.pointSize: theme.fontHeading
                 font.weight: Font.DemiBold
@@ -99,17 +116,18 @@ Card {
             Text {
                 Layout.fillWidth: true
                 text: details.info.date || ""
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.3
+                spacing: theme.space2
                 Pill { visible: details.info.loaded === true; text: i18n.tr("Loaded"); solid: true }
                 Pill {
                     visible: details.info.locked === true
-                    glyph: ""  // lock
+                    glyph: theme.glyphs.lock
                     text: i18n.tr("Locked") + (details.info.lockVersion ? " " + details.info.lockVersion : "")
                     tint: theme.dimText
                     tip: i18n.tr("Locked: changes are not saved")
@@ -124,7 +142,7 @@ Card {
             }
             TpButton {
                 Layout.fillWidth: true
-                Layout.topMargin: theme.em * 0.3
+                Layout.topMargin: theme.space2
                 visible: details.info.loaded !== true
                 accent: true
                 glyph: ""  // play
@@ -139,7 +157,7 @@ Card {
                 columns: 2
                 columnSpacing: theme.em * 0.2
                 rowSpacing: 0
-                ActionButton { glyph: ""; text: i18n.tr("Duplicate"); onClicked: details.nameRequested("duplicate") }  // copy
+                ActionButton { glyph: theme.glyphs.copy; text: i18n.tr("Duplicate"); onClicked: details.nameRequested("duplicate") }  // copy
                 ActionButton {
                     glyph: ""  // rename
                     text: i18n.tr("Rename")
@@ -147,20 +165,20 @@ Card {
                     onClicked: details.nameRequested("rename")
                 }
                 ActionButton {
-                    glyph: details.info.locked ? "" : ""  // unlock, lock
+                    glyph: details.info.locked ? theme.glyphs.lock : theme.glyphs.unlock  // state shown, text tells the action
                     text: details.info.locked ? i18n.tr("Unlock Preset") : i18n.tr("Lock Preset")
                     onClicked: backend.toggleLock(details.info.key)
                 }
                 ActionButton { glyph: ""; text: i18n.tr("Backup Preset"); onClicked: backend.backup(details.info.key) }  // history
-                ActionButton { glyph: ""; text: i18n.tr("Export Package..."); onClicked: backend.exportPackage(details.info.key) }  // export
+                ActionButton { glyph: theme.glyphs.export; text: i18n.tr("Export Package…"); onClicked: backend.exportPackage(details.info.key) }  // export
                 ActionButton {
                     glyph: ""  // library
                     text: i18n.tr("Compare with Loaded Preset")
                     enabled: details.info.loaded !== true
-                    onClicked: backend.compare(details.info.key)
+                    onClicked: details.compareRequested()
                 }
                 ActionButton {
-                    glyph: ""  // delete
+                    glyph: theme.glyphs.delete
                     text: i18n.tr("Delete")
                     danger: true
                     enabled: details.info.loaded !== true && details.info.locked !== true
@@ -183,19 +201,23 @@ Card {
                 spacing: theme.space2
                 Repeater {
                     model: details.info.classes || []
-                    TpTag {
+                    TpChip {
                         required property var modelData
-                        text: modelData.name
+                        interactive: false
+                        // Class preset of one session: "GT3 · Race"
+                        text: modelData.name + (modelData.session ? "  ·  " + details.sessionLabel(modelData.session) : "")
+                        showDot: true
                         dotColor: modelData.color !== "" ? modelData.color : theme.accent
                         maximumTextWidth: Math.max(theme.em * 4, flick.width - theme.em * 4)
                         removable: true
-                        onRemoveRequested: backend.removePrimaryClass(modelData.name)
+                        onRemoveRequested: backend.removePrimaryClassSession(modelData.name, modelData.session || "")
                     }
                 }
                 Repeater {
                     model: details.info.tracks || []
-                    TpTag {
+                    TpChip {
                         required property string modelData
+                        interactive: false
                         text: modelData
                         glyph: ""  // flag
                         maximumTextWidth: Math.max(theme.em * 4, flick.width - theme.em * 5)
@@ -206,20 +228,21 @@ Card {
             }
             RowLayout {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.3
+                spacing: theme.space2
                 TpButton {
                     id: addClass
                     flat: true
-                    glyph: ""  // add
+                    glyph: theme.glyphs.add
                     text: i18n.tr("Car Class")
-                    enabled: (details.info.classChoices || []).length > 0
+                    enabled: details.hasClassChoices
+                    tip: i18n.tr("Every session, or only practice, qualifying or race")
                     size: "sm"
                     onClicked: details.classMenuRequested(addClass)
                 }
                 TpButton {
                     id: addTrack
                     flat: true
-                    glyph: ""  // add
+                    glyph: theme.glyphs.add
                     text: i18n.tr("Track")
                     enabled: (details.info.trackChoices || []).length > 0
                     tip: (details.info.trackChoices || []).length === 0 ? i18n.tr("Tracks come from Track Info Editor (Tools)") : ""
@@ -231,6 +254,7 @@ Card {
                 Layout.fillWidth: true
                 visible: (details.info.hotkeys || []).length > 0
                 text: i18n.trm("Preset hotkeys: " + (details.info.hotkeys || []).join(", "))
+                textFormat: Text.PlainText
                 color: theme.dimText
                 wrapMode: Text.WordWrap
                 font.pointSize: theme.fontLabel
@@ -242,7 +266,7 @@ Card {
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.3
+                spacing: theme.space2
                 Repeater {
                     model: details.info.overlayNames || []
                     Pill { required property string modelData; text: modelData; tint: theme.dimText }
@@ -254,7 +278,7 @@ Card {
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.3
+                spacing: theme.space2
                 Repeater {
                     model: details.info.moduleNames || []
                     Pill { required property string modelData; text: modelData; tint: theme.dimText }
@@ -265,6 +289,7 @@ Card {
                 Layout.fillWidth: true
                 Layout.topMargin: theme.em * 0.5
                 text: (details.info.key || "") + "  ·  " + (details.info.size || "")
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontCaption
                 elide: Text.ElideMiddle
@@ -272,9 +297,9 @@ Card {
         }
     }
 
-    EmptyState {
+    TpStateView {
         anchors.centerIn: parent
-        visible: !details.found
+        empty: !details.found
         glyph: ""  // library
         title: i18n.tr("No preset selected")
         text: i18n.tr("Select a preset to see what it contains.")

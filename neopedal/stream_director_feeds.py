@@ -264,9 +264,9 @@ class PlacementStore:
         if self._active:
             data[self.ACTIVE] = self._active
         try:
-            with atomic_write(os.path.join(self._folder, self.filename)) as file:
+            with atomic_write(os.path.join(self._folder, self.filename), raise_error=True) as file:
                 file.write(json.dumps(data, indent=1))
-        except OSError as error:
+        except OSError as error:  # raised (not discarded in silence): a lost layout is logged (audit BUG-021)
             logger.warning("STREAM OVERLAY: layout not saved: %s", error)
 
 

@@ -20,18 +20,42 @@
 Bug report dialog
 """
 
+import html
 import logging
 import os
+import platform
+from urllib.parse import urlencode
 
 from PySide6.QtCore import QStandardPaths, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QVBoxLayout
 
 from ..bug_report import create_bug_report, default_report_filename, snapshot_report
+from ..const_app import URL_FORK, VERSION
 from ..i18n import tr, trm
 from ._common import BaseDialog, CompactButton, UIScaler, confirm_action, singleton_dialog
 
 logger = logging.getLogger(__name__)
+ISSUE_DESCRIPTION_CHARS = 3000  # description put in a new issue address (browsers take about 8000 characters)
+
+
+def issue_url(description: str = "") -> str:
+    """Address of a new GitHub issue of this version, filled with app version & system (no log, no path, no name:
+    nothing leaves the computer until the user submits it on GitHub), and the description typed"""
+    from PySide6 import __version__ as pyside_version
+    from PySide6.QtCore import qVersion
+
+    text = description.strip()[:ISSUE_DESCRIPTION_CHARS]
+    title = text.splitlines()[0][:80] if text else ""
+    body = "\n".join((
+        "### What happened", "", text or "<!-- What you did, what happened, what you expected -->", "",
+        "### Version", "",
+        f"- NeoPedal {VERSION}",
+        f"- {platform.system()} {platform.release()} ({platform.machine()})",
+        f"- Python {platform.python_version()}, Qt {qVersion()}, PySide6 {pyside_version}", "",
+        "<!-- Attach the bug report zip (Help > Create Bug Report > Save Report…) -->",
+    ))
+    return f"{URL_FORK}/issues/new?{urlencode({'title': title, 'body': body})}"
 
 
 @singleton_dialog("bug_report")
@@ -54,11 +78,17 @@ class BugReport(BaseDialog):
         self.edit_description.setPlaceholderText(tr("Describe the problem: what you did, what happened, what you expected."))
         self.edit_description.setMinimumSize(UIScaler.size(30), UIScaler.size(10))
 
-        self.button_save = button_save = CompactButton(tr("Save Report..."))
+        self.button_save = button_save = CompactButton(tr("Save Report…"))
         button_save.clicked.connect(self.save_report)
+        self.button_issue = button_issue = CompactButton(tr("Open GitHub Issue…"))
+        button_issue.setToolTip(tr(
+            "Opens a new issue on GitHub in your browser, filled with the app version, your system and the "
+            "description above. Nothing is sent until you submit it there: attach the saved report zip to it."))
+        button_issue.clicked.connect(self.open_issue)
         button_close = CompactButton(tr("Close"))
         button_close.clicked.connect(self.reject)
         layout_button = QHBoxLayout()
+        layout_button.addWidget(button_issue)
         layout_button.addStretch(1)
         layout_button.addWidget(button_save)
         layout_button.addWidget(button_close)
@@ -70,6 +100,10 @@ class BugReport(BaseDialog):
         layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
         self.setLayout(layout)
 
+    def open_issue(self):
+        """New GitHub issue in the browser, filled with version, system & description (user submits it there)"""
+        QDesktopServices.openUrl(QUrl(issue_url(self.edit_description.toPlainText()), QUrl.ParsingMode.TolerantMode))
+
     def is_saving(self) -> bool:
         """Report zip being written in background"""
         return self._jobs.is_busy("report")
@@ -79,7 +113,7 @@ class BugReport(BaseDialog):
             return
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
         filename, _ = QFileDialog.getSaveFileName(
-            self, tr("Save Report..."), os.path.join(folder, default_report_filename()), "Zip (*.zip)"
+            self, tr("Save Report…"), os.path.join(folder, default_report_filename()), "Zip (*.zip)"
         )
         if not filename:
             return
@@ -101,7 +135,7 @@ class BugReport(BaseDialog):
         self.unsetCursor()
         if not isinstance(error, OSError):
             logger.error("BUG REPORT: failed", exc_info=(type(error), error, error.__traceback__))
-        QMessageBox.warning(self, tr("Error"), trm(f"Unable to create bug report:<br>{error}"))
+        QMessageBox.warning(self, tr("Error"), trm(f"Unable to create bug report:<br>{html.escape(str(error))}"))
 
     def report_saved(self, files: list[str]):
         self.button_save.setEnabled(True)

@@ -34,23 +34,20 @@ Item {
     ListView.onReused: recycling = false
 
     width: ListView.view ? ListView.view.width - theme.em * 0.7 : 0  // room for scroll bar
-    height: Math.round(theme.em * 3.3)
+    height: Math.round(theme.rowTall)
 
     Accessible.role: Accessible.ListItem
     Accessible.name: name + (loaded ? ", " + i18n.tr("Loaded") : "") + (locked ? ", " + i18n.tr("Locked") : "")
 
-    Rectangle {
+    TpListRow {
         id: surface
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.radiusLg
-        color: row.selected ? Qt.tint(area.containsMouse ? theme.hover : theme.base, theme.tint(theme.accent, "selected"))
-             : area.containsMouse ? theme.hover : theme.base
-        border.width: 1
-        border.color: row.selected ? theme.tint(theme.accent, 0.75) : theme.cardBorder
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
-        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
+        card: true
+        hovered: area.containsMouse
+        selected: row.selected
+        animate: !row.recycling
 
         MouseArea {
             id: area
@@ -94,18 +91,19 @@ Item {
 
         Column {
             anchors.left: badge.right
-            anchors.leftMargin: theme.em * 0.7
+            anchors.leftMargin: theme.padCard
             anchors.right: tags.left
-            anchors.rightMargin: theme.em * 0.6
+            anchors.rightMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
             spacing: 1
             Row {
                 width: parent.width
-                spacing: theme.em * 0.4
+                spacing: theme.space3
                 Text {
                     id: nameText
                     width: Math.min(implicitWidth, parent.width - marks.width - theme.em * 0.4)
                     text: row.name
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.weight: row.loaded ? Font.DemiBold : Font.Medium
                     elide: Text.ElideRight
@@ -113,7 +111,7 @@ Item {
                 }
                 Row {
                     id: marks
-                    spacing: theme.em * 0.3
+                    spacing: theme.space2
                     anchors.verticalCenter: parent.verticalCenter
                     Pill {
                         visible: row.loaded
@@ -122,7 +120,7 @@ Item {
                     }
                     Pill {
                         visible: row.locked
-                        glyph: ""  // lock
+                        glyph: theme.glyphs.lock
                         text: row.lockVersion
                         tint: theme.dimText
                         tip: i18n.tr("Locked: changes are not saved")
@@ -132,6 +130,7 @@ Item {
             Text {
                 width: parent.width
                 text: row.contentText
+                textFormat: Text.PlainText
                 color: row.unreadable ? theme.warning : theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
@@ -143,7 +142,7 @@ Item {
             anchors.right: actions.left
             anchors.rightMargin: theme.em * 0.5
             anchors.verticalCenter: parent.verticalCenter
-            spacing: theme.em * 0.3
+            spacing: theme.space2
             visible: row.wide
             // Many tags: cut at 40 % of the row, the preset name keeps its room
             width: visible ? Math.min(implicitWidth, Math.round(row.width * 0.4)) : 0
@@ -152,10 +151,14 @@ Item {
                 model: row.classes.slice(0, 3)
                 Pill {
                     required property var modelData
-                    text: modelData.name
+                    // Class preset of one session: "GT3 · Race"
+                    text: modelData.name + (modelData.session === "practice" ? "  ·  " + i18n.tr("Practice")
+                        : modelData.session === "qualify" ? "  ·  " + i18n.tr("Qualify")
+                        : modelData.session === "race" ? "  ·  " + i18n.tr("Race") : "")
                     tint: modelData.color !== "" ? modelData.color : theme.accent
                     solid: true
-                    tip: i18n.tr("Primary preset for class")
+                    tip: modelData.session ? i18n.tr("Primary preset for class in this session")
+                                           : i18n.tr("Primary preset for class")
                 }
             }
             Repeater {
@@ -187,9 +190,9 @@ Item {
         Row {
             id: actions
             anchors.right: parent.right
-            anchors.rightMargin: theme.em * 0.4
+            anchors.rightMargin: theme.space3
             anchors.verticalCenter: parent.verticalCenter
-            spacing: theme.em * 0.2
+            spacing: theme.space1
             TpButton {
                 text: i18n.tr("Load")
                 accent: true
@@ -203,8 +206,8 @@ Item {
             TpButton {
                 id: moreButton
                 flat: true
-                glyph: ""  // more
-                fallback: "..."
+                glyph: theme.glyphs.more
+                fallback: "…"
                 tip: i18n.tr("More actions")
                 size: "sm"
                 onClicked: {

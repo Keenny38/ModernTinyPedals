@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from functools import lru_cache, partial
-from math import acos, atan, atan2, ceil, cos, degrees, dist, hypot, isfinite, radians, sin, tan
+from math import acos, atan, atan2, ceil, cos, degrees, dist, hypot, isfinite, nan, radians, sin, tan
 from statistics import fmean
 from typing import Any
 
@@ -445,9 +445,10 @@ def reference_speed(dataset: Sequence, position: float, half_window: float = 15.
 
 
 def speed_delta(dataset: Sequence, position: float, speed: float) -> float:
-    """Speed difference (m/s, + faster) to a recorded lap at same lap distance, 0 if unknown"""
+    """Speed difference (m/s, + faster) to a recorded lap at same lap distance, nan if unknown (no lap,
+    position outside it): never taken as no difference"""
     reference = reference_speed(dataset, position)
-    return speed - reference if reference > 0 else 0.0
+    return speed - reference if reference > 0 else nan
 
 
 def exp_mov_avg(factor: float, ema_last: float, source: float) -> float:
@@ -882,8 +883,11 @@ def turning_radius(wheel_angle: float, wheelbase: float, min_angle: float = 0) -
     return wheelbase / tan(radians(wheel_angle))
 
 
-def steering_ratio(steer_angle: float, wheel_angle: float) -> float:
-    """Steering ratio"""
-    if wheel_angle:
-        return steer_angle / wheel_angle
-    return 0.0
+def steering_ratio(
+    steer_angle: float, wheel_angle: float, min_steer_angle: float = 2.0, min_wheel_angle: float = 0.2,
+    max_ratio: float = 99.9,
+) -> float:
+    """Steering ratio (absolute), 0 near straight ahead (angles too small for a meaningful ratio)"""
+    if not (abs(wheel_angle) >= min_wheel_angle and abs(steer_angle) >= min_steer_angle):  # also NaN
+        return 0.0
+    return min(abs(steer_angle / wheel_angle), max_ratio)

@@ -24,7 +24,9 @@ The game is asked about once a second while the page is open (shown or not: the 
 another page is looked at): standings, contacts, camera & car followed, session time. Race events & battles
 come from process/director.RaceWatcher, shots from process/director.Director. Modes: manual (operator cuts
 only), assisted (stories worth showing listed, taken in one click), automatic (director cuts by itself,
-an operator cut holds it a while). Live session (driving or spectating) and replays alike.
+an operator cut holds it a while). Live session (driving or spectating) and replays alike. A game answer without the
+session shown never ends it alone (see lost_answer): the desk waits, greyed, for the next answers. Suggestions keep
+their number (keys 1 to 6) while listed, and their place while the operator aims at the list (holdSuggestions).
 
 Parts of the page (child QObjects, QML: backend.<part>, settings & texts in director_shared):
 game (director_game: state requests, connection), camera (director_camera: camera, HUD, playback, commands sent),
@@ -35,20 +37,25 @@ the commentator screen and the car sheet; it owns the jobs, the page settings fi
 
 from __future__ import annotations
 
+import html
 import time
 import weakref
+from collections.abc import Callable
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QCoreApplication, QObject, QTimer, Signal, Slot
+from PySide6.QtWidgets import QWidget
 
 from ... import app_signal
 from ...i18n import tr
 from ...process import director as dr
 from ...process.driver_history import history as driver_history
 from ...process.game_info import IMMOVABLE, Contact, SessionState, Standing, merge_contacts
+from ...process.results_text import MISSING, sector_text
 from ...setting import cfg
+from . import dialogs, page_settings
 from . import game_camera as gc
-from . import page_settings
 from .director_camera import CameraDesk
 from .director_game import GameStatePoll
 from .director_graphics import BroadcastGraphics
@@ -59,6 +66,7 @@ from .director_shared import (
     CAR_ROLES,
     CLASS_ROLES,
     COMMENTARY_TABS,
+    DIRECTOR_HOTKEYS,
     FEED_FILTERS,
     FEED_KINDS,
     FEED_ROLES,
@@ -71,6 +79,8 @@ from .director_shared import (
     KIND_TEXTS,
     KIND_TONES,
     LAP_ROLES,
+    LOST_ANSWERS,
+    LOST_SECONDS,
     MENU,
     MODES,
     OFFLINE,
@@ -161,6 +171,8 @@ class DirectorBackend(PageBackend):
     unseenChanged = Signal()
     feedFilterChanged = Signal()
     enabledChanged = Signal()
+    lostChanged = Signal()
+    keysChanged = Signal()
 
     # Parts of the page: QML properties (backend.timing.timingRows...), typed for Python callers
     if TYPE_CHECKING:
@@ -244,6 +256,18 @@ class DirectorBackend(PageBackend):
         self.notes: dict[str, str] = ({str(key): str(value) for key, value in notes.items() if value}
                                       if isinstance(notes, dict) else {})
         self.state = OFFLINE
+        # Answers without session in a row while one is shown (see lost_answer): first one's monotonic & epoch time
+        self._lost_count = 0
+        self._lost_start = 0.0
+        self._lost_since = 0.0
+        # Suggestion numbers (keys 1 to 6): given when a story is listed, kept while it stays listed
+        self._story_numbers: dict[str, int] = {}
+        # Suggestion keys in shown order while the operator aims at the list (hover, focus): order kept, see
+        # holdSuggestions; None: listed by score
+        self._held_order: list[str] | None = None
+        self._key_labels: dict[str, str] = {}  # director hotkeys: key text ("" if none), see refresh_key_labels
+        self._hotkey_rows: list[dict] = []
+        self._global_keys = False
         self.session_key: tuple[str, str, float] = ("", "", 0)
         self.session_time = -1.0
         self.time_received = 0.0  # time.time() of session time
@@ -285,6 +309,7 @@ class DirectorBackend(PageBackend):
         self._instant_timer = QTimer(self)  # instant replay over: back to live
         self._instant_timer.setSingleShot(True)
         self._instant_timer.timeout.connect(self.backToLive)
+        self.refresh_key_labels()
         _active = weakref.ref(self)
 
     @property
@@ -301,6 +326,7 @@ class DirectorBackend(PageBackend):
     def page_shown(self):
         """Game asked at once; then about every second until the page closes (hidden too: director runs)"""
         self._shown = True
+        self.refresh_key_labels()  # hotkeys changed on the hotkey page meanwhile
         if self._stale:
             self.refresh_models()
         self._timing.page_shown()
@@ -319,8 +345,7 @@ class DirectorBackend(PageBackend):
         self._game.stop()
         self._instant_timer.stop()
         self._camera.stop()  # events log lines still written in background: page never waits (see WRITER)
-        self._history_asked = False
-        driver_history.clear()  # race history of every driver (up to MAX_FILES files) read again once opened
+        self._history_asked = False  # driver_history tables kept: scanned again once opened, files unchanged not read
         if _active is not None and _active() is self:
             _active = None
             from ...stream_director import director_feed, live_feed
@@ -385,9 +410,24 @@ class DirectorBackend(PageBackend):
             "notes": dict(sorted(self.notes.items())), **self._timing.page_settings(), "enabled": self._enabled,
         }
 
-    def notify(self, text: str, error: bool = False):
+    def notify(self, text: str, error: bool = False, undo: Callable[[], object] | None = None, file: str = ""):
+        """Message of the page (refused command, copied address, reset...): the one toast of the page (TpDialogHost),
+        error in red; undo: Undo button of the toast (change done without confirmation, Ctrl+Z too); file: file
+        written, Show in Folder button"""
         self.notice, self.notice_error = text, error
         self.noticeChanged.emit()
+        bridge = dialogs.page_bridge(page) if isinstance(page := self.parent(), QWidget) else None
+        if bridge is None:
+            return
+        action: Callable[[], object] | None = undo
+        action_text = tr("Undo") if undo is not None else ""
+        if file and undo is None:
+            from .replay_files import show_in_folder
+
+            action, action_text = partial(show_in_folder, file), tr("Show in Folder")
+        # Plain text of the page: never read as markup
+        bridge.show_toast(html.escape(text, quote=False), "error" if error else "success", action_text=action_text,
+                          action=action)
 
     # Game answers
     def received_state(self, state: dict):
@@ -397,9 +437,11 @@ class DirectorBackend(PageBackend):
         game, graphics = self._game, self._graphics
         active = state["active"]
         if active is None:
-            self.set_state(MENU if state["running"] else OFFLINE)
+            if self.lost_answer():
+                self.set_state(MENU if state["running"] else OFFLINE)
             game.schedule()
             return
+        self.set_lost(0)
         self.set_state(REPLAY if active else SESSION)
         key = (state["track"], state["session"], state.get("start", 0))
         # Another session (other track or session, or same session started again): everything starts again
@@ -494,9 +536,38 @@ class DirectorBackend(PageBackend):
             counts[car.car_class] = counts.get(car.car_class, 0) + 1
             self._grid[car.slot] = counts[car.car_class]
 
+    def lost_answer(self) -> bool:
+        """Game answered without session: True once it really left the session shown (LOST_ANSWERS answers in a
+        row, or two answers LOST_SECONDS apart), at once when none is shown. Before that the desk stays (greyed,
+        "not responding" banner), suggestions & instant replay kept: one missed answer never empties it."""
+        if self.state not in (SESSION, REPLAY):
+            return True
+        clock = time.monotonic()
+        if self._lost_count == 0:
+            self._lost_start, self._lost_since = clock, time.time()
+        count = self._lost_count + 1
+        if count >= LOST_ANSWERS or (count >= 2 and clock - self._lost_start >= LOST_SECONDS):
+            return True  # set_state ends the lost answers
+        self.set_lost(count)
+        return False
+
+    def set_lost(self, count: int):
+        """Answers without session in a row (0: answering again, or session left)"""
+        if count != self._lost_count:
+            was_lost = self._lost_count > 0
+            self._lost_count = count
+            if was_lost != (count > 0):
+                self.lostChanged.emit()
+
+    @property
+    def game_lost(self) -> bool:
+        """Session shown, last answer(s) without it: waiting for the next ones (see lost_answer)"""
+        return self._lost_count > 0
+
     def set_state(self, state: str):
         if state == self.state:
             return
+        self.set_lost(0)
         self.state = state
         self._camera.state_changed(state)
         if state in (OFFLINE, MENU) and self.instant:
@@ -506,6 +577,7 @@ class DirectorBackend(PageBackend):
             self.instantChanged.emit()
         if state in (OFFLINE, MENU):
             self.candidates = []
+            self._story_numbers.clear()
             self._suggestions_model.reset([])
             self.suggestionsChanged.emit()
         self.statusChanged.emit()
@@ -833,7 +905,13 @@ class DirectorBackend(PageBackend):
         waiting = [candidate for candidate in self.candidates if candidate.key != on_air]  # story on air left out
         stories = [candidate for candidate in waiting if candidate.kind != dr.ROAM]
         shown = stories[:SUGGESTIONS] if stories else waiting[:3]
-        for index, candidate in enumerate(shown):
+        best = shown[0].key if shown else ""  # the one Enter takes, wherever it is shown
+        if self._held_order is not None:  # operator aiming: rows kept in place, new ones after (score order)
+            place = {key: index for index, key in enumerate(self._held_order)}
+            shown.sort(key=lambda candidate: place.get(candidate.key, len(place)))
+            self._held_order = [candidate.key for candidate in shown]
+        numbers = self.story_numbers([candidate.key for candidate in shown])
+        for candidate in shown:
             car = self.by_slot.get(candidate.slot)
             title, detail = self.candidate_texts(candidate)
             rows.append({
@@ -842,10 +920,24 @@ class DirectorBackend(PageBackend):
                 "tone": KIND_TONES.get(candidate.kind, "dim"), "title": title, "detail": detail,
                 "number": car.number if car is not None else "",
                 "classColor": class_color(car.car_class) if car is not None else "",
-                "score": round(max(min(candidate.score, 100.0), 0.0)), "best": index == 0,
+                "score": round(max(min(candidate.score, 100.0), 0.0)), "best": candidate.key == best,
+                "hotkey": numbers.get(candidate.key, 0),
             })
         if self._suggestions_model.sync(rows):
             self.suggestionsChanged.emit()
+
+    def story_numbers(self, keys: list[str]) -> dict[str, int]:
+        """Number of each suggestion listed (keys 1 to SUGGESTIONS): kept while the story stays listed, a new
+        story takes the lowest free number (one gone frees its number): a key always takes the story it shows,
+        however the list moves"""
+        numbers = {key: number for key, number in self._story_numbers.items() if key in keys}
+        used = set(numbers.values())
+        free = (number for number in range(1, SUGGESTIONS + 1) if number not in used)
+        for key in keys:
+            if key not in numbers:
+                numbers[key] = next(free, 0)
+        self._story_numbers = {key: number for key, number in numbers.items() if number}
+        return self._story_numbers
 
     def update_cars(self):
         counts: dict[str, int] = {}
@@ -968,7 +1060,7 @@ class DirectorBackend(PageBackend):
             rows.append({
                 "key": name, "name": name or tr("Unknown"), "classColor": class_color(name), "count": len(cars),
                 "leader": leader.driver, "leaderNumber": leader.number,
-                "bestLap": lap_text(best.best) if best is not None else "-",
+                "bestLap": lap_text(best.best) if best is not None else MISSING,
                 "bestDriver": car_label(best) if best is not None else "", "battles": battles.get(name, 0),
             })
         if self._classes_model.sync(rows):
@@ -1054,7 +1146,7 @@ class DirectorBackend(PageBackend):
         """Sectors shown for car: text & color"""
         personal, class_best = self.best_sectors()
         bests, class_bests = personal.get(car.slot, [-1.0] * 3), class_best.get(car.car_class, [-1.0] * 3)
-        return [{"text": localized(f"{value:.3f}") if value > 0 else "-",
+        return [{"text": sector_text(value),  # times keep their dot, as the lap time
                  "tone": sector_tone(value, bests[index], class_bests[index])}
                 for index, value in enumerate(self.shown_sectors(car))]
 
@@ -1094,9 +1186,7 @@ class DirectorBackend(PageBackend):
             sectors = record.sectors
             rows.append({
                 "key": str(record.lap), "lap": record.lap, "time": lap_text(record.time),
-                "s1": localized(f"{sectors[0]:.3f}") if sectors[0] > 0 else "-",
-                "s2": localized(f"{sectors[1]:.3f}") if sectors[1] > 0 else "-",
-                "s3": localized(f"{sectors[2]:.3f}") if sectors[2] > 0 else "-",
+                "s1": sector_text(sectors[0]), "s2": sector_text(sectors[1]), "s3": sector_text(sectors[2]),
                 "timeTone": sector_tone(record.time, car.best if car is not None else -1.0, class_lap),
                 "s1Tone": sector_tone(sectors[0], bests[0], class_bests[0]),
                 "s2Tone": sector_tone(sectors[1], bests[1], class_bests[1]),
@@ -1469,10 +1559,60 @@ class DirectorBackend(PageBackend):
 
     @Slot(int)
     def takeSuggestionAt(self, index: int):
-        """Suggestion of the list by place (keys 1 to 6)"""
-        rows = self._suggestions_model.rows
-        if 0 <= index < len(rows):
-            self.takeSuggestion(rows[index]["key"])
+        """Suggestion numbered index + 1 (keys 1 to 6: number shown on it, kept while listed, see story_numbers),
+        never in manual mode (list hidden)"""
+        key = next((key for key, number in self._story_numbers.items() if number == index + 1), None)
+        if key is not None:
+            self.takeSuggestion(key)
+
+    @Slot(bool)
+    def holdSuggestions(self, held: bool):
+        """Operator aiming at the suggestions (pointer over the list, list focused, and a second after): rows stay
+        in place, new ones listed after them; let go: listed by score again"""
+        if held == (self._held_order is not None):
+            return
+        self._held_order = [row["key"] for row in self._suggestions_model.rows] if held else None
+        if not held and self._shown:
+            self.update_suggestions()
+
+    def refresh_key_labels(self):
+        """Key text of each director hotkey ("" if none, or global hotkeys off): tooltips & keys sheet"""
+        from ...hotkey.common import format_hotkey_name
+        from ...i18n.options import option_label
+
+        shortcuts = cfg.user.shortcuts or {}
+        enabled = bool(cfg.application.get("enable_global_hotkey"))
+        labels = {name: format_hotkey_name(str(shortcuts.get(name, {}).get("bind", ""))) if enabled else ""
+                  for name in DIRECTOR_HOTKEYS}
+        rows = [{"name": name, "label": option_label(name), "key": labels[name]} for name in DIRECTOR_HOTKEYS]
+        if labels != self._key_labels or rows != self._hotkey_rows or enabled != self._global_keys:
+            self._key_labels, self._hotkey_rows, self._global_keys = labels, rows, enabled
+            self.keysChanged.emit()
+
+    @Property(dict, notify=keysChanged)
+    def keyLabels(self) -> dict:
+        """Director hotkeys (keyboard shortcut settings) by name: key text, "" if none or global hotkeys off"""
+        return self._key_labels
+
+    @Property(list, notify=keysChanged)
+    def hotkeyRows(self) -> list:
+        """Director hotkeys of the keys sheet: name, label (language of the app), key text ("" if none)"""
+        return self._hotkey_rows
+
+    @Property(bool, notify=keysChanged)
+    def globalHotkeys(self) -> bool:
+        """Global hotkeys on (app settings): director hotkeys work"""
+        return self._global_keys
+
+    @Property(bool, notify=lostChanged)
+    def gameLost(self) -> bool:
+        """Session shown, game answered without it lately: desk greyed until it answers or the session ends"""
+        return self._lost_count > 0
+
+    @Property(float, notify=lostChanged)
+    def lostSince(self) -> float:
+        """Epoch milliseconds of the first answer without the session shown (see gameLost)"""
+        return self._lost_since * 1000
 
     @Property(list, notify=forecastChanged)
     def forecastNodes(self) -> list[dict]:
@@ -1528,7 +1668,9 @@ class DirectorBackend(PageBackend):
 
     @Slot(str)
     def takeSuggestion(self, key: str):
-        """Story cut to by operator: shown at least the shortest shot"""
+        """Story cut to by operator: shown at least the shortest shot (never in manual mode: list hidden)"""
+        if self.mode == "manual":
+            return
         candidate = next((candidate for candidate in self.candidates if candidate.key == key), None)
         if candidate is None or not self.can_command():
             return
@@ -1540,6 +1682,11 @@ class DirectorBackend(PageBackend):
 
     @Slot()
     def takeBest(self):
+        """Best story not on air (Enter, Take Best, take best hotkey): never in manual mode, where the operator
+        cuts alone and the stories are not shown"""
+        if self.mode == "manual":
+            self.notify(tr("Manual mode: no suggestion taken. Switch to Assisted to take the best story."))
+            return
         best = next((candidate for candidate in self.candidates if candidate.slot != self.on_air_slot), None)
         if best is not None:
             self.takeSuggestion(best.key)

@@ -20,6 +20,7 @@
 Navigation Widget
 """
 
+from math import hypot, isfinite
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -33,6 +34,55 @@ from ._painter import fill_pixmap
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import NavigationConfig
+
+VIEW_REBUILD = 0.25  # road drawn built again once car moved this fraction of view size (pixels) from where built
+
+
+def map_segments_near(coords, closed: bool, center_x: float, center_y: float, radius: float) -> QPainterPath | None:
+    """Path of map segments passing within radius of center, None if all do (whole map path drawn)
+
+    Runs of consecutive segments, a run never ends at a node within radius: within radius, road drawn the same as
+    with whole map path (same segments & joins). Closed map: segment from last node back to first included.
+    """
+    total = len(coords)
+    count = total if closed else total - 1
+    if count < 1:
+        return None
+    limit = radius * radius
+    dists = [(pos_x - center_x) ** 2 + (pos_y - center_y) ** 2 for pos_x, pos_y in coords]
+    near = []
+    for index in range(count):
+        next_index = index + 1 if index + 1 < total else 0
+        if dists[index] <= limit or dists[next_index] <= limit:
+            near.append(True)
+            continue
+        # Both nodes farther: segment passes within radius only if its point closest to center does
+        pos_x1, pos_y1 = coords[index]
+        delta_x = coords[next_index][0] - pos_x1
+        delta_y = coords[next_index][1] - pos_y1
+        length = delta_x * delta_x + delta_y * delta_y
+        ratio = ((center_x - pos_x1) * delta_x + (center_y - pos_y1) * delta_y) / length if length else 0.0
+        if 0.0 < ratio < 1.0:
+            gap_x = pos_x1 + delta_x * ratio - center_x
+            gap_y = pos_y1 + delta_y * ratio - center_y
+            near.append(gap_x * gap_x + gap_y * gap_y <= limit)
+        else:
+            near.append(False)
+    if all(near):
+        return None
+    path = QPainterPath()
+    first = near.index(False) + 1 if closed else 0  # closed map: runs start after a far segment (none across node 0)
+    drawing = False
+    for step in range(count):
+        index = (first + step) % count
+        if near[index]:
+            if not drawing:
+                path.moveTo(*coords[index])
+                drawing = True
+            path.lineTo(*coords[index + 1 if index + 1 < total else 0])
+        else:
+            drawing = False
+    return path
 
 
 class NavigationMixin:
@@ -50,9 +100,19 @@ class NavigationMixin:
         self.veh_offset_y = self.area_size * max(self.wcfg["vehicle_offset"], 0)
         self.start_line_length = self.wcfg["start_line_length"] if start_line_length is None else start_line_length
         self.sector_line_length = self.wcfg["sector_line_length"] if sector_line_length is None else sector_line_length
+        # Road drawn (see view_map_path): within reach of farthest view corner from car, plus road width & distance
+        # car moves before it is built again
+        self.view_rebuild = self.area_size * VIEW_REBUILD
+        corner_reach = max(hypot(corner_x - self.area_center, corner_y - self.veh_offset_y)
+                           for corner_x in (0, self.area_size) for corner_y in (0, self.area_size))
+        road_width = max(self.wcfg["map_width"], 2) + max(self.wcfg["map_outline_width"], 0)
+        self.view_reach = corner_reach + road_width * 2 + self.view_rebuild
+        self.view_center: tuple[float, float] | None = None  # car position on scaled map where road drawn was built
+        self.view_path: QPainterPath | None = None  # road drawn, None: whole map
         # Last data
         self.last_veh_data_version: int | None = None
-        self.last_modified = 0
+        self.last_modified: float | None = None  # None: nothing drawn yet
+        self.map_closed = False  # map loop closed
         self.map_path: QPainterPath | None = None
         self.sfinish_path: QPainterPath | None = None
         self.sector_path: QPainterPath | None = None
@@ -62,13 +122,19 @@ class NavigationMixin:
         self.map_offset = 0,0
 
     def update_map(self, data) -> bool:
-        """Map update, whether map changed"""
+        """Map update, whether map changed (data of NO_TRACK_MAP: no map, widget creation)"""
         if self.last_modified != data:
             self.last_modified = data
-            self.track_map = minfo.mapping.trackMap  # taken once: coordinates & sectors of the same map
+            # Taken once: coordinates & sectors of the same map
+            self.track_map = minfo.mapping.trackMap if data != NO_TRACK_MAP.lastModified else NO_TRACK_MAP
             self.create_map_path(self.track_map.coordinates)
             return True
         return False
+
+    def car_map_point(self) -> tuple[float, float]:
+        """Player car position on scaled map"""
+        return (api.read.vehicle.position_longitudinal() * self.global_scale - self.map_offset[0],
+                api.read.vehicle.position_lateral() * self.global_scale - self.map_offset[1])
 
     def map_view(self) -> tuple[float, float, float]:
         """Map transform: translation x, y, then rotation (degrees), car at its place in view"""
@@ -78,10 +144,23 @@ class NavigationMixin:
         # x, y position & offset relative to player
         rot_pos_x, rot_pos_y = calc.rotate_coordinate(
             plr_ori_rad,   # plr_ori_rad, rotate view
-            api.read.vehicle.position_longitudinal() * self.global_scale - self.map_offset[0],
-            api.read.vehicle.position_lateral() * self.global_scale - self.map_offset[1]
+            *self.car_map_point(),
         )
         return self.area_center - rot_pos_x, self.veh_offset_y - rot_pos_y, calc.degrees(plr_ori_rad)
+
+    def view_map_path(self) -> QPainterPath | None:
+        """Map path drawn: road around car (whole map if all of it is near), built again once car moved away from
+        where it was built, so a repaint draws a few hundred nodes instead of the whole track"""
+        if self.map_path is None or not self.map_scaled:
+            return self.map_path
+        pos_x, pos_y = self.car_map_point()
+        center = self.view_center
+        if center is None or not hypot(pos_x - center[0], pos_y - center[1]) <= self.view_rebuild:  # also nan
+            if not (isfinite(pos_x) and isfinite(pos_y)):
+                return self.map_path
+            self.view_center = (pos_x, pos_y)
+            self.view_path = map_segments_near(self.map_scaled, self.map_closed, pos_x, pos_y, self.view_reach)
+        return self.map_path if self.view_path is None else self.view_path
 
     def view_position(self, veh_info) -> tuple[float, float]:
         """Opponent position in view (rotated position relative to player)"""
@@ -102,7 +181,8 @@ class NavigationMixin:
                 else:
                     map_path.lineTo(*coords)
             # Close map loop if start & end distance less than 500 meters
-            if dist < 500:
+            self.map_closed = dist < 500
+            if self.map_closed:
                 map_path.closeSubpath()
             # Create start/finish path, once start line known (official circuit shape: not yet)
             if self.track_map.start_known():
@@ -125,11 +205,13 @@ class NavigationMixin:
             self.map_scaled = None
             self.map_size = 1,1
             self.map_offset = 0,0
+            self.map_closed = False
             map_path = None
             sfinish_path = None
             sector_path = None
 
         self.map_path = map_path
+        self.view_center = self.view_path = None  # road drawn built again on new map
         self.sfinish_path = sfinish_path
         self.sector_path = sector_path
 
@@ -190,8 +272,6 @@ class Realtime(NavigationMixin, Overlay):
             self.veh_size,
         )
 
-        self.create_map_path()
-
         # Config canvas
         self.resize(self.area_size, self.area_size)
         self.pixmap_background = QPixmap(self.area_size, self.area_size)
@@ -221,7 +301,7 @@ class Realtime(NavigationMixin, Overlay):
 
         self.draw_background()
         self.draw_map_mask_pixmap()
-        self.update_map(-1)
+        self.update_map(NO_TRACK_MAP.lastModified)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -291,15 +371,16 @@ class Realtime(NavigationMixin, Overlay):
         painter.translate(offset_x, offset_y)
         painter.rotate(rotation)
 
-        if self.map_path:
+        map_path = self.view_map_path()
+        if map_path:
             # Draw map outline
             if self.wcfg["map_outline_width"] > 0:
                 painter.setPen(self.pen_outline["map_outline"])
-                painter.drawPath(self.map_path)
+                painter.drawPath(map_path)
 
             # Draw map
             painter.setPen(self.pen_outline["map"])
-            painter.drawPath(self.map_path)
+            painter.drawPath(map_path)
 
         # Draw start/finish line
         if self.wcfg["show_start_line"] and self.sfinish_path:

@@ -36,7 +36,7 @@ from ..userfile.heatmap import (
     select_tyre_heatmap_name,
 )
 from ._base import Overlay
-from ._data import temperature_text
+from ._data import shown_temperature, temperature_text
 from ._painter import RawText
 
 
@@ -81,6 +81,7 @@ class TyreTemperatures(Overlay):
 
         # Config units
         self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
+        self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0  # degrees of unit per Celsius
 
         # Heatmap style list: 0 - fl, 1 - fr, 2 - rl, 3 - rr
         self.heatmap_styles = 4 * [
@@ -127,6 +128,10 @@ class TyreTemperatures(Overlay):
         for idx, inner in enumerate(layout_inner):
             inner.addWidget(self.bars_tcmpd[idx], row, columns[idx])
 
+    def vehicle_reset(self):
+        """Compounds read again (followed car changed while spectating, session changed, back to garage)"""
+        self.last_in_pits = -1
+
     def update_compounds(self):
         """Update compound (heatmap & symbol) while in pit (or switched pit state)"""
         in_pits = api.read.vehicle.in_pits()
@@ -148,7 +153,7 @@ class TyreTemperatures(Overlay):
 
     # GUI update methods
     def update_temp(self, target, data, index):
-        """Tyre temperature"""
+        """Tyre temperature (Celsius, rounded as shown: see shown_temperature)"""
         if target.last != data:
             target.last = data
             target.text = temperature_text(data, self.unit_temp, self.leading_zero, self.sign_text, TEXT_PLACEHOLDER)
@@ -211,11 +216,12 @@ class LayerTemperature(TyreTemperatures):
         self.update_compounds()
 
         # Temperature: 0 - fl, 3 - fr, 6 - rl, 9 - rr
+        scale = self.temp_scale
         if self.wcfg["show_inner_center_outer"]:
             temps = getattr(api.read.tyre, self.reader_ico)()
             for tyre_idx, bar_temp in enumerate(self.bars_temp):
-                self.update_temp(bar_temp, round(temps[tyre_idx]), tyre_idx // 3)
+                self.update_temp(bar_temp, shown_temperature(temps[tyre_idx], scale), tyre_idx // 3)
         else:  # 0 - fl, 1 - fr, 2 - rl, 3 - rr
             temps = getattr(api.read.tyre, self.reader_avg)()
             for tyre_idx, bar_temp in enumerate(self.bars_temp):
-                self.update_temp(bar_temp, round(temps[tyre_idx]), tyre_idx)
+                self.update_temp(bar_temp, shown_temperature(temps[tyre_idx], scale), tyre_idx)

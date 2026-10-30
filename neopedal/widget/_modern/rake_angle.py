@@ -69,6 +69,6 @@ class Realtime(StatsMixin, ModernOverlay):
         """Update when vehicle on track"""
         theme = self.theme
         self.rake = self.ema(self.rake, calc.rake(*api.read.wheel.ride_height()))
-        angle = calc.slope_angle(self.rake, self.wcfg["wheelbase"])
+        angle = round(calc.slope_angle(self.rake, self.wcfg["wheelbase"]), self.decimals)  # sign as shown
         sub = f"{abs(self.rake):.0f}mm" if self.wcfg["show_ride_height_difference"] else ""
-        self.refresh((Value(f"{angle:+.{self.decimals}f}{self.sign}", theme.negative if self.rake < 0 else None, sub=sub),))
+        self.refresh((Value(f"{angle:+z.{self.decimals}f}{self.sign}", theme.negative if angle < 0 else None, sub=sub),))

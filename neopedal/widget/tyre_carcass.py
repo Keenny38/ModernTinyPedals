@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING
 
 from ..api_control import api
 from ..const_common import TEXT_NA
-from ._data import TemperatureRates, rate_text
+from ._data import TemperatureRates, rate_text, shown_temperature
+from ._modern.base import STEADY
 from ._tyre_temps import TyreTemperatures
 
 if TYPE_CHECKING:
@@ -40,9 +41,7 @@ class Realtime(TyreTemperatures):
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)
-        layout_inner, font_m, bar_padx, text_width = self.set_tyre_layouts()
-        # Temperature difference (rate of change): scale only, no offset
-        self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0
+        layout_inner, font_m, bar_padx, text_width = self.set_tyre_layouts()  # temp_scale: also of rate of change
 
         # Tyre carcass temperature
         base_row = 1
@@ -110,6 +109,11 @@ class Realtime(TyreTemperatures):
         """Rate of change restarts from next reading (no rate against stale temperature)"""
         self.reset_rates()
 
+    def vehicle_reset(self):
+        """Compounds read again, rate of change restarts (no rate against previous car temperature)"""
+        super().vehicle_reset()
+        self.reset_rates()
+
     def reset_rates(self):
         """Clear rate of change & last temperature (new session or paused timer)"""
         self.rates.reset()
@@ -122,7 +126,7 @@ class Realtime(TyreTemperatures):
         # Tyre carcass temperature: 0 - fl, 1 - fr, 2 - rl, 3 - rr
         ctemp = api.read.tyre.carcass_temperature()
         for tyre_idx, bar_ctemp in enumerate(self.bars_temp):
-            self.update_temp(bar_ctemp, round(ctemp[tyre_idx]), tyre_idx)
+            self.update_temp(bar_ctemp, shown_temperature(ctemp[tyre_idx], self.temp_scale), tyre_idx)
 
         # Rate of change
         if self.wcfg["show_rate_of_change"] and self.rates.update(ctemp, api.read.timing.elapsed()):
@@ -139,6 +143,7 @@ class Realtime(TyreTemperatures):
         """Rate of change"""
         if target.last != data:
             target.last = data
-            target.text = rate_text(data, self.temp_scale)
-            target.fg, target.bg = self.bar_style_rtemp[data > 0]
+            target.text = text = rate_text(data, self.temp_scale)
+            # Steady (shown 0.0) in neutral color, not heating or cooling color
+            target.fg, target.bg = self.bar_style_rtemp[2 if text == STEADY else data > 0]
             target.update()

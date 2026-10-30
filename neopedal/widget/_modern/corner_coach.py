@@ -75,7 +75,7 @@ class Realtime(CornerCoachMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for box in self.boxes.values():
             rounded(painter, box, self.radius(0.3), theme.tint(theme.surface_alt, 200))
 
@@ -110,9 +110,7 @@ class Realtime(CornerCoachMixin, ModernOverlay):
         theme = self.theme
         if kind == BRAKE_ON_POINT:
             return theme.positive
-        if kind == BRAKE_NOW:
-            return theme.negative
-        if kind in (BRAKE_EARLY, BRAKE_LATE):
+        if kind in (BRAKE_NOW, BRAKE_EARLY, BRAKE_LATE):  # as classic design (warning color)
             return theme.warning
         return theme.text
 

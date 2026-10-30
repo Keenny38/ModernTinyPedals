@@ -23,15 +23,20 @@ Broadcast Director stream graphics, OBS results & phone dashboard (CSS).
 One meaning per color:
     purple: session or class best (lap, sector), fastest lap
     gain: personal best, places gained, finished, energy ok
-    loss: places lost, penalty, disqualified, retired, energy low
-    warning: in pit lane (orange), energy getting low
-    gold: yellow flag, slower sector
+    loss: places lost, penalty, disqualified, retired, energy low, invalid lap
+    warning: in pit lane (orange), energy getting low, attention
+    gold: yellow flag, slower lap or sector
     player: player's row
+
+Colorblind safe variant (overlay style "enable_colorblind_colors"): COLORBLIND_STATUS_COLORS, read by overlay
+themes (widget._style.COLORBLIND_COLORS), app pages (ui.quick COLORBLIND_STATUS) & stream pages (status_css).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import MappingProxyType
+from typing import Any
 
 # Role: (on dark background, on light background)
 STATUS_COLORS = MappingProxyType({
@@ -41,6 +46,16 @@ STATUS_COLORS = MappingProxyType({
     "warning": ("#FB923C", "#C2410C"),
     "gold": ("#FACC15", "#B45309"),
     "player": ("#38BDF8", "#0369A1"),
+})
+# Colorblind safe status colors (Okabe-Ito like: green -> sky blue, red -> vermillion, purple -> reddish purple,
+# player blue -> bluish green as blue is taken by gain), same roles & order as STATUS_COLORS
+COLORBLIND_STATUS_COLORS = MappingProxyType({
+    "purple": ("#E08AC0", "#A33D80"),
+    "gain": ("#56B4E9", "#0067A8"),
+    "loss": ("#F08A50", "#B04A00"),
+    "warning": ("#E69F00", "#8F5F00"),
+    "gold": ("#F0E442", "#8A7A00"),
+    "player": ("#009E73", "#007A59"),
 })
 CSS_NAMES = MappingProxyType({"warning": "warn"})  # CSS variable names of stream pages (--warn)
 
@@ -52,10 +67,20 @@ ENERGY_MEDIUM = 0.3
 SAME_TIME = 0.0005
 
 
-def status_css(light: bool = False) -> str:
+def colorblind_style(style: Any) -> bool:
+    """Colorblind safe colors set in overlay style setting (overlays, app pages & stream pages follow it)"""
+    return isinstance(style, Mapping) and bool(style.get("enable_colorblind_colors", False))
+
+
+def status_colors(colorblind: bool = False) -> MappingProxyType:
+    """Status colors (role: (on dark, on light)), colorblind safe variant if asked"""
+    return COLORBLIND_STATUS_COLORS if colorblind else STATUS_COLORS
+
+
+def status_css(light: bool = False, colorblind: bool = False) -> str:
     """CSS custom properties of status colors: --purple:#c084fc;--gain:...;"""
     return "".join(
-        f"--{CSS_NAMES.get(role, role)}:{pair[light].lower()};" for role, pair in STATUS_COLORS.items())
+        f"--{CSS_NAMES.get(role, role)}:{pair[light].lower()};" for role, pair in status_colors(colorblind).items())
 
 
 def energy_tone(fraction: float) -> str:

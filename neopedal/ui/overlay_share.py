@@ -43,7 +43,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -221,7 +220,7 @@ def export_overlay_settings(
             (tr("All"), names), (tr("None"), ()), (tr("Active"), active),
             (tr("With changes"), [name for name in names if changed[name]]),
         ],
-        ok_text=tr("Export..."),
+        ok_text=tr("Export…"),
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return 0
@@ -236,10 +235,17 @@ def export_overlay_settings(
             zip_filename, {name: read(name) for name in picked}, cfg.default.setting,
             VERSION, SETTING_VERSION, screen_rect())
     except OSError as error:
-        QMessageBox.warning(parent, tr("Error"), trm(f"Unable to export overlay settings:<br>{html.escape(str(error))}"))
+        alert(parent, tr("Error"), trm(f"Unable to export overlay settings:<br>{html.escape(str(error))}"))
         return 0
     show_toast(parent, trm(f"Exported <b>{count}</b> overlay(s) to:<br>{html.escape(zip_filename)}"))
     return count
+
+
+def alert(parent, title: str, text: str):
+    """Error in the page showing it (dialog bridge), else a message box"""
+    from .quick import dialogs
+
+    dialogs.alert(parent, title, text, "warning")  # as the former message box (QMessageBox.warning)
 
 
 # Import
@@ -257,7 +263,7 @@ def refuse_locked(parent) -> bool:
     """Loaded preset is locked: told, True"""
     if cfg.filename.setting not in cfg.user.filelock:
         return False
-    QMessageBox.warning(parent, tr("Error"), trm("Changes to locked preset will not be saved."))
+    alert(parent, tr("Error"), trm("Changes to locked preset will not be saved."))
     return True
 
 
@@ -271,17 +277,17 @@ def import_overlay_file(parent, zip_filename: str, page=None) -> bool:
     if refuse_locked(parent):
         return False
     if package_format(zip_filename) in PRESET_PACKAGE_FORMATS:
-        QMessageBox.warning(parent, tr("Error"), tr("This is a preset package: import it on the Presets page."))
+        alert(parent, tr("Error"), tr("This is a preset package: import it on the Presets page."))
         return False
     names = available_names()
     try:
         package = read_overlay_package(zip_filename, {name: cfg.default.setting[name] for name in names})
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        QMessageBox.warning(parent, tr("Error"), trm(
+        alert(parent, tr("Error"), trm(
             f"Unable to import overlay settings:<br>{html.escape(tr(str(error)))}"))
         return False
     if not package.overlays:
-        QMessageBox.warning(parent, tr("Error"), tr("No overlay of this file is available in this version."))
+        alert(parent, tr("Error"), tr("No overlay of this file is available in this version."))
         return False
     lines = [html.escape(os.path.basename(zip_filename))]
     if package.app_version:
@@ -341,4 +347,4 @@ def report_html(lines: Sequence[str]) -> str:
     """Options left out or corrected by an import, one per line (translated reasons), the first ones only"""
     shown = "".join(f"<br>• {html.escape(trm(report_line(line)))}" for line in lines[:REPORT_LINES])
     more = len(lines) - REPORT_LINES
-    return shown + (f"<br>{trm(f'... and {more} more')}" if more > 0 else "")
+    return shown + (f"<br>{trm(f'… and {more} more')}" if more > 0 else "")

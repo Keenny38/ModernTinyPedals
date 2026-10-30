@@ -30,7 +30,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 
 from ...i18n import tr_overlay as tr
 from ...module_info import minfo
@@ -105,6 +105,10 @@ class Realtime(StatsMixin, ModernOverlay):
         self.trace.clear()
         self.last_g = (0.0, 0.0)
 
+    def vehicle_reset(self):
+        """Trace of previous car or session not joined to next car"""
+        self.trace.clear()
+
     def to_screen(self, gforce: float, center: float) -> float:
         """G reading as plot coordinate, clamped near plot (non-finite or absurd values never
         reach Qt drawing)"""
@@ -137,7 +141,7 @@ class Realtime(StatsMixin, ModernOverlay):
     def paint_static(self, painter: QPainter):
         theme = self.theme
         wcfg = self.wcfg
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         plot = self.plot
         center = self.center
         disc(painter, plot, theme, False, theme.tint(theme.surface_alt, 220))
@@ -175,7 +179,7 @@ class Realtime(StatsMixin, ModernOverlay):
             radius = max_avg * self.scale
             painter.drawEllipse(center, radius, radius)
         if self.show_trace and len(self.trace) > 1:
-            self.draw_trace(painter)
+            draw_trace(painter, list(self.trace), self.pen_trace, self.trace_colors)
         if self.show_dot:
             dot = QPointF(self.to_screen(lat, center.x()), self.to_screen(lgt, center.y()))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -187,24 +191,28 @@ class Realtime(StatsMixin, ModernOverlay):
         if readings is not None:
             self.draw_stats(painter, readings)
 
-    def draw_trace(self, painter: QPainter):
-        """Trace in parts, older parts fainter"""
-        points = list(self.trace)
-        count = len(points)
-        step = max(count // TRACE_PARTS, 1)
-        pen = self.pen_trace
-        part = TRACE_PARTS - 1
-        end = count
-        while end > 1 and part >= 0:
-            color = self.trace_colors[part]
-            if not color.alpha():  # faded out: older parts too
-                break
-            start = max(end - step, 0) if part else 0
-            pen.setColor(color)
-            painter.setPen(pen)
+
+def draw_trace(painter: QPainter, points: list[QPointF], pen: QPen, colors: tuple[QColor, ...], dots: bool = False):
+    """Trace in parts, one per color (oldest part first), older parts fainter (classic & modern designs)"""
+    count = len(points)
+    parts = len(colors)
+    step = max(count // parts, 1)
+    part = parts - 1
+    end = count
+    while end > 1 and part >= 0:
+        color = colors[part]
+        if not color.alpha():  # faded out: older parts too
+            break
+        start = max(end - step, 0) if part else 0
+        pen.setColor(color)
+        painter.setPen(pen)
+        if dots:
+            painter.drawPoints(QPolygonF(points[start:end]))
+            end = start  # each point drawn once
+        else:
             painter.drawPolyline(QPolygonF(points[start:end]))
             end = start + 1  # parts share a point: line stays continuous
-            part -= 1
+        part -= 1
 
 
 def trace_alpha(index: int, fade_step: float) -> int:

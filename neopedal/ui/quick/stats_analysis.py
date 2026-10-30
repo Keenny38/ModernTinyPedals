@@ -19,16 +19,18 @@
 """
 Driver stats viewer figures of All Tracks (no Qt, no page state): race record of results files (clean streak,
 places gained), people met in online races, rank history chart, driving time by track & class of a period,
-official races to come (RaceControl daily races) & tracks of driver stats they are on
+official races to come (RaceControl daily races) & tracks of driver stats they are on, progress of the last
+days (weekly_progress: records, goals reached or near, shared with the Home page)
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple
 
+from ...const_common import MAX_SECONDS
 from ...process import driver_ranks as dr
 from ...process import results_file as rf
 from ...process import results_index as ri
@@ -75,7 +77,8 @@ def average_gained(summaries: Iterable[ri.ResultSummary]) -> tuple[float, int]:
 # People met in online races
 class Rival(NamedTuple):
     """Someone of your class in several online races: races together, finished ahead of them, behind them, best lap
-    gap (s, yours minus theirs, mean of races both set one; None if none), last race together (Unix time)"""
+    gap (s, yours minus theirs, mean of races both set one; None if none), last race together (Unix time), its
+    results file & track (driver stats track key)"""
 
     name: str
     races: int
@@ -83,6 +86,8 @@ class Rival(NamedTuple):
     behind: int
     gap: float | None
     last: float
+    path: str = ""
+    track: str = ""
 
 
 def finish_order(position: int, status: str) -> int:
@@ -94,13 +99,13 @@ def finish_order(position: int, status: str) -> int:
 
 def rivals(summaries: Iterable[ri.ResultSummary]) -> list[Rival]:
     """People met in MIN_MEETINGS online races or more (most races together first, then latest)"""
-    found: dict[str, list] = {}  # name: races, ahead, behind, gaps, last
+    found: dict[str, list] = {}  # name: races, ahead, behind, gaps, last, last results file, last track
     for summary in summaries:
         if summary.kind != "Race" or summary.setting != "Multiplayer":
             continue
         mine = finish_order(summary.class_position, summary.status)
         for other in summary.rivals:
-            entry = found.setdefault(other.name, [0, 0, 0, [], 0.0])
+            entry = found.setdefault(other.name, [0, 0, 0, [], 0.0, "", ""])
             entry[0] += 1
             theirs = finish_order(other.class_position, other.status)
             if mine < theirs:
@@ -109,9 +114,10 @@ def rivals(summaries: Iterable[ri.ResultSummary]) -> list[Rival]:
                 entry[2] += 1
             if summary.best_lap > 0 and other.best_lap > 0:
                 entry[3].append(summary.best_lap - other.best_lap)
-            entry[4] = max(entry[4], summary.end)
-    shown = [Rival(name, races, ahead, behind, sum(gaps) / len(gaps) if gaps else None, last)
-             for name, (races, ahead, behind, gaps, last) in found.items() if races >= MIN_MEETINGS]
+            if summary.end >= entry[4]:
+                entry[4:7] = [summary.end, summary.path, summary.track]
+    shown = [Rival(name, races, ahead, behind, sum(gaps) / len(gaps) if gaps else None, last, path, track)
+             for name, (races, ahead, behind, gaps, last, path, track) in found.items() if races >= MIN_MEETINGS]
     shown.sort(key=lambda rival: (-rival.races, -rival.last, rival.name.casefold()))
     return shown[:MAX_RIVALS]
 
@@ -138,13 +144,22 @@ def period_bounds(year: int, today: date) -> tuple[date, date]:
     return today - timedelta(days=364), today
 
 
+def record_day(record: SessionRecord) -> date | None:
+    """Local day of a record, None if its time is out of range for this platform (record left out, not raised:
+    a damaged line of the history file never blocks the page)"""
+    try:
+        return date.fromtimestamp(record.time)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def distribution(records: Iterable[SessionRecord], first: date, last: date, class_of) -> tuple[list, list]:
     """Driving time (seconds) of each track (TOP_TRACKS, then others as "") & of each class, most first"""
     tracks: dict[str, float] = {}
     classes: dict[str, float] = {}
     for record in records:
-        day = date.fromtimestamp(record.time)
-        if day < first or day > last or record.seconds <= 0:
+        day = record_day(record)
+        if day is None or day < first or day > last or record.seconds <= 0:
             continue
         tracks[record.track] = tracks.get(record.track, 0.0) + record.seconds
         name = record.vehicle_class or class_of(record.vehicle)
@@ -159,7 +174,8 @@ def distribution(records: Iterable[SessionRecord], first: date, last: date, clas
 
 def history_years(records: Iterable[SessionRecord]) -> list[int]:
     """Years with sessions, newest first"""
-    return sorted({date.fromtimestamp(record.time).year for record in records}, reverse=True)
+    days = (record_day(record) for record in records)
+    return sorted({day.year for day in days if day is not None}, reverse=True)
 
 
 # Official races to come (RaceControl daily races, as the game menu lists them)
@@ -250,3 +266,102 @@ def stats_track(event: Upcoming, keys: Iterable[str], names: dict[str, tuple[str
     """Driver stats track of an event ("" if never driven there): game names of its scene, else its own name"""
     wanted = {name.casefold() for name in names.get(event.scene.casefold(), ())} | {event.track.casefold()}
     return next((key for key in keys if key.casefold() in wanted), "")
+
+
+# Weekly progress (Driver Stats All Tracks card, Home page feed): plain numbers, the caller words them
+WEEK_DAYS = 7
+NEAR_GOAL = 0.5  # s: goal shown as near once the personal best is this close to it
+SAME_TIME = 0.0005  # s: lap times this close are the same
+
+
+def _laptime(value: Any) -> float:
+    """Lap time in seconds, 0 if none (same limit as stats files: under MAX_SECONDS)"""
+    return float(value) if isinstance(value, (int, float)) and 0 < value < MAX_SECONDS else 0.0
+
+
+def parse_goals(value: Any) -> dict[str, float]:
+    """Lap time goals of driver stats config ("goals": {"track|vehicle": seconds}), invalid entries left out"""
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): laptime for key, entry in value.items() if (laptime := _laptime(entry))}
+
+
+def weekly_progress(records: Iterable[SessionRecord], goals: Mapping[str, float], now: float,
+                    days: int = WEEK_DAYS, near: float = NEAR_GOAL,
+                    bests: Mapping[tuple[str, str], float] | None = None) -> list[dict]:
+    """What changed in the last days (no Qt, no file, same answer for the same arguments)
+
+    Args:
+        records: session history (driver_history records, any order).
+        goals: lap time goals by "track|vehicle" (see parse_goals).
+        now: end of the period (Unix time); the period is the `days` days before it.
+        near: a goal is near when the personal best is at most this much slower (s).
+        bests: personal best of (track, vehicle) from the stats file (lap times completed from results files),
+            else the best of the records.
+
+    Returns:
+        Items, nothing when nothing was driven in the period. Every item has "kind":
+        - "summary" (first): sessions, laps (valid & invalid), seconds, meters, tracks, vehicles (counts);
+        - "goal_reached": track, vehicle, goal, best, time (session that reached it);
+        - "record" (new personal bests, newest first): track, vehicle, best, previous (0 for a first lap time),
+          gain (previous - best, 0 for a first lap time), time;
+        - "goal_near" (closest first): track, vehicle, goal, best, gap (best - goal, > 0), driven in the period.
+    """
+    start = now - days * 86400
+    before: dict[tuple[str, str], float] = {}  # best before the period
+    within: dict[tuple[str, str], tuple[float, float]] = {}  # best of the period & its session time
+    reached: dict[tuple[str, str], float] = {}  # first session of the period at or under the goal
+    sessions = laps = 0
+    seconds = meters = 0.0
+    tracks: set[str] = set()
+    for record in sorted(records, key=lambda entry: entry.time):
+        if record.time > now:
+            continue
+        combo = (record.track, record.vehicle)
+        laptime = _laptime(record.best)
+        if record.time < start:
+            if laptime and (combo not in before or laptime < before[combo]):
+                before[combo] = laptime
+            continue
+        sessions += 1
+        laps += max(record.valid, 0) + max(record.invalid, 0)
+        seconds += max(record.seconds, 0.0)
+        meters += max(record.meters, 0.0)
+        tracks.add(record.track)
+        if combo not in within:
+            within[combo] = (0.0, record.time)
+        if laptime and (not within[combo][0] or laptime < within[combo][0] - SAME_TIME):
+            within[combo] = (laptime, record.time)
+        goal = goals.get(f"{record.track}|{record.vehicle}", 0.0)
+        old = before.get(combo, 0.0)
+        if goal and laptime and laptime <= goal + SAME_TIME and not (old and old <= goal + SAME_TIME):
+            reached.setdefault(combo, record.time)
+    if not sessions:
+        return []
+    items: list[dict] = [{"kind": "summary", "sessions": sessions, "laps": laps, "seconds": seconds, "meters": meters,
+                          "tracks": len(tracks), "vehicles": len(within)}]
+    for combo, when in sorted(reached.items(), key=lambda item: (-item[1], item[0])):
+        items.append({"kind": "goal_reached", "track": combo[0], "vehicle": combo[1],
+                      "goal": goals[f"{combo[0]}|{combo[1]}"], "best": within[combo][0], "time": when})
+    records_found: list[dict[str, Any]] = []
+    for combo, (best, when) in within.items():
+        previous = before.get(combo, 0.0)
+        if best and (not previous or best < previous - SAME_TIME):
+            records_found.append({"kind": "record", "track": combo[0], "vehicle": combo[1], "best": best,
+                                  "previous": previous, "gain": previous - best if previous else 0.0, "time": when})
+    records_found.sort(key=lambda item: (-item["time"], item["track"], item["vehicle"]))
+    items.extend(records_found)
+    near_found: list[dict[str, Any]] = []
+    for combo in within:
+        goal = goals.get(f"{combo[0]}|{combo[1]}", 0.0)
+        if not goal or combo in reached:
+            continue
+        candidates = [laptime for laptime in (before.get(combo, 0.0), within[combo][0],
+                                              _laptime((bests or {}).get(combo, 0.0))) if laptime]
+        best = min(candidates, default=0.0)
+        if best and SAME_TIME < best - goal <= near:
+            near_found.append({"kind": "goal_near", "track": combo[0], "vehicle": combo[1], "goal": goal,
+                               "best": best, "gap": best - goal})
+    near_found.sort(key=lambda item: (item["gap"], item["track"], item["vehicle"]))
+    items.extend(near_found)
+    return items

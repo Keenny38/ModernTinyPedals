@@ -115,6 +115,9 @@ class Realtime(Overlay):
             column=1,
         )
 
+        # Last data
+        self.last_inputs = [None] * 4  # brake input mark per wheel
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         brake_pressure = api.read.brake.pressure(scale=100)
@@ -132,13 +135,14 @@ class Realtime(Overlay):
                 brake_inputs = WHEELS_ZERO
 
         for idx, bar_bpres in enumerate(self.bars_bpres):
-            self.update_bpres(bar_bpres, brake_pressure[idx], brake_inputs[idx])
+            self.update_bpres(bar_bpres, brake_pressure[idx], brake_inputs[idx], idx)
 
     # GUI update methods
-    def update_bpres(self, target, data, inputs):
-        """Brake pressure"""
-        if target.last != data:
+    def update_bpres(self, target, data, inputs, index):
+        """Brake pressure, input mark (moves alone at a held pressure: pit auto-hold)"""
+        if target.last != data or self.last_inputs[index] != inputs:
             target.last = data
+            self.last_inputs[index] = inputs
             if inputs != -1:
                 target.update_maxrange(inputs)
             target.update_input(data)

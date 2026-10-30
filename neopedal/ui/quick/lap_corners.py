@@ -101,6 +101,7 @@ class CornerTable(PagePart):
 
     changed = Signal()  # corner rows, sort, sensitivity, compared lap (page cornersChanged)
     focusRequestChanged = Signal()
+    summaryChanged = Signal()  # synthesis band under lap chips (sent only when its texts change)
 
     def __init__(self, page: CornerHost, setting: dict, parent: QObject | None = None):
         super().__init__(parent)
@@ -116,6 +117,7 @@ class CornerTable(PagePart):
         self._trackouts: dict[str, tuple[tuple, dict[int, float]]] = {}  # lap key: (key, track-out point by corner)
         self._resampled: dict[str, ResampledLap] = {}  # lap key: columns on corner grid (same lap, same object)
         self._coaching: list[dict] = []  # corners where compared lap loses most time, causes
+        self._summary: dict = {}  # synthesis band: compared & reference lap, total gap, worst corners (see summary)
         self.official: list[TrackCorner] = []  # official corner numbers (or names) of circuit
         self.official_numbered = True
         self._official_key: tuple | None = None  # reference & track of placed official corners
@@ -196,6 +198,12 @@ class CornerTable(PagePart):
         """Corners where compared lap loses most time (up to 3): row index, name, time lost, causes"""
         return self._coaching
 
+    @Property(dict, notify=summaryChanged)
+    def summary(self) -> dict:
+        """Synthesis band under lap chips, {} without compared lap: lap & reference names, total gap (tone: loss,
+        gain or ""), worst corners (coaching rows: row index, name, time lost, causes)"""
+        return self._summary
+
     @Property(str, notify=changed)
     def coachingLap(self) -> str:
         lap = self.compared_lap()
@@ -230,6 +238,7 @@ class CornerTable(PagePart):
     def release(self):
         self.forget()
         self._table, self._marks, self._coaching = [], [], []
+        self.set_summary({})
 
     def compared_lap(self) -> PlotLap | None:
         """Lap compared corner by corner & on gain map: chosen lap if shown, else first compared lap"""
@@ -352,7 +361,31 @@ class CornerTable(PagePart):
         self._table = rows
         self.row_model.sync([{**row, "id": f"{row['kind']}|{row['index']}"} for row in rows], "id")
         self.build_coaching()
+        self.build_summary(reference, compared_lap)
         self.build_corner_marks()
+
+    def build_summary(self, reference: LapData | None, compared: PlotLap | None):
+        """Synthesis band: total gap of compared lap to reference lap & its worst corners (coaching rows), sent only
+        when its texts change (charts rebuilt with the same laps: band items kept)"""
+        summary: dict = {}
+        if reference is not None and compared is not None and self._page.data.reference is not None:
+            gap = lap_time_delta(reference, compared.data)
+            summary = {
+                "lap": self._page.short_label(compared.key), "lapKey": compared.key,
+                "reference": self._page.short_label(self._page.data.reference.key),
+                "gap": signed(gap, 3, " s"), "tone": "loss" if gap > 0.0005 else "gain" if gap < -0.0005 else "",
+                "corners": self._coaching,
+            }
+        self.set_summary(summary)
+
+    def set_summary(self, summary: dict):
+        if summary != self._summary:
+            self._summary = summary
+            self.summaryChanged.emit()
+
+    def lost_corners(self) -> list[int]:
+        """Corner rows where compared lap loses most time, worst first (guided analysis)"""
+        return [tip["index"] for tip in self._coaching]
 
     def sums_comparable(self, reference: LapData, other: LapData) -> bool:
         """Whether corners + straights = lap delta rows mean something: compared lap has stats in every corner & about

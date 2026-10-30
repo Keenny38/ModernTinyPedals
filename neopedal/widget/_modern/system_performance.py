@@ -30,8 +30,7 @@ from typing import TYPE_CHECKING
 import psutil
 from PySide6.QtGui import QPainter
 
-from ... import calculation as calc
-from ..system_performance import AppMemory, app_cpu_percent
+from ..system_performance import AppMemory, CpuAverage, app_cpu_percent, start_cpu_readings
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
@@ -53,10 +52,10 @@ class Realtime(StatsMixin, ModernOverlay):
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
-        self.ema = calc.ema_filter(wcfg["average_samples"])
         self.app_info = psutil.Process(os.getpid())
         self.app_memory = AppMemory(self.app_info)
         self.cpu_count = os.cpu_count() or 1
+        start_cpu_readings(self.app_info)
         stats = []
         if wcfg["show_system_performance"]:
             stats.append(Stat("system", "System", "888.88%", sub_sample="888.8GB"))
@@ -66,7 +65,7 @@ class Realtime(StatsMixin, ModernOverlay):
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0, show_sub=True)
         self.set_size(width, height)
-        self.cpu = {"system": 0.0, "app": 0.0}
+        self.cpu = {key: CpuAverage(wcfg["average_samples"]) for key in ("system", "app")}
 
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
@@ -79,11 +78,11 @@ class Realtime(StatsMixin, ModernOverlay):
         values = []
         for key in self.keys:
             if key == "system":
-                self.cpu[key] = self.ema(self.cpu[key], psutil.cpu_percent())
+                cpu = self.cpu[key].update(psutil.cpu_percent())
                 memory = f"{psutil.virtual_memory().used / 1024 ** 3:.1f}GB"
             else:
-                self.cpu[key] = self.ema(self.cpu[key], app_cpu_percent(self.app_info, self.cpu_count))
+                cpu = self.cpu[key].update(app_cpu_percent(self.app_info, self.cpu_count))
                 memory = f"{self.app_memory.megabytes():.1f}MB"
-            values.append(Value(f"{self.cpu[key]:.2f}%", bar=fraction(self.cpu[key] / 100), sub=memory))
+            values.append(Value(f"{cpu:.2f}%", bar=fraction(cpu / 100), sub=memory))
         state = tuple(values)
         self.refresh_keyed(state, self.pixel_key(state, [slot.value.width() for slot in self.slots], "bar"))

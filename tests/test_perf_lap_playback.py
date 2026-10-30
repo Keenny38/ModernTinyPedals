@@ -264,7 +264,7 @@ def test_session_shapes_geometry():
 
     view = {"width": 500, "padLeft": 50, "padRight": 10, "top": 6, "bottom": 200, "low": 60, "high": 80,
             "stripTops": [220, 280], "stripHeight": 50, "em": 10, "best": 70, "window": "#000000",
-            "text": "#ffffff", "gold": "#ffd700", "fuelColor": "#3B82F6", "wearColor": "#F59E0B"}
+            "text": "#ffffff", "bestColor": "#ffd700", "fuelColor": "#3B82F6", "wearColor": "#F59E0B"}
     rows = [lap(70, fuel=2.0), lap(71, shown=True, fuel=1.0), lap(0), lap(72, valid=False, fuel=1.5, wear=0.5),
             lap(73), lap(74, outlier=True, wear=0.2)]
     shapes = session_shapes(rows, view)

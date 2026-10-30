@@ -10,7 +10,6 @@ QML_FOLDER = Path(__file__).resolve().parent.parent / "neopedal" / "ui" / "qml"
 # (TpCombo makes its items only while open), first chips of a row, setup steps
 ALLOWED: dict[tuple[str, str], int] = {
     ("DirectorGraphics.qml", "model"): 2,  # combo: "All Classes" / "Preset in use" + names
-    ("OverlayOptions.qml", "model"): 2,  # combo: "Save as Profile..." / "Color Theme..." + names
     ("PresetRow.qml", "model"): 2,  # first 3 classes & 2 tracks of a preset
     ("RaceResults.qml", "model"): 1,  # class chips ("All" + classes) when any
     ("RaceTyreTab.qml", "model"): 1,  # header cells: Stint, wheels, Change

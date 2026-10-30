@@ -22,6 +22,7 @@ Driver stats viewer part (StatsCore, mixin of DriverStatsBackend): Page state sh
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import threading
@@ -37,7 +38,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from ... import app_signal
 from ...api_control import api
@@ -56,12 +57,14 @@ from ...userfile.driver_stats import (
     STATS_LOCK,
 )
 from ...userfile.lap_reference import LEVEL_COLORS, LapReference, LapReferenceTable
+from . import open_web_link
 from .formatting import format_date
 from .stats_common import (
     ALL_TRACKS,
     COLORBLIND_LEVEL_COLORS,
     CONFIG_NAME,
     REFERENCE_MAX_AGE,
+    STATS_TABS,
     SYNC_HISTORY_BYTES,
     SYNC_STATS_BYTES,
     online_value,
@@ -86,6 +89,22 @@ from .stats_io import (
 
 logger = logging.getLogger(__name__)
 
+
+def results_combo(stats: dict, track: str, venue: str, car_class: str = "", car: str = "", vehicle: str = ""
+                  ) -> tuple[str, str] | None:
+    """Stats track & vehicle keys of a results session car (race results page): track of the event or venue
+    name, vehicle of the entry name, then class & brand, then class ("" if none); None if track not in stats"""
+    names = {name.strip().casefold() for name in (track, venue) if name.strip()}
+    track_key = next((key for key in stats if key and key.casefold() in names), "")
+    if not track_key:
+        return None
+    keys = [str(key) for key in stats.get(track_key, {})]
+    described = f"{car} {vehicle}".casefold()
+    prefix = f"{car_class} - "
+    found = next((key for key in keys if vehicle and key == vehicle), "") or next(
+        (key for key in keys if car_class and key.startswith(prefix) and key[len(prefix):].casefold() in described),
+        "") or next((key for key in keys if car_class and key == car_class), "")
+    return track_key, found
 
 class StatsCore(StatsHost):
     """Page state shared by the other parts: signals, settings, lap time reference, stats & history files (watched, reloaded in order on a worker thread), results files, track list & selected track"""
@@ -115,7 +134,9 @@ class StatsCore(StatsHost):
     rivalsChanged = Signal()  # people met in online races (All Tracks)
     upcomingChanged = Signal()  # official races to come (All Tracks, RaceControl)
     goalChanged = Signal()  # lap time goal of selected vehicle
+    weeklyChanged = Signal()  # progress of the last days (All Tracks)
     _wanted_combo: tuple[str, str] | None = None  # track & vehicle shown once stats are read (see show_combo)
+    _wanted_results: tuple[str, ...] | None = None  # results session shown once stats are read (show_results_combo)
 
     @Slot()
     def palette_changed(self, *_args):
@@ -213,9 +234,10 @@ class StatsCore(StatsHost):
         if not self.viewer_config().get("enable_lap_reference", True):
             return tr("Community lap times off")
         if self._downloading:
-            return tr("Downloading community lap times...")
+            return tr("Downloading community lap times…")
         if self.references.entries:
-            updated = f" · {tr('updated')} {self.references.updated}" if self.references.updated else ""
+            # Date cell of the sheet (anyone's sheet: its address can be changed): text, never markup
+            updated = f" · {tr('updated')} {html.escape(self.references.updated)}" if self.references.updated else ""
             return f"{tr('Community lap times')} ({source}){updated}"
         if self.reference_error:
             return tr("Community lap times unavailable (offline?)")
@@ -244,25 +266,31 @@ class StatsCore(StatsHost):
     def updateReference(self):
         self.download_reference(force=True)
 
+    @Slot(str)
+    def openLink(self, link: str):
+        """Link of the reference text (sheet source) in the browser: https only, never another scheme"""
+        open_web_link(link)
+
     @Slot()
-    def changeSheetUrl(self):
-        """Published Google Sheet of lap times (same layout), downloaded at once"""
-        from .._common import TextInputDialog
+    def changeSheetUrl(self, text: str = ""):
+        """Published Google Sheet of lap times (same layout), downloaded at once; not a sheet address: told, then
+        asked again with the address typed"""
+        from . import dialogs
 
         def accept(url: str) -> bool:
             url = url.strip() or lap_reference.DEFAULT_SHEET_URL
             if not url.startswith("https://docs.google.com/spreadsheets/"):
-                QMessageBox.warning(self._window, tr("Error"), tr("Not a Google Sheets address."))
-                return False
+                dialogs.alert(self._window, tr("Error"), tr("Not a Google Sheets address."), "warning",
+                              lambda: self.changeSheetUrl(url))
+                return True
             self.save_viewer_config(lap_reference_sheet_url=url)
             self.download_reference(force=True)
             return True
 
-        TextInputDialog(
-            self._window, tr("Change Sheet Address..."),
-            tr("Address of the published Google Sheet of community lap times (empty for default):"),
-            accept, self.viewer_config().get("lap_reference_sheet_url") or lap_reference.DEFAULT_SHEET_URL,
-        ).open()
+        dialogs.ask_text(
+            self._window, tr("Change Sheet Address…"),
+            tr("Address of the published Google Sheet of community lap times (empty for default):"), accept,
+            text or self.viewer_config().get("lap_reference_sheet_url") or lap_reference.DEFAULT_SHEET_URL)
 
     # Stats & history files
     @staticmethod
@@ -557,6 +585,7 @@ class StatsCore(StatsHost):
         """Page updated with stats & history files read"""
         self._reading = False
         self._file_times = files.times
+        self._sector_times, self._lap_folders = files.sector_times, files.lap_folders
         if files.history is not None:
             history = files.history
             self.history, self._history_stamp, self.history_index = history.records, history.stamp, history.by_combo
@@ -578,11 +607,26 @@ class StatsCore(StatsHost):
             self.selectTrack(track)
             self.selectRow(vehicle)
 
+    def show_results_combo(self, track: str, venue: str, car_class: str = "", car: str = "", vehicle: str = ""):
+        """Track & player's car of a results session (race results page): stats track of its event or venue name,
+        vehicle row of the car (entry name, class & brand, class); now if stats are read, else once read"""
+        if not self._loaded or any(job is not None and job.kind == "reload"
+                                   for job in (self._running_job, *self._locked_jobs)):
+            self._wanted_results = (track, venue, car_class, car, vehicle)
+            return
+        self._wanted_results = None
+        combo = results_combo(self.stats_temp, track, venue, car_class, car, vehicle)
+        if combo is not None:
+            self.show_combo(*combo)
+
     def stats_read(self, stats_user: dict | None, select: str | None):
         """Page updated with stats file read (checked already: validate_stats_file)"""
         if stats_user is None:  # invalid file: stats shown kept
             self.refresh_table()
             return
+        if self._wanted_results is not None:  # results session asked while reading (see show_results_combo)
+            self._wanted_combo = results_combo(stats_user, *self._wanted_results) or self._wanted_combo
+            self._wanted_results = None
         self.stats_temp = stats_user
         self._stats_serial += 1
         combo, self._wanted_combo = self._wanted_combo, None  # asked while reading (see show_combo)
@@ -714,3 +758,15 @@ class StatsCore(StatsHost):
     def setActivityView(self, view: int):
         self.save_viewer_config(activity_view=1 if view == 1 else 0)
         self.optionsChanged.emit()
+
+    @Property(int, notify=optionsChanged)
+    def statsTab(self) -> int:
+        """Tab of the page: 0 overview, 1 progression, 2 compare"""
+        value = self.viewer_config().get("stats_tab", 0)
+        return value if isinstance(value, int) and 0 <= value < STATS_TABS else 0
+
+    @Slot(int)
+    def setStatsTab(self, index: int):
+        if 0 <= index < STATS_TABS and index != self.statsTab:
+            self.save_viewer_config(stats_tab=index)
+            self.optionsChanged.emit()

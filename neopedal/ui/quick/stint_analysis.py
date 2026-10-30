@@ -353,7 +353,7 @@ def load_friend(filename: str) -> dict:
     try:
         with open(filename, encoding="utf-8") as file:
             document = json.load(file)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:  # RecursionError: nested too deeply
         raise ValueError(str(error)) from error
     return friend_from_document(document, os.path.splitext(os.path.basename(filename))[0])
 

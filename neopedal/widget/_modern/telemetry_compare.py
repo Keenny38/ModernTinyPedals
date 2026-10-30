@@ -33,7 +33,7 @@ from PySide6.QtGui import QPainter, QPen
 
 from ...i18n import tr_overlay as tr
 from ..telemetry_compare import CENTERED_CHANNELS, PANEL_LABELS, TelemetryCompareMixin, delta_limit, shown_panels
-from .base import LEFT, RIGHT, ModernOverlay
+from .base import LEFT, RIGHT, ModernOverlay, signed
 from .draw import panel, rounded
 
 if TYPE_CHECKING:
@@ -85,8 +85,8 @@ class Realtime(TelemetryCompareMixin, ModernOverlay):
 
         limit = delta_limit(self.decimals)  # widest delta once rounded
         self.delta_w = self.text_width("value", self.widest("value", (
-            "+88." + "8" * self.decimals if self.decimals else "+88", f"{limit:+.{self.decimals}f}",
-            f"{-limit:+.{self.decimals}f}")))
+            "+88." + "8" * self.decimals if self.decimals else "+88", signed(limit, self.decimals),
+            signed(-limit, self.decimals))))
         self.speed_w = self.text_width("small", f"+888 {self.speed_symbol}")
         self.ref_label = tr("Ref")
         self.ref_label_w = self.text_width("label", self.ref_label) + unit * 0.3
@@ -118,7 +118,7 @@ class Realtime(TelemetryCompareMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for box in self.boxes.values():
             rounded(painter, box, self.radius(0.3), theme.tint(theme.surface_alt, 200))
         for channel in CENTERED_CHANNELS:

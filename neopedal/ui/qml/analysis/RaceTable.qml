@@ -141,6 +141,7 @@ Item {
                             width: table.widths[index] || 0
                             height: table.rowHeight
                             text: rowItem.cells[column] !== undefined ? rowItem.cells[column] : ""
+                            textFormat: Text.PlainText
                             color: column === table.colorColumn && text !== "" ? table.cellColor : theme.text
                             font.weight: rowItem.index === table.boldRow ? Font.DemiBold : Font.Normal
                             font.features: { "tnum": 1 }

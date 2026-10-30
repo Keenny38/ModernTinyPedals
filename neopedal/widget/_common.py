@@ -22,8 +22,9 @@ Overlay base common class.
 
 from __future__ import annotations
 
+import re
 from math import isfinite
-from time import monotonic
+from time import monotonic, strftime
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import QPoint, QRect, Qt
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from .. import calculation as calc
 from ..api_control import api
-from ..const_common import MAX_SECONDS
+from ..const_common import MAX_SECONDS, MIN_IMPACT_MAGNITUDE
 from ..module_info import VehicleDataSet, minfo
 from ..validator import generator_init
 from ._snapping import constrain_axis, grid_value, snap_position
@@ -50,14 +51,62 @@ def player_vehicle() -> VehicleDataSet:
 
 def player_race_laps(est_remaining: float) -> tuple[float, float]:
     """Player laps done (completed laps + lap progress) & race finish lap, same count in Laps and position and
-    Session overlays. Both from game scoring, updated together (telemetry lap number is the lap being driven, one
-    more than completed laps). Timed race ends on crossing the line after the timer: finish lap rounded up"""
+    Session overlays. Both from game scoring, updated together (LMU telemetry lap number equals completed laps
+    while driving, recorded sessions, but updates one frame before scoring at the line: never mixed with them).
+    Timed race ends on crossing the line after the timer: finish lap rounded up"""
     lap_into = api.read.lap.progress()
     laps_completed = api.read.lap.completed_laps()
     if api.read.session.finish_type(minfo.vehicles.finishAsLap):
         return laps_completed + lap_into, api.read.lap.maximum()
     laps_timer = calc.end_timer_laps_remain(lap_into, minfo.delta.lapTimePace, est_remaining)
     return laps_completed + lap_into, laps_completed + calc.ceil(laps_timer)
+
+
+def system_clock_samples(clock_format: str) -> tuple[str, ...]:
+    """Texts of system clock format to size its value: every day & month name (Wednesday, September...), morning &
+    afternoon, every digit as 8 (widest digit, digits are tabular); format itself if invalid"""
+    try:
+        return tuple(
+            re.sub(r"\d", "8", strftime(clock_format, (2021, month, 28, 10 + month % 2 * 12, 58, 58, month % 7, 1, 0)))
+            for month in range(1, 13)
+        )
+    except ValueError:
+        return (clock_format,)
+
+
+class SessionBestLap:
+    """Session best lap time of all cars (or player class), one car read per update (Timing overlays): cleared on
+    new or restarted session, as overlay may stay shown from one session to the next (spectating, streamed)"""
+
+    __slots__ = ("laptime", "index", "session", "elapsed")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Read again from first car"""
+        self.laptime = MAX_SECONDS
+        self.index = 0
+        self.session = -1
+        self.elapsed = 0.0
+
+    def update(self, same_class_only: bool) -> float:
+        """Best lap time so far"""
+        session = api.read.session.identifier()[0]
+        elapsed = api.read.session.elapsed()
+        if session != self.session or elapsed < self.elapsed - 1:  # new session, or same session restarted
+            self.laptime = MAX_SECONDS
+            self.session = session
+        self.elapsed = elapsed
+        # Bounded before reading: fewer cars than at last update (car left) would read a stale slot past the field
+        if self.index >= api.read.vehicle.total_vehicles():
+            self.index = 0
+        if not same_class_only or api.read.vehicle.same_class(self.index):
+            best = api.read.timing.best_laptime(self.index)
+            if 0 < best < self.laptime:
+                self.laptime = best
+        self.index += 1  # one car per update, wrap after last car
+        return self.laptime
 
 
 class FontMetrics(NamedTuple):
@@ -205,6 +254,22 @@ def lap_delta_shown(reference_laptime: float) -> bool:
     return minfo.delta.hasLastLap and 0 < reference_laptime < MAX_SECONDS
 
 
+def lap_reference(source: str, game_delta: bool = False) -> float:
+    """Reference lap time of lap under way (read once lap started, kept until line, see lap_delta_shown): 0 if
+    reference is last lap and it went through pit lane (out lap, pit in lap: not comparable). Game delta shown
+    (game_deltabest): best lap as defined by game, that live game delta compares against (no jump at line)"""
+    delta = minfo.delta
+    if source == "Last" and not delta.hasLastLap:
+        return 0.0
+    laptime = getattr(delta, f"lapTime{source}", 0.0)
+    if game_delta and 0 < laptime < MAX_SECONDS:  # live delta shown (app reference exists)
+        game_live = api.read.timing.delta_best()
+        game_best = api.read.timing.best_laptime()
+        if game_live and isfinite(game_live) and 0 < game_best < MAX_SECONDS:
+            return game_best
+    return laptime
+
+
 def game_deltabest(app_delta: float) -> float:
     """Delta to best lap computed by game (LMU), app computed delta if game gives none (0)"""
     delta = api.read.timing.delta_best()
@@ -216,43 +281,45 @@ def tyre_punctured() -> tuple[bool, ...]:
     return tuple(flat or worn for flat, worn in zip(api.read.tyre.flat(), api.read.tyre.puncture()))
 
 
+def impact_cone_position() -> tuple[float, float] | None:
+    """Position (x, y) of last impact if strong enough for impact cone, None for light or empty impact"""
+    if api.read.vehicle.impact_magnitude() < MIN_IMPACT_MAGNITUDE:
+        return None
+    position = api.read.vehicle.impact_position()
+    return position if any(position) else None
+
+
+# Flashes of every overlay (warnings, alerts, flags, pedal bars, damage pulse): one phase rule (flash_lit)
+FLASH_MINIMUM = 0.2  # seconds: shortest lit or dark part of a flash
+FAST_FLASH_MINIMUM = 0.05  # pedal bar alerts (ABS, TC, wheel lock & spin) flicker faster
+
+
+def flash_lit(elapsed: float, on: float, off: float | None = None, minimum: float = FLASH_MINIMUM) -> bool:
+    """Flash lit elapsed seconds after it started: lit for on seconds, then dark for off seconds (default: on),
+    each at least minimum seconds"""
+    on = max(on, minimum)
+    off = on if off is None else max(off, minimum)
+    return elapsed % (on + off) < on
+
+
 @generator_init
 def warning_flash(duration: float, interval: float, max_count: int):
-    """Warning flash state"""
-    last_condition = False
-    highlight = False
-    highlight_seconds = max(duration, 0.2)
-    highlight_timer = 0.0
-    interval_seconds = max(interval, 0.2)
-    interval_timer = 0.0
-    flash_count = 0
+    """Warning flash state while condition sent is true: lit for duration, dark for interval (flash_lit), steady
+    lit from flash number max_count on (at least 3)"""
+    lit_seconds = max(duration, FLASH_MINIMUM)
+    period = lit_seconds + max(interval, FLASH_MINIMUM)
     flash_max = max(max_count, 3)
+    start = -1.0  # when condition became true, -1 while false
+    highlight = False
 
     while True:
         condition = yield highlight
-        elapsed = monotonic()
-
-        if last_condition != condition:
-            last_condition = condition
-            if condition:
-                highlight_timer = elapsed
-                highlight = False
-                interval_timer = 0
-                flash_count = 0
-
         if not condition:
+            start = -1.0
             highlight = False
             continue
-        elif flash_count >= flash_max:
-            highlight = True
-            continue
-
-        if elapsed - highlight_timer < highlight_seconds:
-            if not highlight:
-                flash_count += 1
-            highlight = True
-            interval_timer = elapsed
-        else:
-            highlight = False
-            if elapsed - interval_timer >= interval_seconds:
-                highlight_timer = elapsed
+        elapsed = monotonic()
+        if start < 0:
+            start = elapsed
+        age = elapsed - start
+        highlight = age // period >= flash_max - 1 or flash_lit(age, lit_seconds, period - lit_seconds)

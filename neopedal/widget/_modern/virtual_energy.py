@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ...module_info import minfo
+from .base import DASH, signed
 from .consumption import COMMON_OPTIONS, ConsumptionPanel, Names, decimals
 from .stats import Stat, Value
 
@@ -49,10 +50,11 @@ class Realtime(ConsumptionPanel):
         level_bar="show_energy_level_bar",
         start_mark="show_starting_energy_level_mark",
         refill_mark="show_refilling_level_mark",
+        refill_shown="show_refilling",
     )
     options = (
         *COMMON_OPTIONS, *names[2:],
-        "show_fuel_ratio_and_fuel_bias", "decimal_places_fuel_ratio", "decimal_places_fuel_bias",
+        "show_fuel_ratio", "show_fuel_bias", "decimal_places_fuel_ratio", "decimal_places_fuel_bias",
     )
 
     def __init__(self, config, widget_name):
@@ -60,18 +62,25 @@ class Realtime(ConsumptionPanel):
         self.source = minfo.energy
         self.convert = float
         self.symbol = "%"
-        self.show_ratio = self.wcfg["show_fuel_ratio_and_fuel_bias"]
-        extra = [Stat("ratio", "Ratio", "8.888"), Stat("bias", "Bias", "+8.88")] if self.show_ratio else []
+        self.show_ratio = bool(self.wcfg["show_fuel_ratio"])
+        self.show_bias = bool(self.wcfg["show_fuel_bias"])
+        extra = [Stat("ratio", "Ratio", "8.888")] if self.show_ratio else []
+        if self.show_bias:
+            extra.append(Stat("bias", "Bias", "+8.88"))
         self.setup_panel(extra)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        theme = self.theme
+        if not minfo.energy.available:  # car without virtual energy: no values, no low energy warning
+            missing = Value(DASH, theme.text_faint)
+            self.refresh(((missing,) * len(self.keys), DASH, (DASH, 0.0), False, None))
+            return
         extra = []
         if self.show_ratio:
-            theme = self.theme
+            extra.append(Value(f"{minfo.hybrid.fuelEnergyRatio:.{decimals(self.wcfg, 'fuel_ratio')}f}", theme.text_dim))
+        if self.show_bias:
             bias = minfo.hybrid.fuelEnergyBias
-            extra = [
-                Value(f"{minfo.hybrid.fuelEnergyRatio:.{decimals(self.wcfg, 'fuel_ratio')}f}", theme.text_dim),
-                Value(f"{bias:+.{decimals(self.wcfg, 'fuel_bias')}f}", theme.negative if bias < 0 else theme.text_dim),
-            ]
+            extra.append(Value(signed(bias, decimals(self.wcfg, "fuel_bias")),
+                               theme.negative if bias < 0 else theme.text_dim))
         self.read_panel(extra)

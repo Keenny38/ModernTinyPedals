@@ -38,11 +38,8 @@ from .draw import accent_edge, panel
 if TYPE_CHECKING:
     from ...template.widget_config_types import TrackNotesConfig
 
-SECTIONS = (  # key, font role, color token
-    ("track_notes", "strong", "text"),
-    ("comments", "small", "text_dim"),
-    ("debugging", "small", "text_muted"),
-)
+SECTION_STYLES = (("strong", "text"), ("small", "text_dim"), ("small", "text_muted"))  # note, comments, debugging:
+# font role, color token
 
 ALIGN = {"left": LEFT, "right": RIGHT}  # else center
 
@@ -52,6 +49,7 @@ class Realtime(TrackNotesMixin, ModernOverlay):
 
     wcfg: TrackNotesConfig
 
+    NOTES_KEY = "track_notes"  # option prefix of note section (show_track_notes, track_notes_width...)
     options = (
         "font_size", "layout", "show_background", "enable_auto_hide_if_not_available", "maximum_display_duration",
         "show_pit_notes_while_in_pit", "pit_notes_text", "pit_comments_text", "show_track_notes",
@@ -64,15 +62,16 @@ class Realtime(TrackNotesMixin, ModernOverlay):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
         self.setup_notes()
-        self.keys = tuple(self.display_ordered([key for key, _, _ in SECTIONS if wcfg[f"show_{key}"]], key=str))
-        self.roles = {key: role for key, role, _ in SECTIONS}
-        self.colors = {key: getattr(self.theme, token) for key, _, token in SECTIONS}
-        self.aligns = {key: ALIGN.get(str(wcfg[f"{key}_text_alignment"]).lower(), CENTER) for key, _, _ in SECTIONS}
-        self.widths = {key: self.digit_width(self.roles[key]) * max(int(wcfg[f"{key}_width"]), 1) for key, _, _ in SECTIONS}
+        sections = tuple((key, *style) for key, style in zip((self.NOTES_KEY, "comments", "debugging"), SECTION_STYLES))
+        self.keys = tuple(self.display_ordered([key for key, _, _ in sections if wcfg[f"show_{key}"]], key=str))
+        self.roles = {key: role for key, role, _ in sections}
+        self.colors = {key: getattr(self.theme, token) for key, _, token in sections}
+        self.aligns = {key: ALIGN.get(str(wcfg[f"{key}_text_alignment"]).lower(), CENTER) for key, _, _ in sections}
+        self.widths = {key: self.digit_width(self.roles[key]) * max(int(wcfg[f"{key}_width"]), 1) for key, _, _ in sections}
         self.horizontal = wcfg["layout"] != 0
         self.show_background = bool(wcfg["show_background"])
         self.line_break = bool(wcfg["enable_comments_line_break"])
-        self.uppercase = bool(wcfg["track_notes_uppercase"])
+        self.uppercase = bool(wcfg.get(f"{self.NOTES_KEY}_uppercase", False))  # track notes only
         self.comment_lines = 0
         self.sections: dict[str, QRectF] = {}
         self.place_sections(1)
@@ -86,7 +85,7 @@ class Realtime(TrackNotesMixin, ModernOverlay):
         pad = unit * 0.35
         edge = unit * 0.3 if self.show_background else 0.0
         inner = unit * 0.5
-        heights = {"track_notes": unit * 1.5, "comments": unit * 1.1 * comment_lines + unit * 0.3, "debugging": unit * 1.2}
+        heights = {self.NOTES_KEY: unit * 1.5, "comments": unit * 1.1 * comment_lines + unit * 0.3, "debugging": unit * 1.2}
         left = pad + edge
         top = pad
         width = height = 0.0
@@ -117,7 +116,7 @@ class Realtime(TrackNotesMixin, ModernOverlay):
             return
         texts: list[tuple[str, ...]] = []
         for key in self.keys:
-            if key == "track_notes":
+            if key == self.NOTES_KEY:
                 text = self.note_text(notes_current, in_pits)
                 texts.append((text.upper() if self.uppercase else text,))
             elif key == "comments":
@@ -142,7 +141,7 @@ class Realtime(TrackNotesMixin, ModernOverlay):
         if not self.show_background:
             return
         rect = QRectF(self.rect())
-        panel(painter, rect, theme, self.radius(0.5), self.depth_effects)
+        panel(painter, rect, theme, self.panel_radius(), self.depth_effects)
         unit = self.unit
         accent_edge(painter, QRectF(unit * 0.3, unit * 0.35, rect.width(), rect.height() - unit * 0.7),
                     theme.accent, max(unit * 0.16, 2.0), self.radius(0.3))

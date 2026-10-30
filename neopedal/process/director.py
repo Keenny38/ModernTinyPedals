@@ -427,8 +427,11 @@ class RaceWatcher:
                 state.stopped_at = now
                 events.append(self.event(STOPPED, state.still_since, (car,)))
             self.check_slow(car, state, now, race and green and not halted, events)
-        for slot in set(self.cars) - set(by_slot):  # left the session
+        for slot in set(self.cars) - set(by_slot):  # left the session: nothing inherited by the next car of the slot
             del self.cars[slot]
+            self.laps.pop(slot, None)
+            self.pit_stops.pop(slot, None)
+            self.sector_best.pop(slot, None)
         events.extend(self.update_battles(cars, places, now, elapsed, race))
         events.sort(key=lambda event: event.time)
         self.measuring.extend(event for event in events if event.kind in (CONTACT, WALL) and event.live)

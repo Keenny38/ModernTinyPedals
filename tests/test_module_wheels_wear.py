@@ -161,7 +161,8 @@ def test_suspension_skipped_after_impact_and_offroad(tele):
     output = WheelsInfo()
     gen = calc_suspension_travel(output, average_samples=3, average_margin=10, wheel_liftoff=0.1, enable_offroad=False)
     tele.update({"vehicle.speed": 50.0, "inputs.throttle_raw": 1.0, "timing.elapsed": 20.0,
-                 "vehicle.impact_time": 19.0, "wheel.suspension_deflection": (40.0,) * 4,
+                 "vehicle.impact_time": 19.0, "vehicle.impact_magnitude": 1500.0,  # real impact (not kerbs)
+                 "wheel.suspension_deflection": (40.0,) * 4,
                  "tyre.vertical_deflection": (1.0,) * 4, "wheel.position_vertical": (0.02,) * 4})
     gen.send(0)  # impact 1 s ago
     assert output.minSuspensionPosition[0] == 0.0

@@ -41,14 +41,14 @@ def test_live_language_switch(ui_env, monkeypatch):
     set_language("English")
     window = app_module.AppWindow()
     try:
-        assert "Config" in menu_titles(window)
+        assert "Settings" in menu_titles(window)  # one name for settings (UI/UX audit 2026-10-29 N1)
         window.centralWidget().set_current_index(2)
         cfg.application["language"] = "Français"
         app_signal.refresh.emit(True)
         QCoreApplication.processEvents()  # rebuild is deferred
         assert current_language() == "fr"
         titles = menu_titles(window)
-        assert "Config" not in titles and "Aide" in titles
+        assert "Settings" not in titles and "Aide" in titles and "Paramètres" in titles
         assert window.centralWidget().current_index() == 2  # same tab kept
         # Refresh signal still works after rebuild (old widgets disconnected)
         app_signal.refresh.emit(True)
@@ -74,7 +74,7 @@ def test_navigation_rail(ui_env, monkeypatch):
     import os
 
     from neopedal.ui import app as app_module
-    from neopedal.ui.tools_view import TOOL_SECTIONS, ToolCard, ToolsView
+    from neopedal.ui.tools_view import LISTED_TOOL_SECTIONS, ToolsView
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -83,8 +83,13 @@ def test_navigation_rail(ui_env, monkeypatch):
     try:
         view = window.centralWidget()
         assert view.current_index() == app_module.PAGE_INDEX["tools"]  # restored
-        cards = view.findChild(ToolsView).findChildren(ToolCard)  # home page quick access has tool cards too
-        assert len(cards) == sum(len(tools) for _, tools in TOOL_SECTIONS)
+        # Qt Quick page: one tile per listed tool & per page left out of the navigation bar (Pages section)
+        from neopedal.ui.nav_rail import current_rail_items
+        from neopedal.ui.quick.shell_tools_backend import page_entries
+
+        tools_page = view.findChild(ToolsView)
+        pages = len(page_entries(set(current_rail_items())))
+        assert tools_page.backend.shownCount == pages + sum(len(tools) for _, tools in LISTED_TOOL_SECTIONS)
         if os.environ.get("RAIL_SHOT"):
             window.resize(560, 820)
             window.show()
@@ -204,18 +209,16 @@ def test_command_palette(ui_env, monkeypatch):
         # Former fuel calculator & tyre strategy planner names find the merged tool
         assert match_commands(palette.commands, "fuel calculator")[0].title == "Race Calculator"
         assert match_commands(palette.commands, "stratégie pneus")[0].title == "Race Calculator"
-        shown = [palette.list_results.item(row).text() for row in range(palette.list_results.count())]
-        palette.edit_search.setText("hotkey")
-        assert [palette.list_results.item(row).text() for row in range(palette.list_results.count())] == shown
-        palette.apply_search()  # typing refreshes results after a short pause
-        assert palette.list_results.count() >= 1
-        palette.edit_search.setText("font size speed")  # options found too
-        palette.apply_search()
-        assert any("\u2192" in palette.list_results.item(row).text() for row in range(palette.list_results.count()))
+        palette.set_search("hotkey")  # Qt Quick palette (UI/UX audit 2026-10-29 N6)
+        assert palette.backend.titles()
+        palette.set_search("font size speed")  # options found too
+        assert any(row["group"] == "Options" for row in palette.backend.results)
         options = palette.options
         assert CommandPalette(window).options is options  # option index kept while settings unchanged
-        palette.edit_search.setText("Tools")
-        palette.run_selected()  # first match is the page (pending search applied first)
+        palette = CommandPalette(window)
+        palette.set_search("Tools")
+        palette.run_selected()  # first match is the page, run once the palette is closed
+        QCoreApplication.processEvents()
         assert window.centralWidget().current_index() == app_module.PAGE_INDEX["tools"]
     finally:
         cfg.application["last_page_index"] = 0

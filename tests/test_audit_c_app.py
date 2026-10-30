@@ -201,19 +201,23 @@ def test_config_save_keeps_options_changed_elsewhere(window):
     assert cfg.user.setting["speedometer"]["opacity"] == 0.25
 
 
-def test_font_config_unsaved_state(window, answers):
-    from neopedal.ui.config import FONT_NO_CHANGE, FontConfig
+def test_font_config_unsaved_state(window, answers, monkeypatch):
+    """Global font override: category of the Settings page, pending until applied, then back to no change"""
+    from neopedal.ui import settings_host
+    from neopedal.ui.menu import open_preset_config
 
-    dialog = FontConfig(parent=window, user_setting=cfg.user.setting, reload_func=lambda: None)
-    dialog.open()
+    monkeypatch.setattr(settings_host, "run_after_saving", lambda callback: None)  # overlays not reloaded
+    page = open_preset_config(window, "font")
     try:
-        assert dialog.is_preset_setting() and not dialog.is_modified()
-        dialog.edit_fontsize.setValue(2)
-        assert dialog.is_modified() and window.modified_config_dialogs(preset_only=True) == [dialog]
-        assert dialog.selected_choice(dialog.edit_fontname) == FONT_NO_CHANGE
-        assert dialog.applying() and not dialog.is_modified()
+        assert page.backend.category == "font" and not page.is_modified()
+        page.backend.setNumber("font:font_size_addend", 2)
+        assert page.is_modified()
+        rows = {row["option"]: row for row in page.backend.model.rows}
+        assert rows["font_name"]["choices"][0] == "no change"
+        assert page.backend.apply() and not page.is_modified()
+        assert {row["option"]: row for row in page.backend.model.rows}["font_size_addend"]["number"] == 0
     finally:
-        dialog.close()
+        page.backend.discard()
 
 
 def test_screen_change_waits_for_unsaved_config(window, monkeypatch):
@@ -248,19 +252,23 @@ def test_singleton_error_shows_dialog_title(ui_env, answers):
         flush_deleted()
 
 
-# Item 4: capture screen keeps layout editor page
-def test_capture_screen_keeps_layout_editor_page(window, monkeypatch):
+# Item 4: screen captured for the screen view (former Layout Editor) without the app window, page kept
+def test_capture_screen_keeps_overlays_page(window, monkeypatch):
     from PySide6.QtGui import QGuiApplication
 
-    editor = open_editor_page(window, "layout_editor.LayoutEditor")
+    from neopedal.ui import overlay_view
+    from neopedal.ui.overlay_view import OverlayView
+
+    monkeypatch.setattr(overlay_view, "CAPTURE_DELAY_MS", 20)
+    page = window.centralWidget().findChild(OverlayView) or OverlayView(window)
     window.show()
     screen = QGuiApplication.primaryScreen()
     grabbed = []
-    monkeypatch.setattr(type(screen), "grabWindow", lambda self, *args: grabbed.append(window.isVisible()) or QImage())
-    editor.capture_screen()
+    monkeypatch.setattr(type(screen), "grabWindow", lambda self, *args: grabbed.append(window.isVisible()) or QImage(8, 8, QImage.Format.Format_ARGB32))
+    image = page.capture_screen(screen.name())
     assert grabbed == [False]  # main window hidden while capturing
-    assert window.isVisible()
-    assert editor in [page.dialog for page in window.centralWidget().dialog_pages()]  # page not closed
+    assert window.isVisible() and image is not None and not image.isNull()
+    assert page.capture_screen("no such screen") is None and grabbed == [False]
     window.hide()
 
 
@@ -334,11 +342,11 @@ def test_float_cell_rejects_non_finite(text):
 # Item 17: refresh never runs toggle side effects
 def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
     from neopedal.ui import hotkey_view, spectate_view
-    from neopedal.ui.quick import spectate_backend
+    from neopedal.ui.quick import hotkey_backend, spectate_backend
 
     calls = []
     for action in ("reload", "enable", "disable"):
-        monkeypatch.setattr(type(hotkey_view.kctrl), action, lambda self, _action=action: calls.append(_action))
+        monkeypatch.setattr(type(hotkey_backend.kctrl), action, lambda self, _action=action: calls.append(_action))
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: calls.append("save"))
     monkeypatch.setattr(type(spectate_backend.api), "setup", lambda self: calls.append("api"))
     cfg.application["enable_global_hotkey"] = True
@@ -349,9 +357,9 @@ def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
         hotkeys.refresh()
         cfg.api["enable_player_index_override"] = True  # turned on elsewhere (hotkey)
         spectate.refresh()
-        assert hotkeys.button_toggle.isChecked() and spectate.backend.enabled
+        assert hotkeys.backend.enabled and spectate.backend.enabled
         assert "reload" not in calls and "save" not in calls and "api" not in calls
-        hotkeys.button_toggle.click()  # user click still applies
+        hotkeys.backend.setEnabled(False)  # user click still applies
         assert "reload" in calls and cfg.application["enable_global_hotkey"] is False
         spectate.backend.setEnabled(False)  # user switch saves & sets API up
         assert "api" in calls and cfg.api["enable_player_index_override"] is False
@@ -390,21 +398,24 @@ def test_spectate_texts_translated(ui_env, french, monkeypatch):
 # Item 18: global hotkeys off only while capturing a key
 def test_hotkeys_disabled_only_while_capturing(ui_env, monkeypatch):
     from neopedal.template.setting_shortcuts import SHORTCUTS_GENERAL
-    from neopedal.ui import hotkey_view
+    from neopedal.ui.quick import hotkey_backend
 
     calls = []
     for action in ("enable", "disable"):
-        monkeypatch.setattr(type(hotkey_view.kctrl), action, lambda self, _action=action: calls.append(_action))
-    dialog = hotkey_view.ConfigHotkey(None, option_name=next(iter(SHORTCUTS_GENERAL)), hotkey_name="",
-                                      reload_func=lambda: None)
-    dialog.show()
+        monkeypatch.setattr(type(hotkey_backend.kctrl), action, lambda self, _action=action: calls.append(_action))
+    monkeypatch.setattr(hotkey_backend, "get_key_state_function", lambda: lambda code: 0)
+    cfg.application["enable_global_hotkey"] = True
+    page = hotkey_backend.HotkeyBackend(None)
+    page.page_shown()
+    page.startCapture(next(iter(SHORTCUTS_GENERAL)))  # capture dialog of the page
     assert calls == ["disable"]
-    dialog.hide()  # page left open behind another page
+    page.page_hidden()  # page left open behind another page
     assert calls == ["disable", "enable"]
-    dialog.show()
+    page.page_shown()
     assert calls[-1] == "disable"
-    dialog.close()
+    page.cancelCapture()
     assert calls[-1] == "enable"
+    page.deleteLater()
 
 
 # Item 21: same page already open gets the call
@@ -475,15 +486,19 @@ def test_api_menu_reset_frees_action_group(window):
 
 # Item 29: titles & literals translated
 def test_titles_translated(window, french):
-    from neopedal.ui.config import FontConfig
+    from types import SimpleNamespace
 
-    font = FontConfig(parent=window, user_setting=cfg.user.setting, reload_func=lambda: None)
+    from neopedal.ui.quick.settings_backend import SettingsBackend
+
+    font = SettingsBackend(None, SimpleNamespace(confirm=lambda text: True))  # global font override category
     try:
-        assert font.windowTitle().startswith("Police globale")
-        assert font.edit_fontname.itemText(0) == "aucun changement"
-        assert font.edit_autooffset.itemText(1) == "activer"
+        font.selectCategory("font")
+        assert font.categoryInfo["label"] == "Police globale"
+        rows = {row["option"]: row for row in font.model.rows}
+        assert rows["font_name"]["choices"][0] == "aucun changement"
+        assert rows["enable_auto_font_offset"]["choices"][1] == "activer"
     finally:
-        font.close()
+        font.deleteLater()
     from neopedal.ui.menu import OverlayMenu
 
     menu = OverlayMenu("Overlay", window)
@@ -647,25 +662,6 @@ def test_about_modified_version_notice(ui_env, french):
         assert "TinyPedal developers" in text  # upstream copyright kept
     finally:
         dialog.close()
-        flush_deleted()
-
-
-def test_layout_editor_capture_window_mode(ui_env, monkeypatch):
-    """Separate window (not a page): the editor itself is hidden while capturing"""
-    from PySide6.QtGui import QGuiApplication
-
-    from neopedal.ui.layout_editor import LayoutEditor
-
-    editor = LayoutEditor(None)
-    editor.show()
-    screen = QGuiApplication.primaryScreen()
-    grabbed = []
-    monkeypatch.setattr(type(screen), "grabWindow", lambda self, *args: grabbed.append(editor.isVisible()) or QImage())
-    try:
-        editor.capture_screen()
-        assert grabbed == [False] and editor.isVisible()
-    finally:
-        editor.close()
         flush_deleted()
 
 

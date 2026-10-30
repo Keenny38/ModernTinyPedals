@@ -31,15 +31,15 @@ from functools import partial
 from time import monotonic
 
 import shiboken6
-from PySide6.QtCore import QLocale, QObject, Qt, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QDateTime, QLocale, QObject, Qt, Signal, Slot
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QMenu,
     QMessageBox,
     QPushButton,
     QSystemTrayIcon,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -48,7 +48,7 @@ from ..i18n import current_language, tr, trm
 from ..jobs import Job, WorkerPool, get_courier, weak_callback
 from ..lazy_service import update_checker
 from ..setting import cfg
-from ._common import confirm_action, find_dialog_host
+from ._common import UIScaler, confirm_action, find_dialog_host
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +106,58 @@ def download_installer(asset, **kwargs) -> str:
     return found(asset, **kwargs)
 
 
-def run_installer(path: str, folder: str | None = None, repository: str | None = None) -> None:
+def run_installer(path: str, folder: str | None = None, repository: str | None = None,
+                  signer: str | None = None) -> None:
     """See update.run_installer"""
     from ..update import run_installer as found
 
-    found(path, folder, repository)
+    found(path, folder, repository, signer)
 
 
-def install_update(window: QWidget | None, path: str, repository: str | None = None) -> bool:
+def installer_signer(path: str, repository: str | None = None) -> str:
+    """See update.installer_signer"""
+    from ..update import installer_signer as found
+
+    return found(path, repository)
+
+
+def is_official_repository(repo: str) -> bool:
+    """See update.is_official_repository"""
+    from ..update import is_official_repository as found
+
+    return found(repo)
+
+
+def update_repository() -> str:
+    """See update.update_repository"""
+    from ..update import update_repository as found
+
+    return found()
+
+
+def install_error_text(error: Exception) -> str:
+    """Message of installer refused or not started (run_installer, installer_signer errors)"""
+    from ..update import InstallerChangedError, RevocationUnknownError, UnsignedInstallerError
+
+    if isinstance(error, UnsignedInstallerError):
+        return tr("Installer of custom update repository is not signed, update was not installed.")
+    if isinstance(error, RevocationUnknownError):
+        return tr("Revocation of the installer signing certificate could not be checked (server unreachable), "
+                  "update was not installed. Try again later.")
+    if isinstance(error, InstallerChangedError):
+        return tr("Installer changed after it was downloaded, update was not installed.")
+    if isinstance(error, ValueError):
+        return tr("Installer signature is not valid, update was not installed.")
+    return trm(f"Unable to install update: {error}")
+
+
+def display_signer(signer: str) -> str:
+    """Signer name shown in a message (certificate text: no markup, no control character, bounded)"""
+    return "".join(char for char in signer if char not in "<>&" and char.isprintable())[:200]
+
+
+def install_update(window: QWidget | None, path: str, repository: str | None = None,
+                   signer: str | None = None) -> bool:
     """Run downloaded installer then quit, False if cancelled or installer not started
 
     Open pages are closed first (each may ask to save changes): cancelling keeps app as is,
@@ -121,28 +165,21 @@ def install_update(window: QWidget | None, path: str, repository: str | None = N
 
     Args:
         repository: update repository the installer was downloaded from, None for current setting.
+        signer: signer shown to user (custom repository), installer refused if signed by another one.
     """
     close_pages = getattr(window, "close_pages_for_quit", None)
     if callable(close_pages) and not close_pages():
         discard_installer(path)
         return False
     try:
-        run_installer(path, repository=repository)
+        run_installer(path, repository=repository, signer=signer)
     except (OSError, ValueError) as error:
         logger.error("UPDATES: unable to run installer: %s", error)
         cancel_quit = getattr(window, "cancel_quit", None)
         if callable(cancel_quit):
             cancel_quit()
         discard_installer(path)  # broken signature never kept, unstartable one never left in temp folder
-        from ..update import UnsignedInstallerError
-
-        if isinstance(error, UnsignedInstallerError):
-            msg_text = tr("Installer of custom update repository is not signed, update was not installed.")
-        elif isinstance(error, ValueError):
-            msg_text = tr("Installer signature is not valid, update was not installed.")
-        else:
-            msg_text = trm(f"Unable to install update: {error}")
-        QMessageBox.warning(window, tr("Error"), msg_text)
+        QMessageBox.warning(window, tr("Error"), install_error_text(error))
         return False
     quit_app = getattr(window, "quit_app", None)
     if callable(quit_app):
@@ -155,18 +192,32 @@ def format_megabytes(size: int) -> str:
     return QLocale(current_language()).toString(size / 1_000_000, "f", 1)
 
 
-def _download(asset, report: Callable[[int, int], None], cancel: threading.Event) -> tuple[str, str]:
-    """Installer downloaded (download thread): path & error message ("" if downloaded)"""
+def _download(asset, report: Callable[[int, int], None], cancel: threading.Event) -> tuple[str, str, str | None]:
+    """Installer downloaded (download thread): path, error message ("" if downloaded) & signer
+
+    Installer of a custom update repository: signature verified (revocation checked online, off the UI
+    thread), its signer shown before installing; refused one removed, error is then the full message.
+    Signer None: official release (signed manifest verified at check time).
+    """
     from ..update import DownloadCancelled
 
     try:
-        return download_installer(asset, progress=report, cancelled=cancel), ""
+        path = download_installer(asset, progress=report, cancelled=cancel)
     except DownloadCancelled:
         logger.info("UPDATES: download cancelled")
-        return "", DOWNLOAD_CANCELLED
+        return "", DOWNLOAD_CANCELLED, None
     except Exception as error:  # OSError, ValueError, or unexpected: never left busy
         logger.error("UPDATES: download failed: %s", error)
-        return "", str(error)
+        return "", trm(f"Unable to download update: {error}"), None
+    repository = asset.repository or update_repository()
+    if is_official_repository(repository):
+        return path, "", None
+    try:
+        return path, "", installer_signer(path, repository)
+    except Exception as error:  # refused (ValueError), unreadable (OSError) or unexpected: never left busy
+        logger.error("UPDATES: installer refused: %s", error)
+        discard_installer(path)
+        return "", install_error_text(error), None
 
 
 _download_workers: WorkerPool | None = None
@@ -245,8 +296,8 @@ class UpdateInstaller(QObject):
         job.release()
         if not ok:  # unexpected error of the download thread: never left busy
             logger.error("UPDATES: download failed: %s", value)
-        path, message = value if ok else ("", str(value))
-        self.install_downloaded(path, message)
+        path, message, signer = value if ok else ("", trm(f"Unable to download update: {value}"), None)
+        self.install_downloaded(path, message, signer)
 
     def cancel(self) -> bool:
         """Stop download (partial file removed), False if not downloading"""
@@ -260,9 +311,14 @@ class UpdateInstaller(QObject):
         """Progress kept for buttons & pages shown later"""
         self.received, self.total = received, total
 
-    @Slot(str, str)  # type: ignore[operator]
-    def install_downloaded(self, path: str, error: str):
-        """Run installer and quit, installer restarts NeoPedal when done"""
+    def install_downloaded(self, path: str, error: str, signer: str | None = None):
+        """Run installer and quit, installer restarts NeoPedal when done
+
+        Args:
+            error: full message of failed download (empty if downloaded).
+            signer: signer of installer of a custom update repository (see _download): always asked first,
+                with update repository & signer shown. None: official release.
+        """
         self.busy = False
         self.busy_changed.emit(False)
         auto_install, self._auto_install = self._auto_install, False
@@ -270,15 +326,25 @@ class UpdateInstaller(QObject):
         if error == DOWNLOAD_CANCELLED:
             return
         if not path:
-            QMessageBox.warning(window, tr("Error"), trm(f"Unable to download update: {error}"))
+            QMessageBox.warning(window, tr("Error"), error)
             return
-        if not auto_install:
-            if not confirm_action(window, tr("Download And Install"),
-                                  tr("Update downloaded. Close NeoPedal and install it now?"),
-                                  tr("Install Now"), default_action=True):
-                discard_installer(path)  # declined: never left in temp folder
-                return
-        install_update(window, path, self._repository)
+        if signer is not None:  # custom update repository: publisher shown, never installed without asking
+            repository = self._repository or update_repository()
+            publisher = display_signer(signer) or tr("unknown publisher")
+            question = trm(f"Update downloaded from {repository}, installer signed by {publisher}. "
+                           "Install it only if you trust this publisher. Close NeoPedal and install it now?")
+        elif not auto_install:
+            question = tr("Update downloaded. Close NeoPedal and install it now?")
+        else:
+            question = ""
+        if question and not confirm_action(window, tr("Download And Install"), question, tr("Install Now"),
+                                           default_action=signer is None):
+            discard_installer(path)  # declined: never left in temp folder
+            return
+        if signer is None:
+            install_update(window, path, self._repository)
+        else:
+            install_update(window, path, self._repository, signer=signer)
 
 
 _update_installer: UpdateInstaller | None = None
@@ -292,43 +358,88 @@ def update_installer() -> UpdateInstaller:
     return _update_installer
 
 
+# Status chips of the status band: (attribute, notice name of colors & option, text, notification center action)
+NOTICE_CHIPS = (
+    ("presetlocked", "locked_preset", "Preset Locked", "page:preset"),
+    ("spectate", "spectate_mode", "Spectate Mode Enabled", "page:spectate"),
+    ("pacenotes", "pace_notes_playback", "Pace Notes Playback Enabled", "page:pacenotes"),
+    ("hotkey", "global_hotkey", "Global Hotkey Enabled", "page:hotkey"),
+    ("carsetup", "auto_backup_car_setup", "Auto Backup Car Setup Enabled", ""),
+    ("director", "broadcast_director", "Broadcast Director On", "tool:broadcast_director.BroadcastDirector"),
+)
+MIN_CONTRAST = 4.5  # WCAG AA, text of chips on their background
+
+
+def _luminance(color: QColor) -> float:
+    channels = [value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+                for value in (color.redF(), color.greenF(), color.blueF())]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def contrast(first: QColor, second: QColor) -> float:
+    """WCAG contrast ratio of two colors"""
+    high, low = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def readable_colors(font: str, background: str) -> tuple[str, str]:
+    """Text & background colors of a chip with at least MIN_CONTRAST: user colors kept when readable, else the
+    background is darkened (light text) or lightened (dark text) in its hue, else the text turned black or white"""
+    text, fill = QColor(font), QColor(background)
+    if not text.isValid():
+        text = QColor("white")
+    if not fill.isValid():
+        fill = QColor("#5E6670")
+    text.setAlpha(255)
+    fill.setAlpha(255)
+    light_text = _luminance(text) >= _luminance(fill)
+    for _ in range(40):
+        if contrast(text, fill) >= MIN_CONTRAST:
+            break
+        fill = QColor((fill.darker(106) if light_text else fill.lighter(106)).name())  # 8-bit, as written
+    if contrast(text, fill) < MIN_CONTRAST:
+        text = QColor("black") if contrast(QColor("black"), fill) > contrast(QColor("white"), fill) else QColor("white")
+    return text.name(), fill.name()
+
+
 class NotifyBar(QWidget):
-    """Notify bar"""
+    """Status chips of the window status band: preset locked, spectate, pace notes, global hotkey, car setup
+    backup, Broadcast Director on, update available. One line (chips side by side), colors of Notification
+    settings kept readable (see readable_colors). Shown notices are listed in the notification center too."""
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.presetlocked = QPushButton(tr("Preset Locked"))
-        self.presetlocked.setVisible(False)
-
-        self.spectate = QPushButton(tr("Spectate Mode Enabled"))
-        self.spectate.setVisible(False)
-
-        self.pacenotes = QPushButton(tr("Pace Notes Playback Enabled"))
-        self.pacenotes.setVisible(False)
-
-        self.hotkey = QPushButton(tr("Global Hotkey Enabled"))
-        self.hotkey.setVisible(False)
-
-        self.carsetup = QPushButton(tr("Auto Backup Car Setup Enabled"))
-        self.carsetup.setVisible(False)
-
-        self.director = QPushButton(tr("Broadcast Director On"))
-        self.director.setVisible(False)
+        layout = QHBoxLayout()
+        layout.setSpacing(UIScaler.pixel(4))
+        layout.setContentsMargins(0, 0, 0, 0)
+        for attribute, _, text, _ in NOTICE_CHIPS:
+            button = QPushButton(tr(text))
+            button.setObjectName("statusChip")
+            button.setVisible(False)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            setattr(self, attribute, button)
+            layout.addWidget(button)
 
         self.updates = UpdatesNotifyButton("")
         self.updates.setVisible(False)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.presetlocked)
-        layout.addWidget(self.spectate)
-        layout.addWidget(self.pacenotes)
-        layout.addWidget(self.hotkey)
-        layout.addWidget(self.carsetup)
-        layout.addWidget(self.director)
+        self.updates.setStyleSheet(self.chip_style())
         layout.addWidget(self.updates)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addStretch(1)
         self.setLayout(layout)
+
+    presetlocked: QPushButton
+    spectate: QPushButton
+    pacenotes: QPushButton
+    hotkey: QPushButton
+    carsetup: QPushButton
+    director: QPushButton
+
+    @staticmethod
+    def chip_style(font: str = "", background: str = "") -> str:
+        """Style sheet of a chip: rounded, compact, colors if set"""
+        colors = f"color: {font}; background: {background};" if font and background else ""
+        return (f"QPushButton {{ {colors} border: none; border-radius: {UIScaler.pixel(9)}px; "
+                f"padding: {UIScaler.pixel(1)}px {UIScaler.pixel(9)}px; margin: {UIScaler.pixel(2)}px 0; }}")
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
@@ -357,18 +468,27 @@ class NotifyBar(QWidget):
         running = module is not None and module.director_status() == "on"
         self.set_notice(self.director, "broadcast_director", cfg.notification["notify_broadcast_director"] and running)
 
-    @staticmethod
-    def set_notice(button: QPushButton, name: str, shown: bool):
+    def set_notice(self, button: QPushButton, name: str, shown: bool):
         """Notice shown or hidden, its colors set only when changed (style sheet parsed again on each set)"""
-        button.setVisible(bool(shown))
+        shown = bool(shown)
+        if button.isHidden() == shown:
+            button.setVisible(shown)
+            self.publish_active()
         if not shown:
             return
-        style = (
-            f"color: {cfg.notification[f'font_color_{name}']};"
-            f"background: {cfg.notification[f'background_color_{name}']};"
-        )
+        style = self.chip_style(*readable_colors(
+            cfg.notification[f"font_color_{name}"], cfg.notification[f"background_color_{name}"]))
         if button.styleSheet() != style:
             button.setStyleSheet(style)
+
+    def active_notices(self) -> list[tuple[str, str]]:
+        """Shown notices: (text, notification center action)"""
+        return [(tr(text), action) for attribute, _, text, action in NOTICE_CHIPS
+                if not getattr(self, attribute).isHidden()]
+
+    def publish_active(self):
+        """Shown notices listed in the notification center"""
+        notification_store().set_active(self.active_notices())
 
 
 class UpdatesNotifyButton(QPushButton):
@@ -379,6 +499,7 @@ class UpdatesNotifyButton(QPushButton):
 
     prompted_version = ""  # update already proposed, see prompt_update
     dismissed_message = ""  # update message hidden by user, see dismiss
+    logged_message = ""  # update message added to the notification center (once)
 
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
@@ -439,14 +560,21 @@ class UpdatesNotifyButton(QPushButton):
             # Show checking message only with manual checking, notice shown kept while checking automatically
             if not update_checker.is_manual():
                 return
-            self.setText(tr("Checking For Updates..."))
+            self.setText(tr("Checking for updates…"))
             self.setVisible(True)
         else:
-            # Hide message if no updates (or version skipped, or dismissed) and not manual checking
+            # Hide message if no updates (or version skipped, or dismissed) and not manual checking.
+            # Release refused (signed manifest not verified): shown like an update, without install
             skipped = update_checker.is_skipped()
             dismissed = update_checker.message() == self.dismissed_message
+            noticed = (update_checker.is_updates() and not skipped) or update_checker.is_refused()
             self.setText(trm(update_checker.message()))
-            self.setVisible(update_checker.is_manual() or (update_checker.is_updates() and not skipped and not dismissed))
+            self.setVisible(update_checker.is_manual() or (noticed and not dismissed))
+            if noticed and UpdatesNotifyButton.logged_message != update_checker.message():
+                UpdatesNotifyButton.logged_message = update_checker.message()  # once per version
+                updates = update_checker.is_updates()
+                notification_store().add(trm(update_checker.message()), "info" if updates else "warning",
+                                         ((tr("What's New"), "updates"),) if updates else ())
             self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.notes(current_language())))
             self.skip_update.setVisible(update_checker.is_updates())
             self.install_update.setVisible(self.can_install())
@@ -460,7 +588,7 @@ class UpdatesNotifyButton(QPushButton):
             return
         if update_checker.is_checking():
             self.checking(True)
-        elif (update_checker.is_updates() and not update_checker.is_skipped()
+        elif (((update_checker.is_updates() and not update_checker.is_skipped()) or update_checker.is_refused())
                 and update_checker.message() != self.dismissed_message):
             self.checking(False)
 
@@ -480,7 +608,7 @@ class UpdatesNotifyButton(QPushButton):
         """Downloaded part shown on button"""
         if not update_installer().busy:
             return
-        text = tr("Downloading Update...")
+        text = tr("Downloading Update…")
         if received:
             text = f"{text} {download_progress_text(received, total)}"
         self.setText(text)
@@ -536,6 +664,14 @@ class UpdatesNotifyButton(QPushButton):
 
         Not brought to front: shown as page of hidden window, seen once window is opened.
         """
+        from .release_notes import open_notes_page
+
+        shown = open_notes_page(self, tr("Update Available") if prompt else tr("What's New"),
+                                update_checker.latest_version())
+        if shown is not None:  # notes of this update already open: shown again, no second page built
+            if bring_to_front:
+                shown.open()
+            return
         dialog = self.release_notes_dialog(prompt)
         if bring_to_front:
             dialog.open()
@@ -573,3 +709,172 @@ def skip_from_notes():
     if window is not None:
         for button in window.findChildren(UpdatesNotifyButton):
             button.hide()
+
+
+# Notification center: messages of the app kept with their time & level (errors of background work, saving
+# failures, updates found), shown notices of the status band, read from the bell of the navigation rail
+SEVERITIES = ("error", "warning", "info")
+MAX_NOTIFICATIONS = 100
+TRAY_MESSAGE_INTERVAL = 60.0  # seconds: at most one tray message this often (more messages: count told)
+
+
+class NotificationStore(QObject):
+    """Messages of the notification center (newest first) & notices shown in the status band
+
+    Emits changed when messages, their read state or the shown notices change, added with each new message.
+    A message repeating the last one is counted on it (time updated) instead of added again.
+    """
+
+    changed = Signal()
+    added = Signal(dict)
+
+    def __init__(self):
+        super().__init__()
+        self._entries: list[dict] = []
+        self._active: list[tuple[str, str]] = []
+        self._next_id = 1
+
+    def add(self, text: str, severity: str = "error", actions: tuple[tuple[str, str], ...] = ()) -> dict:
+        """Message added (severity: "error", "warning" or "info"), actions: (label, action key) of its buttons,
+        see run_notification_action"""
+        if severity not in SEVERITIES:
+            severity = "error"
+        now = QDateTime.currentDateTime()
+        last = self._entries[0] if self._entries else None
+        if last is not None and last["text"] == text and last["severity"] == severity:
+            last["count"] += 1
+            last["time"] = now
+            last["read"] = False
+            entry = last
+        else:
+            entry = {"id": self._next_id, "text": text, "severity": severity, "time": now, "count": 1,
+                     "read": False, "actions": [{"label": label, "key": key} for label, key in actions]}
+            self._next_id += 1
+            self._entries.insert(0, entry)
+            del self._entries[MAX_NOTIFICATIONS:]
+        self.changed.emit()
+        self.added.emit(entry)
+        return entry
+
+    def entries(self) -> list[dict]:
+        """Messages, newest first"""
+        return list(self._entries)
+
+    def unread_count(self) -> int:
+        return sum(not entry["read"] for entry in self._entries)
+
+    def mark_all_read(self):
+        if any(not entry["read"] for entry in self._entries):
+            for entry in self._entries:
+                entry["read"] = True
+            self.changed.emit()
+
+    def remove(self, entry_id: int):
+        entries = [entry for entry in self._entries if entry["id"] != entry_id]
+        if len(entries) != len(self._entries):
+            self._entries = entries
+            self.changed.emit()
+
+    def clear(self):
+        if self._entries:
+            self._entries = []
+            self.changed.emit()
+
+    def active(self) -> list[tuple[str, str]]:
+        """Notices shown in the status band: (text, action key)"""
+        return list(self._active)
+
+    def set_active(self, notices: list[tuple[str, str]]):
+        if notices != self._active:
+            self._active = list(notices)
+            self.changed.emit()
+
+
+_notification_store: NotificationStore | None = None
+
+
+def notification_store() -> NotificationStore:
+    """Notification center messages (created once, after QApplication)"""
+    global _notification_store
+    if _notification_store is None:
+        _notification_store = NotificationStore()
+    return _notification_store
+
+
+def error_actions() -> tuple[tuple[str, str], ...]:
+    """Buttons of an error message: log & bug report"""
+    return ((tr("View Log"), "log"), (tr("Create Bug Report…"), "bug_report"))
+
+
+def run_notification_action(window: QWidget | None, key: str):
+    """Action of a notification center button: "log", "bug_report", "updates" (what's new of available update),
+    "page:<page key>" (main window page), "tool:<module.DialogClass>" (tool page)"""
+    if window is None:
+        return
+    show_app = getattr(window, "show_app", None)
+    if callable(show_app):
+        show_app()
+    if key == "log":
+        from .log_info import LogInfo
+
+        LogInfo(window).show()
+    elif key == "bug_report":
+        from .bug_report_view import BugReport
+
+        BugReport(window).show()
+    elif key == "updates":
+        for button in window.findChildren(UpdatesNotifyButton):
+            button.show_release_notes()
+            break
+    elif key.startswith("page:"):
+        from .nav_rail import PAGE_INDEX
+
+        view = getattr(window, "centralWidget", lambda: None)()
+        index = PAGE_INDEX.get(key.removeprefix("page:"))
+        select_page = getattr(view, "select_page", None)
+        if index is not None and callable(select_page):
+            select_page(index)
+    elif key.startswith("tool:"):
+        from .tools_view import open_tool
+
+        open_tool(key.removeprefix("tool:"), window)
+
+
+class TrayRelay(QObject):
+    """New error or warning while the main window is hidden in tray or minimized (racing): a tray message
+    (system notification, never a window over the game), at most one per TRAY_MESSAGE_INTERVAL, the next one
+    telling how many came meanwhile. Only with the tray icon shown (Minimize to Tray)."""
+
+    def __init__(self, window: QWidget):
+        super().__init__(window)
+        self._window = window
+        self._last = -TRAY_MESSAGE_INTERVAL
+        self._waiting = 0  # messages not told since last tray message
+        notification_store().added.connect(self.message_added)
+
+    def message_added(self, entry: dict):
+        window = self._window
+        if entry["severity"] == "info" or (window.isVisible() and not window.isMinimized()):
+            return
+        tray_icon = window.findChild(QSystemTrayIcon)
+        if tray_icon is None or not tray_icon.isVisible() or not QSystemTrayIcon.supportsMessages():
+            return
+        self._waiting += 1
+        now = monotonic()
+        if now - self._last < TRAY_MESSAGE_INTERVAL:
+            return
+        text = entry["text"] if self._waiting == 1 else trm(f"{self._waiting} new messages, last one: {entry['text']}")
+        self._last, self._waiting = now, 0
+        show_app = getattr(window, "show_app", None)
+        if callable(show_app):
+            tray_icon.messageClicked.connect(show_app, Qt.ConnectionType.UniqueConnection)
+        icon = (QSystemTrayIcon.MessageIcon.Critical if entry["severity"] == "error"
+                else QSystemTrayIcon.MessageIcon.Warning)
+        tray_icon.showMessage(APP_NAME, text, icon, 10000)
+
+
+def open_notification_center(window: QWidget, anchor: QWidget):
+    """Notification center popup next to anchor (bell of the rail)"""
+    from .quick.notify_backend import NotificationCenter
+
+    NotificationCenter.open_at(window, anchor)

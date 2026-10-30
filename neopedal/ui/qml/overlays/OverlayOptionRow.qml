@@ -4,13 +4,15 @@ import QtQuick.Layouts
 import "../components"
 
 // Row of Overlay Options page: section header (title, item on/off switch, collapse, reset), option
-// (name, description, editor matching its kind, reset & more actions) or display order list. Rows of a
+// (name with searched words in bold, description, editor matching its kind: TpOptionEditor shared with the
+// Settings page, reset & more actions: "⋯", right click or Menu key) or display order list. Rows of a
 // section form one card. Unsaved edits are marked by an accent bar, invalid values by a red reason,
 // options of an item that is off are in dim text (still editable), options set by a profile are locked.
 // Only the block of the row type is made (Loader per block). Rows are reused by the ListView (reuseItems):
 // model fed again for another row, block & editor kept when of the same type & kind, editor reset on reuse.
 Item {
     id: row
+    readonly property bool rowHovered: rowHover.hovered  // hover-revealed actions shown
     required property var model
     required property int index
     // Roles read by bindings of every row type: fed once (and again on reuse or change) instead of a model read
@@ -30,10 +32,23 @@ Item {
     required property bool first
     required property bool last
     required property bool changed
+    required property string marked  // label with searched words in bold (rich text), "" if not searching
     readonly property string rowType: model.row
-    readonly property real editorWidth: Math.min(theme.em * 17, Math.max(theme.em * 10, width * 0.4))
+    readonly property real editorWidth: Math.min(theme.em * 19, Math.max(theme.em * 11, width * 0.42))  // as Settings
     property bool settled: true  // height, chevron & dimming animated, not while reused for another row
-    signal menuRequested(var data, Item anchor)
+    signal menuRequested(var data, Item anchor, real x, real y)  // x < 0: menu below anchor, right aligned
+
+    // Field being edited left first (typed text taken): an action of the menu (reset) is never undone by the
+    // field committing its old text once focus moves; data copied: row may be reused while the menu is open
+    function openMenu(anchor, x, y) {
+        if (row.rowType !== "option")
+            return
+        row.releaseFocus()
+        row.menuRequested({
+            key: row.model.key, option: row.model.option, kind: row.kind, modified: row.modified,
+            locked: row.locked, shared: row.model.shared, error: row.error
+        }, anchor, x, y)
+    }
 
     function moveItem(item, offset) {  // order list item moved up (-1) or down (+1): display order, or list option
         if (row.model.option !== "")
@@ -78,6 +93,13 @@ Item {
     }
 
     implicitHeight: gap.height + card.height
+    // Menu key (or Shift+F10) in the option's editor: more actions
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+            row.openMenu(card, -1, -1)
+            event.accepted = row.rowType === "option"
+        }
+    }
 
     Item {  // room above each section card
         id: gap
@@ -91,9 +113,14 @@ Item {
         width: parent.width
         height: row.rowType === "header" ? Math.round(theme.em * 2.9)
               : row.rowType === "order" ? orderLoader.implicitHeight + theme.space6
-              : Math.max(optionLoader.implicitHeight + theme.em * 0.9, theme.em * 2.9)
-        radius: theme.radiusXl
-        color: row.rowType === "header" ? (theme.dark ? Qt.lighter(theme.base, 1.08) : Qt.darker(theme.base, 1.015)) : theme.base
+              : Math.max(optionLoader.implicitHeight + theme.em * 1.0, theme.rowTall)  // as Settings rows
+        radius: theme.radiusLg
+        color: row.rowType === "header" ? theme.surfaceHover : theme.surfaceCard  // section titles stand out of their options
+        TapHandler {  // right click on an option: more actions at the pointer
+            enabled: row.rowType === "option"
+            acceptedButtons: Qt.RightButton
+            onTapped: function(eventPoint) { row.openMenu(card, eventPoint.position.x, eventPoint.position.y) }
+        }
         Behavior on height { enabled: row.rowType === "order" && row.settled; NumberAnimation { duration: theme.motionBase } }
 
         // Square corners between rows of a card
@@ -164,7 +191,7 @@ Item {
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: theme.space3
-                    anchors.rightMargin: theme.em * 0.5
+                    anchors.rightMargin: theme.space3
                     spacing: theme.space3
                     TpButton {  // collapse / expand: Tab & Enter (the whole header is clickable too)
                         visible: !backend.filtering
@@ -182,6 +209,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         text: headerBlock.title
+                        textFormat: Text.PlainText
                         // Item off: title in dim text (never faded)
                         color: headerBlock.toggle !== "" && !headerBlock.toggleChecked ? theme.dimOn(card.color) : theme.text
                         Behavior on color { enabled: row.settled; ColorAnimation { duration: theme.motionBase } }
@@ -199,6 +227,7 @@ Item {
                     Text {
                         visible: headerBlock.collapsed
                         text: headerBlock.count
+                        textFormat: Text.PlainText
                         color: theme.dimOn(card.color)
                         font.pointSize: theme.fontSmall
                         font.features: { "tnum": 1 }
@@ -206,11 +235,11 @@ Item {
                     TpButton {
                         flat: true
                         size: "sm"
-                        glyph: ""  // undo
+                        glyph: theme.glyphs.reset
                         fallback: "↺"
                         tip: i18n.tr("Reset options of this section to default")
                         visible: headerBlock.customizedCount > 0
-                        opacity: headerArea.containsMouse || hovered || visualFocus ? 1 : 0.5
+                        opacity: headerArea.containsMouse || hovered || visualFocus ? 1 : 0  // revealed: hover, focus, current
                         onClicked: backend.resetSection(row.model.key)
                     }
                     TpSwitch {
@@ -218,7 +247,7 @@ Item {
                         enabled: !row.locked
                         checkable: false  // follows backend
                         checked: headerBlock.toggleChecked
-                        text: headerBlock.toggleChecked ? i18n.tr("On") : i18n.tr("Off")
+                        text: headerBlock.toggleChecked ? i18n.tr("Enabled") : i18n.tr("Disabled")
                         tip: row.label
                         onClicked: backend.setBool(headerBlock.toggle, !headerBlock.toggleChecked)
                         Accessible.role: Accessible.CheckBox
@@ -246,6 +275,7 @@ Item {
                     Layout.fillWidth: true
                     text: row.help !== "" ? row.help
                                                 : i18n.tr("Order of shown items, top first: drag them, or use the arrows.")
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     font.pointSize: theme.fontSmall
                     wrapMode: Text.WordWrap
@@ -261,7 +291,7 @@ Item {
                         radius: theme.radiusMd
                         property real shift: 0  // dragged distance
                         z: dragger.active ? 10 : 0
-                        color: dragger.active ? theme.raised : orderArea.containsMouse ? theme.hover : theme.base
+                        color: dragger.active ? theme.surfaceFlyout : orderArea.containsMouse ? theme.hover : theme.surfaceCard
                         border.width: dragger.active ? 1 : 0
                         border.color: theme.accent
                         transform: Translate { y: dragger.active ? orderItem.shift : 0 }
@@ -295,10 +325,11 @@ Item {
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: theme.space2
-                            spacing: theme.em * 0.5
+                            spacing: theme.space3
                             Text {
                                 Layout.preferredWidth: theme.em * 1.4
                                 text: orderItem.index + 1
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(orderItem.color)
                                 horizontalAlignment: Text.AlignRight
                                 font.features: { "tnum": 1 }
@@ -325,6 +356,7 @@ Item {
                                 text: orderItem.modelData.note
                                       ? orderItem.modelData.label + "  ·  " + orderItem.modelData.note
                                       : orderItem.modelData.label
+                                textFormat: Text.PlainText
                                 color: orderItem.modelData.checked && !orderItem.modelData.note ? theme.text : theme.dimOn(orderItem.color)
                                 elide: Text.ElideRight
                             }
@@ -356,7 +388,7 @@ Item {
                     TpButton {
                         flat: true
                         size: "sm"
-                        glyph: ""  // undo
+                        glyph: theme.glyphs.reset
                         text: i18n.tr("Default Order")
                         tip: i18n.tr("Back to default order (saved with Apply)")
                         enabled: row.modified
@@ -377,15 +409,13 @@ Item {
             anchors.rightMargin: theme.space3
             active: row.rowType === "option"
             sourceComponent: RowLayout {
-                spacing: theme.em * 0.5
+                spacing: theme.space3
 
                 function reset() {
-                    if (editor.item && editor.item.reset)
-                        editor.item.reset()
+                    editor.reset()
                 }
                 function release() {
-                    if (editor.item && editor.item.release)
-                        editor.item.release()
+                    editor.release()
                 }
 
                 ColumnLayout {
@@ -393,7 +423,8 @@ Item {
                     spacing: 1
                     Text {
                         Layout.fillWidth: true
-                        text: row.label
+                        text: row.marked !== "" ? row.marked : row.label
+                        textFormat: row.marked !== "" ? Text.StyledText : Text.PlainText
                         // Doing nothing with current values: dim text (readable, still editable)
                         color: row.dimmed ? theme.dimText : theme.text
                         Behavior on color { enabled: row.settled; ColorAnimation { duration: theme.motionBase } }
@@ -408,6 +439,7 @@ Item {
                         Layout.fillWidth: true
                         visible: row.help !== ""
                         text: row.help
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontSmall
                         wrapMode: Text.WordWrap
@@ -422,6 +454,7 @@ Item {
                         Layout.fillWidth: true
                         visible: row.note !== "" || row.hint !== ""
                         text: [row.hint, row.note].filter(function(part) { return part !== "" }).join("  ·  ")
+                        textFormat: Text.PlainText
                         color: theme.dimText
                         font.pointSize: theme.fontSmall
                         font.italic: true
@@ -431,30 +464,53 @@ Item {
                         Layout.fillWidth: true
                         visible: row.error !== ""
                         text: "⚠ " + row.error
+                        textFormat: Text.PlainText
                         color: theme.loss
                         font.pointSize: theme.fontSmall
                         wrapMode: Text.WordWrap
                     }
                 }
 
-                Loader {
+                TpOptionEditor {
                     id: editor
                     Layout.preferredWidth: row.editorWidth
                     Layout.alignment: Qt.AlignVCenter
                     enabled: !row.locked
-                    sourceComponent: row.kind === "bool" ? boolEditor
-                                   : row.kind === "choice" || row.kind === "font" ? choiceEditor
-                                   : row.kind === "integer" || row.kind === "float" ? numberEditor
-                                   : row.kind === "color" ? colorEditor
-                                   : row.kind === "path" || row.kind === "image" ? pathEditor
-                                   : textEditor
+                    kind: row.kind
+                    label: row.label
+                    checked: row.checked
+                    // Roles of one kind read only by rows of that kind (one model read each, not for every row)
+                    readonly property bool choosing: row.kind === "choice" || row.kind === "font"
+                    readonly property bool numeric: row.kind === "integer" || row.kind === "float"
+                    choices: choosing ? row.model.choices : []
+                    choiceIndex: choosing ? row.model.choiceIndex : -1
+                    text: row.text
+                    number: numeric ? row.model.number : 0
+                    decimals: numeric ? row.model.decimals : 0
+                    step: numeric ? row.model.step : 1
+                    minimum: numeric ? row.model.minimum : 0
+                    maximum: numeric ? row.model.maximum : 0
+                    range: numeric ? row.model.rangeText || "" : ""
+                    color: row.kind === "color" ? row.model.color : ""
+                    invalid: row.error !== ""
+                    table: row.kind === "text" && row.model.table
+                    onSwitched: function(checked) { backend.setBool(row.model.key, checked) }
+                    onChosen: function(index) { backend.setChoice(row.model.key, index) }
+                    onNumberEdited: function(value) { backend.setNumber(row.model.key, value) }
+                    onTextTyped: function(text) { backend.typeText(row.model.key, text) }
+                    onTextCommitted: function(text) { backend.setText(row.model.key, text) }
+                    onReverted: backend.revertOption(row.model.key)
+                    onColorRequested: backend.pickColor(row.model.key)
+                    onBrowseRequested: backend.browse(row.model.key)
+                    onFolderRequested: backend.openFolder(row.model.key)
+                    onTableRequested: backend.editTable(row.model.key)
                 }
 
                 TpButton {
                     Layout.alignment: Qt.AlignVCenter
                     flat: true
                     size: "sm"
-                    glyph: ""  // undo
+                    glyph: "\uE7A7"  // undo
                     fallback: "↺"
                     tip: (hovered || visualFocus) && row.model.defaultText !== ""
                          ? i18n.trm("Back to default: " + row.model.defaultText) : i18n.tr("Reset to Default")
@@ -467,179 +523,14 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     flat: true
                     size: "sm"
-                    glyph: ""  // more
+                    glyph: "\uE712"  // more
                     fallback: "⋯"
                     tip: i18n.tr("More actions")
-                    opacity: hovered || visualFocus ? 1 : 0.6
-                    onClicked: row.menuRequested({  // copy: row may be reused for another option while menu is open
-                        key: row.model.key, option: row.model.option, modified: row.modified,
-                        locked: row.locked, shared: row.model.shared, error: row.error
-                    }, moreButton)
+                    opacity: hovered || visualFocus || row.rowHovered ? 1 : 0  // revealed: hover, focus, current
+                    onClicked: row.openMenu(moreButton, -1, -1)
                 }
             }
         }
     }
-
-    Component {
-        id: boolEditor
-        Item {
-            implicitHeight: switchItem.implicitHeight
-            TpSwitch {
-                id: switchItem
-                anchors.right: parent.right
-                checkable: false  // follows backend
-                checked: row.checked
-                text: row.checked ? i18n.tr("On") : i18n.tr("Off")
-                onClicked: backend.setBool(row.model.key, !row.checked)
-                Accessible.role: Accessible.CheckBox
-                Accessible.name: row.label
-                Accessible.checked: row.checked
-            }
-        }
-    }
-    Component {
-        id: choiceEditor
-        TpCombo {
-            id: combo
-            function reset() {
-                currentIndex = Qt.binding(function() { return row.model.choiceIndex })
-            }
-            function release() {
-                combo.popup.close()
-            }
-            model: row.model.choices
-            currentIndex: row.model.choiceIndex
-            tip: row.label
-            onActivated: function(index) { backend.setChoice(row.model.key, index) }
-        }
-    }
-    Component {
-        id: numberEditor
-        Item {
-            function reset() {
-                numberField.text = numberField.format(numberField.value)  // decimals may differ, same value
-            }
-            implicitHeight: numberField.implicitHeight
-            NumberField {
-                id: numberField
-                anchors.right: parent.right
-                width: Math.min(parent.width, theme.em * 8)
-                value: row.model.number
-                decimals: row.model.decimals
-                step: row.model.step
-                minimum: row.model.minimum
-                maximum: row.model.maximum
-                tip: row.label
-                range: row.model.rangeText || ""
-                onEdited: function(value) { backend.setNumber(row.model.key, value) }
-            }
-        }
-    }
-    Component {
-        id: colorEditor
-        RowLayout {
-            id: colorBlock
-            readonly property string swatchColor: row.model.color  // one model read (swatch & its text)
-            function reset() {
-                colorField.text = Qt.binding(function() { return row.text })
-            }
-            spacing: theme.space3
-            AbstractButton {  // swatch: color picker (Tab, Enter / Space)
-                id: swatch
-                Layout.preferredWidth: Math.round(theme.fieldHeight)
-                Layout.preferredHeight: Layout.preferredWidth
-                hoverEnabled: true
-                focusPolicy: Qt.TabFocus
-                onClicked: backend.pickColor(row.model.key)
-                Keys.onReturnPressed: animateClick()
-                Keys.onEnterPressed: animateClick()
-                Keys.onShortcutOverride: function(event) {
-                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
-                        event.accepted = true
-                }
-                HoverHandler { cursorShape: Qt.PointingHandCursor }
-                ToolTip.visible: hovered || visualFocus
-                ToolTip.text: i18n.tr("Select Color")
-                ToolTip.delay: theme.tipDelay
-                Accessible.role: Accessible.Button
-                Accessible.name: i18n.tr("Select Color")
-                background: Rectangle {
-                    radius: theme.radiusMd
-                    color: colorBlock.swatchColor !== "" ? colorBlock.swatchColor : "transparent"
-                    border.width: 1
-                    border.color: swatch.hovered ? theme.accent : theme.border
-                    FocusRing { visible: swatch.visualFocus }
-                }
-                contentItem: Text {
-                    visible: colorBlock.swatchColor === ""
-                    text: "?"
-                    color: theme.loss
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-            TpTextField {
-                id: colorField
-                Layout.fillWidth: true
-                text: row.text
-                invalid: row.error !== ""
-                font.features: { "tnum": 1 }
-                tip: row.label
-                maximumLength: 9
-                onEditingFinished: if (text !== row.text) backend.setText(row.model.key, text)
-                onEscaped: text = Qt.binding(function() { return row.text })
-            }
-        }
-    }
-    Component {
-        id: textEditor
-        RowLayout {
-            function reset() {
-                textField.text = Qt.binding(function() { return row.text })
-            }
-            spacing: theme.space2
-            TpTextField {
-                id: textField
-                Layout.fillWidth: true
-                text: row.text
-                invalid: row.error !== ""
-                tip: row.label
-                onEditingFinished: if (text !== row.text) backend.setText(row.model.key, text)
-                onEscaped: text = Qt.binding(function() { return row.text })
-            }
-            TpButton {
-                visible: row.model.table
-                glyph: ""  // list
-                fallback: "…"
-                tip: i18n.tr("Edit as a table")
-                implicitHeight: Math.round(theme.fieldHeight)
-                onClicked: backend.editTable(row.model.key)
-            }
-        }
-    }
-    Component {
-        id: pathEditor
-        RowLayout {
-            function reset() {
-                pathField.text = Qt.binding(function() { return row.text })
-            }
-            spacing: theme.space2
-            TpTextField {
-                id: pathField
-                Layout.fillWidth: true
-                text: row.text
-                invalid: row.error !== ""
-                tip: row.label
-                onEditingFinished: if (text !== row.text) backend.setText(row.model.key, text)
-                onEscaped: text = Qt.binding(function() { return row.text })
-            }
-            TpButton {
-                glyph: ""  // folder open
-                fallback: "…"
-                tip: row.kind === "path" ? i18n.tr("Choose Folder...") : i18n.tr("Choose File...")
-                implicitHeight: Math.round(theme.fieldHeight)
-                onClicked: backend.browse(row.model.key)
-            }
-        }
-    }
+    HoverHandler { id: rowHover }
 }

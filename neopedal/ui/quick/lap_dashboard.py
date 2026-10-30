@@ -27,6 +27,10 @@ cards while a pedal, steering, gear or speed channel is shown, G circle while a 
 Layout (groups & items shown) changes with laps & selection only, values are read at each cursor move, one entry per
 item & lap in layout order: QML items are kept while cursor moves. Groups of simple view are a list model synced in
 place (a group whose items stay keeps its cells), only while simple view is shown (worked out again once shown).
+
+Summary band on top of simple view, whatever channels are shown: delta & speed of each lap at cursor (read with pedal
+cards), delta of each lap over the whole lap (deltaLine: GPU lines, vertices shared with the delta chart) and corners
+where time is lost (corner table coaching, read by QML).
 """
 
 from __future__ import annotations
@@ -53,6 +57,7 @@ from ..lap_viewer import (
     number_text,
 )
 from .lap_base import PagePart, weak_host
+from .lines import VertexStore, line_strip
 from .models import DictListModel
 
 if TYPE_CHECKING:
@@ -168,6 +173,7 @@ class DashboardHost(Protocol):
     def mathChanged(self) -> SignalInstance: ...
     def channels_updated(self, save: bool = True): ...
     def short_label(self, key: str) -> str: ...
+    def series_key(self, lap: PlotLap, channel: Channel, data: TraceData | None = None) -> str: ...
 
 
 class DashboardTab(PagePart):
@@ -176,6 +182,7 @@ class DashboardTab(PagePart):
     changed = Signal()  # channels shown (Show menu, simple view items), also sent by chartChanged & mathChanged
     channelsChanged = Signal()  # Show menu channels or their availability changed (not their shown state)
     layoutChanged = Signal()  # simple view items changed (values read at cursor again), groupKeys
+    deltaLineChanged = Signal()  # summary band delta lines: laps compared, their deltas or colors
 
     def __init__(self, page: DashboardHost, data: TraceData, opened: bool, parent: QObject | None = None):
         super().__init__(parent)
@@ -190,10 +197,13 @@ class DashboardTab(PagePart):
         self._layout_items: list = self.items  # items of groups last synced (values of other items read again)
         self._layout_shown = False  # simple view shown: groups synced on every change
         self._layout_stale = True  # changed while simple view hidden: synced once shown
+        self._delta_line: tuple[tuple, dict] | None = None  # summary band delta lines: (laps & keys, deltaLine)
+        self._delta_value: dict = {}  # deltaLine (see update_delta_line)
         page.chartChanged.connect(self.changed)  # items recorded in shown laps
         page.mathChanged.connect(self.changed)
         self.changed.connect(self.check_catalog)
         self.changed.connect(self.check_layout)
+        self.changed.connect(self.check_delta_line)
 
     @Property(list, notify=changed)
     def catalog(self) -> list[dict]:
@@ -259,12 +269,63 @@ class DashboardTab(PagePart):
         """Every group shown in simple view, pedal cards ("driver") first when shown"""
         return self._group_keys
 
+    @Property(dict, notify=deltaLineChanged)
+    def deltaLine(self) -> dict:
+        """Summary band: delta of each compared lap over the whole lap, {"series": [{key, color, lap}], "low", "high"},
+        empty without deltas (one lap). Vertices shared with the delta chart (same keys), built here when that chart is
+        hidden, kept while shown (see vertex_keys); same dict until laps or their deltas change"""
+        return self._delta_value
+
+    @Slot()
+    def check_delta_line(self):
+        """Channels shown, laps or math channels changed: summary band delta lines worked out again while simple view
+        is shown (read by QML only then), once shown again else"""
+        if self._layout_shown:
+            self.update_delta_line()
+
+    def update_delta_line(self):
+        """deltaLine worked out (deltaLineChanged sent if it changed), its vertices built if missing (dropped while
+        simple view was hidden, or never built)"""
+        data = self.data
+        laps = data.delta_laps() if data.laps else []
+        line: dict = {}
+        if not laps:
+            self._delta_line = None
+        else:
+            channel = CHANNEL_MAP["delta"]
+            page = self._page
+            keys = tuple(page.series_key(lap, channel) for lap in laps)
+            low, high = data.value_range(channel)
+            signature = (keys, tuple(lap.color.name() for lap in laps), low, high)
+            if self._delta_line is not None and self._delta_line[0] == signature:
+                line = self._delta_line[1]
+            else:
+                line = {"series": [{"key": key, "color": lap.color.name(), "lap": lap.key}
+                                   for key, lap in zip(keys, laps)],
+                        "low": low, "high": high if high > low else low + 1}
+                self._delta_line = (signature, line)
+            for key, lap in zip(keys, laps):  # dropped meanwhile (vertex store cleaned) or never built: built again
+                if not VertexStore.has(key):
+                    VertexStore.set(key, line_strip(*data.series(channel, lap)))
+        if line is not self._delta_value and line != self._delta_value:
+            self._delta_value = line
+            self.deltaLineChanged.emit()
+
+    def vertex_keys(self) -> list[str]:
+        """Vertex keys of summary band delta lines, kept by the page while simple view is shown (built again once
+        shown, see update_delta_line)"""
+        if self._delta_line is None or not self._layout_shown:
+            return []
+        return [series["key"] for series in self._delta_line[1]["series"]]
+
     @Slot(bool)
     def setLayoutShown(self, shown: bool):
         """Simple view shown or hidden: groups synced on every change while shown, once shown again if changed"""
         self._layout_shown = bool(shown)
         if self._layout_shown and self._layout_stale:
             self.update_layout()
+        if self._layout_shown:
+            self.update_delta_line()
 
     @Slot()
     def check_layout(self):
@@ -304,7 +365,7 @@ class DashboardTab(PagePart):
         series & value ranges built with charts in background (see update_chart)"""
         if not self.opened:
             return []
-        columns: list[str] = []
+        columns: list[str] = ["delta", "speed_kph"]  # summary band
         for _, _, items in self.dashboard_groups():
             for item in items:
                 if not self.item_shown(item):
@@ -485,6 +546,7 @@ class DashboardTab(PagePart):
             self._clutch_used = {key: value for key, value in self._clutch_used.items() if key in shown}
         laps = []
         short_label = self._page.short_label
+        delta_channel = CHANNEL_MAP["delta"]
         for lap in self.data.laps:
             values = {column: self.data.value_at(CHANNEL_MAP[column], lap, x)
                       for column in ("throttle", "brake", "clutch", "steering", "speed_kph")}
@@ -495,6 +557,8 @@ class DashboardTab(PagePart):
             rotation = lap.data.meta.get("steering_range")
             rotation = float(rotation) if isinstance(rotation, (int, float)) and rotation > 0 else 0.0
             speed = values["speed_kph"]
+            # Summary band: gap to reference (or ideal) lap at cursor, none for the lap compared with
+            delta = self.data.value_at(delta_channel, lap, x) if lap.key in self.data.deltas else None
             laps.append({
                 "lap": lap.key, "label": short_label(lap.key), "color": lap.color.name(),
                 "ended": all(value is None for value in values.values()),  # past end of lap
@@ -506,7 +570,10 @@ class DashboardTab(PagePart):
                 "rotation": rotation,
                 "gear": "" if gear is None else ("R" if gear < 0 else "N" if gear == 0 else str(gear)),
                 "speed": "" if speed is None else f"{speed:.0f}",
+                "speedValue": -1.0 if speed is None else float(speed),
                 "speedUnit": self.data.unit_of(CHANNEL_MAP["speed_kph"]),
+                "delta": "" if delta is None else format_channel_value(delta_channel, delta),
+                "deltaValue": 0.0 if delta is None else float(delta),
             })
         return laps
 
@@ -520,4 +587,6 @@ class DashboardTab(PagePart):
     def release(self):
         self.items = []
         self._clutch_used = {}
+        self._delta_line = None
+        self._delta_value = {}
         self._layout_stale = True  # groups synced again once laps are read again

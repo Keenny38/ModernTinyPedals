@@ -6,7 +6,7 @@ NeoPedal can be driven by other programs, stream live telemetry, show a dashboar
 
 Remote control lets Stream Deck, Bitfocus Companion, SimHub or any button box software run app commands through a small local HTTP server.
 
-1. Open `Config` > `Remote Control`.
+1. Open `Settings` > `Remote Control`.
 2. Turn on `enable_remote_control`. The default port is `8337` (`remote_control_port`).
 
 The server only listens on `127.0.0.1` (this computer):
@@ -24,6 +24,19 @@ curl -X POST -H "X-NeoPedal: 1" http://127.0.0.1:8337/command/overlay_lock
 
 Requests without the header, or with another host name than `127.0.0.1` or `localhost`, are refused, so web pages cannot send commands from your browser.
 
+### Access token (optional)
+
+Without a token, any program running on this computer, including programs of other Windows accounts, can send commands and read the telemetry stream. To limit it to your own tools, turn on `enable_access_token` (off by default, so most tools set up before keep working). Commands with an effect on the whole app are refused (`403`, `token required`) as long as no token is set, since 0.28.0: `quit_application`, `restart_application`, `restart_api`, `select_next_api`, `select_previous_api`, `reload_preset`, `load_next_preset`, `load_previous_preset` and every `preset_*` command. To send them, turn the token on:
+
+1. Turn on `enable_access_token` and select `Apply`. A random token is created (`access_token`, at least 16 characters, you can also type your own).
+2. The `Remote Control` settings page then shows the command with the token. Copy it into your Stream Deck, Companion or SimHub actions: the `X-NeoPedal` header value must be the token.
+
+```bash
+curl -X POST -H "X-NeoPedal: <token>" http://127.0.0.1:8337/command/overlay_lock
+```
+
+Commands with another header value are refused (`403`). Telemetry stream clients send the token the same way (header), or in the stream address for browser pages: `ws://127.0.0.1:8337/stream?token=<token>`. `GET /commands` (list of command names, and `token_required`: the commands refused without a token) needs no token.
+
 ## WebSocket telemetry stream
 
 With remote control on, `ws://127.0.0.1:8337/stream` pushes live telemetry as JSON: speed, gear, RPM, pedals, position, lap times, delta, fuel, tyre and brake temperatures and more (the same fields as the web dashboard).
@@ -40,15 +53,17 @@ A client can change fields and changes at any time by sending a text message suc
 
 The web dashboard shows live data in a browser, for example on a phone or tablet next to your screen: gear, speed, RPM, delta, lap times, position, fuel (or virtual energy for LMU Hypercar and LMGT3), pedals, tyre and brake temperatures, time left. With LMU it also shows the official delta and marks invalid laps. The page uses the app language and your units.
 
-1. Open `Config` > `Web Dashboard` and turn on `enable_web_dashboard` (port `8338` by default, `web_dashboard_port`).
+1. Open `Settings` > `Web Dashboard` and turn on `enable_web_dashboard` (port `8338` by default, `web_dashboard_port`).
 2. To open it from another device, turn on `enable_lan_access`. Windows Firewall may ask you to allow the app the first time.
-3. The `Web Dashboard` settings page shows the addresses to open and the access code, with copy buttons (also `Config` > `Web Dashboard Address...`).
+3. The `Web Dashboard` settings page shows the addresses to open and the access code, with copy buttons (also `Settings` > `Web Dashboard Address…`).
 
 Security:
 
-- An **access code** is always required (`access_code`, a random code is generated if empty, then kept when the app restarts). After 10 wrong codes, the device is blocked for 60 seconds. The code is exchanged for a session cookie, so it does not stay in the page address.
+- An **access code** is always required (`access_code`, at least 8 characters; a random code is generated if empty, then kept when the app restarts). A shorter code set by hand in an older version is replaced by a new random code once: the settings page shows the new one. After 10 wrong codes, the device is blocked for 60 seconds. After 30 wrong codes from devices of the local network within 5 minutes (whatever their address), logins from the local network are blocked for 2 minutes; dashboards already open stay logged in, and logins from this computer are not blocked. The code is exchanged for a session cookie, so it does not stay in the page address.
+- A login is only valid on the device that made it. On this computer, it ends when the browser is closed (or after 12 hours); on a phone or tablet, it lasts 7 days (12 hours without use).
+- Web pages of other sites cannot try codes (`Origin` and `Sec-Fetch-Site` checks) nor read the dashboard through their own domain name (`Host` check against DNS rebinding). Open the dashboard with the addresses shown by the app (`127.0.0.1`, `localhost`, the IP address of this computer, or its computer name / `<name>.local` with LAN access).
 - Without HTTPS, traffic is plain HTTP: only enable LAN access on a network you trust.
-- `enable_https` serves the dashboard over HTTPS with a self-signed certificate created in the config folder. The browser warns once about it: check the SHA-256 fingerprint shown by `Web Dashboard Address...` before accepting it.
+- `enable_https` serves the dashboard over HTTPS with a self-signed certificate created in the config folder. The browser warns once about it: check the SHA-256 fingerprint shown by `Web Dashboard Address…` before accepting it.
 
 ## Stream overlays (OBS, Streamlabs, XSplit, vMix)
 
@@ -88,7 +103,7 @@ Good to know:
 
 ### VR overlay (experimental)
 
-`Config` > `VR Overlay (Experimental)` > `enable_vr_overlay` shows all visible overlays in your headset, with the same layout as on your desktop. Nothing else to install: everything is included in the Windows release.
+`Settings` > `VR Overlay (Experimental)` > `enable_vr_overlay` shows all visible overlays in your headset, with the same layout as on your desktop. Nothing else to install: everything is included in the Windows release.
 
 - **OpenXR games**, on any runtime (SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...), **experimental and off by default** (`enable_openxr_layer`): the app comes with its own OpenXR layer, a small DLL that OpenXR games load when they start. It draws the overlays over the game image. Games using Direct3D 11 (Le Mans Ultimate, rFactor 2 and most sim racing games), Direct3D 12 or Vulkan are supported; OpenGL games are not.
 - **SteamVR games** (OpenVR): shown as a SteamVR overlay as soon as SteamVR runs. The app never starts SteamVR, so Meta or Virtual Desktop users without SteamVR are not bothered. When an OpenXR game runs on SteamVR, only the OpenXR layer draws the overlays (no double image).
@@ -122,9 +137,10 @@ For OpenGL games, or to place overlays with another tool, turn on `enable_vr_mir
 
 - `Start Recording` / `Stop Recording` while in game, or turn on `enable_auto_replay_recording` in the Recorder module to record each time you drive (`number_of_saved_replays` automatic recordings kept, default `20`; manual recordings are never removed).
 - Recordings are `.tpreplay` files in the `telemetry` folder (about 7 MB per minute). REST API data of LMU is recorded too.
-- Double-click a replay (or `Open Replay...`) to play it: the app reads from the file until you click `Back to Game`.
-- Play, pause, speed, loop, position slider with lap changes and incidents, `Go to lap`, `◀ Incident` / `Incident ▶`, frame by frame. Keys: `Space` play / pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame.
-- `Set Start`, `Set End` and `Save Section...` save part of a replay to a new file, for example to share an incident.
+- Double-click a replay of the list, press `Enter` or its `Play` button to play it (`Open Replay…` plays a file from another folder): the app reads from the file until you click `Back to Game`. The replay played is marked `▶` in the list.
+- The playback bar is the one of the telemetry viewer: frame by frame, 5 s back / forward (held: rewind / fast forward), play / pause, loop, speed, position slider with lap changes (marks on top) and incidents (marks below), then `Go to lap`, `◀ Incident` / `Incident ▶`. Keys: `Space` play / pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame, `,` / `.` speed, `L` loop.
+- `Set Start`, `Set End` and `Save Section…` save part of a replay (shaded on the position slider) to a new file, for example to share an incident.
+- With an API that cannot record (other than LMU / rF2), the page says so and recording & replay are off.
 
 The telemetry viewer can open the replay at the cursor position (`Open Replay Here`) when a Session recorder replay covers that lap.
 
@@ -139,7 +155,7 @@ The `Replays` list and the `Replay` tab of [Results & Replays](Race-Results.md) 
 - **Incidents**: contacts between cars of the session, or with a wall. The game lists a contact from both cars: they are merged into one incident (`×2` when several contacts of the same cars follow each other). Car number and class, your car marked in blue, `All` / `Cars` / `Walls` filter, `My car`, and driver chips (most incidents first) to see one driver's incidents. The export button copies the incidents shown to the clipboard or saves them as CSV. Once you leave a session, its incidents and standings stay shown (`Last Session`).
 - **Timeline**: every incident on a line covering the whole session, with the replay position. Click an incident to jump to it, click anywhere else to move the replay there. Mouse wheel zooms, drag moves the zoomed part, double-click or `Whole session` shows everything again.
 - **Jump to Incident** (or double-click, `Enter`, the arrows of the panel for the previous / next incident) moves the replay `Seconds Before` the incident, camera on your car if it is involved, else on the first car. Right-click an incident to choose the car or to see only one driver's incidents. In a live session the button becomes **Replay This Moment**: the replay of the session opens at that moment, and `Back to Live` returns to the session.
-- **Drivers**: standings of the session or replay, by position: class position, car number, driver and car, laps, best lap (purple: fastest of its class), last lap, gap to the leader (practice & qualifying: best lap behind the best lap of the leader, as in game), pit stops, virtual energy (cars of your team only), status (garage, in pits, finished, retired) and number of incidents (click it to see that driver's incidents). Class chips show one class only, your car is highlighted, the car followed by the camera is marked. Double-click a driver (or its camera button) to put the camera on their car. Right-click: `Go to Lap...` moves the replay to the start of a lap of that car.
+- **Drivers**: standings of the session or replay, by position: class position, car number, driver and car, laps, best lap (purple: fastest of its class), last lap, gap to the leader (practice & qualifying: best lap behind the best lap of the leader, as in game), pit stops, virtual energy (cars of your team only), status (garage, in pits, finished, retired) and number of incidents (click it to see that driver's incidents). Class chips show one class only, your car is highlighted, the car followed by the camera is marked. Double-click a driver (or its camera button) to put the camera on their car. Right-click: `Go to Lap…` moves the replay to the start of a lap of that car.
 - **Map**: the track and pit lane of the session or replay with every car (class color and number, your car with a white ring, the car followed by the camera with a blue one). With the game on this computer, cars follow their real place 10 times a second, like the Broadcast Director track map; otherwise they glide along the track between updates. Click a car to put the camera on it. Mouse wheel zooms, drag moves, double-click shows the whole track.
 
 The page asks the game only while the replays list or the `Replay` tab is shown, on one connection per update: every 2 seconds with a replay open, 5 seconds otherwise, 15 seconds when the game is not running; standings only while `Drivers` or `Map` is shown, while a replay is open, or when the incidents change. `Refresh` (`F5`) asks again at once. Seconds before, sort, filters, the tab shown and protected replays are kept for next time.

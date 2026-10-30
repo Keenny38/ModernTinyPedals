@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import delta_shown, game_deltabest, lap_delta_shown
+from ._common import delta_shown, game_deltabest, lap_delta_shown, lap_reference
 
 if TYPE_CHECKING:
     from ..template.widget_config_types import DeltabestExtendedConfig
@@ -84,7 +84,7 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_all_time_deltabest"],
                 bg_color=self.wcfg["background_color_all_time_deltabest"],
-                last=0,
+                last=None,
             )
             self.set_primary_orient(
                 target=self.bar_atbest,
@@ -101,7 +101,7 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_session_deltabest"],
                 bg_color=self.wcfg["background_color_session_deltabest"],
-                last=0,
+                last=None,
             )
             self.set_primary_orient(
                 target=self.bar_ssbest,
@@ -118,7 +118,7 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_stint_deltabest"],
                 bg_color=self.wcfg["background_color_stint_deltabest"],
-                last=0,
+                last=None,
             )
             self.set_primary_orient(
                 target=self.bar_stbest,
@@ -135,7 +135,7 @@ class Realtime(Overlay):
                 offset_y=font_m.voffset,
                 fg_color=self.wcfg["font_color_deltalast"],
                 bg_color=self.wcfg["background_color_deltalast"],
-                last=0,
+                last=None,
             )
             self.set_primary_orient(
                 target=self.bar_labest,
@@ -157,11 +157,13 @@ class Realtime(Overlay):
                 minfo.delta.lapTimeLast - last if lap_delta_shown(last) else None for last in self.last_laptimes)
             self.new_lap = True
         else:
-            if self.new_lap:
-                self.last_laptimes[0] = minfo.delta.lapTimeBest
-                self.last_laptimes[1] = minfo.delta.lapTimeSession
-                self.last_laptimes[2] = minfo.delta.lapTimeStint
-                self.last_laptimes[3] = minfo.delta.lapTimeLast
+            if self.new_lap:  # references of lap under way, as live deltas (game delta: game best lap)
+                self.last_laptimes = [
+                    lap_reference("Best"),
+                    lap_reference("Session", self.wcfg["show_game_deltabest_if_available"]),
+                    lap_reference("Stint"),
+                    lap_reference("Last"),
+                ]
                 self.new_lap = False
 
             alltime_best = minfo.delta.deltaBest
@@ -195,12 +197,22 @@ class Realtime(Overlay):
 
     # GUI update methods
     def update_deltabest(self, target, data, prefix):
-        """Update deltabest"""
-        if target.last != data:
-            target.last = data
-            if data is None:  # no reference lap, or out lap
-                text = f"{'-':>{self.max_padding}}"
-            else:
-                text = f"{calc.sym_max(data, self.delta_display_range):>+{self.max_padding}.{self.decimals}f}"
-            target.text = f"{prefix}{text:.{self.max_padding}}"
+        """Update deltabest, redrawn only when text as displayed changes"""
+        if data is None:  # no reference lap, or out lap
+            text = f"{'-':>{self.max_padding}}"
+        else:
+            text = fitted_delta(calc.sym_max(data, self.delta_display_range), self.decimals, self.max_padding)
+        if target.last != text:
+            target.last = text
+            target.text = f"{prefix}{text}"
             target.update()
+
+
+def fitted_delta(delta: float, decimals: int, width: int) -> str:
+    """Signed delta right aligned in width characters (never -0.000), fewer decimals (rounded, not cut) if
+    too long: +12.35 for +12.345 in 6 characters"""
+    for places in range(max(decimals, 0), -1, -1):
+        text = f"{delta:>+z{width}.{places}f}"
+        if len(text) <= width:
+            return text
+    return text[:width]

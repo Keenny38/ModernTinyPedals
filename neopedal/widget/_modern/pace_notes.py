@@ -19,23 +19,32 @@
 """
 Pace notes Widget, modern design
 
-Classic drawing with design font & theme colors (see restyle module).
+Same card as track notes: current pace note in bold, comments under it (one line per line
+break), debugging distances. Sections stacked (or side by side), hidden while auto hidden.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..pace_notes import Realtime as Classic
-from .restyle import Restyled, restyled_options
+from ..pace_notes import PaceNotesMixin
+from .base import display_order_options
+from .track_notes import Realtime as TrackNotes
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import PaceNotesConfig
 
 
-class Realtime(Restyled, Classic):
+class Realtime(PaceNotesMixin, TrackNotes):
     """Draw widget"""
 
-    wcfg: PaceNotesConfig
+    wcfg: PaceNotesConfig  # type: ignore[assignment]  # track notes card, pace notes options
 
-    options = restyled_options("pace_notes")
+    NOTES_KEY = "pace_notes"
+    options = (
+        "font_size", "layout", "show_background", "enable_auto_hide_if_not_available", "maximum_display_duration",
+        "show_pit_notes_while_in_pit", "pit_notes_text", "pit_comments_text", "show_pace_notes",
+        "pace_notes_width", "pace_notes_text_alignment", "show_comments",
+        "enable_comments_line_break", "comments_width", "comments_text_alignment", "show_debugging",
+        "debugging_width", "debugging_text_alignment", *display_order_options("pace_notes"),
+    )

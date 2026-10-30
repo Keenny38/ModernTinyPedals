@@ -128,7 +128,7 @@ def cache_path(folder: str, track: str) -> str:
 
 def load_geometry(folder: str, track: str) -> TrackGeometry | None:
     """Saved geometry of track, None if never fetched"""
-    with suppress(OSError, ValueError, KeyError, TypeError, IndexError):
+    with suppress(OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
         with open(cache_path(folder, track), encoding="utf-8") as file:
             saved = json.load(file)
         center = [(float(x), float(y), float(z)) for x, y, z in saved["center"]]

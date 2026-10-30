@@ -172,7 +172,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
     def paint_static(self, painter: QPainter):
         theme = self.theme
         unit = self.unit
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         if self.show_body:  # axles from card to card, behind cards
             pen = QPen(theme.tint(theme.text_faint, 120), unit * 0.22)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -275,7 +275,7 @@ class Realtime(TyreOverviewMixin, ModernOverlay):
                     painter.fillRect(QRectF(tread.left(), y, tread.width(), max(unit * 0.06, 1.0)), groove)
                 y += step
         if card.alert and self.show_highlight:  # puncture or flat spot: tinted tyre & mark
-            color = theme.negative if card.alert == "puncture" else theme.orange
+            color = theme.negative if card.alert == "puncture" else theme.warning
             rounded(painter, tread, band_radius, theme.tint(color, 70))
             mark = min(tyre.width() * 0.5, unit * 1.0)
             dot = QRectF(tyre.center().x() - mark / 2, tyre.bottom() - mark - unit * 0.25, mark, mark)

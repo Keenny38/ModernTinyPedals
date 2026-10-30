@@ -96,10 +96,10 @@ def test_no_low_fuel_warning_without_estimate(widgets, monkeypatch, modern):
         assert states[-1] is True
     else:
         widget.timerEvent(None)
-        assert widget.bar_curr.bg == widget.bar_style_curr[0]
+        assert widget.cells["remaining"].bg == widget.bar_style_curr[0]
         monkeypatch.setattr(minfo.fuel, "estimatedValidConsumption", 3.0)
         widget.timerEvent(None)
-        assert widget.bar_curr.bg == widget.bar_style_curr[1]
+        assert widget.cells["remaining"].bg == widget.bar_style_curr[1]
 
 
 # --- Director events log: writer thread never left busy, no formula in CSV cells
@@ -178,7 +178,11 @@ def test_sectors_skip_unknown_sector(widgets, monkeypatch, modern):
     for data in (minfo.sectors.sessionBest, minfo.sectors.allTimeBest):
         monkeypatch.setattr(data, "sectorIndex", -1)  # sector data reset
     widget.timerEvent(None)
-    assert (widget.last_sector_index if modern else widget.last_sector_idx) == 1  # reset not taken as a sector
+    for data in (minfo.sectors.sessionBest, minfo.sectors.allTimeBest):
+        monkeypatch.setattr(data, "sectorIndex", 1)
+    widget.timerEvent(None)  # reset not taken as a sector: synced again, no sector just finished awaited
+    assert (widget.last_sector_index if modern else widget.last_sector_idx) == 1
+    assert widget.sector_shown and not widget.freeze_timer_start
 
 
 # --- Trailing: plot speed proportional to time scale, whatever the update interval

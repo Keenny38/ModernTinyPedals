@@ -14,10 +14,10 @@ Card {
 
     implicitHeight: flow.implicitHeight + pad * 2
 
-    component Caption: Text {
+    component Caption: TpText {  // names & values, never markup
         property string tip: ""
-        color: theme.dimText
-        font.pointSize: theme.fontSmall
+        role: "caption"
+        elide: Text.ElideNone
         HoverHandler { id: captionHover; enabled: parent.tip !== "" }
         ToolTip.visible: captionHover.hovered
         ToolTip.text: tip
@@ -62,7 +62,7 @@ Card {
                 name: i18n.tr("Race Type")
                 options: [i18n.tr("Time"), i18n.tr("Laps")]
                 currentIndex: setup.lapRace ? 1 : 0
-                implicitHeight: Math.round(theme.em * 2.05)
+                implicitHeight: Math.round(theme.fieldHeight)  // as the fields next to it
                 onActivated: function(index) { backend.setInput("enable_lap_race", index === 1) }
             }
         }
@@ -116,7 +116,7 @@ Card {
                     name: i18n.tr("Safety Margin")
                     options: backend.marginUnits
                     currentIndex: Number(setup.inputs.input_safety_margin_kind)
-                    implicitHeight: Math.round(theme.em * 2.05)
+                    implicitHeight: Math.round(theme.fieldHeight)  // as the fields next to it
                     ToolTip.visible: unitHover.hovered
                     ToolTip.text: i18n.tr("Safety margin in laps, in fuel kept in the tank, or in % more consumption per lap")
                     ToolTip.delay: theme.tipDelay

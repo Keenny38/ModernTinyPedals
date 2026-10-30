@@ -35,10 +35,13 @@ import re
 import zlib
 from typing import NamedTuple
 
+from ..validator import load_json_strict
+
 PREFIX = "NP1:pb:"
 CODE = re.compile(r"NP1:pb:([A-Za-z0-9_\-]+=*)")
 MAX_CODE = 4096  # characters of a code read (a code is about 200)
 MAX_TEXT = 200  # characters kept of each text field
+MAX_TIME = 253402300799  # latest date (Unix time) kept: 9999-12-31, later dates overflow date formatting
 
 
 class SharedBest(NamedTuple):
@@ -76,7 +79,7 @@ def decode(text: str) -> SharedBest | None:
         return None
     try:
         raw = zlib.decompressobj().decompress(base64.urlsafe_b64decode(match[1]), 64 * 1024)
-        document = json.loads(raw.decode("utf-8"))
+        document = load_json_strict(raw.decode("utf-8"))
     except (binascii.Error, ValueError, zlib.error, UnicodeDecodeError):
         return None
     data = document.get("d") if isinstance(document, dict) else None
@@ -84,10 +87,12 @@ def decode(text: str) -> SharedBest | None:
         return None
     laptime = data.get("laptime")
     when = data.get("time", 0)
-    if (isinstance(laptime, bool) or not isinstance(laptime, (int, float)) or not math.isfinite(laptime)
-            or not 0 < laptime < 3600):
+    # Range checked before isfinite: a huge int (1e400 written as digits) overflows float conversion
+    if (isinstance(laptime, bool) or not isinstance(laptime, (int, float)) or not 0 < laptime < 3600
+            or not math.isfinite(laptime)):
         return None
-    if isinstance(when, bool) or not isinstance(when, (int, float)) or not math.isfinite(when) or when < 0:
+    if (isinstance(when, bool) or not isinstance(when, (int, float)) or not 0 <= when <= MAX_TIME
+            or not math.isfinite(when)):
         when = 0
     track, vehicle = _text(data.get("track")), _text(data.get("vehicle"))
     if not track or not vehicle:

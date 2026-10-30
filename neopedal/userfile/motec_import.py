@@ -31,6 +31,7 @@ import csv
 import json
 import math
 import os
+import re
 import time
 from array import array
 from bisect import bisect_left
@@ -48,6 +49,7 @@ MAX_LOG_SECONDS = 6 * 3600  # longer logs (or sizes made up by a broken file) re
 LINE_MATCH_SECONDS = 3.0  # lap number change matched to a line crossing this close (slow channel, logger delay)
 COMMENT_LAP_TIME_TOLERANCE = 1.0  # seconds, lap time of comment (lap name) used if this close to log lap time
 WHEELS = ("FL", "FR", "RL", "RR")
+PASSAGE_COMMENT = re.compile(r" \d+-\d+ m$")  # comment of a passage exported by this app (part of a lap)
 
 
 def _speed_kph(unit: str) -> float:
@@ -358,7 +360,8 @@ def read_log_laps(filename: str) -> tuple[LdInfo, Iterator[ImportedLap]]:
                 yield build(number, first, last, end_time - start_time, start_time, rebase=not crossings)
             return
         if not line:
-            if lap_time_channel is not None:  # single lap file (exported by this app): whole log is one lap
+            # single lap file (exported by this app): whole log is one lap, unless only a passage of a lap
+            if lap_time_channel is not None and not PASSAGE_COMMENT.search(info.comment):
                 yield single_lap()
             return
         log_start = log_start_crossing(lap_time_channel)
@@ -434,7 +437,7 @@ def build_lap(
 
 def lap_file_name(lap: ImportedLap, timestamp: float) -> str:
     """Recorded lap file name of imported lap (same pattern as recorder), dated at lap end if known, else timestamp"""
-    minutes, seconds = divmod(lap.lap_time, 60)
+    minutes, seconds = divmod(round(lap.lap_time, 3), 60)  # rounded first: never 1m60.000s
     date = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(lap.finished or timestamp))
     return f"{date} lap{lap.number:03d} {int(minutes)}m{seconds:06.3f}s.csv"
 

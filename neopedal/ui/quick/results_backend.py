@@ -50,6 +50,7 @@ from ...process.results_file import Entry, Event, SessionResult
 from ...process.results_index import FileStamp, SessionInfo, session_info
 from ...process.results_text import (
     MINUS,
+    SESSION_FILTER_LABELS,
     class_alias,
     class_color,
     count_text,
@@ -60,12 +61,16 @@ from ...process.results_text import (
     kind_text,
     lap_text,
     laps_text,
+    place_tone,
+    position_text,
+    sector_text,
+    signed_text,
 )
 from ...setting import cfg
 from ...template.setting_status_colors import SAME_TIME
 from ..lap_viewer import localized
 from . import page_settings
-from .formatting import clock_minutes, day_text
+from .formatting import clock_minutes, day_text, odometer_text
 from .game_pictures import (
     LogoCache,
     brand_logo_url,
@@ -78,11 +83,14 @@ from .game_pictures import (
 from .lines import VertexStore, Vertices, band, normals
 from .models import DictListModel
 from .page_backend import PageBackend
+from .results_comments import session_comments
+from .results_telemetry import recorded_laps
 
 logger = logging.getLogger(__name__)
 
 SETTINGS_FILE = rf.PAGE_SETTINGS_FILE  # page settings, user config folder
-KIND_FILTERS = ("", "Race", "Qualifying", "Practice")  # "" = every session
+KIND_FILTERS = ("", *SESSION_FILTER_LABELS[1:])  # "" = every session, then practice, qualifying, race
+OLD_KIND_FILTERS = ("", "Race", "Qualifying", "Practice")  # order of index saved by 0.27.0 and older ("kind")
 KIND_CODES = {"Race": "R", "Qualifying": "Q", "Practice": "P", "Warmup": "W"}
 LIST_MODES = ("sessions", "replays")  # left list: sessions of results files, replays saved by game (LMU)
 TABS = ("classification", "positions", "laps", "events", "replay")  # replay: game replay & live session (LMU)
@@ -107,7 +115,7 @@ CLASSIFICATION_ROLES = (
 )
 LAP_ROLES = (
     "key", "lap", "posText", "timeText", "timeTone", "deltaText", "s1", "s2", "s3", "s1Tone", "s2Tone",
-    "s3Tone", "speedText", "compound", "pit", "usageText", "wearText", "accessibleText",
+    "s3Tone", "speedText", "compound", "pit", "usageText", "wearText", "accessibleText", "telemetry",
 )
 EVENT_ROLES = ("key", "clock", "kind", "glyph", "title", "detail", "mine")
 EVENT_GLYPHS = {  # Segoe Fluent Icons / MDL2 Assets
@@ -177,7 +185,8 @@ def percent_text(fraction: float, decimals: int = 1) -> str:
 
 
 def signed_seconds(value: float) -> str:
-    return f"{value:+.3f}".replace("-", MINUS)
+    """Lap time gap "+0,345" (decimal separator of app language, typeset minus sign)"""
+    return signed_text(value, 3)
 
 
 def speed_converter() -> tuple[Any, str]:
@@ -209,13 +218,12 @@ def player_result_text(result: SessionResult | SessionInfo, entry: Entry | None)
     if entry is None:
         return "", ""
     if result.kind == "Race" and not finished(entry):
-        return game_text(entry.status), "loss"
+        return game_text(entry.status), place_tone(0, True, retired=True)
     if entry.position <= 0 or (result.kind != "Race" and entry.best_lap <= 0):
         return "", ""
     multiclass = as_info(result).class_count > 1
     shown = entry.class_position if multiclass and entry.class_position > 0 else entry.position
-    tone = "gold" if shown == 1 else "gain" if shown <= 3 else ""
-    return f"P{shown}", tone
+    return f"P{shown}", place_tone(shown, result.kind == "Race")  # race podium: gold, silver, bronze
 
 
 def session_row(result: SessionResult | SessionInfo, today: QDate, newest: bool = False, replay: bool = False,
@@ -303,7 +311,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str,
                 extra = contacts.get(name, (0, 0))
                 cars, objects = cars + extra[0], objects + extra[1]
         team = entry.team or entry.vehicle
-        best = lap_text(entry.best_lap) if entry.best_lap > 0 else "-"
+        best = lap_text(entry.best_lap)
         rows.append({
             "key": str(index),
             "posText": str(position),
@@ -367,14 +375,13 @@ def summary_tiles(result: SessionResult) -> list[dict[str, str]]:
     else:
         multiclass = len(result.classes) > 1
         if result.kind == "Race" and not finished(player):
-            value, tone = game_text(player.status), "loss"
+            value, tone = game_text(player.status), place_tone(0, True, retired=True)
             detail = game_text(player.dnf_reason) if player.dnf_reason not in ("", "DNF") else ""
         else:
-            value = f"P{player.position}" if player.position > 0 else "-"
-            tone = "gold" if player.position == 1 else ""
+            value = position_text(player.position, len(entries))  # "P3/12": one form for every page
+            tone = place_tone(player.class_position if multiclass else player.position, result.kind == "Race")
             class_cars = sum(1 for entry in entries if entry.car_class == player.car_class)
-            detail = (f"{player.car_class} P{player.class_position} / {class_cars}" if multiclass
-                      else f"/ {len(entries)}")
+            detail = f"{player.car_class} {position_text(player.class_position, class_cars)}" if multiclass else ""
         tiles.append(tile(tr("Position"), value, detail, tone))
         if result.kind == "Race" and player.grid > 0 and player.position > 0 and finished(player):
             grid = player.class_grid if multiclass and player.class_grid > 0 else player.grid
@@ -388,7 +395,8 @@ def summary_tiles(result: SessionResult) -> list[dict[str, str]]:
         best_detail = ""
         if player.best_lap > 0 and rank:
             place = rank.index(player.best_lap) + 1
-            best_detail = f"#{place}" if place > 1 else tr("Fastest")
+            # Rank among best laps "Lap rank 2/12" (never "#": car numbers)
+            best_detail = f"{tr('Lap rank')} {place}/{len(rank)}" if place > 1 else tr("Fastest")
         tiles.append(tile(tr("Best Lap"), lap_text(player.best_lap), best_detail,
                           "purple" if fastest is not None and fastest is player else ""))
         tiles.append(tile(tr("Laps"), str(player.laps_completed),
@@ -401,7 +409,7 @@ def summary_tiles(result: SessionResult) -> list[dict[str, str]]:
                           if cars + objects else "",
                           "loss" if cars + objects else ""))
         if points or penalties:
-            tiles.append(tile(tr("Track limits"), localized(f"{points:g}"),
+            tiles.append(tile(tr("Track Limits"), localized(f"{points:g}"),
                               f"{penalties} {tr('Penalties').lower()}" if penalties else "",
                               "loss" if penalties else "warning"))
     if fastest is not None and (player is None or fastest is not player):
@@ -416,7 +424,7 @@ def session_header(result: SessionResult) -> dict[str, Any]:
         result.server if online else "",
         length_text(result),
         count_text(len(result.entries), "car", "cars"),
-        f"{localized(f'{result.track_length / 1000:.2f}')} km" if result.track_length > 0 else "",
+        odometer_text(result.track_length) if result.track_length > 0 else "",  # user distance unit
     ]
     return {
         "title": result.track,
@@ -460,10 +468,11 @@ def lap_rows(result: SessionResult, entry: Entry) -> list[dict[str, Any]]:
             "pit": lap.pit,
             "usageText": usage_text(lap),
             "wearText": percent_text(min(lap.wear), 0) if lap.wear else "",
+            "telemetry": False,  # recorded lap of player's car (set once looked for, see recorded_laps)
         }
         for number, sector in enumerate(lap.sectors):
             key = f"s{number + 1}"
-            row[key] = f"{sector:.3f}" if sector > 0 else ""
+            row[key] = sector_text(sector, "")
             row[f"{key}Tone"] = ("purple" if sector > 0 and abs(sector - overall_sectors[number]) < SAME_TIME else
                                  "gain" if sector > 0 and abs(sector - own_sectors[number]) < SAME_TIME else "")
         row["accessibleText"] = spoken(f"{lap_word} {lap.number}", row["timeText"], records.get(row["timeTone"], ""),
@@ -502,7 +511,7 @@ def lap_stats(result: SessionResult, entry: Entry) -> list[dict[str, str]]:
         stats.append(tile(tr("Top Speed"), f"{to_speed(max(speeds)):.0f} {symbol}"))
     pits = sum(1 for lap in entry.laps if lap.pit)
     if pits:
-        stats.append(tile(tr("Pit lane"), laps_text(pits)))
+        stats.append(tile(tr("Pit Lane"), laps_text(pits)))
     return stats
 
 
@@ -709,6 +718,8 @@ class RaceResultsBackend(PageBackend):
     eventsChanged = Signal()
     tabChanged = Signal()
     listModeChanged = Signal()
+    tabsChanged = Signal()  # tabs shown or tab shown (tab picked, session, list mode)
+    commentsChanged = Signal()
     replaysLinked = Signal(object)  # {replay name: results path} of sessions with a replay (LMU)
     watchWanted = Signal(object)  # ReplayAction: replay of session opened in game (then event or lap)
 
@@ -717,7 +728,7 @@ class RaceResultsBackend(PageBackend):
         settings = load_page_settings()
         self.page_file = page_settings.PageSettings(SETTINGS_FILE, page_settings.SAVE_DELAY_MS, self)
         self.custom_folder = str(settings.get("folder", ""))
-        self.kind_filter = self._index(settings.get("kind"), len(KIND_FILTERS))
+        self.kind_filter = self._kind_index(settings)
         self.hide_empty = bool(settings.get("hide_empty", True))
         self.tab = self._index(settings.get("tab"), len(TABS))
         self.list_mode = self._index(settings.get("list"), len(LIST_MODES))
@@ -750,6 +761,10 @@ class RaceResultsBackend(PageBackend):
         self.drivers: list[dict[str, str]] = []
         self.driver_index = -1  # car picked in drivers
         self.driver_info: dict[str, Any] = {}  # car picked: names, class, brand logo & picture
+        self.comments: list[dict[str, str]] = []  # comments on player's session (see results_comments)
+        self.recorded: dict[int, str] = {}  # recorded lap file of each lap of player's car (lap viewer)
+        self._recorded_of: tuple[str, str] = ("", "")  # session & car recorded laps were looked for
+        self._tabs: tuple[tuple[int, ...], int] = ((), -1)  # tabs shown & tab shown last told
         self.speed_unit = speed_converter()[1]
         self._laps_of: tuple[str, str] = ("", "")  # session & car of lap rows
         self._driver_told: tuple[str, dict[str, Any]] = ("", {})  # car picked & info last told
@@ -789,10 +804,19 @@ class RaceResultsBackend(PageBackend):
         self._read_timer.setInterval(READ_DELAY_MS)
         self._read_timer.timeout.connect(self.start_read)
         notifier().changed.connect(self.pictures_changed)
+        self._tabs = (self.tab_keys(), self.shown_tab())
 
     @staticmethod
     def _index(value: Any, count: int) -> int:
         return value if isinstance(value, int) and 0 <= value < count else 0
+
+    @classmethod
+    def _kind_index(cls, settings: dict) -> int:
+        """Session filter saved by name ("session_kind"), else index of older order ("kind")"""
+        kind = settings.get("session_kind")
+        if isinstance(kind, str) and kind in KIND_FILTERS:
+            return KIND_FILTERS.index(kind)
+        return KIND_FILTERS.index(OLD_KIND_FILTERS[cls._index(settings.get("kind"), len(OLD_KIND_FILTERS))])
 
     # Page
     def page_shown(self):
@@ -800,6 +824,9 @@ class RaceResultsBackend(PageBackend):
         self._shown = True
         self._release_timer.stop()
         self.reload()
+        self._recorded_of = ("", "")  # laps recorded while hidden: looked for again
+        if self.result is not None:
+            self.look_for_recorded(self.entry())
 
     def page_hidden(self):
         self._shown = False
@@ -819,9 +846,9 @@ class RaceResultsBackend(PageBackend):
     @Slot()
     def release_results(self):
         """Full results released (page hidden a while): rows kept as they are, session read again once shown"""
+        rf.forget_results(list(self.kept))  # files other readers parsed (stream overlay) stay for them
         self.kept.clear()
         self._kept_bytes.clear()
-        rf.forget_results()  # files parsed kept for next readers
         self.result = None
         self.reading = ""
         self._read_timer.stop()
@@ -839,7 +866,7 @@ class RaceResultsBackend(PageBackend):
 
     def page_settings(self) -> dict[str, Any]:
         return {
-            "folder": self.custom_folder, "kind": self.kind_filter, "hide_empty": self.hide_empty,
+            "folder": self.custom_folder, "session_kind": KIND_FILTERS[self.kind_filter], "hide_empty": self.hide_empty,
             "tab": self.tab, "event_filter": self.event_filter, "event_mine": self.event_mine,
             "list": self.list_mode,
         }
@@ -868,6 +895,7 @@ class RaceResultsBackend(PageBackend):
             if header != self.header:
                 self.header = header
                 self.selectionChanged.emit()
+                self.update_tabs()  # replay of session found meanwhile: its tab
             self.refresh_classification(keep_rows=True)
             self.publish_driver()
 
@@ -1074,7 +1102,7 @@ class RaceResultsBackend(PageBackend):
 
     @Slot()
     def openFolder(self):
-        if self.folders:
+        if self.folders and os.path.isdir(self.folders[0]):  # never a file (would be run)
             QDesktopServices.openUrl(QUrl.fromLocalFile(self.folders[0]))
 
     @Slot()
@@ -1308,7 +1336,12 @@ class RaceResultsBackend(PageBackend):
             self.classes = class_chips(result)
             if not self.selected_entry or int(self.selected_entry) >= len(result.entries):
                 self.selected_entry = "0" if result.entries else ""
+        comments = session_comments(result)
+        if comments != self.comments:
+            self.comments = comments
+            self.commentsChanged.emit()
         self.selectionChanged.emit()
+        self.update_tabs()
         self.refresh_session()
 
     def refresh_session(self):
@@ -1436,6 +1469,9 @@ class RaceResultsBackend(PageBackend):
             self.driver_index = index
             self.driverIndexChanged.emit()
         rows = lap_rows(result, entry) if entry is not None and result is not None else []
+        self.look_for_recorded(entry)
+        for row in rows:  # laps recorded, found already (same session & car)
+            row["telemetry"] = row["lap"] in self.recorded
         laps_of = (self.shown_key, self.selected_entry)
         if laps_of == self._laps_of:
             self._lap_model.sync(rows)  # same car read again: rows changed in place (scroll & current lap kept)
@@ -1446,7 +1482,8 @@ class RaceResultsBackend(PageBackend):
         if summary != self.lap_summary:
             self.lap_summary = summary
             self.lapSummaryChanged.emit()
-        columns = {"usage": any(row["usageText"] for row in rows), "wear": any(row["wearText"] for row in rows)}
+        columns = {"usage": any(row["usageText"] for row in rows), "wear": any(row["wearText"] for row in rows),
+                   "telemetry": any(row["telemetry"] for row in rows)}
         if columns != self.lap_columns:
             self.lap_columns = columns
             self.lapsChanged.emit()
@@ -1455,6 +1492,76 @@ class RaceResultsBackend(PageBackend):
             self.speed_unit = unit
             self.speedUnitChanged.emit()
         self.publish_driver()
+
+    # Recorded laps of player's car (lap telemetry viewer)
+    def look_for_recorded(self, entry: Entry | None):
+        """Recorded laps of player's car looked for in background once per session & car (lap files names only),
+        lap rows marked once found"""
+        laps_of = (self.shown_key, self.selected_entry)
+        if laps_of == self._recorded_of:
+            return
+        self._recorded_of = laps_of
+        self.recorded = {}
+        result = self.result
+        folder = str(cfg.path.telemetry or "")
+        if entry is None or result is None or not entry.player or not folder:
+            self.jobs.cancel("recorded laps")
+            return
+        self.jobs.run("recorded laps", lambda: (laps_of, recorded_laps(folder, result, entry)),
+                      self.recorded_found, key="recorded laps")
+
+    def recorded_found(self, answer: tuple[tuple[str, str], dict[int, str]]):
+        laps_of, found = answer
+        if laps_of != self._recorded_of or found == self.recorded:
+            return
+        self.recorded = found
+        if laps_of == self._laps_of:
+            self._lap_model.update_rows(lambda row: {"telemetry": row["lap"] in found})
+            columns = {**self.lap_columns, "telemetry": bool(found)}
+            if columns != self.lap_columns:
+                self.lap_columns = columns
+                self.lapsChanged.emit()
+
+    @Slot(int)
+    def openLapTelemetry(self, number: int):
+        """Recorded lap of player's car opened in lap telemetry viewer: its track & class laps, this lap shown as
+        reference"""
+        path = self.recorded.get(number, "")
+        if not path or not os.path.isfile(path):
+            from ..toast import show_toast
+
+            show_toast(self.page_window(), tr("This lap was not recorded: the Recorder module records your laps."),
+                       level="warning")
+            return
+        from ..tools_view import open_tool
+        from .lap_focus import show_laps
+
+        viewer = open_tool("lap_viewer.LapViewer", self.page_window())
+        backend = getattr(viewer, "backend", None)
+        if backend is not None and not show_laps(backend, path):
+            logger.info("RACE RESULTS: recorded lap not in a track folder: %s", path)
+
+    @Slot()
+    def openTrackStats(self):
+        """Driver stats page on the track of the session, player's car picked (if driven there)"""
+        result = self.result
+        if result is None:
+            return
+        from ..tools_view import open_tool
+
+        viewer = open_tool("driver_stats_viewer.DriverStatsViewer", self.page_window())
+        stats = getattr(viewer, "backend", None)
+        show = getattr(stats, "show_results_combo", None)
+        if callable(show):
+            player = result.player_entry
+            if player is None:
+                show(result.track, result.venue)
+            else:
+                show(result.track, result.venue, player.car_class, player.car, player.vehicle)
+
+    def page_window(self) -> QWidget | None:
+        parent = self.parent()
+        return parent if isinstance(parent, QWidget) else None
 
     def publish_driver(self):
         """Car picked & its info (names, class, logo & picture) told only if changed (logos fetched meanwhile)"""
@@ -1618,6 +1725,7 @@ class RaceResultsBackend(PageBackend):
             self.list_mode = index
             self.save_settings()
             self.listModeChanged.emit()
+            self.update_tabs()
 
     @Slot(int)
     def setTab(self, index: int):
@@ -1625,3 +1733,37 @@ class RaceResultsBackend(PageBackend):
             self.tab = index
             self.save_settings()
             self.tabChanged.emit()
+            self.update_tabs()
+
+    def tab_keys(self) -> tuple[int, ...]:
+        """Tabs shown (indexes of TABS): positions for races only. Replay tab (game replay & live session) under a
+        session only when the game saved the replay of that session (LMU), always in the replays list (where the
+        player lives). Sessions list without session: no tab"""
+        replay = (REPLAY_TAB,) if self.list_mode == 1 or self.header.get("replay") else ()
+        if not self.shown_key:
+            return replay if self.list_mode == 1 else ()
+        return (0, 1, 2, 3, *replay) if self.is_race else (0, 2, 3, *replay)
+
+    def shown_tab(self) -> int:
+        """Tab shown: tab picked if shown, else first tab, -1 if none"""
+        keys = self.tab_keys()
+        return self.tab if self.tab in keys else keys[0] if keys else -1
+
+    def update_tabs(self):
+        tabs = (self.tab_keys(), self.shown_tab())
+        if tabs != self._tabs:
+            self._tabs = tabs
+            self.tabsChanged.emit()
+
+    @Property(list, notify=tabsChanged)
+    def tabKeys(self) -> list:
+        return list(self._tabs[0])
+
+    @Property(int, notify=tabsChanged)
+    def shownTab(self) -> int:
+        return self._tabs[1]
+
+    @Property(list, notify=commentsChanged)
+    def sessionComments(self) -> list:
+        """Comments on player's session: glyph, title, value, detail, tone (see results_comments)"""
+        return self.comments

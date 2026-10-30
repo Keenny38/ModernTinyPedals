@@ -1051,13 +1051,20 @@ def test_recorder_uses_game_impact_time(ui_env, monkeypatch):
     from neopedal.api_control import api
 
     impact = [10.0]
+    magnitude = [2000.0]
     monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: impact[0])
+    monkeypatch.setattr(api.read.vehicle, "impact_magnitude", lambda: magnitude[0])
+    monkeypatch.setattr(api.read.vehicle, "impact_position", lambda: (1.0, 0.0))
     widget = new_widget({"show_incident_recorder": True})
     try:
         widget.update_recorder(30.0)  # impact before widget started: ignored
         assert widget.recorder.pending is None
-        impact[0] = 55.0
+        impact[0], magnitude[0] = 50.0, 60.0  # kerbs or underbody scraping: not an incident
         widget.recorder.samples[-1] = widget.recorder.samples[-1]._replace(time=-1.0)  # next sample not skipped
+        widget.update_recorder(30.0)
+        assert widget.recorder.pending is None
+        impact[0], magnitude[0] = 55.0, 2000.0
+        widget.recorder.samples[-1] = widget.recorder.samples[-1]._replace(time=-1.0)
         widget.update_recorder(30.0)
         assert widget.recorder.pending is not None and widget.recorder.pending[1] == "impact"
     finally:

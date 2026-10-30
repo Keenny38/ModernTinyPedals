@@ -50,7 +50,7 @@ Item {
 
     // Hovered a moment: overlay played on a moving simulated race (one card at a time)
     Timer {
-        interval: 450
+        interval: theme.hoverIntentDelay
         running: card.hovered && card.previewState === 1 && theme.animate && pageState.active && !card.recycling
         onTriggered: backend.startLive(card.name)
     }
@@ -59,14 +59,13 @@ Item {
         id: surface
         anchors.fill: parent
         anchors.margins: theme.space2
-        radius: theme.radiusXl
-        // Active & hovered: tint a step stronger (both states shown, as in the list rows)
-        color: card.active ? Qt.tint(theme.base, theme.tint(theme.accent, card.hovered ? theme.tintSubtle * 1.4 : theme.tintSubtle * 0.7))
-             : card.hovered ? (theme.dark ? Qt.lighter(theme.base, 1.12) : Qt.darker(theme.base, 1.02))
-             : theme.base
+        radius: theme.radiusLg
+        // Active & hovered: accent tint over the hovered card surface (both states shown, as in the list rows)
+        readonly property color cardBase: card.hovered ? theme.surfaceHover : theme.surfaceCard
+        color: card.active ? Qt.tint(cardBase, theme.tint(theme.accent, "subtle")) : cardBase
         border.width: card.active ? 1.5 : 1
         border.color: card.active ? theme.accent
-                    : card.hovered ? Qt.lighter(theme.border, 1.3)
+                    : card.hovered ? theme.strokeStrong
                     : theme.cardBorder
         Behavior on color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
         Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: theme.motionBase } }
@@ -87,7 +86,7 @@ Item {
             }
         }
         // What the overlay shows, below the card
-        ToolTip {
+        TpToolTip {
             visible: area.containsMouse && card.description !== ""
             delay: theme.tipDelay * 2
             text: card.description
@@ -129,7 +128,9 @@ Item {
                 Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionBase } }
                 Behavior on scale { enabled: !card.recycling; NumberAnimation { duration: theme.motionSlow; easing.type: Easing.OutCubic } }
             }
-            // Played overlay: pictures straight from the store (never cached: each one shown once)
+            // Played overlay: pictures straight from the store (never cached: each one shown once), read &
+            // scaled on Qt's image thread (the store is thread-safe): the page never waits for a picture, the last
+            // one stays shown until the next is ready (a late picture is skipped, fine for a preview)
             Image {
                 id: live
                 readonly property bool shown: status === Image.Ready && source !== ""
@@ -139,7 +140,7 @@ Item {
                 scale: shot.scale
                 source: card.playing ? backend.liveUrl : ""
                 visible: shown
-                asynchronous: false
+                asynchronous: true
                 retainWhileLoading: true
                 cache: false
                 fillMode: Image.PreserveAspectFit
@@ -159,8 +160,8 @@ Item {
                 SequentialAnimation on opacity {
                     running: card.previewState === 0 && card.visible && pageState.active && theme.animate  // QML visible stays true while page hidden
                     loops: Animation.Infinite
-                    NumberAnimation { to: 0.12; duration: 650; easing.type: Easing.InOutQuad }
-                    NumberAnimation { to: 0.05; duration: 650; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 0.12; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 0.05; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
                 }
             }
 
@@ -184,10 +185,10 @@ Item {
                 opacity: card.favorite || card.hovered || card.current ? 1 : 0
                 visible: opacity > 0
                 Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionFast } }
-                glyph: card.favorite ? "" : ""  // star filled : outline
+                glyph: card.favorite ? theme.glyphs.favoriteOn : theme.glyphs.favorite
                 fallback: card.favorite ? "★" : "☆"
-                glyphColor: card.favorite ? theme.gold : "white"
-                tip: card.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")
+                glyphColor: card.favorite ? theme.gold : theme.stageInk
+                tip: (card.favorite ? i18n.tr("Remove from Favorites") : i18n.tr("Add to Favorites")) + "  (Ctrl+D)"
                 onClicked: {
                     card.GridView.view.currentIndex = card.index
                     backend.toggleFavorite(card.name)
@@ -195,32 +196,18 @@ Item {
             }
 
             // Enabled but not running: start error (see log)
-            Rectangle {
+            Pill {
+                objectName: "errorBadge"
                 visible: card.failed
                 anchors.top: parent.top
                 anchors.left: starButton.visible ? starButton.right : parent.left
                 anchors.margins: theme.space3
-                height: Math.round(theme.em * 1.5)
-                width: failedRow.implicitWidth + theme.space5
-                radius: height / 2
-                color: theme.lossFill
-                Row {
-                    id: failedRow
-                    anchors.centerIn: parent
-                    spacing: theme.space2
-                    Icon { glyph: ""; fallback: "!"; size: theme.em * 0.8; color: theme.inkOn(theme.lossFill); anchors.verticalCenter: parent.verticalCenter }  // warning
-                    Text {
-                        text: i18n.tr("Error")
-                        color: theme.inkOn(theme.lossFill)
-                        font.pointSize: theme.fontCaption
-                        font.weight: Font.DemiBold
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-                MouseArea { id: failedArea; anchors.fill: parent; hoverEnabled: true }
-                ToolTip.visible: failedArea.containsMouse
-                ToolTip.text: i18n.tr("Overlay could not start, see log (Help menu)")
-                ToolTip.delay: theme.tipDelay
+                solid: true
+                tint: theme.lossFill
+                glyph: "\uE7BA"  // warning
+                fallback: "!"
+                text: i18n.tr("Error")
+                tip: i18n.tr("Overlay could not start, see log (Help menu)")
             }
 
             // Shown only in some situations: session or pit state, stream only, screen only
@@ -231,35 +218,12 @@ Item {
                 spacing: theme.space2
                 Repeater {
                     model: card.badges
-                    Rectangle {
+                    Pill {
                         required property var modelData
-                        height: Math.round(theme.em * 1.45)
-                        width: badgeRow.implicitWidth + theme.space4
-                        radius: height / 2
-                        color: Qt.darker(theme.stageBottom, 1.5)  // on the dark stage, over the picture
-                        border.width: 1
-                        border.color: Qt.lighter(theme.stageTop, 1.8)
-                        Row {
-                            id: badgeRow
-                            anchors.centerIn: parent
-                            spacing: theme.space1
-                            Icon {
-                                glyph: modelData.kind === "stream" ? "" : modelData.kind === "screen" ? "" : ""
-                                size: theme.em * 0.75
-                                color: "white"
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Text {
-                                text: modelData.text
-                                color: "white"
-                                font.pointSize: theme.fontCaption
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
-                        MouseArea { id: badgeArea; anchors.fill: parent; hoverEnabled: true }
-                        ToolTip.visible: badgeArea.containsMouse
-                        ToolTip.text: modelData.tip
-                        ToolTip.delay: theme.tipDelay
+                        onStage: true  // on the dark stage, over the picture
+                        glyph: modelData.kind === "stream" ? "\uE93E" : modelData.kind === "screen" ? "\uE7F4" : "\uE7C1"  // streaming, monitor, flag
+                        text: modelData.text
+                        tip: modelData.tip
                     }
                 }
             }
@@ -275,7 +239,7 @@ Item {
                 Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: theme.motionFast } }
                 glyph: ""  // settings
                 fallback: "⚙"
-                tip: i18n.tr("Config")
+                tip: i18n.tr("Options…")
                 onClicked: backend.openConfig(card.name)
             }
         }
@@ -297,7 +261,7 @@ Item {
             Column {
                 id: texts
                 anchors.left: dot.right
-                anchors.leftMargin: theme.em * 0.5
+                anchors.leftMargin: theme.space3
                 anchors.right: controls.left
                 anchors.rightMargin: theme.space2
                 anchors.verticalCenter: parent.verticalCenter
@@ -306,6 +270,7 @@ Item {
                     id: nameText
                     width: parent.width
                     text: card.label
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -322,6 +287,7 @@ Item {
                 Text {
                     width: parent.width
                     text: card.categoryLabel
+                    textFormat: Text.PlainText
                     color: theme.dimOn(surface.color)
                     font.pointSize: theme.fontSmall
                     elide: Text.ElideRight

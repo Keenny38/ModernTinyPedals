@@ -104,6 +104,8 @@ def home(ui_env, monkeypatch):
     from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    # Game window of this machine never looked for (a running Le Mans Ultimate would change the checks)
+    monkeypatch.setattr(home_backend, "find_game_window", lambda: False)
     window = app_module.AppWindow()
     window.resize(1300, 900)
     window.show()
@@ -149,7 +151,9 @@ def test_qml_page_shows_cards(home):
     view = home.view
     assert view is not None and view.rootObject() is not None and not view.errors()
     texts = item_texts(view)
-    assert {"Game", "Overlay", "Preset", "Overlays", "Module", "Quick Access", "Checks"} <= texts
+    # Status banner (verdict, version, release notes, update) & one overlays card (overlays & modules on)
+    assert {"Game", "Preset", "Overlays", "Open modules", "Quick Access", "What's New", "Active overlays"} <= texts
+    assert "Overlay" not in texts and "Checks" not in texts
     assert "Last Session" not in texts and "Session Debrief" not in texts  # nothing driven yet
     assert home.backend.page_visible and home.backend._timer.isActive()
 
@@ -195,13 +199,14 @@ def test_game_card_session_and_checks(home, monkeypatch):
     monkeypatch.setattr(read.session, "session_type", lambda: 4)
     monkeypatch.setattr(read.vehicle, "place", lambda index=None: 3)
     monkeypatch.setattr(read.vehicle, "total_vehicles", lambda: 24)
-    monkeypatch.setattr(read.lap, "number", lambda index=None: 12)
+    monkeypatch.setattr(read.lap, "completed_laps", lambda index=None: 11)  # driving lap 12
     backend.refresh_live()
     game = backend.game
     assert (game["track"], game["session"], game["place"], game["lap"]) == ("Road Atlanta", "Race", "P3/24", "Lap 12")
     assert "game" not in keys(backend.checks)
     QCoreApplication.processEvents()
-    assert "Road Atlanta · Race · P3/24 · Lap 12" in item_texts(home.view)
+    assert backend.status["title"] == "In session · Road Atlanta · Race · P3" and backend.status["level"] == "live"
+    assert {"In session · Road Atlanta · Race · P3", "P3", "/24", "Lap 12", "Live Calculator"} <= item_texts(home.view)
 
 
 def test_checks_card_actions(home, monkeypatch):
@@ -269,7 +274,8 @@ def test_update_header(home, monkeypatch):
     assert backend.header["tip"] == ""  # no tooltip of an older check left on the button
     assert "update" in keys(backend.checks)
     QCoreApplication.processEvents()
-    assert {"See Update", "Update Available · v0.20.0"} <= item_texts(home.view)
+    assert "Update Available · v0.20.0" in item_texts(home.view)  # told once: banner button
+    assert "update" not in keys(backend.status["rows"]) and backend.status["key"] != "update"
     shown = []
     from neopedal.ui.notification import UpdatesNotifyButton
 
@@ -355,9 +361,9 @@ def test_quick_access_setting():
     assert entries["command_palette"].kind == "action"
     assert home_view.parse_quick_items("preset, bogus,preset,fuel_calculator,bug_report") == [
         "preset", "race_calculator", "bug_report"]  # unknown & duplicate dropped, merged tool renamed
+    # Entries of the default navigation bar left out (UI/UX audit 2026-10-29: no duplicates of the bar)
     assert home_view.default_quick_items() == [
-        "lap_viewer", "race_calculator", "driver_stats_viewer", "layout_editor", "perf_view",
-        "race_results_viewer", "widget", "module", "preset", "spectate",
+        "perf_view", "track_map_viewer", "module", "spectate", "pacenotes",
         "hotkey", "tools", "app_settings", "bug_report", "check_updates",
     ]
 
@@ -389,7 +395,7 @@ def test_quick_access_editor_updates_buttons(home):
     editor.saving()
     QCoreApplication.processEvents()
     assert cfg.application["home_quick_access"] == "" and backend.quick == []
-    assert "No quick access button: use Customize... to add tools, pages or actions." in item_texts(home.view)
+    assert "No quick access button: use Customize… to add tools, pages or actions." in item_texts(home.view)
     editor.close()
 
 

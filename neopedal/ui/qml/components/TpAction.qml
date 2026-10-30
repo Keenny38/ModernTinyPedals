@@ -3,8 +3,8 @@ import QtQuick
 // Action of a TpToolbar: shown as a button, icon only, or as an entry of the toolbar's "⋯" menu when room
 // runs out (least important first: lower priority). triggered(source): button or "⋯" button it came from,
 // to open a popup next to it.
-//   TpAction { name: "exportButton"; text: i18n.tr("Export"); glyph: ""; priority: 1
-//              onTriggered: function(source) { exportMenu.popup(source, 0, source.height) } }
+//   TpAction { name: "exportButton"; text: i18n.tr("Export"); glyph: theme.glyphs.export; priority: 1
+//              onTriggered: function(source) { exportMenu.toggleBelow(source) } }
 QtObject {
     property string name: ""  // objectName of the button (tests, scripts)
     property string text: ""

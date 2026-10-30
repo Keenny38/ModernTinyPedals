@@ -37,6 +37,11 @@ def named(root, name: str):
     return next(item for item in everything(root) if item.objectName() == name)
 
 
+def state_action(root, state: str):
+    """Action button of a TpStateView (empty state) found by its objectName"""
+    return named(named(root, state), "emptyStateAction")
+
+
 @pytest.fixture
 def qml_messages():
     messages: list[str] = []
@@ -79,9 +84,9 @@ def test_unreadable_results_file_keeps_row_and_shows_error(results_page):
     assert wait_until(lambda: backend.failedFile != "")
     assert backend.selectedKey == practice and backend.failedFile == PRACTICE_NAME and not backend.hasSession
     settle(0.1)
-    file_text = named(root, "failedFile")
-    assert file_text.property("visible") and file_text.property("text") == PRACTICE_NAME
-    assert not named(root, "clearSessionFilters").property("visible")
+    state = named(root, "sessionState")
+    assert state.property("visible") and state.property("text").startswith(PRACTICE_NAME + "\n")
+    assert not state_action(root, "sessionState").property("visible")
     # Another session picked: shown, error gone
     race = next(row["key"] for row in backend.sessionModel.rows if row["key"].endswith(RACE_NAME))
     backend.select(race)
@@ -91,7 +96,7 @@ def test_unreadable_results_file_keeps_row_and_shows_error(results_page):
     backend.kept.clear()
     backend.select(practice)
     assert wait_until(lambda: backend.failedFile != "")
-    backend.setKindFilter(1)  # races
+    backend.setKindFilter(3)  # races
     assert wait_until(lambda: backend.hasSession) and backend.failedFile == ""
 
 
@@ -107,8 +112,8 @@ def test_results_clear_filters(results_page):
     backend.reload()  # files read again: no session left to show
     assert wait_until(lambda: not backend.busy and not backend.hasSession)
     settle(0.1)
-    button = named(root, "clearSessionFilters")
-    assert button.property("visible")
+    button = state_action(root, "sessionState")
+    assert button.property("visible") and button.property("text") == "Clear Filters"
     QMetaObject.invokeMethod(button, "clicked")
     assert wait_until(lambda: backend.hasSession)
     assert (backend.kindFilter, backend.searchText, backend.hideEmpty) == (0, "", False)
@@ -228,7 +233,7 @@ def test_replays_clear_filters(replay_files_page):
     backend.setSessionFilter(3)
     assert backend.shownCount == 0
     settle(0.1)
-    button = named(root, "clearReplayFilters")
+    button = state_action(root, "replayListState")
     assert button.property("visible")
     QMetaObject.invokeMethod(button, "clicked")
     settle(0.1)

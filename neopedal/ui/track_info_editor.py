@@ -17,272 +17,146 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Track info editor
+Track info editor: pit lane, speed trap, map orientation, sun times & primary preset of each track
+(table editor page, see quick/table_editor.py)
+
+Distances & pit speed follow the user's Units settings (stored in meters & m/s). Primary preset: chosen among
+existing presets, the same setting as the Presets page (track tags); a preset since deleted is marked "not found".
+Speed trap cell menu sets it from the car position (current track, out of pit lane).
 """
 
-import logging
-from collections.abc import Mapping
-from typing import Any, cast
-
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import (
-    QMenu,
-    QMessageBox,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
+import html
 
 from ..api_control import api
 from ..const_file import ConfigType
-from ..i18n import tr, trm, untr
-from ..setting import cfg, copy_setting
+from ..i18n import tr
+from ..setting import cfg
 from ..template.setting_tracks import TRACKINFO_DEFAULT
-from ._common import (
-    BaseEditor,
-    ClockTableItem,
-    FloatTableItem,
-    UIScaler,
-    run_after_saving,
-    table_item,
+from .quick.table_editor import (
+    KIND_CLOCK,
+    KIND_NAME,
+    KIND_NUMBER,
+    KIND_PRESET,
+    Column,
+    TableEditorBackend,
+    dict_rows,
 )
+from .quick.table_editor_host import TableEditorPage
 
-HEADER_TRACKS = (
-    "Track name",
-    "Pit entry (m)",
-    "Pit exit (m)",
-    "Pit speed (m/s)",
-    "Speed trap (m)",
-    "Orient (°)",
-    "Sunrise",
-    "Sunset",
-    "Primary preset",
-)
-
-logger = logging.getLogger(__name__)
+KEYS = tuple(TRACKINFO_DEFAULT)
+SPEED_TRAP = KEYS.index("speed_trap") + 1  # column
+PRESET = KEYS.index("preset") + 1
 
 
-class PresetTableItem(QTableWidgetItem):
-    """Primary preset name QTableWidgetItem"""
+class TrackBackend(TableEditorBackend):
+    """Tracks: name, then TRACKINFO_DEFAULT values"""
 
-    def value(self) -> str:
-        """Get value"""
-        return self.text().strip()
+    COLUMNS = (
+        Column("", "Track name", KIND_NAME, width=12),
+        Column("pit_entry", "Pit entry", KIND_NUMBER, width=5, unit="distance"),
+        Column("pit_exit", "Pit Exit", KIND_NUMBER, width=5, unit="distance"),
+        Column("pit_speed", "Pit speed", KIND_NUMBER, width=5, unit="speed", decimals=2),
+        Column("speed_trap", "Speed Trap", KIND_NUMBER, width=5, unit="distance", action="telemetry"),
+        Column("orientation", "Map orientation", KIND_NUMBER, width=4, symbol="°"),
+        Column("sunrise", "Sunrise", KIND_CLOCK, width=4),
+        Column("sunset", "Sunset", KIND_CLOCK, width=4),
+        Column("preset", "Primary preset", KIND_PRESET, width=9),
+    )
+    CONFIG_TYPE = ConfigType.TRACKS
+    NEW_NAME = "New Track Name"
+    RESET_TEXT = "Reset every track to default? Changes are saved only by Save."
 
-    def validate(self):
-        """No validation, invalid preset name is ignored while auto loading"""
+    def load(self) -> list[list]:
+        rows = [self.rounded(row) for row in dict_rows(cfg.user.tracks, KEYS, TRACKINFO_DEFAULT)]
+        self.loaded_presets = {row[0]: row[PRESET] for row in rows}  # primary presets when page opened
+        return rows
 
+    def default_rows(self) -> list[list]:
+        return [self.rounded(row) for row in dict_rows(cfg.default.tracks, KEYS, TRACKINFO_DEFAULT)]
 
-class TrackInfoEditor(BaseEditor):
-    """Track info editor"""
+    @staticmethod
+    def rounded(row: list) -> list:
+        """Numbers rounded as shown before (4 decimals)"""
+        return [round(value, 4) if isinstance(value, float) else value for value in row]
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.set_utility_title(tr("Track Info Editor"))
-        self.setMinimumSize(UIScaler.size(68), UIScaler.size(35))
+    def to_setting(self, rows: list[list]) -> dict:
+        """Primary preset left as is here keeps the one set from the Presets page meanwhile (saved at once there)"""
+        saved = cfg.user.tracks
+        setting = {}
+        for row in rows:
+            data = dict(zip(KEYS, row[1:]))
+            current = saved.get(row[0])
+            if (isinstance(current, dict) and "preset" in current
+                    and data["preset"] == self.loaded_presets.get(row[0], data["preset"])):
+                data["preset"] = current["preset"]
+            setting[row[0]] = data
+        return setting
 
-        self.tracks_temp = copy_setting(cfg.user.tracks)
+    def read_saved(self) -> bool:
+        """Primary presets set from the Presets page while hidden shown (rows left as is here)"""
+        changed = False
+        for row in self.rows:
+            current = cfg.user.tracks.get(row[0])
+            loaded = self.loaded_presets.get(row[0])
+            if isinstance(current, dict) and row[PRESET] == loaded and current.get("preset", loaded) != loaded:
+                row[PRESET] = self.loaded_presets[row[0]] = current.get("preset", "")
+                changed = True
+        if changed:
+            self._host.record_change()  # own undo step, editor not marked modified
+        return changed
 
-        # Set table: narrow orientation & clock columns
-        self.table_tracks = self.editor_table(HEADER_TRACKS, {
-            column_index: 5 if 5 <= column_index <= 7 else 8 for column_index in range(1, len(HEADER_TRACKS))})
-        self.table_tracks.cellChanged.connect(self.verify_input)
+    def store(self, setting: dict):
+        super().store(setting)
+        self.loaded_presets = {name: data["preset"] for name, data in setting.items()}
+        changed = False
+        for row in self.rows:  # primary presets kept from the Presets page shown
+            preset = self.loaded_presets.get(row[0], row[PRESET])
+            if preset != row[PRESET]:
+                row[PRESET] = preset
+                changed = True
+        if changed:
+            self.refresh()
+            self._host.record_change()  # own undo step, editor not marked modified
 
-        self.table_tracks.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table_tracks.customContextMenuRequested.connect(self.open_context_menu)
+    def new_row(self, name: str) -> list:
+        return [name, *TRACKINFO_DEFAULT.values()]
 
-        self.refresh_table()
-        self.enable_table_undo("tracks_temp", self.update_tracks_temp, self.refresh_table)
-        self.set_unmodified()
+    def session_rows(self) -> list[list]:
+        """Track of the session"""
+        track_name = api.read.session.track_name()
+        return [self.new_row(track_name)] if track_name else []
 
-        # Set button
-        layout_button = self.set_layout_button()
-
-        # Set layout
-        layout_main = QVBoxLayout()
-        layout_main.addWidget(self.table_tracks)
-        layout_main.addLayout(layout_button)
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout_main)
-
-    def set_layout_button(self):
-        """Set button layout"""
-        return self.editor_buttons(
-            (("Add", self.add_track), ("Sort", self.sort_track), ("Delete", self.delete_track)),
-            self.reset_setting, self.applying)
-
-    def refresh_table(self):
-        """Refresh tracks list"""
-        self.table_tracks.setRowCount(0)
-        row_index = 0
-        for track_name, track_data in self.tracks_temp.items():
-            self.add_track_entry(row_index, track_name, track_data)
-            row_index += 1
-
-    def add_track(self):
-        """Add new track"""
-        start_index = row_index = self.table_tracks.rowCount()
-        with self.batch_edit():  # one undo step
-            # Add missing track name from active session
-            track_name = api.read.session.track_name()
-            if track_name and not self.is_value_in_table(track_name, self.table_tracks):
-                self.add_track_entry(row_index, track_name, TRACKINFO_DEFAULT)
-                row_index += 1
-            # Add new name entry
-            if start_index == row_index:
-                new_track_name = self.new_name_increment("New Track Name", self.table_tracks)
-                self.add_track_entry(row_index, new_track_name, TRACKINFO_DEFAULT)
-                self.table_tracks.setCurrentCell(row_index, 0)
-
-    def add_track_entry(self, row_index: int, track_name: str, track_data: Mapping):
-        """Add new track entry to table"""
-        self.table_tracks.insertRow(row_index)
-        self.table_tracks.setItem(row_index, 0, QTableWidgetItem(track_name))
-        column_index = 1
-        for key, value in TRACKINFO_DEFAULT.items():
-            if isinstance(value, float):
-                item: QTableWidgetItem = FloatTableItem(round(track_data.get(key, value), 4))
-            elif key == "preset":
-                item = PresetTableItem(track_data.get(key, value))
-            else:
-                item = ClockTableItem(track_data.get(key, value))
-            self.table_tracks.setItem(row_index, column_index, item)
-            column_index += 1
-
-    def sort_track(self):
-        """Sort tracks in ascending order"""
-        if self.table_tracks.rowCount() > 1:
-            self.table_tracks.sortItems(0)
-            self.set_modified()
-
-    def delete_track(self):
-        """Delete track entry"""
-        selected_rows = set(data.row() for data in self.table_tracks.selectedIndexes())
-        if not selected_rows:
-            QMessageBox.warning(self, tr("Error"), tr("No data selected."))
-            return
-
-        if not self.confirm_operation(message=tr("<b>Delete selected rows?</b>")):
-            return
-
-        for row_index in sorted(selected_rows, reverse=True):
-            self.table_tracks.removeRow(row_index)
-        self.set_modified()
-
-    def reset_setting(self):
-        """Reset setting"""
-        msg_text = (
-            "Reset <b>tracks preset</b> to default?<br><br>"
-            "Changes are only saved after clicking Apply or Save Button."
-        )
-        if self.confirm_operation(message=msg_text):
-            self.tracks_temp = copy_setting(cfg.default.tracks)
-            self.replace_table_data(self.refresh_table)
-
-    def applying(self):
-        """Save & apply"""
-        self.save_setting()
-
-    def saving(self):
-        """Save & close"""
-        if self.save_setting():
-            self.accept()  # close
-
-    def verify_input(self, row_index: int, column_index: int):
-        """Verify input value"""
-        self.set_modified()
-        item = cast(Any, table_item(self.table_tracks, row_index, column_index))
-        if column_index >= 1:
-            item.validate()
-
-    def open_context_menu(self, position: QPoint):
-        """Open context menu"""
-        if not self.table_tracks.itemAt(position):
-            return
-
-        menu = QMenu()
-        if self.table_tracks.currentColumn() == 4:
-            menu.addAction(tr("Set from Telemetry"))
-        else:
-            return
-
-        position += QPoint(  # position correction from header
-            self.table_tracks.verticalHeader().width(),
-            self.table_tracks.horizontalHeader().height(),
-        )
-        selected_action = menu.exec(self.table_tracks.mapToGlobal(position))
-        if not selected_action:
-            return
-
-        action = untr(selected_action.text())
-        if action == "Set from Telemetry":
-            self.set_position_from_tele()
-
-    def set_position_from_tele(self):
-        """Set position from telemetry to selected cell"""
-        if len(self.table_tracks.selectedIndexes()) != 1:  # limit to one selected cell
-            msg_text = (
-                "Select <b>one value</b> from <b>Speed trap</b> column to set position."
-            )
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
-            return
-
-        if api.read.vehicle.in_pits():
-            msg_text = "Cannot set speed trap position while in pit lane."
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
-            return
-
-        row_index = self.table_tracks.currentRow()
-        track_name = table_item(self.table_tracks, row_index, 0).text()
+    def cell_action(self, key: int, column: int):
+        """Speed trap at car position (asked first): current track only, out of pit lane"""
+        number = self.index_of(key)
+        track_name = str(self.rows[number][0])
         current_name = api.read.session.track_name()
         if track_name != current_name:
-            msg_text = (
-                f"Unable to set speed trap position for selected track:<br><b>{track_name}</b><br><br>"
-                f"Only support to set speed trap position for current track:<br><b>{current_name}</b>"
+            self._host.warn(
+                f"Unable to set speed trap position for selected track:<br><b>{html.escape(track_name)}</b><br><br>"
+                f"Only support to set speed trap position for current track:<br><b>{html.escape(current_name)}</b>"
             )
-            QMessageBox.warning(self, tr("Error"), trm(msg_text))
             return
-
+        if api.read.vehicle.in_pits():
+            self._host.warn("Cannot set speed trap position while in pit lane.")
+            return
         position = round(api.read.lap.distance(), 4)
-        if not self.confirm_operation(
-            message=f"Set speed trap at position <b>{position}</b><br>for <b>{track_name}</b>?"):
-            return
+        shown = self.display(SPEED_TRAP, position)
+        self.ask(
+            tr("Set from Telemetry"),
+            tr("Speed trap set at the car position:") + f" {shown}\n{track_name}", tr("Set"),
+            "set_value", key, SPEED_TRAP, position)
 
-        table_item(self.table_tracks, row_index, 4, FloatTableItem).setValue(position)
-        self.table_tracks.setCurrentCell(-1, -1)  # deselect to avoid mis-clicking
+    def set_value(self, key: int, column: int, value: float):
+        """Cell value set (base unit), one undo step"""
+        number = self.index_of(key)
+        if number >= 0 and self.rows[number][column] != value:
+            self.rows[number][column] = value
+            self.changed()
 
-    def verify_table(self) -> bool:
-        """Verify table before saving, warn if a track name is listed more than once"""
-        track_names = set()
-        for row_index in range(self.table_tracks.rowCount()):
-            track_name = table_item(self.table_tracks, row_index, 0).text()
-            if track_name in track_names:
-                self.table_tracks.setCurrentCell(row_index, 0)  # show duplicate row
-                msg_text = (
-                    f"<b>{track_name}</b> is listed more than once.<br><br>"
-                    "Each name can only be listed once, rename or delete duplicate rows."
-                )
-                QMessageBox.warning(self, tr("Error"), trm(msg_text))
-                return False
-            track_names.add(track_name)
-        return True
 
-    def update_tracks_temp(self):
-        """Update temporary changes to tracks temp first"""
-        self.tracks_temp.clear()
-        for row_index in range(self.table_tracks.rowCount()):
-            track_name = table_item(self.table_tracks, row_index, 0).text()
-            self.tracks_temp[track_name] = {
-                key: cast(Any, table_item(self.table_tracks, row_index, column_index)).value()
-                for column_index, key in enumerate(TRACKINFO_DEFAULT, start=1)
-            }
+class TrackInfoEditor(TableEditorPage):
+    """Track info editor"""
 
-    def save_setting(self) -> bool:
-        """Save setting, False if table is invalid (not saved)"""
-        if not self.verify_table():
-            return False
-        self.update_tracks_temp()
-        cfg.user.tracks = copy_setting(self.tracks_temp)
-        cfg.save(0, config_type=ConfigType.TRACKS)
-        self.set_unmodified()
-        run_after_saving(self.reloading)
-        return True
+    BACKEND = TrackBackend
+    TITLE = "Track Info Editor"

@@ -110,7 +110,7 @@ def test_qualifying_lap_graphic(director_page, english):  # noqa: F811
     poll(page, race_answers(200.0, *cars, focus=2, info={"session": "QUALIFY1"}))
     backend.set_on_air(2, dr.MANUAL)
     lap = backend.graphics.graphics_state()["quali"]
-    assert (lap["position"], lap["delta"], lap["deltaTone"], lap["target"]) == ("P2", "-0.200", "gain", "1:30.000")
+    assert (lap["position"], lap["delta"], lap["deltaTone"], lap["target"]) == ("P2", "\u22120.200", "gain", "1:30.000")
     assert lap["sectors"][0]["text"] == "29.800" and lap["running"] and lap["lapStart"] == 199.0
     backend.graphics.setGraphic("quali", False)
     assert backend.graphics.graphics_state()["quali"] is None

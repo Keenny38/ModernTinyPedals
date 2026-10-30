@@ -204,8 +204,9 @@ def test_drivers_history_cleared_while_scan_runs(monkeypatch, tmp_path):
     assert history.records("ann") == []
 
 
-def test_director_release_clears_drivers_history(director_page, monkeypatch, tmp_path):  # noqa: F811
-    """Broadcast Director closed: race history of every driver released (read again once opened)"""
+def test_director_release_keeps_drivers_history(director_page, monkeypatch, tmp_path):  # noqa: F811
+    """Broadcast Director closed: race history of every driver kept (small records, up to 2000 race files
+    parsed again at each opening before, see audit PERF-006)"""
     path = str(tmp_path / "2026_10_05_22_34_33-70R1.xml")
     with open(path, "wb") as file:
         file.write(b"x")
@@ -215,7 +216,7 @@ def test_director_release_clears_drivers_history(director_page, monkeypatch, tmp
         assert dh.history.scan([str(tmp_path)])
         assert len(dh.history.records("ann")) == 1
         director_page.backend.release()
-        assert dh.history.records("ann") == []
-        assert not dh.history._files  # file stamps gone too: whole file read again
+        assert len(dh.history.records("ann")) == 1
+        assert dh.history._files  # file stamps kept: unchanged files never parsed again
     finally:
         dh.DriverHistory.clear(dh.history)  # never left filled for later tests

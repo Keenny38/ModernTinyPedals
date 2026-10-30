@@ -342,9 +342,11 @@ def sync_edit_mode():
 
 
 def forget_overlay(name: str):
-    """Overlay stopped: no longer selected"""
+    """Overlay stopped: no longer selected, toolbar count updated (overlay turned off from toolbar menu, Delete
+    key or Overlays page: already out of the active overlays when stopped)"""
     if _edit_mode is not None:
         _edit_mode.deselect(name)
+        _edit_mode.refresh_toolbar()
 
 
 def step_text(step: EditStep | None) -> str:

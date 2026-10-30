@@ -15,11 +15,9 @@ Column {
     Accessible.role: Accessible.StaticText
     Accessible.name: text
 
-    BusyIndicator {
+    TpSpinner {
         anchors.horizontalCenter: parent.horizontalCenter
-        running: state.visible && pageState.active
-        implicitWidth: theme.em * (state.compact ? 1.6 : 2.4)
-        implicitHeight: implicitWidth
+        size: state.compact ? "md" : "lg"
     }
     Text {
         width: parent.width
@@ -27,6 +25,7 @@ Column {
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
         text: state.text
+        textFormat: Text.PlainText
         color: theme.dimText
         font.pointSize: state.compact ? theme.fontSmall : theme.fontPoint
     }

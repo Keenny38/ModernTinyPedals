@@ -21,6 +21,7 @@ RowLayout {
 
     Text {
         text: row.label
+        textFormat: Text.PlainText
         color: theme.text
         elide: Text.ElideRight
         Layout.fillWidth: true

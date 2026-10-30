@@ -26,6 +26,7 @@ reading. Unavailable forecasts hidden (or shown as dashes).
 
 from __future__ import annotations
 
+from functools import lru_cache
 from math import cos, pi, sin
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -154,7 +155,7 @@ class Realtime(ForecastMixin, ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for index in range(self.columns):
             tile = QRectF(self.tile_left(index), self.pad, self.column_w, self.tile_h)
             fill = theme.tint(theme.accent, 34) if index == 0 else theme.tint(theme.surface_alt, 190)
@@ -196,13 +197,18 @@ class Realtime(ForecastMixin, ModernOverlay):
 # Weather icons, in square rect
 def cloud_path(center: QPointF, width: float) -> QPainterPath:
     """Cloud with flat bottom, width wide, centered on center"""
-    x, y = center.x(), center.y()
+    return cloud_shape(width).translated(center)
+
+
+@lru_cache(maxsize=16)
+def cloud_shape(width: float) -> QPainterPath:
+    """Cloud centered on 0, 0, made once per width (simplified outline: costly, icons drawn at every repaint)"""
     path = QPainterPath()
     path.setFillRule(Qt.FillRule.WindingFill)  # overlapping bumps stay filled
-    path.addEllipse(QPointF(x - width * 0.25, y + width * 0.05), width * 0.17, width * 0.17)
-    path.addEllipse(QPointF(x - width * 0.04, y - width * 0.07), width * 0.25, width * 0.25)
-    path.addEllipse(QPointF(x + width * 0.22, y + width * 0.01), width * 0.2, width * 0.2)
-    path.addRoundedRect(QRectF(x - width * 0.42, y + width * 0.01, width * 0.84, width * 0.21), width * 0.105, width * 0.105)
+    path.addEllipse(QPointF(-width * 0.25, width * 0.05), width * 0.17, width * 0.17)
+    path.addEllipse(QPointF(-width * 0.04, -width * 0.07), width * 0.25, width * 0.25)
+    path.addEllipse(QPointF(width * 0.22, width * 0.01), width * 0.2, width * 0.2)
+    path.addRoundedRect(QRectF(-width * 0.42, width * 0.01, width * 0.84, width * 0.21), width * 0.105, width * 0.105)
     return path.simplified()
 
 
@@ -270,7 +276,7 @@ def weather_icon(painter: QPainter, rect: QRectF, sky: int, theme: Theme, stroke
     5 drizzle, 6 light rain, 7 rain, 8 rain, 9 heavy rain, 10 storm"""
     side = rect.width()
     cx, cy = rect.center().x(), rect.center().y()
-    sun = theme.warning
+    sun = theme.caution
     if theme.surface.lightnessF() > 0.5:  # light theme: light clouds with darker edge
         cloud, dark, edge = theme.surface_strong, theme.text_faint, theme.text_muted
     else:

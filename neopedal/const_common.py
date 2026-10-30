@@ -27,6 +27,9 @@ FLOAT_INF = float("inf")
 MAX_VEHICLES = 128  # set vehicle data size limit
 MAX_SECONDS = 99999.0  # for lap or sector time limit
 MAX_METERS = 999999.0  # for distance limit
+# Lighter impacts are not incidents (impact cone, incident recorder, module recordings): kerbs & underbody
+# scraping (LMU: 15 to 130 every half second), and LMU impact updates without impact (magnitude 0 at position 0,0)
+MIN_IMPACT_MAGNITUDE = 200.0
 
 MAX_FORECASTS = 5  # for weather forecast
 MAX_FORECAST_MINUTES = 9999.0  # for weather forecast

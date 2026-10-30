@@ -88,7 +88,7 @@ def test_planner_wear_and_change_time(plan):
     assert plan.cells[2][2]["remaining"] == pytest.approx(0.2)
     assert plan.cells[2][0]["remaining"] == pytest.approx(1.0)
     rows = plan.view()["rows"]
-    assert rows[1]["change"] == "N/A" and rows[2]["change"] == "+4.5s"
+    assert rows[1]["change"] == "—" and rows[2]["change"] == "+4.5 s"  # missing value, spaced unit
     assert rows[1]["cells"][0]["dim"] and not rows[2]["cells"][0]["dim"]  # used before: dimmed
     status = plan.status()
     assert status["used"] == 6 and status["stints"] == 3 and status["stock"] == 8 and status["maximum"] == 4
@@ -182,7 +182,7 @@ def test_planner_tread_texts_and_colors():
     from neopedal.ui.quick.race_tyres import tread_color, tread_text
 
     assert tread_text(1.0, 0.7) == "New-70%" and tread_text(0.95, 0.65) == "95-65%"
-    assert tread_text(0.2, -0.1) == "Blowout" and tread_text(float("nan"), 0.1) == "-"
+    assert tread_text(0.2, -0.1) == "Blowout" and tread_text(float("nan"), 0.1) == "—"
     assert tread_color(0.95) == "#00AA33" and tread_color(0.1) == "#CC0000" and tread_color(float("nan")) == "#CC0000"
 
 

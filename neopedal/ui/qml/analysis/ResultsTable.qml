@@ -5,7 +5,7 @@ import "../components"
 
 // Classification of session picked (class picked only): position (and places gained from grid in races),
 // class, number, driver & team, car, laps, race time or gap (best lap gap in practice & qualifying), best lap
-// (fastest in purple & bold), pit stops, contacts. Player row tinted, car picked outlined.
+// (fastest in purple & ◆ mark), pit stops, contacts. Player row tinted, car picked outlined.
 // Click (or Tab then Up / Down): pick car (its laps, highlighted on positions chart), double click or Enter: show
 // its laps. Narrow page: the table scrolls sideways (driver column keeps 8 em at least).
 Item {
@@ -34,6 +34,7 @@ Item {
     readonly property real scrollWidth: list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0
 
     component Cell: Text {
+        textFormat: Text.PlainText  // text of each use: names & values, never markup
         property real cellWidth: 0
         property bool alignRight: false
         width: cellWidth
@@ -45,6 +46,8 @@ Item {
         rightPadding: alignRight ? theme.em * 0.5 : 0
         elide: Text.ElideRight
     }
+    TpLapTime { id: markProbe; visible: false }  // room of record mark: header lines up with times
+
     component Header: TpHeaderCell {
         property real cellWidth: 0
         width: cellWidth
@@ -81,7 +84,8 @@ Item {
                 Header { cellWidth: table.wCar; text: i18n.tr("Car") }
                 Header { cellWidth: table.wLaps; text: i18n.tr("Laps"); align: Qt.AlignRight }
                 Header { cellWidth: table.wGap; text: table.race ? i18n.tr("Time / Gap") : i18n.tr("Gap"); align: Qt.AlignRight }
-                Header { cellWidth: table.wBest; text: i18n.tr("Best Lap"); align: Qt.AlignRight }
+                Header { cellWidth: table.wBest; text: i18n.tr("Best Lap"); align: Qt.AlignRight
+                         rightPadding: markProbe.markRoom }
                 Header { cellWidth: table.wPits; text: i18n.tr("Pit Stops"); align: Qt.AlignRight }
                 Header { cellWidth: table.wInc; text: i18n.tr("Inc."); tip: i18n.tr("Contacts"); align: Qt.AlignRight }
             }
@@ -158,7 +162,7 @@ Item {
                     }
 
                     width: table.rowWidth
-                    height: Math.round(theme.em * 3.0)
+                    height: Math.round(theme.row)
                     onSelectedChanged: if (selected && live) list.currentIndex = index  // keyboard goes on from here
                     Component.onCompleted: if (selected) list.currentIndex = index
                     Accessible.role: Accessible.Row
@@ -256,6 +260,7 @@ Item {
                             Text {
                                 width: parent.width - theme.em * 0.5
                                 text: row.driver
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.weight: row.player ? Font.Bold : Font.DemiBold
                                 elide: Text.ElideRight
@@ -263,6 +268,7 @@ Item {
                             Text {
                                 width: parent.width - theme.em * 0.5
                                 text: row.team
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(surface.color)
                                 font.pointSize: theme.fontSmall
                                 elide: Text.ElideRight
@@ -287,6 +293,7 @@ Item {
                                 rightPadding: theme.em * 0.5
                                 horizontalAlignment: Text.AlignRight
                                 text: row.gapText
+                                textFormat: Text.PlainText
                                 color: row.gapTone === "loss" ? theme.loss : row.gapTone === "dim" ? theme.dimOn(surface.color) : theme.text
                                 font.weight: row.index === 0 ? Font.DemiBold : Font.Normal
                                 font.features: { "tnum": 1 }
@@ -298,17 +305,18 @@ Item {
                                 rightPadding: theme.em * 0.5
                                 horizontalAlignment: Text.AlignRight
                                 text: row.reasonText
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(surface.color)
                                 font.pointSize: theme.fontCaption
                                 elide: Text.ElideRight
                             }
                         }
-                        Cell {  // fastest lap of the session: purple, bold & ◆ mark
-                            cellWidth: table.wBest
-                            alignRight: true
-                            text: row.bestText + (row.bestTone === "purple" ? " ◆" : "")
-                            color: row.bestTone === "purple" ? theme.purple : theme.text
-                            font.weight: row.bestTone === "purple" ? Font.Bold : Font.Normal
+                        TpLapTime {  // fastest lap of the session: purple & ◆ mark (shared record mark)
+                            width: table.wBest
+                            height: implicitHeight
+                            anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                            text: row.bestText
+                            record: row.bestTone === "purple" ? "session" : ""
                         }
                         Cell {
                             cellWidth: table.wPits
@@ -328,12 +336,13 @@ Item {
                                     visible: row.penalties > 0
                                     glyph: ""  // warning
                                     fallback: "!"
-                                    size: theme.em * 0.8
+                                    size: theme.iconSm
                                     color: theme.warning
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Text {
                                     text: row.contacts
+                                    textFormat: Text.PlainText
                                     color: row.contacts > 0 ? theme.text : theme.dimOn(surface.color)
                                     font.features: { "tnum": 1 }
                                     anchors.verticalCenter: parent.verticalCenter

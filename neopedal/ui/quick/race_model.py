@@ -33,7 +33,14 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...const_app import FORMAT_PREFIX, LEGACY_FORMAT_PREFIX
-from ...fuel_strategy import MARGIN_UNITS, MAX_DRIVERS, driver_table_text, parse_driver_table
+from ...fuel_strategy import (
+    MARGIN_UNITS,
+    MAX_DRIVERS,
+    driver_table_text,
+    parse_driver_table,
+    parse_stint_drivers,
+    stint_drivers_text,
+)
 from ...i18n import tr
 from ...template.setting_global import FUEL_CALCULATOR_INPUTS
 
@@ -191,6 +198,7 @@ def ranged_inputs(values: dict) -> dict:
         if key in INPUT_SPECS:
             inputs[key] = clamp_input(key, value, kind)
     inputs["input_driver_table"] = driver_table_text(driver_rows(inputs["input_driver_table"]))
+    inputs["input_stint_drivers"] = stint_drivers_text(parse_stint_drivers(inputs["input_stint_drivers"]))
     start = inputs["input_race_start_minutes"]
     inputs["input_race_start_minutes"] = start if 0 <= start < 24 * 60 else -1
     if inputs["input_tank_capacity"] > 0:

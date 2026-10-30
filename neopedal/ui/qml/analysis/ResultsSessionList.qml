@@ -32,7 +32,7 @@ Item {
             onTriggered: backend.openFolder()
         }
         Action {
-            text: i18n.tr("Choose Folder...")
+            text: i18n.tr("Choose Folder…")
             onTriggered: backend.chooseFolder()
         }
         Action {
@@ -64,11 +64,11 @@ Item {
                 checked: folderMenu.visible
                 tip: backend.folderText !== "" ? i18n.tr("Results Folder") + ":\n" + backend.folderText
                                                : i18n.tr("No results folder found")
-                onClicked: folderMenu.visible ? folderMenu.close() : folderMenu.popup(folderButton, 0, folderButton.height + 4)
+                onClicked: folderMenu.toggleBelow(folderButton)
                 Accessible.name: i18n.tr("Results Folder")
             }
             TpButton {
-                glyph: ""  // refresh
+                glyph: theme.glyphs.refresh
                 fallback: "⟳"
                 flat: true
                 size: "sm"
@@ -83,7 +83,7 @@ Item {
             id: searchField
             Layout.fillWidth: true
             searchDelay: 200
-            placeholderText: i18n.tr("Search: track, server, car...")
+            placeholderText: i18n.tr("Search: track, server, car…")
             onSearchChanged: function(text) { backend.setSearch(text) }
             onExitField: list.forceActiveFocus()
             Keys.onEscapePressed: { clearSearch(); list.forceActiveFocus() }
@@ -98,7 +98,7 @@ Item {
             TpSegmented {
                 Layout.fillWidth: false
                 name: i18n.tr("Session")
-                options: [i18n.tr("All"), i18n.tr("Races"), i18n.tr("Qualifying"), i18n.tr("Practice")]
+                options: [i18n.tr("All"), i18n.tr("Practice"), i18n.tr("Qualifying"), i18n.tr("Race")]  // SESSION_FILTER_LABELS
                 currentIndex: backend.kindFilter
                 maxWidth: root.width - theme.padCard * 2
                 onActivated: function(index) { backend.setKindFilter(index) }
@@ -107,8 +107,9 @@ Item {
         }
         TpSwitch {
             text: i18n.tr("Hide sessions without laps")
+            checkable: false  // state of backend shown (binding never broken by the click)
             checked: backend.hideEmpty
-            onToggled: backend.setHideEmpty(checked)
+            onClicked: backend.setHideEmpty(!backend.hideEmpty)
         }
 
         ListView {
@@ -147,7 +148,7 @@ Item {
                 required property string section
                 width: ListView.view.width
                 height: Math.round(theme.rowCompact)
-                color: theme.base
+                color: theme.surfaceCard  // sticky over the rows: the card surface they scroll on
                 TpSectionLabel {
                     anchors.left: parent.left
                     anchors.leftMargin: theme.space2
@@ -245,6 +246,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: row.title
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.weight: row.selected ? Font.DemiBold : Font.Normal
                                 elide: Text.ElideRight
@@ -253,7 +255,7 @@ Item {
                                 visible: row.replay
                                 glyph: ""  // video
                                 fallback: "▶"
-                                size: theme.em * 0.8
+                                size: theme.iconSm
                                 color: theme.dimText
                             }
                             Text {  // newest session: "New" (not a color dot alone)
@@ -268,6 +270,7 @@ Item {
                             Layout.fillWidth: true
                             text: [row.kindText, row.clock, row.cars + " " + (row.cars === 1 ? i18n.tr("car") : i18n.tr("cars")),
                                    row.online ? i18n.tr("Online") : ""].filter(function(part) { return part !== "" }).join(" · ")
+                            textFormat: Text.PlainText
                             color: theme.dimOn(surface.color)
                             font.pointSize: theme.fontSmall
                             font.features: { "tnum": 1 }
@@ -283,6 +286,7 @@ Item {
                             Layout.alignment: Qt.AlignRight
                             visible: row.resultText !== ""
                             text: row.resultText
+                            textFormat: Text.PlainText
                             color: row.resultTone !== "" ? theme.tone(row.resultTone) : theme.text
                             font.weight: Font.Bold
                             font.pointSize: theme.fontSubtitle
@@ -292,6 +296,7 @@ Item {
                             Layout.alignment: Qt.AlignRight
                             Layout.maximumWidth: theme.em * 8
                             text: row.detailText
+                            textFormat: Text.PlainText
                             color: theme.dimOn(surface.color)
                             font.pointSize: theme.fontCaption
                             elide: Text.ElideRight

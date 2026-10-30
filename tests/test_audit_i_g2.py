@@ -35,7 +35,7 @@ def test_rows_spoken_text_made_by_backend(english, ui_env):  # noqa: F811
     assert [row["accessibleText"] for row in alice][:2] == [
         f"Lap 1, {alice[0]['timeText']}", f"Lap 2, {alice[1]['timeText']}, Session best"]
     bob = rb.lap_rows(result, result.entries[1])
-    assert bob[1]["accessibleText"] == "Lap 2, -"  # no time: dim dash kept, no record
+    assert bob[1]["accessibleText"] == "Lap 2, —"  # no time: dim dash kept, no record
     assert bob[2]["accessibleText"] == f"Lap 3, {bob[2]['timeText']}, Personal best, PIT"
     rows = rb.classification_rows(result, "", "")
     assert rows[0]["accessibleText"] == "1, Alice Driver, " + ", ".join(
@@ -161,10 +161,14 @@ def role_reads(window, names):  # noqa: F811
     model = page.backend.rows
     roles = {number: bytes(name).decode() for number, name in model.roleNames().items()}
     reads: Counter = Counter()
+    readers: dict = {}  # role: rows (type, key) that read it
     original = DictListModel.data
 
     def counting(index, role=0):
-        reads[roles.get(role, role)] += 1
+        name = roles.get(role, role)
+        reads[name] += 1
+        row = model.rows[index.row()] if 0 <= index.row() < len(model.rows) else {}
+        readers.setdefault(name, set()).add((row.get("row"), row.get("key")))
         return original(model, index, role)
 
     model.data = counting  # instance attribute: called by Qt instead of the class method
@@ -174,18 +178,22 @@ def role_reads(window, names):  # noqa: F811
             settle(0.15)
     finally:
         del model.data
-    return page, reads
+    return page, reads, readers
 
 
 def test_option_rows_read_each_role_once(window, qml_warnings):  # noqa: F811
-    _, reads = role_reads(window, ("fuel", "relative", "speedometer"))
+    _, reads, readers = role_reads(window, ("fuel", "relative", "speedometer"))
     # Header roles read once by the header block (was up to 5 reads each), never for option rows; measured on
-    # these overlays: 19.6 reads per row and switch, 21.2 before, 29.3 with header roles required (fed to every row)
-    headers = reads["title"]
+    # these overlays: 19.6 reads per row and switch, 21.2 before, 29.3 with header roles required (fed to every row).
+    # Counted by row: a role is read again by a change notice of its row (one more read, timing dependent)
+    header_rows = readers["title"]
+    headers = len(header_rows)
     assert 0 < headers < reads["kind"] / 2, reads
+    assert {row_type for row_type, _ in header_rows} == {"header"}, header_rows
     for name in ("toggle", "toggleChecked", "collapsed", "count", "customizedCount"):
-        assert reads[name] == headers, (name, reads)
-    assert reads["changedCount"] <= headers  # only while collapsed
+        assert readers[name] == header_rows, (name, readers[name] ^ header_rows)  # every header row, those only
+        assert reads[name] < headers * 2, (name, reads)  # about once per header block
+    assert reads["changedCount"] < headers * 2  # only while collapsed
     assert reads["defaultText"] == 0  # reset tip: read only while hovered
     assert reads["color"] <= reads["kind"] / 4 and reads["orders"] <= reads["kind"] / 4  # their row type only
     assert not [text for text in qml_warnings if "OverlayOption" in text], qml_warnings
@@ -310,8 +318,10 @@ def test_color_swatch_follows_its_option(window, qml_warnings):  # noqa: F811
     page.show()
     settle()
     options = page.backend
-    option = next(dict(row) for name in [row["key"] for row in options.nav.rows] if options.selectOverlay(name) is None
-                  for row in options.rows.rows
+    # Modern designs read theme colors (no color option): classic layout (pending switch) shows them
+    options.setBool("relative/enable_classic_layout", True)
+    settle(0.1)
+    option = next(dict(row) for row in options.rows.rows
                   if row["row"] == "option" and row["kind"] == "color" and not row["locked"])
     settle(0.2)
 

@@ -130,6 +130,16 @@ class Realtime(Overlay):
         self.speed_max = -1.0
         self.speed_fast = -1.0
 
+    def vehicle_reset(self):
+        """Speeds of the previous car or session not kept (followed car changed), captions shown again"""
+        self.post_update()
+        for name, text in (("min", "MIN"), ("max", "MAX"), ("fast", "TOP")):
+            target = getattr(self, f"bar_speed_{name}", None)
+            if target is not None and target.last is not None:
+                target.last = None
+                target.text = text
+                target.update()
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Read speed data

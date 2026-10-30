@@ -20,7 +20,7 @@
 Race notifications Widget
 
 Short messages that fade out after a few seconds: position gained or lost (overall & in class),
-new penalty, fastest lap in class, blue flag, full course yellow start & end, lap invalidated.
+new penalty, fastest lap in class, blue flag, full course yellow start & end, red flag, lap invalidated.
 Nothing drawn while there is no message (unless in overlay edit mode).
 """
 
@@ -36,6 +36,7 @@ from PySide6.QtGui import QPainter
 from .. import calculation as calc
 from ..api_control import api
 from ..const_common import MAX_SECONDS
+from ..formatter import class_alias
 from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
@@ -57,8 +58,9 @@ RESTART_STEP = 5.0  # seconds: session time going back more than this is a resta
 FADE_TIME = 0.6  # seconds of fade out at end of display
 FADE_STEPS = 8  # opacity steps of fade (widget redrawn only on step change)
 # Message titles (English, translated when shown), for widget width
-TITLES = ("Position", "Class position", "Penalty", "Fastest lap", "Blue flag", "Full course yellow",
+TITLES = ("Position", "Class position", "Penalty", "Fastest lap", "Blue flag", "Full course yellow", "Red flag",
           "Green flag", "Lap invalidated")
+RED_FLAG = 7  # full course yellow state of race halt
 PREVIEW_TITLE = "Race notifications"
 
 
@@ -147,12 +149,14 @@ class RaceEvents:
         if in_race:
             self.poll_class_best(messages)
         blue = api.read.session.blue_flag()
-        if self.enabled["show_blue_flag"] and blue and not self.blue_flag:
-            messages.append(Message("Blue flag", minfo.vehicles.nearestBlueClass, INFO))
+        if self.enabled["show_blue_flag"] and in_race and blue and not self.blue_flag:  # race only: lapping car
+            messages.append(Message("Blue flag", class_alias(minfo.vehicles.nearestBlueClass), INFO))
         self.blue_flag = blue
         yellow = api.read.session.yellow_flag_state()
         if self.enabled["show_full_course_yellow"] and in_race and self.yellow_state >= 0:
-            if yellow > 0 >= self.yellow_state:
+            if yellow == RED_FLAG != self.yellow_state:  # race halted, also from full course yellow
+                messages.append(Message("Red flag", "", LOSS))
+            elif yellow > 0 >= self.yellow_state:
                 messages.append(Message("Full course yellow", "", WARNING))
             elif yellow == 0 < self.yellow_state:
                 messages.append(Message("Green flag", "", GAIN))
@@ -203,6 +207,8 @@ class RaceEvents:
                 best_car = car
         if best_car is None:
             return
+        # First class best seen is never announced: race start lap of first car to cross the line (slow, not a
+        # fastest lap worth a message), or a lap set before overlay started (joined, reloaded); improvements are
         if best < self.class_best - 0.0005 and self.class_best < MAX_SECONDS and self.enabled["show_class_fastest_lap"]:
             messages.append(Message("Fastest lap", f"{best_car.driverName} {calc.sec2laptime(best)}", BEST))
         # Never goes up (best lap holder leaving): same lap back on reconnect is not a new fastest lap;

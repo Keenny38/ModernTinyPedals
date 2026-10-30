@@ -23,10 +23,12 @@ Overlay Control
 import logging
 import sys
 import threading
+from collections.abc import Callable
 
 from . import app_signal, overlay_signal, realtime_state
 from .api_control import api
 from .setting import cfg
+from .template.setting_classes import SESSION_PRESET_KEYS, session_name
 from .thread_guard import run_supervised, wait_stopped
 
 logger = logging.getLogger(__name__)
@@ -44,9 +46,16 @@ def stream_on_air() -> bool:
 
 
 class OverlayToggle:
-    """Overlay state toggle"""
+    """Overlay state toggle
 
-    __slots__ = ()
+    Args:
+        wake: wakes the overlay control thread (see OverlayControl.wake), None if none (tests).
+    """
+
+    __slots__ = ("_wake",)
+
+    def __init__(self, wake: Callable[[], None] | None = None):
+        self._wake = wake
 
     def vr(self):
         """Toggle VR state"""
@@ -62,8 +71,11 @@ class OverlayToggle:
         follow_lock(cfg.overlay["fixed_position"])
 
     def hide(self):
-        """Toggle hide state"""
+        """Toggle hide state: control thread woken, hidden state read & signalled at once (it waits up to
+        FROZEN_WAIT while game data is frozen)"""
         self.__toggle_option("auto_hide")
+        if self._wake is not None:
+            self._wake()
 
     def grid(self):
         """Toggle grid move state"""
@@ -90,14 +102,18 @@ class OverlayControl:
     )
 
     def __init__(self):
-        self.toggle = OverlayToggle()
+        self.toggle = OverlayToggle(self.wake)
         self._thread: threading.Thread | None = None
         self._event = threading.Event()
-        self._wake = threading.Event()  # activity change (realtime_state) or stop
+        self._wake = threading.Event()  # activity change (realtime_state), toggle or stop
 
         self._last_active_state = None
         self._last_shown_state = None
         self._last_hide_state = None
+
+    def wake(self):
+        """Read state again now (auto hide toggled), instead of at the end of the current wait"""
+        self._wake.set()
 
     def _stopped(self) -> bool:
         """Whether update thread stopped (or never started)"""
@@ -183,18 +199,21 @@ class OverlayControl:
                 realtime_state.screen_hidden = screen_hidden
                 overlay_signal.hidden.emit(hidden)
             # Visibility context check (per widget "visibility_context" option)
-            if realtime_state.session_type != session_type or realtime_state.in_pits != in_pits:
+            session_changed = realtime_state.session_type != session_type
+            if session_changed or realtime_state.in_pits != in_pits:
                 realtime_state.session_type = session_type
                 realtime_state.in_pits = in_pits
                 overlay_signal.context.emit()
             # Active state check
+            entered = False
             if self._last_active_state != active:
                 self._last_active_state = active
-                # Update auto load state only once when player enters track
-                if active and cfg.application["enable_auto_load_preset"]:
-                    # Track primary preset takes priority over class primary preset
-                    if not self.__check_preset_track():
-                        self.__check_preset_class()
+                entered = active
+            # Auto load when player enters track, or session changes while driving (practice to qualifying)
+            if (entered or (active and session_changed)) and cfg.application["enable_auto_load_preset"]:
+                # Class preset of the session first, then track preset, then class preset (every session)
+                if not self.__check_preset_class_session(session_type) and not self.__check_preset_track():
+                    self.__check_preset_class()
             # Set overlay timer state
             if self._last_shown_state != shown:
                 self._last_shown_state = shown
@@ -212,6 +231,21 @@ class OverlayControl:
         if preset_name == "":
             return False
         self.__auto_load_preset(track_name, preset_name)
+        return True
+
+    def __check_preset_class_session(self, session_type: int) -> bool:
+        """Check primary preset from class & session (practice, qualify, race)"""
+        session = session_name(session_type)
+        if not session:
+            return False
+        class_name = api.read.vehicle.class_name()
+        class_data = cfg.user.classes.get(class_name)
+        if not isinstance(class_data, dict):
+            return False
+        preset_name = cfg.get_primary_preset_name(class_data.get(SESSION_PRESET_KEYS[session], ""))
+        if preset_name == "":
+            return False
+        self.__auto_load_preset(f"{class_name} ({session})", preset_name)
         return True
 
     def __check_preset_class(self) -> bool:

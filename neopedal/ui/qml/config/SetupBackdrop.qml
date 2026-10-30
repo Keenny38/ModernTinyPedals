@@ -44,8 +44,8 @@ Rectangle {
         SequentialAnimation on opacity {
             running: backdrop.loading && pageState.active && theme.animate
             loops: Animation.Infinite
-            NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-            NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }
+            NumberAnimation { to: 0.35; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
+            NumberAnimation { to: 1; duration: theme.pulseDuration; easing.type: Easing.InOutQuad }
         }
     }
     Icon {
@@ -53,7 +53,7 @@ Rectangle {
         visible: !backdrop.loading && backdrop.source === ""
         glyph: ""  // picture
         fallback: "▢"
-        size: theme.em * 1.6
+        size: theme.iconLg
         color: theme.stageText
     }
 }

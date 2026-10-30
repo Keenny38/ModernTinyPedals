@@ -244,7 +244,7 @@ def test_stats_sessions_from_results(backend):  # noqa: F811
     race_row, qualifying_row = backend.sessions
     assert race_row["results"] == spa_race().path and race_row["rank"] == "P2/12"
     assert race_row["version"] == "1.42" and race_row["incidents"] == 3
-    assert "Position P5 of 30" in race_row["tip"] and "+3.500" in race_row["tip"]
+    assert "Position P5/30" in race_row["tip"] and "+3.500" in race_row["tip"]
     assert qualifying_row["version"] == "1.41" and qualifying_row["results"] == ""  # no results file
     assert "set on" in backend.progression["info"] and "Version 1.41" in backend.progression["info"]
     assert stats_common.gap_text(spa_race(gap_laps=2)) == "+2 laps"
@@ -337,13 +337,13 @@ def test_results_replay_button(lmu_results, monkeypatch):
 
 def test_results_open_path(lmu_results):
     page, folder = lmu_results
-    page.setKindFilter(3)  # practice: race hidden
+    page.setKindFilter(1)  # practice: race hidden
     page.open_path(str(folder / RACE_NAME))
     assert wait_until(lambda: page.hasSession and page.selectedKey.endswith(RACE_NAME))
     assert page.kindFilter == 0
     from neopedal.ui.quick.results_backend import load_page_settings
 
-    assert load_page_settings()["kind"] == 3  # filter of user kept for next time
+    assert load_page_settings()["session_kind"] == "Practice"  # filter of user kept for next time
     page.open_path(str(folder / "missing.xml"))  # not a session: read again, nothing shown instead
     assert wait_until(lambda: not page.loading)
     assert page.selectedKey.endswith(RACE_NAME)

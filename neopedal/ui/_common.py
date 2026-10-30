@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from functools import partial
 from typing import Any, TypeVar, overload
@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -63,15 +62,13 @@ from PySide6.QtWidgets import (
 from ..const_app import APP_NAME
 from ..i18n import tr, trm
 from ..setting import cfg
-from ..userfile.json_setting import copy_setting
 from ..validator import is_string_number
-from . import UIScaler, draw_focus_ring
+from . import UIScaler, draw_focus_ring, message_text, safe_markup
 
 # Validator
 QVAL_INTEGER = QIntValidator(-999999, 999999)
 QVAL_FLOAT = QDoubleValidator(-999999.9999, 999999.9999, 6)
 QVAL_COLOR = QRegularExpressionValidator(QRegularExpression('^#[0-9a-fA-F]*'))
-QVAL_HEATMAP = QRegularExpressionValidator(QRegularExpression('[0-9a-zA-Z_]*'))
 QVAL_FILENAME = QRegularExpressionValidator(QRegularExpression('[^\\\\/:*?"<>|]*'))
 
 # Unsaved changes marker, before title of page (page title, navigation rail entry, open pages menu)
@@ -122,8 +119,16 @@ def singleton_dialog(dialog_type: str, show_error: bool = True):
 
         def wrapper(*args, **kwargs):
             parent = kwargs.get("parent", args[0] if args else None)
-            if page_host(parent, dialog_class) is not None:
-                # Shown as page in app: one page per dialog, opening the same one shows its page again
+            host = page_host(parent, dialog_class)
+            if host is not None:
+                # Shown as page in app: one page per dialog, opening the same one shows its page again. A dialog
+                # with one page only (SINGLE_PAGE) is found before a copy is built (Qt Quick view, its data) to be
+                # thrown away by show_dialog_page; one page per title: built, matched by title there.
+                if getattr(dialog_class, "SINGLE_PAGE", False):
+                    page = host.find_dialog_page(dialog_class.__name__)
+                    if page is not None and page.dialog is not None:
+                        host.show_page_widget(page)
+                        return page.dialog
                 instance = dialog_class(*args, **kwargs)
                 DialogSingleton.register(dialog_type, instance)
                 return instance
@@ -267,7 +272,7 @@ def confirm_box(parent: QWidget | None, title: str, text: str, action_text: str,
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
     box.setWindowTitle(title)
-    box.setText(text)
+    box.setText(message_text(text))  # names & file names in the message never read as markup
     cancel = box.addButton(cancel_text or tr("Cancel"), QMessageBox.ButtonRole.ActionRole)
     action = box.addButton(action_text, QMessageBox.ButtonRole.ActionRole)
     box.setEscapeButton(cancel)
@@ -295,6 +300,16 @@ def find_dialog_host(widget: QWidget | None):
     return host if hasattr(host, "show_dialog_page") else None
 
 
+def embeds_from_page(dialog_class: type) -> bool:
+    """Dialog class shown as page too when opened from a page: tools (a page of their own) & EMBED_FROM_PAGE"""
+    if getattr(dialog_class, "EMBED_FROM_PAGE", False):
+        return True
+    from ..template.page_registry import tool_pages
+
+    name = dialog_class.__name__
+    return any(page.dialog.rsplit(".", 1)[-1] == name for page in tool_pages())
+
+
 def page_host(parent, dialog_class: type):
     """Page host for dialog class opened from parent, None if dialog stays a separate window
 
@@ -305,8 +320,8 @@ def page_host(parent, dialog_class: type):
     ancestor: QWidget | None = parent
     while ancestor is not None:
         if isinstance(ancestor, QDialog):
-            # Opened from a dialog page: page too if class allows it (text input), else popup over it
-            if getattr(ancestor, "in_app_page", False) and getattr(dialog_class, "EMBED_FROM_PAGE", False):
+            # Opened from a dialog page: page too if a tool (results -> stats...) or class allows it, else popup over it
+            if getattr(ancestor, "in_app_page", False) and embeds_from_page(dialog_class):
                 break
             return None
         ancestor = ancestor.parentWidget()
@@ -340,6 +355,8 @@ class BaseDialog(QDialog):
     # turned off (keep_when_hidden False) freed like any page
     KEEP_WHEN_HIDDEN = False
     in_app_page = False  # set when shown as page
+    # One page at most (title never varies): opening it again shows the open page, no copy built (singleton_dialog)
+    SINGLE_PAGE = False
     shown_instead: BaseDialog | None = None  # same dialog already open as page, see shown_dialog
     modified_changed = Signal(bool)  # unsaved changes marker shown or cleared, see refresh_modified
     _marked_modified = False
@@ -416,13 +433,31 @@ class BaseDialog(QDialog):
         if not self.in_app_page and self._save_shortcut is None and self.save_action() is not None:
             self._save_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self, self.save_by_shortcut)
 
+    def show_page_again(self) -> bool:
+        """Already shown as page in app (returned by singleton_dialog or an open_... function): its page shown
+        again, True if found (never shown as window, never made modal by open())"""
+        if not self.in_app_page:
+            return False
+        page = self.parentWidget()
+        while page is not None and getattr(page, "dialog", None) is not self:
+            page = page.parentWidget()
+        host = find_dialog_host(self)
+        if page is None or host is None:
+            return False
+        host.show_page_widget(page)
+        return True
+
     def show(self):
+        if self.show_page_again():
+            return
         host = embedded_host(self)
         if host is not None and not self.isVisible() and host.show_dialog_page(self):
             return
         super().show()
 
     def open(self):
+        if self.show_page_again():
+            return
         host = embedded_host(self)
         if host is not None and not self.isVisible() and host.show_dialog_page(self):
             return
@@ -478,26 +513,6 @@ class BaseEditor(BaseDialog):
         QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.redo)
 
-    def enable_table_undo(self, temp_name: str, update_temp: Callable[[], None], refresh_table: Callable[[], None]):
-        """Enable undo & redo for editor that syncs table with a temp dict
-
-        Args:
-            temp_name: attribute name of temp dict (ex. "brakes_temp").
-            update_temp: function that updates temp dict from table.
-            refresh_table: function that rebuilds table from temp dict.
-        """
-        def capture():
-            update_temp()
-            return copy_setting(getattr(self, temp_name))
-
-        def restore(state):
-            temp = getattr(self, temp_name)
-            temp.clear()
-            temp.update(copy_setting(state))
-            refresh_table()
-
-        self.enable_undo(capture, restore)
-
     def add_undo_buttons(self, layout: QHBoxLayout):
         """Add undo & redo buttons to layout"""
         button_undo = CompactButton(tr("Undo"))
@@ -508,65 +523,6 @@ class BaseEditor(BaseDialog):
         button_redo.clicked.connect(self.redo)
         layout.addWidget(button_undo)
         layout.addWidget(button_redo)
-
-    def editor_table(self, headers: Sequence[str], fixed_widths: Mapping[int, float] | None = None) -> QTableWidget:
-        """Table of editor: translated headers, columns stretched except fixed width ones
-
-        Args:
-            headers: column names (English).
-            fixed_widths: column index -> width (UIScaler.size units).
-        """
-        table = QTableWidget(self)
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels([tr(name) for name in headers])
-        table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for column, width in (fixed_widths or {}).items():
-            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-            table.setColumnWidth(column, UIScaler.size(width))
-        return table
-
-    def editor_buttons(
-        self, buttons: Sequence[QWidget | tuple[str, Callable]],
-        reset: Callable, apply: Callable) -> QHBoxLayout:
-        """Button row of editor: buttons given (widget or text & action), Reset, Undo, Redo,
-        then Apply, Save & Close
-
-        Args:
-            buttons: leading buttons, widget or (English text, clicked action).
-            reset: Reset button action.
-            apply: Apply button action.
-        """
-        leading = []
-        for button in buttons:
-            if isinstance(button, tuple):
-                text, action = button
-                button = CompactButton(tr(text))
-                button.clicked.connect(action)
-            leading.append(button)
-
-        button_reset = CompactButton(tr("Reset"))
-        button_reset.clicked.connect(reset)
-
-        button_apply = CompactButton(tr("Apply"))
-        button_apply.clicked.connect(apply)
-
-        button_save = CompactButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(self.close)
-
-        layout_button = QHBoxLayout()
-        for button in leading:
-            layout_button.addWidget(button)
-        layout_button.addWidget(button_reset)
-        self.add_undo_buttons(layout_button)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_apply)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_close)
-        return layout_button
 
     def __capture_state(self) -> object:
         """Capture editor state, None if editor is being rebuilt"""
@@ -605,19 +561,6 @@ class BaseEditor(BaseDialog):
         self._undo_state = state
         self._is_modified = True
         self.refresh_modified()
-
-    def replace_table_data(self, refresh_table: Callable[[], None]):
-        """Rebuild table from replaced temp data (reset, import), recorded as one undo step
-
-        Cell changes while rebuilding are not recorded, as recording reads the partially
-        filled table back into temp data that the rebuild is reading from.
-        """
-        self._undo_busy = True
-        try:
-            refresh_table()
-        finally:
-            self._undo_busy = False
-        self.set_modified()
 
     @contextmanager
     def batch_edit(self) -> Iterator[None]:
@@ -660,7 +603,7 @@ class BaseEditor(BaseDialog):
             return True
 
         confirm = QMessageBox.question(
-            self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+            self, tr("Confirm"), tr("<b>Save changes before continuing?</b>"),
             buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
 
         if confirm == QMessageBox.StandardButton.Save:
@@ -708,29 +651,6 @@ class BaseEditor(BaseDialog):
             event.ignore()
 
     @staticmethod
-    def new_name_increment(name: str, table: QTableWidget, column: int = 0) -> str:
-        """New name with number increment add at the end"""
-        new_index = 1
-        new_name = f"{name} {new_index}"
-        exist = True
-        while exist:  # check existing name
-            items = table.findItems(new_name, Qt.MatchFlag.MatchExactly)
-            for item in items:
-                if item.column() == column:  # match column
-                    new_index += 1
-                    new_name = f"{name} {new_index}"
-                    break
-            else:
-                exist = False
-        return new_name
-
-    @staticmethod
-    def is_value_in_table(target: str, table: QTableWidget, column: int = 0) -> bool:
-        """Is there any matching value in table"""
-        items = table.findItems(target, Qt.MatchFlag.MatchExactly)
-        return any(item.column() == column for item in items)
-
-    @staticmethod
     def reloading(reload_module: bool = True, reload_widget: bool = True) -> None:
         """Reloading module & widget only"""
         # Delay import
@@ -743,14 +663,16 @@ class BaseEditor(BaseDialog):
 
 
 class TextInputDialog(BaseDialog):
-    """Text input shown as page in app (replaces QInputDialog), on_accept(text) returns True to close
-
-    Opened from a dialog page, it is a page too (back to that page when closed). Closed by a language
-    change unless opened from a page kept by it: on_accept targets the view being replaced.
+    """Small text input window over the page asking for it (replaces QInputDialog), on_accept(text) returns True
+    to close. Window modal (show() opens it like open()): the page it answers stays as is until it is answered.
+    QML pages with a TpDialogHost show the same input inside the page instead (quick/dialogs.ask_text).
     """
 
-    EMBED_FROM_PAGE = True
+    EMBED_IN_APP = False  # a page of its own replaced the whole page it asks for
     CLOSED_ON_LANGUAGE_CHANGE = True
+
+    def show(self):
+        self.open()
 
     def __init__(
         self, parent, title: str, label: str, on_accept: Callable[[str], bool], text: str = "",
@@ -759,7 +681,7 @@ class TextInputDialog(BaseDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self._on_accept = on_accept
-        label_text = QLabel(label, self)
+        label_text = QLabel(safe_markup(label), self)  # names in the label (vehicle, lap) never read as markup
         label_text.setWordWrap(True)
         label_text.setTextFormat(Qt.TextFormat.RichText)
         self.edit: QLineEdit | QPlainTextEdit
@@ -792,6 +714,19 @@ class TextInputDialog(BaseDialog):
     def accepting(self):
         if self._on_accept(self.text()):
             self.accept()
+
+
+# Qt's & these classes' own methods, to see when tests or scripts replaced them: quick.dialogs then lets the
+# replacement answer instead of showing a dialog in the QML page
+ORIGINAL_DIALOG_METHODS = {
+    "question": _QUESTION,
+    "warning": QMessageBox.__dict__.get("warning"),
+    "information": QMessageBox.__dict__.get("information"),
+    "critical": QMessageBox.__dict__.get("critical"),
+    "confirm_operation": BaseDialog.confirm_operation,
+    "text_input_show": TextInputDialog.show,
+    "text_input_open": TextInputDialog.open,
+}
 
 
 class BatchOffset(BaseDialog):
@@ -995,16 +930,6 @@ def table_item(table: QTableWidget, row: int, column: int, item_type: type = QTa
     return item
 
 
-def column_texts(table: QTableWidget, column: int = 0) -> set[str]:
-    """Texts of table column, for fast exact match checks while adding many rows"""
-    texts = set()
-    for row in range(table.rowCount()):
-        item = table.item(row, column)
-        if item is not None:
-            texts.add(item.text())
-    return texts
-
-
 # Table item class
 class FloatTableItem(QTableWidgetItem):
     """Float type QTableWidgetItem with validation"""
@@ -1035,45 +960,3 @@ class FloatTableItem(QTableWidgetItem):
     def __lt__(self, other):
         """Sort by value"""
         return self.value() < other.value()
-
-
-class ClockTableItem(QTableWidgetItem):
-    """Clock type QTableWidgetItem with validation"""
-
-    def __init__(self, value: str):
-        super().__init__()
-        self._value = ""
-        self.setText(value)
-
-    def value(self) -> str:
-        """Get value"""
-        return self._value
-
-    def validate(self):
-        """Validate value, replace invalid value with old value if invalid"""
-        value = self.__verify(self.text())
-        if value:
-            self._value = value
-        self.setText(self._value)
-
-    def __lt__(self, other):
-        """Sort by value"""
-        return self.value() < other.value()
-
-    def __verify(self, clock_time: str) -> str:
-        """Validate clock time (Hour:Minute) string"""
-        try:
-            data = clock_time.split(":")
-            if len(data) != 2:
-                raise ValueError
-            hours = min(max(int(data[0]), 0), 24)
-            minutes = min(max(int(data[1]), 0), 60)
-            if minutes >= 60:
-                hours += 1
-                minutes = 0
-            if hours >= 24:
-                hours = 24
-                minutes = 0
-            return f"{hours:02d}:{minutes:02d}"
-        except (AttributeError, IndexError, ValueError, TypeError):
-            return ""

@@ -28,8 +28,10 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Sequence
+import weakref
+from collections.abc import Callable, Sequence
 from contextlib import suppress
+from typing import Any
 
 from PySide6.QtCore import (
     Slot,
@@ -39,10 +41,12 @@ from ...i18n import tr, trm
 from ...userfile.lap_cache import (
     remove_cached_lap,
 )
-from ...userfile.lap_library import is_foreign
+from ...userfile.lap_library import FOREIGN_MARK, Deletion, is_foreign
 from ...userfile.lap_marks import remove_marks, restore_marks, set_mark, set_marks
 from ...userfile.telemetry_lap import (
+    IMPORT_FOLDER,
     LapFile,
+    is_lap_file,
     is_valid_name,
     lap_number_of,
     lap_stem,
@@ -51,12 +55,12 @@ from ...userfile.telemetry_lap import (
     list_laps,
     list_tracks,
 )
-from .._common import TextInputDialog
 from ..lap_viewer import (
     LapEntry,
     format_laptime,
     lap_label,
 )
+from . import dialogs
 from .formatting import day_month_minutes, file_stamp
 from .lap_base import (
     BackendBase,
@@ -67,6 +71,8 @@ logger = logging.getLogger(__name__)
 TRASH_FOLDER = ".trash"  # deleted laps, in telemetry folder (hidden: not a track), restored by undo
 TRASH_DAYS = 30  # deleted laps kept in trash folder
 UNDO_DEPTH = 20  # deletions undone one after another (older ones restored from Recently Deleted)
+FILES_BACKGROUND = 8  # more lap files moved (trash, restore) at once than this: moved in a thread job (a session or
+# every checked lap deleted: tens of os.replace, each slow behind an antivirus or on a network share)
 
 
 def trash_batch_time(name: str) -> float:
@@ -113,14 +119,46 @@ def list_trash(folder: str, days: int = TRASH_DAYS) -> list[tuple[float, str, st
         except OSError:  # not a folder, or removed meanwhile
             continue
         for track in tracks:
-            try:
-                names = os.listdir(os.path.join(root, batch, track))
-            except OSError:
-                continue
-            laps.extend((made, os.path.join(root, batch, track, name), os.path.join(folder, track, name))
-                        for name in names)
+            # Imported laps (library): .imported/<log>/<lap> in batch, put back in their log of imported laps
+            parts = [(track, group) for group in subfolders(os.path.join(root, batch, track))] \
+                if track == IMPORT_FOLDER else [(track,)]
+            for part in parts:
+                try:
+                    names = os.listdir(os.path.join(root, batch, *part))
+                except OSError:
+                    continue
+                laps.extend((made, os.path.join(root, batch, *part, name), os.path.join(folder, *part, name))
+                            for name in names if len(part) == 1 or is_lap_file(name))
     laps.sort(key=lambda lap: (lap[0], os.path.basename(lap[2])), reverse=True)
     return laps
+
+
+def subfolders(folder: str) -> list[str]:
+    """Names of the folders in folder, none if unreadable"""
+    try:
+        return [entry.name for entry in os.scandir(folder) if entry.is_dir()]
+    except OSError:
+        return []
+
+
+def trash_origin(folder: str, trashed: str) -> str:
+    """Place a lap of trash goes back to (track folder, or log of imported laps), empty if trashed is not a lap of
+    the trash of telemetry folder"""
+    root = os.path.abspath(os.path.join(folder, TRASH_FOLDER))
+    path = os.path.abspath(trashed)
+    try:
+        parts = os.path.relpath(path, root).split(os.sep)
+    except ValueError:  # other drive
+        return ""
+    if (len(parts) == 3 and not parts[1].startswith(".")) or (len(parts) == 4 and parts[1] == IMPORT_FOLDER):
+        if trash_batch_time(parts[0]) > 0 and ".." not in parts:
+            return os.path.join(folder, *parts[1:])
+    return ""
+
+
+def is_imported(folder: str, path: str) -> bool:
+    """Whether lap path is a lap of imported laps library of telemetry folder"""
+    return path_key(os.path.dirname(os.path.dirname(path))) == path_key(os.path.join(folder, IMPORT_FOLDER))
 
 
 def path_key(path: str) -> str:
@@ -173,8 +211,8 @@ class LapActions(BackendBase):
             self.marks_changed(path)
             return True
 
-        TextInputDialog(self._window, tr("Lap Note"), tr("Note for this lap (empty to remove):"), saving,
-                        str(self.lap_marks(path).get("note", ""))).show()
+        dialogs.ask_text(self._window, tr("Lap Note"), tr("Note for this lap (empty to remove):"), saving,
+                         str(self.lap_marks(path).get("note", "")))
 
     @Slot(str)
     def deleteLap(self, path: str):
@@ -183,17 +221,18 @@ class LapActions(BackendBase):
 
     @Slot(list)
     def deleteLaps(self, paths: list):
-        """Move recorded laps to trash, confirmation asked for several laps (undo restores them)"""
+        """Move recorded laps to trash without confirmation, however many: undo restores them (toast, Ctrl+Z)"""
         recorded = {entry.file.path for entry in self.entries}
         paths = [str(path) for path in paths if str(path) in recorded]
+        if paths:
+            self.trash_laps(paths)
+
+    def trash_laps(self, paths: list[str]):
+        """Recorded laps moved to trash, laps being read moved once loaded"""
+        recorded = {entry.file.path for entry in self.entries}
+        paths = [path for path in paths if path in recorded]  # list changed while asked
         if not paths:
             return
-        if len(paths) > 1:
-            from .._common import confirm_action
-
-            if not confirm_action(self._window, tr("Delete Laps"), trm(f"Move {len(paths)} laps to trash?"),
-                                  tr("Move to Trash")):
-                return
         joined = False  # laps being read join this deletion once loaded (undone together)
         if self._loader is not None:  # file read by background loading: deleted once loaded
             reading = [path for path in paths if path in self._loaded_paths]
@@ -201,36 +240,75 @@ class LapActions(BackendBase):
                 joined, self._pending_batch = True, None
             self._pending_delete.extend(path for path in reading if path not in self._pending_delete)
             paths = [path for path in paths if path not in self._loaded_paths]
-        if paths and self.apply_delete(paths) and joined:
-            self._pending_batch = self._undo[-1]
+        if paths:
+            self.apply_delete(paths, joined=joined)
 
     def trash_folder(self) -> str:
         """New trash batch folder (deletion time)"""
         return os.path.join(self.folder, TRASH_FOLDER, file_stamp())
 
-    def apply_delete(self, paths: list[str], pending: bool = False) -> bool:
-        """Move laps to trash, forget their caches, deletion put on undo stack (pending: laps deleted while being read,
-        restored with laps of same deletion), False if none moved"""
-        batch = self.trash_folder()
-        moved = []
-        for path in paths:
-            target = os.path.join(batch, os.path.basename(os.path.dirname(path)), os.path.basename(path))
-            mark = dict(self.lap_marks(path))
+    def start_file_action(self, work: Callable[[], Any], done: Callable[[Any], Any]):
+        """Lap files moved on a thread (page busy meanwhile, see is_loading), done(result) on the page thread (None
+        if the job failed)"""
+        self._file_actions += 1
+        self.notify_status()  # busy indicator
+
+        def finished(result):
+            self._file_actions -= 1
+            self.notify_status()
+            done(result)
+
+        self.run_job("lap files", work, finished)
+
+    @staticmethod
+    def move_to_trash(folder: str, moves: list[tuple[str, str, str]]) -> tuple[list[tuple[str, str]], list[str]]:
+        """Lap files moved to trash (thread job or page thread): (lap path, trash path, track limits part) of each,
+        caches of laps moved forgotten, marks file of each folder saved once; (moved (path, target), errors)"""
+        moved: list[tuple[str, str]] = []
+        errors: list[str] = []
+        for path, target, part in moves:
             try:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.replace(path, target)
             except OSError as error:
                 logger.error("LAP VIEWER: unable to delete %s: %s", path, error)
-                self.set_status(trm(f"Unable to delete lap: {error}"))
+                errors.append(str(error))
                 continue
-            remove_cached_lap(self.folder, path)
+            remove_cached_lap(folder, path)
             with suppress(OSError):
-                os.remove(os.path.join(self.limits_parts_folder(os.path.basename(os.path.dirname(path))),
-                                       os.path.basename(path) + ".bin"))
-            moved.append((path, target, mark, path in self.checked, path == self.reference_key))
+                os.remove(part)
+            moved.append((path, target))
+        if moved:
+            remove_marks([path for path, _ in moved])
+        return moved, errors
+
+    def apply_delete(self, paths: list[str], pending: bool = False, joined: bool = False) -> bool:
+        """Move laps to trash, forget their caches, deletion put on undo stack (pending: laps deleted while being read,
+        restored with laps of same deletion; joined: laps being read join this deletion once loaded), False if none
+        moved. Many laps: files moved on a thread, state applied once moved (True returned)."""
+        batch = self.trash_folder()
+        marks = {path: dict(self.lap_marks(path)) for path in paths}
+        moves = [(path, os.path.join(batch, os.path.basename(os.path.dirname(path)), os.path.basename(path)),
+                  os.path.join(self.limits_parts_folder(os.path.basename(os.path.dirname(path))),
+                               os.path.basename(path) + ".bin")) for path in paths]
+        if len(moves) > FILES_BACKGROUND:
+            folder = self.folder
+            self.start_file_action(lambda: self.move_to_trash(folder, moves),
+                                   lambda result: self.deleted(result, marks, pending, joined))
+            return True
+        return self.deleted(self.move_to_trash(self.folder, moves), marks, pending, joined)
+
+    def deleted(self, result: Any, marks: dict[str, dict], pending: bool, joined: bool) -> bool:
+        """Laps moved to trash (see move_to_trash): list, charts & undo stack updated, errors told, False if none"""
+        if not isinstance(result, tuple):  # job failed
+            self.page_toast(tr("Unable to delete laps"), "error")
+            return False
+        for error in result[1]:
+            self.page_toast(trm(f"Unable to delete lap: {html.escape(error)}"), "error")
+        moved = [(path, target, marks.get(path, {}), path in self.checked, path == self.reference_key)
+                 for path, target in result[0]]
         if not moved:
             return False
-        remove_marks([item[0] for item in moved])  # marks file of each folder saved once
         gone = {item[0] for item in moved}
         for path in gone:
             self._marks.pop(os.path.dirname(path), None)
@@ -248,12 +326,32 @@ class LapActions(BackendBase):
             del self._undo[:-UNDO_DEPTH]  # older deletions stay in trash (Recently Deleted) until purged
         if pending:
             self._pending_batch = None
+        elif joined:  # laps being read join this deletion once loaded
+            self._pending_batch = deletion
         self.undoChanged.emit()
-        self.set_status(trm(f"{len(deletion)} lap(s) moved to trash"))
         self.fill_list()
         self.load_laps()
-        self.lapsTrashed.emit(len(deletion), lap_label(os.path.basename(deletion[0][0])) if len(deletion) == 1 else "")
+        self.trashed(len(deletion), lap_label(os.path.basename(deletion[0][0])) if len(deletion) == 1 else "")
         return True
+
+    def trashed(self, count: int, label: str):
+        """Laps moved to trash, told once: lap library panel open, its own toast (the page toast is under its
+        scrim), else page toast naming the lap with Undo (Ctrl+Z too). Never the status line as well."""
+        self.lapsTrashed.emit(count, label)
+        if getattr(getattr(self, "_library", None), "_shown", False):  # ImportedLaps panel open
+            return
+        text = (tr("%1 moved to trash").replace("%1", f"<b>{html.escape(label)}</b>") if count == 1 and label
+                else tr("%1 laps moved to trash").replace("%1", str(count)))
+        page = weakref.ref(self)
+        self.page_toast(text, action_text=tr("Undo"),
+                        action=lambda: (backend := page()) is not None and backend.undoDelete())
+
+    def page_toast(self, text: str, level: str = "success", action_text: str = "", action=None):
+        """Toast of this page when shown (never the toast of another page): results of lap actions, errors
+        (level "error"); the status line is for progress only"""
+        bridge = dialogs.page_bridge(self._window)
+        if bridge is not None:
+            bridge.show_toast(text, level, action_text=action_text, action=action)
 
     @Slot()
     def undoDelete(self):
@@ -266,11 +364,14 @@ class LapActions(BackendBase):
         if self._trash_rows:
             self.read_trash()
 
-    def restore_laps(self, items: Sequence[tuple[str, str, dict, bool, bool]]) -> list[str]:
-        """Laps moved back from trash (marks, check state & reference too), lap list & charts updated, paths restored"""
+    @staticmethod
+    def move_from_trash(folder: str, items: Sequence[tuple[str, str, dict, bool, bool]]) -> list[str]:
+        """Lap files of items (see restore_laps) moved back from trash (thread job or page thread), marks file of
+        each folder written once, empty trash folders removed; lap paths restored"""
         restored = []
         marks: dict[str, dict] = {}
-        for path, target, mark, checked, reference in items:
+        trash = path_key(os.path.join(folder, TRASH_FOLDER))
+        for path, target, mark, _checked, _reference in items:
             if os.path.exists(path):
                 continue
             try:
@@ -282,22 +383,62 @@ class LapActions(BackendBase):
             if mark.get("kept") or mark.get("note"):
                 marks[path] = mark
             restored.append(path)
-            if checked:
-                self.checked.add(path)
-            if reference:
-                self.reference_key = path
-            for folder in (os.path.dirname(target), os.path.dirname(os.path.dirname(target))):
-                with suppress(OSError):  # trash track & batch folders removed once empty (never above)
-                    os.rmdir(folder)
+            if is_imported(folder, path):
+                # Mark of laps of another driver's folder, trashed with the last lap of its log
+                mark_target = os.path.join(os.path.dirname(target), FOREIGN_MARK)
+                mark_path = os.path.join(os.path.dirname(path), FOREIGN_MARK)
+                if os.path.isfile(mark_target) and not os.path.exists(mark_path):
+                    with suppress(OSError):
+                        os.replace(mark_target, mark_path)
+            batch = os.path.dirname(target)
+            while path_key(batch).startswith(trash + os.sep):  # trash folders removed once empty (never above)
+                with suppress(OSError):
+                    os.rmdir(batch)
+                batch = os.path.dirname(batch)
         if marks:  # marks file of each folder written once
             restore_marks(marks)
+        return restored
+
+    def restore_laps(self, items: Sequence[tuple[str, str, dict, bool, bool]]) -> list[str]:
+        """Laps moved back from trash (marks, check state & reference too), lap list & charts updated, paths restored
+        (many laps: files moved on a thread, state applied once moved, paths asked returned)"""
+        if len(items) > FILES_BACKGROUND:
+            folder = self.folder
+            self.start_file_action(lambda: self.move_from_trash(folder, items),
+                                   lambda result: self.restored(items, result if isinstance(result, list) else []))
+            return [item[0] for item in items]
+        return self.restored(items, self.move_from_trash(self.folder, items))
+
+    def restored(self, items: Sequence[tuple[str, str, dict, bool, bool]], restored: list[str]) -> list[str]:
+        """Laps moved back from trash (see move_from_trash): check state & reference back, list & charts updated"""
+        imported: list[str] = []  # imported laps restored (library), shown again if they were
+        shown: list[str] = []
+        reference_from: list[str] = []
+        back = set(restored)
+        for path, _target, _mark, checked, reference in items:
+            if path not in back:
+                continue
+            if is_imported(self.folder, path):
+                imported.append(path)
+                shown.extend([path] if checked or reference else [])
+                reference_from.extend([path] if reference else [])
+            else:
+                if checked:
+                    self.checked.add(path)
+                if reference:
+                    self.reference_key = path
         self._marks.clear()
         if self._track:
             laps = list_laps(self.folder, self._track)
             self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(self._track, laps))]
-        self.set_status(trm(f"{len(restored)} lap(s) restored"))
+        if restored:
+            self.page_toast(trm(f"{len(restored)} lap(s) restored"))
         self.fill_list()
         self.load_laps()
+        if imported:
+            self._library.restored(imported)
+        if shown:  # imported laps shown when deleted: shown again (reference too)
+            self.add_external(shown, reference_from or None, checked=shown)
         return restored
 
     # Recently deleted laps (trash folder, kept TRASH_DAYS days)
@@ -310,9 +451,13 @@ class LapActions(BackendBase):
 
     def read_trash(self):
         folder = self.folder
-        self.run_job("trash", lambda: list_trash(folder), self.trash_read)
+        self._trash_serial += 1
+        serial = self._trash_serial
+        self.run_job("trash", lambda: list_trash(folder), lambda laps: self.trash_read(laps, serial))
 
-    def trash_read(self, laps: list[tuple[float, str, str]] | None):
+    def trash_read(self, laps: list[tuple[float, str, str]] | None, serial: int = 0):
+        if serial and serial != self._trash_serial:  # older listing finished after a newer one
+            return
         self._trash_loading = False
         self._trash_rows = [self.trash_row(*lap) for lap in laps or ()]
         self.trashChanged.emit()
@@ -321,8 +466,11 @@ class LapActions(BackendBase):
         name = os.path.basename(path)
         number = lap_number_of(name)
         recorded = lap_timestamp_of(name)
+        place = os.path.basename(os.path.dirname(path))
+        if is_imported(self.folder, path):  # lap of an imported log (library)
+            place = f"{tr('Imported Laps')} · {place}"
         return {
-            "key": trashed, "track": os.path.basename(os.path.dirname(path)),
+            "key": trashed, "track": place,
             "title": trm(f"Lap {number}") if number else lap_stem(name),
             "time": format_laptime(lap_time_of(name)), "recorded": day_month_minutes(recorded) if recorded else "",
             "deleted": day_month_minutes(deleted),
@@ -331,8 +479,8 @@ class LapActions(BackendBase):
     @Slot(str)
     def restoreTrashed(self, key: str):
         """Lap of trash restored to its track folder (marks, check state & reference too if deleted this session)"""
-        root = os.path.normcase(os.path.abspath(os.path.join(self.folder, TRASH_FOLDER)))
-        if os.path.dirname(os.path.dirname(os.path.dirname(os.path.normcase(os.path.abspath(key))))) != root:
+        origin = trash_origin(self.folder, key)
+        if not origin:
             return  # not a lap of trash
         target = os.path.normcase(os.path.abspath(key))
         item = None
@@ -344,10 +492,9 @@ class LapActions(BackendBase):
         self._undo = [batch for batch in self._undo if batch]
         self.undoChanged.emit()
         if item is None:  # deleted before this session: lap only
-            item = (os.path.join(self.folder, os.path.basename(os.path.dirname(key)), os.path.basename(key)), key, {},
-                    False, False)
+            item = (origin, key, {}, False, False)
         if not self.restore_laps([item]):
-            self.set_status(trm(f"Unable to restore lap: {html.escape(os.path.basename(key))}"))
+            self.page_toast(trm(f"Unable to restore lap: {html.escape(os.path.basename(key))}"), "error")
         self.read_trash()
 
     @Slot(bool)
@@ -505,13 +652,28 @@ class LapActions(BackendBase):
 
     @Slot()
     def openLibrary(self):
-        from ..lap_library import LapLibrary
-
-        LapLibrary(self._window, self.folder, self.add_from_library, self.library_changed).show()
+        """Imported laps library panel opened (LapLibraryPanel.qml, see lap_library_panel)"""
+        self._library.openRequested.emit()
 
     def add_from_library(self, paths: list[str]):
         """Laps picked in library shown & checked, fastest one as reference"""
         self.add_external(paths, paths)
+
+    def trash_imported(self, deletion: Deletion):
+        """Imported laps moved to lap viewer trash by the library: one deletion of page undo (Ctrl+Z, toast) &
+        Recently Deleted, shown ones dropped from charts (shown again by undo)"""
+        laps = [(path, target) for path, target in deletion.trashed if is_lap_file(path)]
+        if laps:
+            self._undo.append([(path, target, {}, path in self.checked, path == self.reference_key)
+                               for path, target in laps])
+            del self._undo[:-UNDO_DEPTH]
+            self.undoChanged.emit()
+        if deletion.deleted:
+            self.library_changed(dict.fromkeys(deletion.deleted, ""))
+        if laps:
+            self.trashed(len(laps), lap_label(os.path.basename(laps[0][0])) if len(laps) == 1 else "")
+            if self._trash_rows:
+                self.read_trash()
 
     def library_changed(self, moved: dict[str, str]):
         """Imported laps renamed (new path) or deleted (empty path) in library"""

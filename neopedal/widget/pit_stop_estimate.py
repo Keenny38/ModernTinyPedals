@@ -326,8 +326,9 @@ class Realtime(Overlay):
         is_lengthy_stop = min_pitstop_time >= self.wcfg["lengthy_stop_duration_threshold"]
         padding = 0.00000001 * is_lengthy_stop
 
-        # Min total pit time, update while not in pit
-        if not api.read.vehicle.in_pits() or self.bar_minpit.last < pass_time:
+        # Min total pit time, update while not in pit (kept during a stop: stop time counts down), or in garage
+        # (session start: value of previous track kept otherwise)
+        if not api.read.vehicle.in_pits() or api.read.vehicle.in_garage() or self.bar_minpit.last < pass_time:
             if min_pitstop_time > 0:
                 min_total = min_pitstop_time + pass_time + self.wcfg["additional_pitstop_time"]
             else:

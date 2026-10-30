@@ -22,6 +22,7 @@ Rectangle {
         x: theme.em * 0.35
         anchors.verticalCenter: parent.verticalCenter
         text: badge.label
+        textFormat: Text.PlainText
         color: theme.inkOn(badge.fill)
         font.pointSize: theme.fontCaption
         font.weight: Font.Bold
@@ -38,6 +39,7 @@ Rectangle {
             id: placeText
             anchors.centerIn: parent
             text: badge.position
+            textFormat: Text.PlainText
             color: theme.inkOn(parent.color)
             font.pointSize: theme.fontCaption
             font.weight: Font.DemiBold

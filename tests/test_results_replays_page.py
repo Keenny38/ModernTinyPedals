@@ -95,6 +95,7 @@ def test_page_hidden_stops_game_requests(page):
     dialog, _ = page
     dialog.backend.setTab(REPLAY_TAB)
     dialog.show()
-    assert dialog.replays._shown
+    assert wait_until(lambda: dialog.backend.hasSession)  # replay tab shown once its session (with a replay) is
+    assert dialog.backend.shownTab == REPLAY_TAB and dialog.replays._shown
     dialog.hide()
     assert not dialog.replays._shown and not dialog.replays._timer.isActive()

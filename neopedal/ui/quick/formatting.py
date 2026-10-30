@@ -17,19 +17,25 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Date & time texts shown by pages and written to exported files, one helper per format
+Date & time texts shown by pages and written to exported files, one helper per format; values in units of user
+setting (temperature, distance)
 
-Timestamps are seconds since epoch, shown in local time; None for now.
+Timestamps are seconds since epoch, shown in local time; None for now. Pages show dates in format of app language
+(date_locale: system format when the system speaks it); fixed ISO formats only for file names & exported files.
 """
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import date
 
 from PySide6.QtCore import QDate, QDateTime, QLocale
 
+from ... import units
 from ...i18n import current_language, tr
+from ...process.results_text import MISSING, number_text
+from ...setting import cfg
 
 
 # Fixed formats
@@ -49,13 +55,16 @@ def file_stamp(timestamp: float | None = None) -> str:
 
 
 def day_month(timestamp: float) -> str:
-    """Day & month as 24/10, "" if none"""
-    return time.strftime("%d/%m", time.localtime(timestamp)) if timestamp > 0 else ""
+    """Day & month in language format (24/10 in French, 10/24 in US English), "" if none"""
+    if timestamp <= 0:
+        return ""
+    day = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
+    return date_locale().toString(day, day_month_format())
 
 
 def day_month_minutes(timestamp: float) -> str:
-    """Day, month & time as 24/10 18:05, "" if none"""
-    return time.strftime("%d/%m %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
+    """Day, month & time in language format (24/10 18:05), "" if none"""
+    return f"{day_month(timestamp)} {clock_minutes(timestamp)}" if timestamp > 0 else ""
 
 
 def day_month_year_minutes(timestamp: float | None = None) -> str:
@@ -94,10 +103,17 @@ def date_locale() -> QLocale:
     return QLocale(code)
 
 
+def day_month_format() -> str:
+    """Short date format of language without its year: dd/MM from dd/MM/yyyy, M/d from M/d/yy"""
+    pattern = date_locale().dateFormat(QLocale.FormatType.ShortFormat)
+    shorter = re.sub(r"^y+\W*|\W*y+$", "", pattern)
+    return shorter if "y" not in shorter and "d" in shorter and "M" in shorter else "dd/MM"
+
+
 def format_date(timestamp: float) -> str:
-    """Short date in language format (24/10/2025 in French), "-" if none"""
+    """Short date in language format (24/10/2025 in French), missing text if none"""
     if timestamp <= 0:
-        return "-"
+        return MISSING
     day = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
     return date_locale().toString(day, QLocale.FormatType.ShortFormat)
 
@@ -121,8 +137,41 @@ def day_text(timestamp: float, today: QDate) -> str:
 
 
 def date_text(timestamp: float) -> str:
-    """Short date & time in app language format, "" if none"""
+    """Short date & time in language format (24/10/2025 18:05), "" if none: dates of every page"""
     if timestamp <= 0:
         return ""
     day = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
-    return f"{QLocale(current_language()).toString(day, QLocale.FormatType.ShortFormat)} {clock_minutes(timestamp)}"
+    return f"{date_locale().toString(day, QLocale.FormatType.ShortFormat)} {clock_minutes(timestamp)}"
+
+
+# Values in units of user setting, shared by pages (Stats, Race calculator, Results...)
+def fahrenheit() -> bool:
+    return cfg.units.get("temperature_unit") == "Fahrenheit"
+
+
+def temperature_symbol() -> str:
+    return "°F" if fahrenheit() else "°C"
+
+
+def temperature_value(celsius: float) -> float:
+    """Temperature in user unit"""
+    return units.celsius_to_fahrenheit(celsius) if fahrenheit() else celsius
+
+
+def temperature_text(celsius: float, decimals: int = 0) -> str:
+    """Temperature in user unit: "24 °C", "75 °F", missing text if unknown (-999 and below)"""
+    if celsius <= -999:
+        return MISSING
+    return f"{number_text(temperature_value(celsius), decimals)} {temperature_symbol()}"
+
+
+def odometer_text(meters: float, decimals: int = 2) -> str:
+    """Track or driven length in user odometer unit: "5,79 km", "3,60 mi", "5793 m", missing text if none"""
+    if meters <= 0:
+        return MISSING
+    unit = cfg.units.get("odometer_unit")
+    if unit == "Mile":
+        return f"{number_text(units.meter_to_mile(meters), decimals)} mi"
+    if unit == "Meter":
+        return f"{number_text(meters)} m"
+    return f"{number_text(units.meter_to_kilometer(meters), decimals)} km"

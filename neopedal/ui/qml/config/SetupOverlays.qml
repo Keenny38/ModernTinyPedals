@@ -20,7 +20,7 @@ SetupStep {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: theme.padCard
-            spacing: theme.em * 0.6
+            spacing: theme.space4
 
             TpSegmented {
                 name: i18n.tr("Preset to use")
@@ -33,7 +33,7 @@ SetupStep {
             RowLayout {
                 visible: backend.newPreset
                 Layout.fillWidth: true
-                spacing: theme.em * 0.6
+                spacing: theme.space4
                 Text {
                     text: i18n.tr("Name")
                     color: theme.dimText
@@ -56,6 +56,7 @@ SetupStep {
                 Layout.fillWidth: true
                 visible: backend.newPreset && backend.nameError !== ""
                 text: "⚠ " + backend.nameError
+                textFormat: Text.PlainText
                 color: theme.loss
                 wrapMode: Text.WordWrap
                 font.pointSize: theme.fontLabel
@@ -64,7 +65,7 @@ SetupStep {
             RowLayout {
                 visible: !backend.newPreset
                 Layout.fillWidth: true
-                spacing: theme.em * 0.6
+                spacing: theme.space4
                 Text {
                     text: i18n.tr("Name")
                     color: theme.dimText
@@ -88,8 +89,8 @@ SetupStep {
 
     RowLayout {
         Layout.fillWidth: true
-        Layout.topMargin: theme.em * 0.4
-        spacing: theme.em * 0.4
+        Layout.topMargin: theme.space3
+        spacing: theme.space3
         SetupHeading {
             Layout.fillWidth: false
             Layout.maximumWidth: implicitWidth
@@ -149,8 +150,8 @@ SetupStep {
                 required property int previewState
                 width: grid.tileWidth
                 height: picture.height + info.implicitHeight + theme.em * 1.3
-                radius: theme.radiusXl
-                color: tileArea.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.18) : Qt.darker(theme.base, 1.025)) : theme.base
+                radius: theme.radiusLg
+                color: tileArea.containsMouse ? theme.surfaceHover : theme.surfaceCard
                 border.width: checked ? 2 : 1
                 border.color: checked ? theme.accent : theme.cardBorder
                 scale: tileArea.pressed ? 0.98 : 1
@@ -184,21 +185,21 @@ SetupStep {
                     Rectangle {  // check mark
                         anchors.top: parent.top
                         anchors.right: parent.right
-                        anchors.margins: theme.em * 0.4
+                        anchors.margins: theme.space3
                         width: Math.round(theme.em * 1.3)
                         height: width
                         radius: theme.radiusSm
-                        color: tile.checked ? theme.accentFill : Qt.rgba(0, 0, 0, 0.35)
+                        color: tile.checked ? theme.accentFill : theme.stageScrim  // over the overlay picture
                         border.width: tile.checked ? 0 : 1.5
-                        border.color: Qt.rgba(1, 1, 1, 0.7)
+                        border.color: theme.stageInk
                         Behavior on color { ColorAnimation { duration: theme.motionBase } }
                         Icon {
                             anchors.centerIn: parent
                             visible: tile.checked
                             fallback: "✓"
                             glyph: ""  // check
-                            color: "white"
-                            size: theme.em * 0.72
+                            color: theme.accentInk
+                            size: theme.iconXs
                         }
                     }
                 }
@@ -208,12 +209,13 @@ SetupStep {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: picture.bottom
-                    anchors.margins: theme.em * 0.6
+                    anchors.margins: theme.space4
                     anchors.topMargin: theme.em * 0.5
-                    spacing: theme.em * 0.3
+                    spacing: theme.space2
                     Text {
                         Layout.fillWidth: true
                         text: tile.label
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight

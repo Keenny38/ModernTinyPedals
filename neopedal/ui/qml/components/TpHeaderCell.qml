@@ -16,7 +16,7 @@ AbstractButton {
 
     hoverEnabled: sortable || tip !== "" || label.truncated
     focusPolicy: sortable ? Qt.TabFocus : Qt.NoFocus
-    implicitHeight: Math.round(theme.em * 1.8)
+    implicitHeight: Math.round(theme.headerHeight)
     implicitWidth: label.implicitWidth + (sorted ? arrow.implicitWidth + theme.space1 : 0) + theme.space3
     onClicked: if (sortable) sortRequested()
     Keys.onReturnPressed: if (sortable) sortRequested()
@@ -50,19 +50,21 @@ AbstractButton {
             Text {
                 id: label
                 text: cell.text
+                textFormat: Text.PlainText
                 width: Math.max(0, Math.min(implicitWidth + 1, row.width - (cell.sorted ? arrow.width + row.spacing : 0)))
                 elide: Text.ElideRight
                 color: cell.sorted ? theme.accent : theme.dimText
                 font.pointSize: theme.fontCaption
                 font.weight: Font.DemiBold
                 font.capitalization: Font.AllUppercase
-                font.letterSpacing: 0.4
+                font.letterSpacing: theme.letterSpacingOverline  // capitals, as overline texts
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
                 id: arrow
                 visible: cell.sorted
                 text: cell.descending ? "▼" : "▲"
+                textFormat: Text.PlainText
                 color: theme.accent
                 font.pointSize: theme.fontMicro
                 anchors.verticalCenter: parent.verticalCenter

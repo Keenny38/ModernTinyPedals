@@ -31,6 +31,11 @@ from ..i18n import localized, tr
 from .results_file import Entry, SessionResult, best_lap_gap, race_gap
 
 MINUS = chr(0x2212)  # typeset minus sign
+# Session filter of Results, Replays & Stats pages: labels in this order (index saved by each page)
+SESSION_FILTER_LABELS = ("All", "Practice", "Qualifying", "Race")
+MISSING = chr(0x2014)  # value unknown or not available, on every app page (in-game overlays keep their en dash)
+PODIUM_TONES = ("gold", "silver", "bronze")  # race podium places of Results & Stats pages
+RETIRED_TONE = "loss"  # DNF & DQ of Results & Stats pages
 # Texts written by game (English): label shown, translated (unknown texts shown as written)
 GAME_LABELS = {
     # Retirement reasons
@@ -62,9 +67,56 @@ def game_text(text: str) -> str:
     return tr(label) if label else text
 
 
+# Numbers & times of every app page: decimal separator of app language, typeset minus sign, " s" spaced
+def number_text(value: float, decimals: int = 0) -> str:
+    """Number with decimals: "2,5" in French, "-2,5" below zero (typeset minus) ("0" for a rounded "-0")"""
+    decimals = max(decimals, 0)
+    return localized(f"{round(value, decimals) + 0.0:.{decimals}f}").replace("-", MINUS)
+
+
+def signed_text(value: float, decimals: int = 0, unit: str = "") -> str:
+    """Signed number with optional unit: "+1,2 s", "-0,345" (typeset minus) (unit given with its leading space)"""
+    decimals = max(decimals, 0)
+    return f"{localized(f'{round(value, decimals) + 0.0:+.{decimals}f}')}{unit}".replace("-", MINUS)
+
+
+def seconds_text(seconds: float, decimals: int = 1, sign: bool = False) -> str:
+    """Duration in seconds: "12,3 s", signed if sign ("+1,2 s")"""
+    if sign:
+        return signed_text(seconds, decimals, " s")
+    return f"{number_text(seconds, decimals)} s"
+
+
+def laptime_text(seconds: float, missing: str = MISSING) -> str:
+    """Lap time m:ss.sss of every app page (lap times keep their dot), missing text if none or aberrant"""
+    return calc.sec2laptime_full(seconds) if 0 < seconds < 36000 else missing
+
+
+def sector_text(seconds: float, missing: str = MISSING) -> str:
+    """Sector time 32.456 (m:ss.sss from a minute), missing text if none"""
+    if not 0 < seconds < 36000:
+        return missing
+    return calc.sec2laptime_full(seconds) if round(seconds, 3) >= 60 else f"{seconds:.3f}"
+
+
+def position_text(position: int, total: int = 0) -> str:
+    """Position "P3", "P3/12" out of a field, missing text if unknown"""
+    if position <= 0:
+        return MISSING
+    return f"P{position}/{total}" if total > 0 else f"P{position}"
+
+
+def place_tone(position: int, race: bool, retired: bool = False) -> str:
+    """Finish place tone shared by Results & Stats: DNF / DQ "loss", race podium gold, silver & bronze (never in
+    practice & qualifying), "" else"""
+    if retired:
+        return RETIRED_TONE
+    return PODIUM_TONES[position - 1] if race and 1 <= position <= 3 else ""
+
+
 def lap_text(seconds: float) -> str:
-    """Lap time m:ss.sss, "-" if none"""
-    return calc.sec2laptime_full(seconds) if seconds > 0 else "-"
+    """Lap time m:ss.sss, missing text if none"""
+    return laptime_text(seconds)
 
 
 def race_time_text(seconds: float) -> str:
@@ -129,7 +181,7 @@ def entry_gap(result: SessionResult, entry: Entry, leader: Entry, first: bool) -
     if first:
         return "", ""
     gap_time = best_lap_gap(entry, leader)
-    return (gap_seconds_text(gap_time) if gap_time >= 0 else "-"), "" if gap_time >= 0 else "dim"
+    return (gap_seconds_text(gap_time) if gap_time >= 0 else MISSING), "" if gap_time >= 0 else "dim"
 
 
 def driver_names(entry: Entry) -> list[str]:

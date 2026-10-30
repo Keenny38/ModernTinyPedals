@@ -7,6 +7,7 @@ Inherit Python mapping of LMU Shared Memory Interface
 from __future__ import annotations
 
 import ctypes
+import gc
 import logging
 import mmap
 import platform
@@ -39,6 +40,21 @@ def no_update() -> None:
     """Update placeholder while mmap is not created (None: unknown whether data changed)"""
 
 
+def close_mmap(mmap_buffer: mmap.mmap, name: str) -> bool:
+    """Close mmap, once more after a garbage collection if a ctypes view of it is only kept alive by a
+    reference cycle (direct access), returns True if closed"""
+    for collected in (False, True):
+        try:
+            mmap_buffer.close()
+            logger.info("sharedmemory: CLOSED: %s", name)
+            return True
+        except BufferError:  # exported buffer (struct from_buffer) still referenced
+            if not collected:
+                gc.collect()
+    logger.error("sharedmemory: buffer error while closing %s", name)
+    return False
+
+
 def platform_mmap(name: str, size: int) -> mmap.mmap:
     """Platform memory mapping"""
     if PLATFORM == "Windows":
@@ -69,6 +85,7 @@ class MMapControl:
         "_struct",
         "_buffer",
         "_realtime",
+        "_heads",
         "update",
         "data",
     )
@@ -85,6 +102,8 @@ class MMapControl:
         self._struct = data_struct
         self._buffer = bytearray()
         self._realtime = None
+        # Copy access: (live scoring info, copied scoring info, live first telemetry, copied first telemetry)
+        self._heads: tuple | None = None
         # Returns True if data copy updated, False if not (no new data), None if unknown (direct access)
         self.update: Callable[[], bool | None] = no_update
         self.data: Any = None
@@ -110,6 +129,7 @@ class MMapControl:
             self._buffer[:] = self._mmap_buffer
             self._realtime = self._struct.from_buffer(self._mmap_buffer)
             self.data = self._struct.from_buffer(self._buffer)
+            self._heads = None  # made by first update
             self.update = self.__buffer_copy
 
         mode = "Direct" if access_mode else "Copy"
@@ -122,11 +142,8 @@ class MMapControl:
         """
         self.data = self._struct.from_buffer_copy(self._mmap_buffer)
         self._realtime = None
-        try:
-            self._mmap_buffer.close()
-            logger.info("sharedmemory: CLOSED: %s", self._mmap_name)
-        except BufferError:
-            logger.error("sharedmemory: buffer error while closing %s", self._mmap_name)
+        self._heads = None
+        close_mmap(self._mmap_buffer, self._mmap_name)
         self.update = no_update  # unassign update method (for proper garbage collection)
 
     def __buffer_share(self) -> None:
@@ -145,10 +162,30 @@ class MMapControl:
         ) and (
             self._realtime.scoring.scoringInfo.mNumVehicles
             == self._realtime.telemetry.activeVehicles
-        ) and self._buffer != self._mmap_buffer:  # compare is faster than copy, same data not copied again
+        ) and self.__changed():
             self._buffer[:] = self._mmap_buffer
             return True
         return False
+
+    def __changed(self) -> bool:
+        """Whether shared memory differs from data copy
+
+        Sample times of scoring & first telemetry entry are compared first: while the game runs they change
+        nearly every tick, so the full compare (whole structure, same cost as the copy) only runs on same
+        times (paused game, menus), where it mostly finds equal data and saves the copy.
+        """
+        heads = self._heads
+        if heads is None:  # wrappers of live & copied structures, made once (ctypes allocates one per access)
+            heads = self._heads = (
+                self._realtime.scoring.scoringInfo, self.data.scoring.scoringInfo,
+                self._realtime.telemetry.telemInfo[0], self.data.telemetry.telemInfo[0],
+            )
+        live_scor, copy_scor, live_tele, copy_tele = heads
+        return (
+            live_scor.mCurrentET != copy_scor.mCurrentET
+            or live_tele.mElapsedTime != copy_tele.mElapsedTime
+            or self._buffer != self._mmap_buffer
+        )
 
 
 def test_api():

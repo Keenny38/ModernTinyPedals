@@ -122,7 +122,7 @@ class Realtime(GapTrendMixin, TableMixin, ModernOverlay):
         return QRectF(left, rect.top() + inset, width, rect.height() - inset * 2)
 
     def paint_static(self, painter: QPainter):
-        panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), self.theme, self.panel_radius(), self.depth_effects)
         self.draw_header(painter)
 
     def paint(self, painter: QPainter):

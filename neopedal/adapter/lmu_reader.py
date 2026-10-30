@@ -221,9 +221,16 @@ class ElectricMotor(_reader.ElectricMotor, DataAdapter):
         """Motor water temperature (Celsius)"""
         return rmnan(self.shmm.lmuTeleVeh(index).mElectricBoostWaterTemperature)
 
+    def power(self, index: int | None = None) -> float:
+        """Motor power deployed (kW), 0 while regenerating
+
+        Game electric power (mRegen, negative while deploying): torque x RPM is several times too high.
+        """
+        return max(0.0, -rmnan(self.shmm.lmuTeleVeh(index).mRegen))
+
     def regeneration_level(self, index: int | None = None) -> float:
-        """Regeneration level (kW)"""
-        return rmnan(self.shmm.lmuTeleVeh(index).mRegen)
+        """Regeneration power (kW), 0 while deploying"""
+        return max(0.0, rmnan(self.shmm.lmuTeleVeh(index).mRegen))
 
     def state_of_charge(self, index: int | None = None) -> float:
         """Battery state of charge as shown by game (percent, 0-100)
@@ -529,6 +536,10 @@ class Session(_reader.Session, DataAdapter):
         """Before race starts (green flag)"""
         return self.shmm.lmuScorInfo.mGamePhase <= 4
 
+    def before_formation(self) -> bool:
+        """Before formation lap starts (cars on the grid, amounts of race start)"""
+        return self.shmm.lmuScorInfo.mGamePhase < 3
+
     def green_flag(self) -> bool:
         """Green flag (race starts)"""
         # Inaccurate due to 5FPS refresh rate from API
@@ -643,7 +654,7 @@ class Session(_reader.Session, DataAdapter):
 
     def track_time(self) -> float:
         """Track time"""
-        return self.shmm.lmuScorInfo.mTimeOfDay
+        return rmnan(self.shmm.lmuScorInfo.mTimeOfDay)
 
     def time_scale(self) -> int:
         """Time scale"""
@@ -666,10 +677,11 @@ class Session(_reader.Session, DataAdapter):
         return 0.0
 
     def cut_points(self, index: int | None = None) -> float:
-        """Current track limits cut points per penalty"""
+        """Current track limits cut points per penalty (server value of results stream when newer: other
+        cars' shared memory points are not reset by the penalty)"""
         points = self.shmm.lmuScorInfo.mTrackLimitsStepsPerPoint
         if points:
-            return self.shmm.lmuTeleVeh(index).mTrackLimitsSteps / points
+            return self.shmm.lmuCutPoints(index, self.shmm.lmuTeleVeh(index).mTrackLimitsSteps / points)
         return 0.0
 
     def time_remaining(self) -> float:

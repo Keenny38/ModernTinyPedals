@@ -6,11 +6,13 @@ import "../components"
 // Broadcast director (LMU): cars of the session, camera desk (car & camera on air, director suggestions or
 // automatic cuts, replay transport) and commentator screen (events, battles, classes, pit stops, car sheet).
 // Under bpWide the three panels are stacked in tabs (Cars / Desk / Commentary).
-// Left / Right: previous / next car, Enter: take best suggestion, Space: play / pause replay, F5: ask game again.
-// A focused control (button, switch, segmented, list) keeps these keys (ShortcutOverride): page keys never
-// fire for it.
+// Left / Right: previous / next car, Enter: take best suggestion (assisted & automatic), Space: play / pause
+// replay, F5: ask game again, ?: keys sheet (page keys & director hotkeys). Esc closes the popup shown, never the
+// page. A focused control (button, switch, segmented, list) keeps these keys (ShortcutOverride): page keys never
+// fire for it. Game answering without the session for a moment: desk kept, greyed, under a banner.
 TpPage {
     id: page
+    focus: true  // page keys (Esc) reach it when no control has focus
 
     readonly property string gameState: backend.gameState
     readonly property bool wide: width > theme.em * 92  // content-tuned: session strip & button texts of the three desks
@@ -27,10 +29,17 @@ TpPage {
     readonly property bool keys: pageState.active && !typing
     Shortcut { sequence: "Left"; enabled: page.keys && backend.inSession; onActivated: backend.stepCar(-1) }
     Shortcut { sequence: "Right"; enabled: page.keys && backend.inSession; onActivated: backend.stepCar(1) }
-    Shortcut { sequences: ["Return", "Enter"]; enabled: page.keys && backend.inSession; onActivated: backend.takeBest() }
+    // Manual mode: no Enter (stories hidden: a reflex Enter would cut to one the operator does not see)
+    Shortcut { sequences: ["Return", "Enter"]; enabled: page.keys && backend.inSession && backend.modeName !== "manual"; onActivated: backend.takeBest() }
     Shortcut { sequence: "Space"; enabled: page.keys && backend.replayActive; onActivated: backend.camera.togglePlay() }
     Shortcut { sequences: [StandardKey.Refresh]; enabled: pageState.active && backend.enabled; onActivated: backend.game.refresh() }
-    // 1 to 6: take that suggestion (assisted & automatic modes), numbers shown on the suggestions
+    // Graphics layout reset (Broadcast Graphics) undone with Ctrl+Z, as the Undo of its toast
+    Shortcut { sequence: "Ctrl+Z"; enabled: pageState.active && backend.graphics.canUndoLayoutReset; onActivated: backend.graphics.undoLayoutReset() }
+    // "?" comes with Shift on most layouts (platform key maps may or may not drop it): both
+    Shortcut { sequences: ["?", "Shift+?"]; enabled: page.keys; onActivated: keysSheet.opened ? keysSheet.close() : keysSheet.open() }
+    // Esc: popups close themselves; nothing open, accepted here so the page is never closed by it
+    Keys.onEscapePressed: function(event) { event.accepted = true }
+    // 1 to 6: take the suggestion showing that number (assisted & automatic modes), kept while it is listed
     Repeater {
         model: 6
         delegate: Item {
@@ -48,38 +57,33 @@ TpPage {
         time: backend.sessionTime
         received: backend.timeReceived
         rate: backend.clockRate
-        active: backend.inSession && backend.sessionTime >= 0 && statePill.visible && pageState.active
+        active: backend.inSession && backend.sessionTime >= 0 && statePill.visible && pageState.active && !backend.gameLost
+    }
+    // Hotkey of a director command after a tooltip, "" if none
+    function hotkeyTip(name) {
+        var key = backend.keyLabels[name] || ""
+        return key !== "" ? "  ·  " + i18n.tr("Hotkey %1").arg(key) : ""
     }
 
     ColumnLayout {
+        id: mainColumn
         anchors.fill: parent
         anchors.margins: theme.padPage
         spacing: theme.space4
 
-        // Header: director on / off, game state & session clock, mode, settings (page title: in the host's title bar)
+        // Header: game state & session clock, mode, settings, director on / off (page title: in the host's title bar)
         RowLayout {
+            objectName: "headerRow"
             Layout.fillWidth: true
             spacing: theme.space4
 
-            TpSwitch {
-                objectName: "enabledSwitch"
-                checkable: false  // follows backend
-                checked: backend.enabled
-                // Narrow page: label only while off (state easy to miss from the switch alone)
-                text: page.wide || !backend.enabled ? (backend.enabled ? i18n.tr("Enabled") : i18n.tr("Disabled")) : ""
-                tip: i18n.tr("Broadcast Director on or off")
-                onClicked: backend.setEnabled(!backend.enabled)
-                Accessible.role: Accessible.CheckBox
-                Accessible.name: i18n.tr("Broadcast Director on or off")
-                Accessible.checked: backend.enabled
-            }
             Pill {  // game state (live / replay / menus...) & session clock: dot & text, not color alone
                 id: statePill
                 visible: backend.enabled
                 Layout.alignment: Qt.AlignVCenter
-                tint: page.stateColor(page.gameState)
+                tint: backend.gameLost ? theme.warning : page.stateColor(page.gameState)
                 dot: true
-                pulsing: backend.inSession
+                pulsing: backend.inSession && !backend.gameLost
                 maximumTextWidth: page.width * 0.3
                 tip: backend.statusText
                 text: (page.gameState === "session" ? i18n.tr("Live").toUpperCase()
@@ -91,6 +95,7 @@ TpPage {
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 4
                 text: backend.enabled ? backend.sessionText : ""
+                textFormat: Text.PlainText
                 color: theme.dimText
                 elide: Text.ElideRight
             }
@@ -153,18 +158,18 @@ TpPage {
                                     width: theme.em * 6.2
                                     height: forecastColumn.implicitHeight + theme.space5
                                     radius: theme.radiusMd
-                                    color: modelData.wet ? Qt.tint(theme.base, theme.tint(wetTone, "selected")) : theme.base
+                                    color: modelData.wet ? Qt.tint(theme.surfaceCard, theme.tint(wetTone, "selected")) : theme.surfaceCard
                                     border.width: modelData.wet ? 2 : 1  // wet: thicker frame too
-                                    border.color: modelData.wet ? wetTone : theme.border
+                                    border.color: modelData.wet ? wetTone : theme.strokeSubtle
                                     Column {
                                         id: forecastColumn
                                         anchors.centerIn: parent
                                         width: parent.width - theme.space4
                                         spacing: 2
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.label === "Start" ? i18n.tr("Start") : forecastCard.modelData.label === "Finish" ? i18n.tr("Finish") : forecastCard.modelData.label; color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontCaption }
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.temperature; color: theme.text; font.weight: Font.DemiBold }
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: i18n.tr("Rain %1").replace("%1", forecastCard.modelData.rain); color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontCaption; font.weight: forecastCard.modelData.wet ? Font.DemiBold : Font.Normal }
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.sky; color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontTiny; wrapMode: Text.WordWrap }
+                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.label === "Start" ? i18n.tr("Start") : forecastCard.modelData.label === "Finish" ? i18n.tr("Finish") : forecastCard.modelData.label; color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontCaption; textFormat: Text.PlainText }
+                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.temperature; color: theme.text; font.weight: Font.DemiBold; textFormat: Text.PlainText }
+                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: i18n.tr("Rain %1").replace("%1", forecastCard.modelData.rain); color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontCaption; font.weight: forecastCard.modelData.wet ? Font.DemiBold : Font.Normal; textFormat: Text.PlainText }
+                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: forecastCard.modelData.sky; color: theme.dimOn(forecastCard.color); font.pointSize: theme.fontTiny; wrapMode: Text.WordWrap; textFormat: Text.PlainText }
                                     }
                                 }
                             }
@@ -173,34 +178,14 @@ TpPage {
                 }
             }
             // Instant replay shown in the game: back to live at once
-            Rectangle {
+            TpTally {
+                objectName: "instantReplayTally"
                 visible: backend.instantReplay
-                implicitHeight: theme.controlHeight
-                implicitWidth: replayRow.implicitWidth + theme.space6
-                radius: height / 2
-                color: theme.tint(theme.accent, "selected")
-                border.width: 1
-                border.color: theme.accent
-                Row {
-                    id: replayRow
-                    anchors.centerIn: parent
-                    spacing: theme.em * 0.5
-                    Icon { glyph: ""; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }  // video
-                    Text {
-                        text: i18n.tr("Instant Replay").toUpperCase()
-                        color: theme.accent
-                        font.weight: Font.Bold
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    TpButton {
-                        objectName: "backToLiveButton"
-                        anchors.verticalCenter: parent.verticalCenter
-                        size: "sm"
-                        accent: true
-                        text: i18n.tr("Back to Live")
-                        onClicked: backend.backToLive()
-                    }
-                }
+                live: true
+                tint: theme.accentFill
+                text: i18n.tr("Instant Replay")
+                actionText: i18n.tr("Back to Live")
+                onAction: backend.backToLive()
             }
             // Mode: manual, assisted (suggestions), automatic (director cuts)
             TpSegmented {
@@ -227,6 +212,21 @@ TpPage {
                     y: graphicsButton.height + 4
                 }
             }
+            TpButton {  // keys sheet: page keys & director hotkeys
+                id: keysButton
+                objectName: "keysButton"
+                glyph: ""  // keyboard
+                fallback: "?"
+                tip: i18n.tr("Director keys") + " (?)"
+                checked: keysSheet.visible
+                onClicked: keysSheet.visible ? keysSheet.close() : keysSheet.open()
+                DirectorKeys {
+                    id: keysSheet
+                    x: keysButton.width - width
+                    y: keysButton.height + 4
+                    onClosed: page.forceActiveFocus()  // page keys (Enter, 1 to 6) work again at once
+                }
+            }
             TpButton {
                 id: settingsButton
                 objectName: "settingsButton"
@@ -242,11 +242,23 @@ TpPage {
                 }
             }
             TpButton {
-                glyph: ""  // refresh
+                glyph: theme.glyphs.refresh
                 fallback: "⟳"
                 tip: i18n.tr("Ask game again (F5)")
                 enabled: backend.enabled
                 onClicked: backend.game.refresh()
+            }
+            TpButton {  // director on / off, last of the header like the Race Calculator's
+                objectName: "enabledSwitch"
+                glyph: ""  // power
+                fallback: backend.enabled ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                // Narrow page: label only while off (state easy to miss from the icon alone)
+                text: page.wide || !backend.enabled ? (backend.enabled ? i18n.tr("Enabled") : i18n.tr("Disabled")) : ""
+                tip: i18n.tr("Broadcast Director on or off") + page.hotkeyTip("director_toggle")
+                checkable: false  // follows backend
+                checked: backend.enabled
+                onClicked: backend.setEnabled(!backend.enabled)
+                Accessible.name: i18n.tr("Broadcast Director on or off")
             }
         }
 
@@ -255,9 +267,10 @@ TpPage {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: !backend.inSession
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - theme.em * 2, theme.em * 34)
+                empty: true
                 glyph: ""  // video
                 title: backend.enabled ? i18n.tr("Broadcast Director") : i18n.tr("Broadcast Director is off")
                 text: !backend.enabled ? i18n.tr("The game is not asked anything: no camera cut and the broadcast graphics stay empty. Graphics and director settings can still be changed. Turn it on to direct a session or a replay.")
@@ -280,11 +293,15 @@ TpPage {
             onActivated: function(index) { page.deskTab = index }
         }
 
-        // Cars | camera desk | commentator screen (stacked page: the panel of the tab, whole width)
+        // Cars | camera desk | commentator screen (stacked page: the panel of the tab, whole width). Game answering
+        // without the session for a moment: kept (greyed) under a banner, until it answers or the session ends
         RowLayout {
+            id: panels
+            objectName: "deskPanels"
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: backend.inSession
+            enabled: !backend.gameLost
             spacing: theme.space4
 
             Card {
@@ -312,17 +329,33 @@ TpPage {
         }
     }
 
+    TpNotice {  // over the panels' top (no layout move): how long the game has not answered
+        id: lostBanner
+        objectName: "lostBanner"
+        visible: backend.gameLost && panels.visible
+        x: mainColumn.x + panels.x
+        y: mainColumn.y + panels.y
+        z: 2
+        width: panels.width
+        property real now: Date.now()
+        tone: theme.warning
+        text: i18n.tr("Game not responding for %1 s: desk paused until it answers or the session ends")
+              .arg(Math.max(1, Math.round((now - backend.lostSince) / 1000)))
+        actionText: i18n.tr("Ask Game Again")
+        onAction: backend.game.refresh()
+        Timer {
+            interval: 1000
+            repeat: true
+            running: lostBanner.visible && pageState.active
+            triggeredOnStart: true
+            onTriggered: lostBanner.now = Date.now()
+        }
+    }
+
     DirectorLaps { id: lapHistory }
     DirectorTiming { id: timingTable }
 
-    // Message of refused command (time from text length)
-    TpToast {
-        id: toast
-        text: backend.noticeText
-        error: backend.noticeError
-        Connections {
-            target: backend
-            function onNoticeChanged() { toast.show() }
-        }
-    }
+    // Dialogs & the one toast of the page (backend.notify: refused command, copied address, reset with Undo...),
+    // asked by the backend (quick/dialogs.py): over the page, last child
+    TpDialogHost {}
 }

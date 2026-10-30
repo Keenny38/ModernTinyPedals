@@ -105,6 +105,7 @@ class DriverTable(Overlay):
 
     wcfg: Any  # Relative, Standings or Rivals options
     blank_state: int | None = None  # row state of blank cells (text cleared), None if rows hidden instead
+    shown_state: int = 1  # row state of a row showing a car (Standings: 0)
     veh_range: int
     count_tcp: int
     drv_width: int
@@ -534,6 +535,8 @@ class DriverTable(Overlay):
             target.last = data
             if data[2]:  # player
                 style = self.bar_style_pic[1]
+            elif data[-1] == self.blank_state:  # no class color of car of empty row
+                style = self.bar_style_pic[0]
             elif self.wcfg["show_class_style_for_position_in_class"]:
                 style = (self.wcfg["font_color_position_in_class"], self.set_class_style(data[1])[1])
             else:
@@ -546,7 +549,8 @@ class DriverTable(Overlay):
         """Vehicle class"""
         if target.last != data:
             target.last = data
-            text, bg_color = self.set_class_style(data[0])
+            # Empty row: no class of car of row (vehicle data of index -1)
+            text, bg_color = self.set_class_style("" if data[-1] == self.blank_state else data[0])
             target.text = text[:self.cls_width]
             target.fg, target.bg = (self.wcfg["font_color_class"], bg_color)
             self.toggle_visibility(target, data[-1])
@@ -555,7 +559,9 @@ class DriverTable(Overlay):
         """Vehicle in pit"""
         if target.last != data:
             target.last = data
-            if data[2]:  # finish flag
+            if data[-1] == self.blank_state:  # empty row: no status of car of row (vehicle data of index -1)
+                index = 0
+            elif data[2]:  # finish flag
                 index = 4
             else:
                 index = data[0]
@@ -623,35 +629,37 @@ class DriverTable(Overlay):
             self.toggle_visibility(target, data[-1])
 
     def update_nrg(self, target, *data):
-        """Remaining energy"""
-        if target.last != data:
-            target.last = data
-            ve = data[0]
-            if data[1]:  # highlighted player
-                color_index = 4
-            elif ve <= -1:  # unavailable
-                color_index = 0
-            elif ve <= 0.1:  # 10% remaining
-                color_index = 3
-            elif ve <= 0.3:  # 30% remaining
-                color_index = 2
-            else:
-                color_index = 1
-            if data[-1] == self.blank_state:
-                text = ""
-            elif ve <= -1:
-                text = "-" * self.nrg_width
-            else:
-                text = f"{ve:0{self.nrg_width}.{self.nrg_decimals}%}"[:self.nrg_width]
+        """Remaining energy, drawn again once its text or color changes (continuous value)"""
+        ve = data[0]
+        if data[1]:  # highlighted player
+            color_index = 4
+        elif ve <= -1:  # unavailable
+            color_index = 0
+        elif ve <= 0.1:  # 10% remaining
+            color_index = 3
+        elif ve <= 0.3:  # 30% remaining
+            color_index = 2
+        else:
+            color_index = 1
+        if data[-1] == self.blank_state:
+            text = ""
+        elif ve <= -1:
+            text = "-" * self.nrg_width
+        else:
+            text = f"{ve:0{self.nrg_width}.{self.nrg_decimals}%}"[:self.nrg_width]
+        shown = (text, color_index, data[-1])
+        if target.last != shown:
+            target.last = shown
             target.text = text
             target.fg, target.bg = self.bar_style_nrg[color_index]
             self.toggle_visibility(target, data[-1])
 
     def update_dmg(self, target, *data):
-        """Vehicle integrity"""
+        """Vehicle integrity, drawn again once its shown tenth changes"""
+        data = (int(data[0] * 10), *data[1:])
         if target.last != data:
             target.last = data
-            hp = int(data[0] * 10)
+            hp = data[0]
             if data[1]:  # highlighted player
                 color_index = 3
             elif hp >= 10:  # full integrity
@@ -696,23 +704,24 @@ class DriverTable(Overlay):
             self.toggle_visibility(target, data[-1])
 
     def update_stl(self, target, *data):
-        """Stint laps"""
-        if target.last != data:
-            target.last = data
-            if data[-1] == self.blank_state:
-                text = ""
+        """Stint laps, drawn again once its text changes (estimated laps: continuous value)"""
+        if data[-1] == self.blank_state:
+            text = ""
+        else:
+            stint_laps_done = data[0]
+            stint_laps_est = data[1]
+            if stint_laps_done <= 0:
+                text_done = "--"
             else:
-                stint_laps_done = data[0]
-                stint_laps_est = data[1]
-                if stint_laps_done <= 0:
-                    text_done = "--"
-                else:
-                    text_done = f"{stint_laps_done:02.0f}"
-                if stint_laps_est <= 0:
-                    text_est = "--"
-                else:
-                    text_est = f"{stint_laps_est // 1:02.0f}"
-                text = f"{text_done}/{text_est}"
+                text_done = f"{stint_laps_done:02.0f}"
+            if stint_laps_est <= 0:
+                text_est = "--"
+            else:
+                text_est = f"{stint_laps_est // 1:02.0f}"
+            text = f"{text_done}/{text_est}"
+        shown = (text, data[2], data[-1])
+        if target.last != shown:
+            target.last = shown
             target.text = text
             target.fg, target.bg = self.bar_style_stl[data[2]]
             self.toggle_visibility(target, data[-1])
@@ -726,27 +735,28 @@ class DriverTable(Overlay):
             self.toggle_visibility(target, data[-1])
 
     def update_lic(self, target, *data):
-        """Lift and coast time"""
-        if target.last != data:
-            target.last = data
-            if data[1] > self.wcfg["lift_and_coast_reset_threshold"]:
-                lico_time = 0
-            else:
-                lico_time = data[0]
-                if lico_time > 99:
-                    lico_time = 99
-            if data[2]:  # highlighted player
-                color_index = 2
-            elif lico_time > self.wcfg["lift_and_coast_highlight_threshold"]:
-                color_index = 1
-            else:
-                color_index = 0
-            if data[-1] == self.blank_state:
-                text = ""
-            elif lico_time < 9.94:
-                text = f"{lico_time:.1f}s"
-            else:
-                text = f"{lico_time:.0f}s"
+        """Lift and coast time, drawn again once its text or color changes (continuous timer)"""
+        if data[1] > self.wcfg["lift_and_coast_reset_threshold"]:
+            lico_time = 0
+        else:
+            lico_time = data[0]
+            if lico_time > 99:
+                lico_time = 99
+        if data[2]:  # highlighted player
+            color_index = 2
+        elif lico_time > self.wcfg["lift_and_coast_highlight_threshold"]:
+            color_index = 1
+        else:
+            color_index = 0
+        if data[-1] == self.blank_state:
+            text = ""
+        elif lico_time < 9.94:
+            text = f"{lico_time:.1f}s"
+        else:
+            text = f"{lico_time:.0f}s"
+        shown = (text, color_index, data[-1])
+        if target.last != shown:
+            target.last = shown
             target.text = text
             target.fg, target.bg = self.bar_style_lic[color_index]
             self.toggle_visibility(target, data[-1])
@@ -757,9 +767,10 @@ class DriverTable(Overlay):
         return self.brand_logos.get(brand_name)
 
     def brand_logo_arrived(self, brand_name: str, pixmap):
-        """Brand logo read in background: drawn in cells showing brand"""
+        """Brand logo read in background: drawn in cells showing brand (rows shown only: not blank, hidden or
+        class separator rows, whose data is that of a car too)"""
         for target in self.bars_brd:
-            if target.last is not None and target.last[0] == brand_name and target.last[-1] != self.blank_state:
+            if target.last is not None and target.last[0] == brand_name and target.last[-1] == self.shown_state:
                 target.image = pixmap
                 target.update()
 
@@ -787,6 +798,12 @@ class DriverTable(Overlay):
         if pit_time >= 0:
             return f"{'PIT' if inpit else 'OUT'}{pit_time:>5.1f}"
         return TEXT_NOLAPTIME
+
+
+def pit_time_shown(veh_info) -> bool:
+    """Lap time column shows the pit lane time: in pit lane or on the out lap of a pit visit; a car in the garage
+    (pit time 0) or finished shows its last lap instead"""
+    return veh_info.pitTimer.pitting and veh_info.inPit != 2 and not veh_info.isFinished
 
 
 def pit_time_key(in_pit: int, pit_time: float) -> tuple:

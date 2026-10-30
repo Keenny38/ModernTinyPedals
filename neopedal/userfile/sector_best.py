@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from ..const_common import MAX_SECONDS
@@ -128,10 +129,10 @@ def save_sector_best_file(
     filepath: str,
     filename: str,
     session_id: tuple[float, ...],
-    session_best_tb: list[float],
-    session_best_pb: list[float],
-    alltime_best_tb: list[float],
-    alltime_best_pb: list[float],
+    session_best_tb: Sequence[float],
+    session_best_pb: Sequence[float],
+    alltime_best_tb: Sequence[float],
+    alltime_best_pb: Sequence[float],
     extension: str = FileExt.SECTOR,
 ) -> None:
     """Save sector best file (*.sector)
@@ -145,14 +146,17 @@ def save_sector_best_file(
     """
     if len(session_id) not in (3, 4) or invalid_save_name(filename):
         return
-    with atomic_write(f"{filepath}{filename}{extension}", newline="") as csvfile:
-        data_writer = csv.writer(csvfile)
-        # Session stamp
-        data_writer.writerow(session_id)
-        # session best sector time
-        data_writer.writerow(session_best_tb)
-        data_writer.writerow(session_best_pb)
-        # All time best sector time
-        data_writer.writerow(alltime_best_tb)
-        data_writer.writerow(alltime_best_pb)
-        logger.info("USERDATA: %s%s saved", filename, extension)
+    try:
+        with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as csvfile:
+            data_writer = csv.writer(csvfile)
+            # Session stamp
+            data_writer.writerow(session_id)
+            # session best sector time
+            data_writer.writerow(session_best_tb)
+            data_writer.writerow(session_best_pb)
+            # All time best sector time
+            data_writer.writerow(alltime_best_tb)
+            data_writer.writerow(alltime_best_pb)
+    except OSError:  # already logged by atomic_write, data kept in memory (saved again on next lap)
+        return
+    logger.info("USERDATA: %s%s saved", filename, extension)

@@ -112,7 +112,7 @@ TpPopup {
                             width: parent.width
                             height: Math.round(theme.controlHeightSm)
                             radius: theme.radiusMd
-                            color: groupArea.pressed ? theme.border : groupArea.containsMouse ? theme.hover : "transparent"
+                            color: groupArea.pressed ? theme.surfaceSunken : groupArea.containsMouse ? theme.hover : "transparent"
                             activeFocusOnTab: true
                             Accessible.role: Accessible.CheckBox
                             Accessible.name: pickerGroup.modelData.title
@@ -139,7 +139,7 @@ TpPopup {
                                         anchors.centerIn: parent
                                         glyph: pickerGroup.allShown ? "" : ""  // check (all), minus (some)
                                         fallback: pickerGroup.allShown ? "✓" : "–"
-                                        size: theme.em * 0.7
+                                        size: theme.iconXs
                                         color: theme.inkOn(theme.accentFill)
                                         visible: pickerGroup.anyShown && text !== ""
                                     }
@@ -147,6 +147,7 @@ TpPopup {
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: pickerGroup.modelData.title
+                                    textFormat: Text.PlainText
                                     color: theme.text
                                     font.weight: Font.DemiBold
                                 }
@@ -211,7 +212,7 @@ TpPopup {
                 onMoved: backend.setSmoothing(Math.round(value))
                 tip: i18n.tr("Moving average of noisy channels: G, steering rate, wheel slip, time gain/loss")
             }
-            Text { text: backend.smoothing === 0 ? i18n.tr("Off") : backend.smoothing; color: theme.text; Layout.preferredWidth: theme.em * 1.8 }
+            Text { text: backend.smoothing === 0 ? i18n.tr("Off") : backend.smoothing; color: theme.text; Layout.preferredWidth: theme.em * 1.8; textFormat: Text.PlainText }
         }
         Text {
             text: i18n.tr("Gain/Loss window")
@@ -232,20 +233,22 @@ TpPopup {
             text: i18n.tr("Min / max band")
             tip: i18n.tr("Lowest & highest value of shown laps (3 laps or more): consistency")
             checked: backend.envelope
-            onToggled: backend.setEnvelope(checked)
+            checkable: false  // follows the backend (never unbound by a click)
+            onClicked: backend.setEnvelope(!backend.envelope)
         }
         TpSwitch {
             text: i18n.tr("Delta vs ideal lap")
             tip: i18n.tr("Delta & time gain/loss against ideal lap: fastest clean shown lap in each mini-sector")
             checked: backend.idealDelta
-            onToggled: backend.setIdealDelta(checked)
+            checkable: false
+            onClicked: backend.setIdealDelta(!backend.idealDelta)
         }
         RowLayout {
             Layout.fillWidth: true
             spacing: theme.space3
             TpButton {
                 Layout.fillWidth: true
-                text: i18n.tr("Math Channels...")
+                text: i18n.tr("Math Channels…")
                 flat: true
                 tip: i18n.tr("Channels computed from others: understeer angle, pedal rates, your own expressions")
                 onClicked: { picker.close(); picker.mathRequested() }

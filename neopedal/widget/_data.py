@@ -139,6 +139,7 @@ class BrakeWearData(NamedTuple):
     laps: float  # lifespan in laps
     minutes: float  # lifespan in minutes
     usable: float  # usable thickness (millimeters, above failure thickness)
+    available: bool  # thickness received (not before game data, nor for a spectated car)
 
 
 def brake_wear_data(wheels: Any, index: int, thickness: bool, pace: float) -> BrakeWearData:
@@ -151,9 +152,11 @@ def brake_wear_data(wheels: Any, index: int, thickness: bool, pace: float) -> Br
         pace: lap time pace (seconds).
     """
     current = wheels.currentBrakeThickness[index]
-    failed = current <= 0
+    max_thickness = wheels.maxBrakeThickness[index]
+    available = max_thickness > 0  # max thickness calibrated from game data, cleared while unavailable
+    failed = available and current <= 0
     failure = wheels.failureBrakeThickness[index]
-    usable = wheels.maxBrakeThickness[index] - failure
+    usable = max_thickness - failure
     current = max(current - failure, 0.0)  # worn past failure thickness: no lifespan left
     live = wheels.currentlapBrakeWear[index]
     wear = wheels.estimatedBrakeWear[index]
@@ -179,6 +182,7 @@ def brake_wear_data(wheels: Any, index: int, thickness: bool, pace: float) -> Br
         calc.wear_lifespan_in_laps(current, valid_wear),
         calc.wear_lifespan_in_mins(current, valid_wear, pace),
         usable,
+        available,
     )
 
 
@@ -193,7 +197,7 @@ def temperature_text(value: float, unit_temp: Callable[[float], float], leading_
     """Temperature text (placeholder below -100 degrees: no reading)
 
     Args:
-        value: temperature (Celsius, rounded).
+        value: temperature (Celsius, rounded, see shown_temperature).
         unit_temp: temperature unit conversion.
         leading_zero: digits padded with zeros.
         sign: degree sign, or empty.
@@ -202,6 +206,12 @@ def temperature_text(value: float, unit_temp: Callable[[float], float], leading_
     if value < -100:
         return placeholder
     return f"{unit_temp(value):0{leading_zero}.0f}{sign}"
+
+
+def shown_temperature(value: float, scale: float) -> float:
+    """Temperature (Celsius) rounded to whole degrees of unit shown, so it changes only with its text: rounded
+    after unit conversion, not 1.8 Fahrenheit steps of whole Celsius degrees (scale: 1.8 Fahrenheit, 1 Celsius)"""
+    return round(value * scale, 0) / scale  # ndigits: NaN kept (no ValueError)
 
 
 def rate_text(rate: float, scale: float) -> str:

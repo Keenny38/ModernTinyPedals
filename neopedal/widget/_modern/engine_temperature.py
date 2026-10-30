@@ -27,16 +27,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
-from .base import STEADY, ModernOverlay
+from .base import LEFT, STEADY, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
     from ...template.widget_config_types import EngineTemperatureConfig
+
+SUB_GAP = "  "  # between rate of change & net change
 
 
 class Realtime(StatsMixin, ModernOverlay):
@@ -93,7 +96,32 @@ class Realtime(StatsMixin, ModernOverlay):
         self.paint_stats_static(painter)
 
     def paint(self, painter: QPainter):
-        self.draw_stats(painter, self.state)
+        values = self.state
+        self.draw_stats(painter, tuple(value._replace(sub="") for value in values))
+        # Rate of change & net change per lap after it, each colored by its own sign
+        gap = self.text_width("small", SUB_GAP)
+        for slot, value in zip(self.slots, values):
+            if not value.sub or slot.sub.width() <= 0:
+                continue
+            parts = value.sub.split(SUB_GAP)
+            widths = [self.text_width("small", text) for text in parts]
+            if self.stats_vertical:
+                left = slot.sub.left()
+            else:
+                left = slot.sub.center().x() - (sum(widths) + gap * (len(parts) - 1)) / 2
+            for text, width in zip(parts, widths):
+                self.draw_text(painter, QRectF(left, slot.sub.top(), width, slot.sub.height()), text, "small",
+                               self.change_color(text), LEFT, elide=False)
+                left += width + gap
+
+    def change_color(self, text: str):
+        """Heating orange, cooling blue, steady dim (rate of change ▲ / ▼, net change Δ+ / Δ-)"""
+        mark = text[1:2] if text.startswith("Δ") else text[:1]
+        if mark in ("▲", "+"):
+            return self.theme.orange
+        if mark in ("▼", "-"):
+            return self.theme.lap_behind
+        return self.theme.text_dim
 
     def change_text(self, value: float) -> str:
         """Temperature difference"""
@@ -145,6 +173,6 @@ class Realtime(StatsMixin, ModernOverlay):
                 rate_color = theme.orange if self.rates[key] > 0 else theme.lap_behind
             values.append(Value(
                 f"{self.unit_temp(temp):.1f}°", theme.negative if hot else None, theme.tint(theme.negative, 55) if hot else None,
-                "  ".join(parts), rate_color,
+                SUB_GAP.join(parts), rate_color,  # colors of each part from its text when drawn
             ))
         self.refresh(tuple(values))

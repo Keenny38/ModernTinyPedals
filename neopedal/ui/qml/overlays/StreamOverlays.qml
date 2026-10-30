@@ -12,6 +12,37 @@ TpPage {
 
     readonly property bool wide: width > theme.em * 66  // content-tuned: button texts of source rows fit
     readonly property bool on: backend.enabled && backend.running
+    readonly property var searchWords: overlaySearch.text.toLowerCase().split(" ").filter(function(word) { return word !== "" })
+
+    // Overlay row matching every word of the overlays search
+    function matches(label) {
+        var text = label.toLowerCase()
+        for (var i = 0; i < searchWords.length; ++i)
+            if (text.indexOf(searchWords[i]) < 0)
+                return false
+        return true
+    }
+    function isFind(event) {
+        return event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier
+    }
+    // Layout reset undone with Ctrl+Z, as the Undo of its toast (a focused text field keeps its own Ctrl+Z)
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: pageState.active && backend.canUndoReset
+        onActivated: backend.undoResetLayout()
+    }
+    // Ctrl+F searches the overlays of this page: taken before the app's own Ctrl+F shortcut
+    Keys.onShortcutOverride: function(event) {
+        if (isFind(event))
+            event.accepted = true
+    }
+    Keys.onPressed: function(event) {
+        if (isFind(event)) {
+            overlaySearch.forceActiveFocus()
+            overlaySearch.selectAll()
+            event.accepted = true
+        }
+    }
 
     // Address of a source: title, detail, live mark, copy & open buttons
     component SourceRow: RowLayout {
@@ -37,11 +68,12 @@ TpPage {
             spacing: theme.em * 0.1
             RowLayout {
                 Layout.fillWidth: true
-                spacing: theme.em * 0.5
+                spacing: theme.space3
                 Text {
                     Layout.fillWidth: true
                     Layout.maximumWidth: implicitWidth
                     text: source.title
+                    textFormat: Text.PlainText
                     color: theme.text
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -49,16 +81,17 @@ TpPage {
                 LiveMark { visible: source.live }
                 Item { Layout.fillWidth: true }
             }
-            Text {
+            TpText {
                 Layout.fillWidth: true
+                role: "label"
                 text: source.detail
                 color: theme.dimText
-                font.pointSize: theme.fontLabel
+                elide: Text.ElideNone
                 wrapMode: Text.WordWrap
             }
         }
         TpButton {
-            glyph: ""  // copy
+            glyph: theme.glyphs.copy
             fallback: i18n.tr("Copy")
             text: source.showText ? i18n.tr("Copy Address") : ""
             tip: i18n.tr("Copy Address")
@@ -66,7 +99,7 @@ TpPage {
             onClicked: backend.copy(source.url)
         }
         TpButton {
-            glyph: ""  // open in new window
+            glyph: theme.glyphs.openExternal
             fallback: "↗"
             flat: true
             tip: i18n.tr("Open in browser")
@@ -82,9 +115,9 @@ TpPage {
         pulsing: visible
         size: "sm"
     }
-    component OptionLabel: Text {
+    component OptionLabel: TpText {
+        role: "label"
         color: theme.dimText
-        font.pointSize: theme.fontLabel
     }
 
     ColumnLayout {
@@ -107,7 +140,7 @@ TpPage {
                 maximumTextWidth: page.width * 0.3
             }
             TpButton {
-                glyph: ""  // open in new window
+                glyph: theme.glyphs.openExternal
                 fallback: "↗"
                 text: page.wide ? i18n.tr("Sources Page") : ""
                 tip: i18n.tr("Every source in a browser page, to test them")
@@ -116,9 +149,15 @@ TpPage {
                 onClicked: backend.openInBrowser(backend.indexUrl)
             }
             TpSwitch {
-                text: i18n.tr("Enabled")
+                objectName: "streamEnabledSwitch"
+                text: backend.enabled ? i18n.tr("Enabled") : i18n.tr("Disabled")
+                tip: i18n.tr("Stream Overlays")
+                checkable: false  // follows backend (banner button, port taken): the binding stays
                 checked: backend.enabled
-                onToggled: backend.setEnabled(checked)
+                onClicked: backend.setEnabled(!backend.enabled)
+                Accessible.role: Accessible.CheckBox
+                Accessible.name: i18n.tr("Stream Overlays")
+                Accessible.checked: backend.enabled
             }
         }
 
@@ -157,232 +196,220 @@ TpPage {
                 spacing: theme.space4
 
                 // Layout & race results
-                Card {
+                TpSectionCard {
                     Layout.fillWidth: true
-                    implicitHeight: sourcesColumn.implicitHeight + theme.padCard * 2
-                    ColumnLayout {
-                        id: sourcesColumn
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: theme.padCard
-                        spacing: theme.space5
-                        TpCardHeader { title: i18n.tr("Sources") }
-                        SourceRow {
-                            Layout.fillWidth: true
-                            glyph: ""  // layers
-                            title: i18n.tr("Layout")
-                            detail: i18n.tr("Every overlay shown on stream, at its place on screen.") + "  "
-                                    + backend.layoutSizeText
-                            url: backend.layoutUrl
-                            live: backend.layoutLive
-                            showText: page.wide
-                            active: page.on
-                        }
-                        Flow {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: theme.em * 3.1  // content-tuned: under the source texts (icon tile + gap)
+                    title: i18n.tr("Sources")
+                    spacing: theme.space5
+
+                    SourceRow {
+                        Layout.fillWidth: true
+                        glyph: ""  // layers
+                        title: i18n.tr("Layout")
+                        detail: i18n.tr("Every overlay shown on stream, at its place on screen.") + "  "
+                                + backend.layoutSizeText
+                        url: backend.layoutUrl
+                        live: backend.layoutLive
+                        showText: page.wide
+                        active: page.on
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: theme.em * 3.1  // content-tuned: under the source texts (icon tile + gap)
+                        spacing: theme.space3
+                        RowLayout {
                             spacing: theme.space3
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Format") }
-                                TpSegmented {
-                                    name: i18n.tr("Format")
-                                    options: [i18n.tr("16:9 (screen centre)"), i18n.tr("Whole screen")]
-                                    currentIndex: backend.layoutFormatIndex
-                                    onActivated: function(index) { backend.setLayoutFormat(index) }
-                                }
-                            }
-                            TpButton {
-                                objectName: "editStreamLayout"
-                                glyph: ""  // layers
-                                text: i18n.tr("Edit Layout")
-                                tip: i18n.tr("Place overlays on this layout in your browser, apart from their place on screen (for example overlays of the sides of an ultrawide screen)")
-                                enabled: page.on
-                                onClicked: backend.editLayout()
-                            }
-                            TpButton {
-                                objectName: "resetStreamLayout"
-                                visible: !backend.canUndoReset
-                                glyph: ""  // undo
-                                fallback: "↺"
-                                flat: true
-                                tip: i18n.tr("Overlays of this layout back to their place on screen")
-                                enabled: page.on && backend.layoutPlaced
-                                onClicked: resetLayoutDialog.open()
-                                TpConfirmDialog {
-                                    id: resetLayoutDialog
-                                    objectName: "resetStreamLayoutDialog"
-                                    danger: false  // undo offered after
-                                    title: i18n.tr("Reset this layout?")
-                                    text: i18n.tr("Overlays of this layout go back to their place on screen. You can undo it right after.")
-                                    acceptText: i18n.tr("Reset")
-                                    onAccepted: backend.resetLayout()
-                                }
-                            }
-                            TpButton {
-                                objectName: "undoStreamLayoutReset"
-                                visible: backend.canUndoReset
-                                glyph: ""  // undo
-                                flat: true
-                                text: i18n.tr("Undo")
-                                tip: i18n.tr("Put the overlays back where they were before the reset")
-                                onClicked: backend.undoResetLayout()
+                            OptionLabel { text: i18n.tr("Format") }
+                            TpSegmented {
+                                name: i18n.tr("Format")
+                                options: [i18n.tr("16:9 (screen centre)"), i18n.tr("Whole screen")]
+                                currentIndex: backend.layoutFormatIndex
+                                onActivated: function(index) { backend.setLayoutFormat(index) }
                             }
                         }
-                        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border }
-                        SourceRow {
-                            Layout.fillWidth: true
-                            glyph: ""  // flag
-                            title: i18n.tr("Race Results")
-                            detail: i18n.tr("Classification of the last session, from the results files of the game, updated when a new one is written.") + "  "
-                                    + i18n.tr("Browser source size") + ": 1920 × 1080"
-                            url: backend.resultsUrl
-                            showText: page.wide
-                            active: page.on
+                        TpButton {
+                            objectName: "editStreamLayout"
+                            glyph: ""  // layers
+                            text: i18n.tr("Edit Layout")
+                            tip: i18n.tr("Place overlays on this layout in your browser, apart from their place on screen (for example overlays of the sides of an ultrawide screen)")
+                            enabled: page.on
+                            onClicked: backend.editLayout()
                         }
-                        Flow {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: theme.em * 3.1  // content-tuned: under the source texts (icon tile + gap)
-                            spacing: theme.space5
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Session") }
-                                TpSegmented {
-                                    name: i18n.tr("Session")
-                                    options: [i18n.tr("Race"), i18n.tr("Qualifying"), i18n.tr("Any")]
-                                    currentIndex: backend.resultsSessionIndex
-                                    onActivated: function(index) { backend.setResultsSession(index) }
-                                }
+                        TpButton {  // reversible: done at once, Undo in the toast & Ctrl+Z (never confirmed)
+                            objectName: "resetStreamLayout"
+                            glyph: theme.glyphs.reset
+                            fallback: "↺"
+                            flat: true
+                            tip: i18n.tr("Overlays of this layout back to their place on screen")
+                            enabled: page.on && backend.layoutPlaced
+                            onClicked: backend.resetLayout()
+                        }
+                    }
+                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border }
+                    SourceRow {
+                        Layout.fillWidth: true
+                        glyph: ""  // flag
+                        title: i18n.tr("Race Results")
+                        detail: i18n.tr("Classification of the last session, from the results files of the game, updated when a new one is written.") + "  "
+                                + i18n.tr("Browser source size") + ": 1920 × 1080"
+                        url: backend.resultsUrl
+                        showText: page.wide
+                        active: page.on
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: theme.em * 3.1  // content-tuned: under the source texts (icon tile + gap)
+                        spacing: theme.space5
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Session") }
+                            TpSegmented {
+                                name: i18n.tr("Session")
+                                options: [i18n.tr("Race"), i18n.tr("Qualifying"), i18n.tr("Any")]
+                                currentIndex: backend.resultsSessionIndex
+                                onActivated: function(index) { backend.setResultsSession(index) }
                             }
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Classes") }
-                                TpSegmented {
-                                    name: i18n.tr("Classes")
-                                    options: [i18n.tr("All Classes"), i18n.tr("Class by class")]
-                                    currentIndex: backend.resultsClassIndex
-                                    onActivated: function(index) { backend.setResultsClass(index) }
-                                }
+                        }
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Classes") }
+                            TpSegmented {
+                                name: i18n.tr("Classes")
+                                options: [i18n.tr("All Classes"), i18n.tr("Class by class")]
+                                currentIndex: backend.resultsClassIndex
+                                onActivated: function(index) { backend.setResultsClass(index) }
                             }
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Cars per page") }
-                                TpCombo {
-                                    implicitWidth: theme.em * 5
-                                    model: backend.resultsRowsChoices
-                                    currentIndex: backend.resultsRowsIndex
-                                    tip: i18n.tr("Cars per page")
-                                    onActivated: function(index) { backend.setResultsRows(index) }
-                                }
+                        }
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Cars per page") }
+                            TpCombo {
+                                implicitWidth: theme.em * 5
+                                model: backend.resultsRowsChoices
+                                currentIndex: backend.resultsRowsIndex
+                                tip: i18n.tr("Cars per page")
+                                onActivated: function(index) { backend.setResultsRows(index) }
                             }
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Page time") }
-                                TpCombo {
-                                    implicitWidth: theme.em * 5
-                                    model: backend.resultsCycleChoices
-                                    currentIndex: backend.resultsCycleIndex
-                                    tip: i18n.tr("Page time")
-                                    onActivated: function(index) { backend.setResultsCycle(index) }
-                                }
+                        }
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Page time") }
+                            TpCombo {
+                                implicitWidth: theme.em * 5
+                                model: backend.resultsCycleChoices
+                                currentIndex: backend.resultsCycleIndex
+                                tip: i18n.tr("Page time")
+                                onActivated: function(index) { backend.setResultsCycle(index) }
                             }
                         }
                     }
                 }
 
                 // Each overlay: where shown, address
-                Card {
+                TpSectionCard {
                     Layout.fillWidth: true
-                    implicitHeight: overlaysColumn.implicitHeight + theme.padCard * 2
-                    ColumnLayout {
-                        id: overlaysColumn
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: theme.padCard
-                        spacing: theme.space2
-                        TpCardHeader {
-                            title: i18n.tr("Overlays")
-                            count: String(backend.overlayCount)
-                        }
-                        Text {
+                    title: i18n.tr("Overlays")
+                    count: String(backend.overlayCount)
+                    spacing: theme.space2
+
+                    TpSearchField {
+                        id: overlaySearch
+                        objectName: "streamOverlaySearch"
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: theme.em * 22
+                        searchDelay: 0  // rows filtered at once
+                        placeholderText: i18n.tr("Search overlays") + "   Ctrl+F"
+                        Accessible.name: i18n.tr("Search overlays")
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: i18n.tr("Stream only: hidden on your screen while overlays are locked.")
+                        color: theme.dimText
+                        font.pointSize: theme.fontSmall
+                        wrapMode: Text.WordWrap
+                    }
+                    TpStateView {
+                        compact: true
+                        empty: backend.overlayCount === 0
+                        glyph: ""  // monitor
+                        title: i18n.tr("No overlay enabled: enable overlays on the Overlays page.")
+                    }
+                    TpStateView {
+                        objectName: "streamNoMatch"
+                        compact: true
+                        empty: backend.overlayCount > 0 && page.searchWords.length > 0
+                               && !backend.overlayLabels.some(function(label) { return page.matches(label) })
+                        glyph: ""  // search
+                        title: i18n.tr("No overlay matches the search")
+                        secondaryActionText: i18n.tr("Clear Search")
+                        onSecondaryAction: overlaySearch.clearSearch()
+                    }
+                    Repeater {
+                        model: backend.overlayModel
+                        delegate: Item {
+                            id: row
+                            required property int index
+                            required property string key
+                            required property string label
+                            required property int visibility
+                            required property string sizeText
+                            required property bool live
+                            required property bool shown
                             Layout.fillWidth: true
-                            text: i18n.tr("Stream only: hidden on your screen while overlays are locked.")
-                            color: theme.dimText
-                            font.pointSize: theme.fontSmall
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            visible: backend.overlayCount === 0
-                            text: i18n.tr("No overlay enabled: enable overlays on the Overlays page.")
-                            color: theme.dimText
-                        }
-                        Repeater {
-                            model: backend.overlayModel
-                            delegate: Item {
-                                id: row
-                                required property int index
-                                required property string key
-                                required property string label
-                                required property int visibility
-                                required property string sizeText
-                                required property bool live
-                                required property bool shown
-                                Layout.fillWidth: true
-                                implicitHeight: Math.round(theme.row)
-                                TpListRow {
-                                    id: rowBack
-                                    anchors.fill: parent
-                                    hovered: rowArea.containsMouse
-                                    striped: row.index % 2 === 1
+                            visible: page.matches(row.label)
+                            implicitHeight: Math.round(theme.row)
+                            TpListRow {
+                                id: rowBack
+                                anchors.fill: parent
+                                hovered: rowArea.containsMouse
+                                striped: row.index % 2 === 1 && page.searchWords.length === 0  // rows hidden by the search: no stripes
+                            }
+                            MouseArea { id: rowArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: theme.space3
+                                anchors.rightMargin: theme.space2
+                                spacing: theme.space4
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: row.label
+                                    textFormat: Text.PlainText
+                                    color: row.visibility === 2 ? theme.dimOn(rowBack.color) : theme.text
+                                    elide: Text.ElideRight
                                 }
-                                MouseArea { id: rowArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: theme.em * 0.5
-                                    anchors.rightMargin: theme.space2
-                                    spacing: theme.space4
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: row.label
-                                        color: row.visibility === 2 ? theme.dimOn(rowBack.color) : theme.text
-                                        elide: Text.ElideRight
-                                    }
-                                    LiveMark { visible: row.live }
-                                    Text {
-                                        Layout.preferredWidth: theme.em * 6
-                                        horizontalAlignment: Text.AlignRight
-                                        text: row.sizeText
-                                        color: theme.dimOn(rowBack.color)
-                                        font.pointSize: theme.fontSmall
-                                        font.features: { "tnum": 1 }
-                                    }
-                                    TpSegmented {
-                                        name: row.label
-                                        options: [i18n.tr("Screen & Stream"), i18n.tr("Stream Only"), i18n.tr("Screen Only")]
-                                        currentIndex: row.visibility
-                                        maxWidth: page.wide ? 0 : page.width * 0.45
-                                        onActivated: function(index) { backend.setVisibility(row.key, index) }
-                                    }
-                                    TpButton {
-                                        glyph: ""  // copy
-                                        fallback: i18n.tr("Copy")
-                                        flat: true
-                                        size: "sm"
-                                        tip: i18n.tr("Copy Address") + (row.sizeText !== "" ? "  (" + i18n.tr("Browser source size") + ": " + row.sizeText + ")" : "")
-                                        enabled: page.on && row.visibility !== 2
-                                        onClicked: backend.copy(backend.overlayUrl(row.key))
-                                    }
-                                    TpButton {
-                                        glyph: ""  // open in new window
-                                        fallback: "↗"
-                                        flat: true
-                                        size: "sm"
-                                        tip: i18n.tr("Open in browser")
-                                        enabled: page.on && row.visibility !== 2
-                                        onClicked: backend.openInBrowser(backend.overlayUrl(row.key))
-                                    }
+                                LiveMark { visible: row.live }
+                                Text {
+                                    Layout.preferredWidth: theme.em * 6
+                                    horizontalAlignment: Text.AlignRight
+                                    text: row.sizeText
+                                    textFormat: Text.PlainText
+                                    color: theme.dimOn(rowBack.color)
+                                    font.pointSize: theme.fontSmall
+                                    font.features: { "tnum": 1 }
+                                }
+                                TpSegmented {
+                                    name: row.label
+                                    options: [i18n.tr("Screen & Stream"), i18n.tr("Stream Only"), i18n.tr("Screen Only")]
+                                    currentIndex: row.visibility
+                                    maxWidth: page.wide ? 0 : page.width * 0.45
+                                    onActivated: function(index) { backend.setVisibility(row.key, index) }
+                                }
+                                TpButton {
+                                    glyph: theme.glyphs.copy
+                                    fallback: i18n.tr("Copy")
+                                    flat: true
+                                    size: "sm"
+                                    tip: i18n.tr("Copy Address") + (row.sizeText !== "" ? "  (" + i18n.tr("Browser source size") + ": " + row.sizeText + ")" : "")
+                                    enabled: page.on && row.visibility !== 2
+                                    onClicked: backend.copy(backend.overlayUrl(row.key))
+                                }
+                                TpButton {
+                                    glyph: theme.glyphs.openExternal
+                                    fallback: "↗"
+                                    flat: true
+                                    size: "sm"
+                                    tip: i18n.tr("Open in browser")
+                                    enabled: page.on && row.visibility !== 2
+                                    onClicked: backend.openInBrowser(backend.overlayUrl(row.key))
                                 }
                             }
                         }
@@ -390,92 +417,83 @@ TpPage {
                 }
 
                 // Server settings
-                Card {
+                TpSectionCard {
                     Layout.fillWidth: true
-                    implicitHeight: settingsColumn.implicitHeight + theme.padCard * 2
-                    ColumnLayout {
-                        id: settingsColumn
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: theme.padCard
-                        spacing: theme.space4
-                        TpCardHeader { title: i18n.tr("Server") }
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: theme.space6
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Port") }
-                                NumberField {
-                                    implicitWidth: theme.em * 5.5
-                                    value: backend.port
-                                    minimum: 1024
-                                    maximum: 65535
-                                    showRange: true
-                                    tip: i18n.tr("Server port (default 8339)")
-                                    onEdited: function(value) { backend.setPort(Math.round(value)) }
-                                }
-                            }
-                            RowLayout {
-                                spacing: theme.space3
-                                OptionLabel { text: i18n.tr("Images per second") }
-                                TpSegmented {
-                                    name: i18n.tr("Images per second")
-                                    options: ["15", "30", "60"]
-                                    currentIndex: backend.frameRateIndex
-                                    onActivated: function(index) { backend.setFrameRate(index) }
-                                }
-                            }
-                            TpSwitch {
-                                text: i18n.tr("Show overlays while spectating")
-                                tip: i18n.tr("Overlays shown & updated while you spectate a session or watch a replay, as long as a layout or overlay source is on air (hidden otherwise by Auto Hide)")
-                                checked: backend.spectating
-                                onToggled: backend.setSpectating(checked)
-                            }
-                            TpSwitch {
-                                text: i18n.tr("Another computer (LAN)")
-                                tip: i18n.tr("Sources for a streaming PC on your local network")
-                                checked: backend.lanAccess
-                                onToggled: backend.setLanAccess(checked)
-                            }
-                            TpButton {
-                                objectName: "newTokenButton"
-                                glyph: ""  // refresh
-                                text: i18n.tr("New Access Token")
-                                tip: i18n.tr("Every address gets a new token: addresses copied before stop working (address shown on stream by mistake)")
-                                onClicked: newTokenDialog.open()
-                                TpConfirmDialog {
-                                    id: newTokenDialog
-                                    objectName: "newTokenDialog"
-                                    title: i18n.tr("Make a new access token?")
-                                    text: i18n.tr("Every browser source already set up in your streaming software stops working until you copy its new address into it.")
-                                    acceptText: i18n.tr("New Access Token")
-                                    onAccepted: backend.newToken()
-                                }
+                    title: i18n.tr("Server")
+                    spacing: theme.space4
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: theme.space6
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Port") }
+                            NumberField {
+                                implicitWidth: theme.em * 5.5
+                                value: backend.port
+                                minimum: 1024
+                                maximum: 65535
+                                showRange: true
+                                tip: i18n.tr("Server port (default 8339)")
+                                onEdited: function(value) { backend.setPort(Math.round(value)) }
                             }
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            visible: backend.lanText !== ""
-                            text: i18n.tr("Addresses for another computer") + ":  " + backend.lanText
-                            color: theme.dimText
-                            wrapMode: Text.WordWrap
-                            font.features: { "tnum": 1 }
+                        RowLayout {
+                            spacing: theme.space3
+                            OptionLabel { text: i18n.tr("Images per second") }
+                            TpSegmented {
+                                name: i18n.tr("Images per second")
+                                options: ["15", "30", "60"]
+                                currentIndex: backend.frameRateIndex
+                                onActivated: function(index) { backend.setFrameRate(index) }
+                            }
                         }
+                        TpSwitch {
+                            text: i18n.tr("Show overlays while spectating")
+                            tip: i18n.tr("Overlays shown & updated while you spectate a session or watch a replay, as long as a layout or overlay source is on air (hidden otherwise by Auto Hide)")
+                            objectName: "streamSpectatingSwitch"
+                            checkable: false  // follows backend
+                            checked: backend.spectating
+                            onClicked: backend.setSpectating(!backend.spectating)
+                        }
+                        TpSwitch {
+                            text: i18n.tr("Another computer (LAN)")
+                            tip: i18n.tr("Sources for a streaming PC on your local network")
+                            objectName: "streamLanSwitch"
+                            checkable: false  // follows backend
+                            checked: backend.lanAccess
+                            onClicked: backend.setLanAccess(!backend.lanAccess)
+                        }
+                        TpButton {
+                            objectName: "newTokenButton"
+                            glyph: theme.glyphs.refresh
+                            text: i18n.tr("New Access Token")
+                            tip: i18n.tr("Every address gets a new token: addresses copied before stop working (address shown on stream by mistake)")
+                            onClicked: newTokenDialog.open()
+                            TpConfirmDialog {
+                                id: newTokenDialog
+                                objectName: "newTokenDialog"
+                                title: i18n.tr("Make a new access token?")
+                                text: i18n.tr("Every browser source already set up in your streaming software stops working until you copy its new address into it.")
+                                acceptText: i18n.tr("New Access Token")
+                                onAccepted: backend.newToken()
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: backend.lanText !== ""
+                        text: i18n.tr("Addresses for another computer") + ":  " + backend.lanText
+                        textFormat: Text.PlainText
+                        color: theme.dimText
+                        wrapMode: Text.WordWrap
+                        font.features: { "tnum": 1 }
                     }
                 }
             }
         }
     }
 
-    // Copied address, new token, port unavailable: a few seconds (time from text length)
-    TpToast {
-        id: toast
-        text: backend.noticeText
-        Connections {
-            target: backend
-            function onNoticeChanged() { toast.show() }
-        }
-    }
+    // Dialogs & toasts asked by the backend (confirmations, alerts, messages with Undo)
+    TpDialogHost {}
 }

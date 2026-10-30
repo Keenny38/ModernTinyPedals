@@ -37,7 +37,8 @@ from .validator import is_clock_format, is_finite_number, is_hex_color
 from .version_check import parse_version_string
 
 logger = logging.getLogger(__name__)
-# Values brought within limits by last validations (option, value read, value kept): preset check, log
+# Values brought within limits by the last validation (option, value read, value kept): preset check, log.
+# Cleared by each PresetValidator._validate (styles never clamp), so it holds one preset's values at most
 CLAMPED: list[tuple[str, float, float]] = []
 
 
@@ -155,6 +156,23 @@ def update_former_compound_colors(dict_user: dict[str, dict]) -> bool:
     return changed
 
 
+def update_former_class_colors(dict_user: dict[str, dict]) -> bool:
+    """Classes still at their former default color take the new class color, colors you chose kept
+
+    Returns:
+        True if a color changed (file saved, old one backed up).
+    """
+    from .template.setting_classes import CLASS_COLORS, FORMER_DEFAULT_COLORS
+
+    changed = False
+    for name, data in dict_user.items():
+        color = data.get("color", "")
+        if isinstance(color, str) and name in FORMER_DEFAULT_COLORS and color.upper() == FORMER_DEFAULT_COLORS[name]:
+            data["color"] = CLASS_COLORS[name]
+            changed = True
+    return changed
+
+
 class StyleValidator:
     """Style validator"""
 
@@ -163,7 +181,11 @@ class StyleValidator:
         """Classes style validator"""
         from .template.setting_classes import CLASSES_DEFAULT, CLASSINFO_DEFAULT
 
-        return _validate_style(dict_user, CLASSES_DEFAULT, CLASSINFO_DEFAULT)
+        save_change = _validate_style(dict_user, CLASSES_DEFAULT, CLASSINFO_DEFAULT)
+        if "class_colors" in PENDING_STYLE_UPDATES:
+            PENDING_STYLE_UPDATES.discard("class_colors")
+            save_change = update_former_class_colors(dict_user) or save_change
+        return save_change
 
     @staticmethod
     def brands(dict_user: dict[str, Any]) -> bool:
@@ -422,6 +444,7 @@ class PresetValidator:
         Args:
             keep_unknown: keep keys & sections unknown to this build (preset of a newer build), as they are.
         """
+        CLAMPED.clear()  # values of this validation only (never grows over the session)
         # Check top-level key
         cls.validate_key_pair(dict_user, dict_def, keep_unknown)
         # Check sub-level key

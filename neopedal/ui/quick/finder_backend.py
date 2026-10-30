@@ -21,7 +21,7 @@ Find Option page backend (qml/OptionFinder.qml): ranked results with current val
 
 Results show the value of each option (on / off switch, color, number...), whether it differs from
 default, and the option description. On / off options switch right in the list; any result opens
-its settings page filtered on the option. Without search words, "Changed only" lists every option
+its settings page filtered on the option. Without search words, "Changed Only" lists every option
 set apart from its default. Switches & resets are saved and applied at once: undo & redo (Ctrl+Z,
 Ctrl+Y, Undo button of the notice) save and apply the previous value the same way.
 """
@@ -29,7 +29,6 @@ Ctrl+Y, Undo button of the notice) save and apply the previous value the same wa
 from __future__ import annotations
 
 import html
-import re
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -45,8 +44,8 @@ from ...i18n.options import module_label, option_help, option_label
 from ...module_control import mctrl, wctrl
 from ...setting import cfg
 from .._common import run_after_saving
-from ..module_view import sort_key
-from ..option_finder import OptionEntry, cached_index, reload_function, search_options
+from ..module_view import highlight, sort_key
+from ..option_finder import OptionEntry, cached_index, matching_options, rank_options, reload_function
 from ..toast import show_toast
 from .models import DictListModel
 from .option_kinds import KIND_BOOL, KIND_COLOR, display_text, value_kind
@@ -97,27 +96,6 @@ def user_values(entry: OptionEntry) -> tuple[dict, dict]:
     return cfg.user.setting.get(entry.section, {}), cfg.default.setting.get(entry.section, {})
 
 
-def highlight(text: str, words: tuple[str, ...]) -> str:
-    """Label as rich text, searched words in bold (case & accent folded match)"""
-    folded = sort_key(text)
-    if len(folded) != len(text) or not words:  # folding changed length: no safe mapping
-        return html.escape(text)
-    marks = [False] * len(text)
-    for word in words:
-        for match in re.finditer(re.escape(word), folded):
-            for index in range(match.start(), match.end()):
-                marks[index] = True
-    parts, bold = [], False
-    for char, mark in zip(text, marks):
-        if mark != bold:
-            parts.append("<b>" if mark else "</b>")
-            bold = mark
-        parts.append(html.escape(char))
-    if bold:
-        parts.append("</b>")
-    return "".join(parts)
-
-
 class FinderBackend(QObject):
     """Find Option page state & actions
 
@@ -149,9 +127,10 @@ class FinderBackend(QObject):
 
     # Results
     def matching(self) -> list[OptionEntry]:
-        """Entries matching search words (ranked) & changed filter, any group"""
+        """Entries matching search words & changed filter, any group, in index order (counted per group, the
+        shown ones ranked in update_results: thousands match a short text, MAX_SHOWN are ranked)"""
         if self._words:
-            entries = search_options(self.entries, self._search, limit=0)
+            entries = matching_options(self.entries, self._words)
         elif self._changed_only:
             entries = self.entries
         else:
@@ -194,7 +173,8 @@ class FinderBackend(QObject):
             counts[GROUP_ALL] += 1
             counts[entry.config_type] = counts.get(entry.config_type, 0) + 1
         self._counts = counts
-        shown = [entry for entry in self._found if self._group in (GROUP_ALL, entry.config_type)][:MAX_SHOWN]
+        shown = [entry for entry in self._found if self._group in (GROUP_ALL, entry.config_type)]
+        shown = rank_options(shown, self._words, MAX_SHOWN) if self._words else shown[:MAX_SHOWN]
         self.model.sync([self.row(entry) for entry in shown])
         self.resultsChanged.emit()
 

@@ -49,7 +49,7 @@ def load_marks(folder: str, strict: bool = False) -> dict[str, dict]:
             raise ValueError("not a JSON object")
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: nested too deeply
         if strict:
             raise
         return {}

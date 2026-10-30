@@ -226,7 +226,7 @@ def test_hybrid_drain_regen_and_active_timer(tele):
 def test_hybrid_lap_totals_move_to_last_lap(tele):
     output = HybridInfo()
     gen = module_hybrid.calc_motor(output, min_delta_distance=5)
-    elapsed = drive_hybrid(tele, gen, [80, 75, 70], [2] * 3)
+    elapsed = drive_hybrid(tele, gen, [80, 75, 70], [2] * 3, step=0.5)  # from lap start (lap partly seen: no last lap)
     drive_hybrid(tele, gen, [70, 72], [3] * 2, lap_start=elapsed + 0.5, elapsed=elapsed)  # new lap
     assert output.batteryDrainLast == pytest.approx(10.0)
     assert output.batteryDrain == 0.0
@@ -291,8 +291,11 @@ def test_force_g_downforce_and_braking(tele):
     assert output.downForceRatio == pytest.approx(0.75)
     assert output.brakingRate == pytest.approx(3.0)
     assert output.transientMaxBrakingRate == pytest.approx(3.0)
-    # Braking right after an impact is not counted
-    tele.update({"timing.elapsed": 11.0, "vehicle.impact_time": 10.5})
+    # Braking right after an impact is not counted, light impacts (kerbs, scraping) ignored
+    tele.update({"timing.elapsed": 11.0, "vehicle.impact_time": 10.5, "vehicle.impact_magnitude": 60.0})
+    gen.send(0)
+    assert output.brakingRate == pytest.approx(3.0)
+    tele["vehicle.impact_magnitude"] = 1500.0
     gen.send(0)
     assert output.brakingRate == 0.0
 
@@ -418,11 +421,11 @@ def test_consumption_history_replaced_not_changed_in_place(tele, monkeypatch, tm
     monkeypatch.setattr(minfo, "wheels", SimpleNamespace(lastLapTreadWear=(1.0, 1.0, 1.0, 1.0)))
     history = HistoryInfo()
     gen = module_stint.record_consumption_history(history, f"{tmp_path}/")
-    tele["lap.number"] = 1
+    tele["lap.completed_laps"] = 1
     gen.send(0)
     shown = history.consumptionDataSet  # held by GUI
     shown_laps = list(shown)
-    tele["lap.number"] = 2
+    tele["lap.completed_laps"] = 2
     gen.send(0)
     assert list(shown) == shown_laps
     assert history.consumptionDataSet is not shown and history.consumptionDataSet[0].lapNumber == 2

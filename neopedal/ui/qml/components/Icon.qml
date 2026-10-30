@@ -5,9 +5,10 @@ import QtQuick
 Text {
     property string glyph: ""
     property string fallback: ""
-    property real size: theme.em * 1.05
+    property real size: theme.iconMd
     readonly property bool iconShown: theme.iconFont !== "" && glyph !== ""
     text: iconShown ? glyph : (theme.iconFont === "" ? fallback : "")
+    textFormat: Text.PlainText
     visible: text !== ""
     font.family: iconShown ? theme.iconFont : Qt.application.font.family
     font.pixelSize: iconShown ? size : Math.round(size * 0.9)

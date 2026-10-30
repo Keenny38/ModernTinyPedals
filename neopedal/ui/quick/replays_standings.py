@@ -23,12 +23,14 @@ selected car), lap starts seen of each car, go to a lap of a car
 
 from __future__ import annotations
 
+import html
+
 from PySide6.QtCore import Property, QObject, Slot
-from PySide6.QtWidgets import QInputDialog
 
 from ...formatter import class_alias, class_color
-from ...i18n import tr, trm
+from ...i18n import tr
 from ...process.game_info import Standing
+from . import dialogs
 from .director_shared import status_text  # same status & colors as Broadcast Director
 from .models import DictListModel
 from .replays_base import ReplaysBase
@@ -165,16 +167,20 @@ class ReplaysStandings(ReplaysBase):
 
     @Slot(str)
     def goToLap(self, key: str):
-        """Replay goes to start of a lap (asked) of car, camera on car"""
+        """Replay goes to start of a lap (asked in the page) of car, camera on car"""
         car = self.car_of(key)
         if car is None or self.state != REPLAY:
             return
+
+        def go(lap: int):
+            if self.state == REPLAY and self.car_of(key) is not None:  # replay closed meanwhile: nothing sent
+                self.selectCar(key)
+                self.send(go_to_lap(car.slot, lap, self.seconds_before))
+
         # Any lap, also ahead of replay time (go_to_lap searches forward): not ahead of current lap only
-        lap, accepted = QInputDialog.getInt(self._window, tr("Go to lap"), trm(f"Lap of {car.driver}:"),
-                                            car.laps + 1, 1, max(car.laps + 1, MAX_GO_TO_LAP))
-        if accepted:
-            self.selectCar(key)
-            self.send(go_to_lap(car.slot, lap, self.seconds_before))
+        dialogs.ask_number(self._window, tr("Go to lap"),
+                           tr("Lap of %1:").replace("%1", f"<b>{html.escape(car.driver)}</b>"),
+                           go, car.laps + 1, 1, max(car.laps + 1, MAX_GO_TO_LAP))
 
     def car_of(self, key: str) -> Standing | None:
         return next((car for car in self.standings if str(car.slot) == key), None)

@@ -59,39 +59,6 @@ Item {
         anchors.fill: parent
         spacing: theme.space3
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: theme.space3
-            Text {
-                text: i18n.tr("Corner detection")
-                color: theme.dimText
-                elide: Text.ElideRight
-                Layout.maximumWidth: implicitWidth
-                Layout.fillWidth: true
-            }
-            TpSlider {
-                id: slider
-                Layout.fillWidth: true
-                Layout.minimumWidth: theme.em * 5
-                from: 3; to: 40; stepSize: 1
-                value: backend.cornerTable.hysteresis
-                tip: i18n.tr("Speed drop & rise counted as a corner: lower finds more corners")
-                function apply() {
-                    applyTimer.stop()
-                    if (Math.round(value) !== backend.cornerTable.hysteresis) backend.cornerTable.setHysteresis(Math.round(value))
-                }
-                // Corners found again once released, or once value stays a moment (dragging, arrow keys stay smooth)
-                onMoved: applyTimer.restart()
-                onPressedChanged: if (!pressed) apply()
-                Timer { id: applyTimer; interval: 400; onTriggered: slider.apply() }
-            }
-            Text {
-                text: Math.round(slider.value * backend.speedScale) + " " + backend.speedUnit
-                color: theme.text
-                font.features: { "tnum": 1 }
-            }
-        }
-
         // Compared lap & order
         RowLayout {
             Layout.fillWidth: true
@@ -112,12 +79,13 @@ Item {
             }
         }
 
-        // Laps aligned on braking point of selected corner, corner report
+        // Laps aligned on braking point of selected corner, corner report, corner detection (⋯: also without corners,
+        // a lower sensitivity may find some)
         RowLayout {
             Layout.fillWidth: true
-            visible: root.hasRows
             spacing: theme.space3
             TpButton {
+                visible: root.hasRows
                 readonly property bool aligned: root.alignment.index !== undefined && root.alignment.index === root.selected
                 text: "↔ " + i18n.tr("Align on Braking")
                 flat: true
@@ -129,13 +97,73 @@ Item {
             }
             Item { Layout.fillWidth: true }
             TpButton {
-                glyph: ""  // export
+                visible: root.hasRows
+                glyph: theme.glyphs.export
                 fallback: "⇪"
-                text: i18n.tr("Report...")
+                text: i18n.tr("Report…")
                 flat: true
                 size: "sm"
                 tip: i18n.tr("Export corner report: table, deltas, coaching notes & map (HTML or PDF)")
                 onClicked: backend.exports.exportCornerReport()
+            }
+            TpButton {
+                id: moreButton
+                objectName: "cornerMore"
+                glyph: theme.glyphs.more
+                fallback: "⋯"
+                flat: true
+                size: "sm"
+                tip: i18n.tr("Corner detection")
+                checked: detectionPopup.visible
+                onClicked: detectionPopup.visible ? detectionPopup.close() : detectionPopup.open()
+                // Expert setting: speed drop & rise counted as a corner
+                TpPopup {
+                    id: detectionPopup
+                    objectName: "cornerDetection"
+                    y: moreButton.height + theme.space1
+                    x: moreButton.width - width
+                    width: Math.min(theme.em * 24, root.width)
+                    onClosed: if (root.chart) root.chart.forceActiveFocus()  // keys back to charts
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: theme.space3
+                        TpCardHeader { level: "popup"; title: i18n.tr("Corner detection") }
+                        Text {
+                            text: i18n.tr("Speed drop & rise counted as a corner: lower finds more corners")
+                            textFormat: Text.PlainText
+                            color: theme.dimText
+                            font.pointSize: theme.fontSmall
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.space3
+                            TpSlider {
+                                id: slider
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: theme.em * 5
+                                from: 3; to: 40; stepSize: 1
+                                value: backend.cornerTable.hysteresis
+                                tip: i18n.tr("Speed drop & rise counted as a corner: lower finds more corners")
+                                function apply() {
+                                    applyTimer.stop()
+                                    if (Math.round(value) !== backend.cornerTable.hysteresis) backend.cornerTable.setHysteresis(Math.round(value))
+                                }
+                                // Corners found again once released, or once value stays a moment (dragging, arrow keys stay smooth)
+                                onMoved: applyTimer.restart()
+                                onPressedChanged: if (!pressed) apply()
+                                Timer { id: applyTimer; interval: 400; onTriggered: slider.apply() }
+                            }
+                            Text {
+                                text: Math.round(slider.value * backend.speedScale) + " " + backend.speedUnit
+                                textFormat: Text.PlainText
+                                color: theme.text
+                                font.features: { "tnum": 1 }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -146,19 +174,18 @@ Item {
             Layout.fillWidth: true
             implicitHeight: coachColumn.implicitHeight + theme.space5
             radius: theme.radiusMd
-            color: theme.tint(theme.loss, theme.dark ? "subtle" : 0.07)
+            color: theme.tint(theme.loss, "subtle")
             border.width: 1
-            border.color: theme.tint(theme.loss, 0.35)
+            border.color: theme.tint(theme.loss, "outline")
             ColumnLayout {
                 id: coachColumn
                 anchors.fill: parent
                 anchors.margins: theme.space3
                 spacing: theme.space1
-                Text {
+                TpText {
+                    role: "label"
                     text: i18n.tr("Where time is lost") + (backend.cornerTable.coachingLap ? " · " + backend.cornerTable.coachingLap : "")
-                    color: theme.text
                     font.weight: Font.DemiBold
-                    font.pointSize: theme.fontLabel
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                 }
@@ -170,7 +197,7 @@ Item {
                         Layout.fillWidth: true
                         implicitHeight: tipRow.implicitHeight + theme.space2
                         radius: theme.radiusSm
-                        color: tipArea.pressed ? theme.border : tipArea.containsMouse ? theme.hover : "transparent"
+                        color: tipArea.pressed ? theme.surfaceSunken : tipArea.containsMouse ? theme.hover : "transparent"
                         activeFocusOnTab: true
                         Accessible.role: Accessible.Button
                         Accessible.name: modelData.label + " " + modelData.loss + ": " + modelData.causes.join(", ")
@@ -188,6 +215,7 @@ Item {
                                 Layout.alignment: Qt.AlignTop
                                 Layout.preferredWidth: theme.em * 4.2
                                 text: tip.modelData.label
+                                textFormat: Text.PlainText
                                 color: theme.text
                                 font.weight: Font.Bold
                                 elide: Text.ElideRight
@@ -195,6 +223,7 @@ Item {
                             Text {
                                 Layout.alignment: Qt.AlignTop
                                 text: tip.modelData.loss
+                                textFormat: Text.PlainText
                                 color: theme.loss
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
@@ -202,6 +231,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: tip.modelData.causes.join(" · ")
+                                textFormat: Text.PlainText
                                 color: theme.dimOn(tipArea.containsMouse ? theme.hover : coachCard.color)
                                 font.pointSize: theme.fontSmall
                                 wrapMode: Text.WordWrap
@@ -307,11 +337,13 @@ Item {
                                 Text {
                                     id: cornerLabel
                                     text: rowItem.modelData.label
+                                    textFormat: Text.PlainText
                                     color: rowItem.modelData.kind === "ideal" ? theme.purple : theme.text
                                     font.weight: rowItem.modelData.kind === "total" || rowItem.modelData.kind === "ideal" ? Font.Bold : Font.DemiBold
                                 }
                                 Text {
                                     text: rowItem.modelData.apex
+                                    textFormat: Text.PlainText
                                     color: rowItem.modelData.kind === "ideal" ? theme.purple : theme.dimOn(rowItem.color)
                                     font.pointSize: theme.fontCaption
                                     anchors.baseline: cornerLabel.baseline
@@ -330,7 +362,7 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: rowItem.modelData.bar > 0 ? parent.width - half : parent.width - half - amount
                                     width: amount
-                                    color: theme.tint(root.tone(rowItem.modelData.timeColor, theme.dimText), 0.55)
+                                    color: theme.tint(root.tone(rowItem.modelData.timeColor, theme.dimText), "outline")
                                 }
                                 Rectangle {
                                     visible: rowItem.corner
@@ -338,11 +370,12 @@ Item {
                                     width: 1
                                     height: parent.height * 0.6
                                     anchors.verticalCenter: parent.verticalCenter
-                                    color: theme.tint(theme.dimText, 0.5)
+                                    color: theme.tint(theme.dimText, "outline")
                                 }
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: rowItem.modelData.time
+                                    textFormat: Text.PlainText
                                     color: root.tone(rowItem.modelData.timeColor, theme.text)
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
@@ -353,6 +386,7 @@ Item {
                                 Layout.preferredWidth: theme.em * 5.5
                                 horizontalAlignment: Text.AlignRight
                                 text: rowItem.modelData.speed || ""
+                                textFormat: Text.PlainText
                                 color: rowItem.modelData.kind === "ideal" ? theme.purple : root.tone(rowItem.modelData.speedColor, theme.text)
                                 font.features: { "tnum": 1 }
                             }
@@ -369,8 +403,9 @@ Item {
                             color: theme.dimOn(rowItem.color)
                             font.pointSize: theme.fontCaption
                             font.features: { "tnum": 1 }
-                            function value(text, color) {
-                                return "<font color='" + root.tone(color, theme.text) + "'>" + text.replace(/ /g, "&nbsp;") + "</font>"
+                            function value(text, color) {  // values & lap names (file names) escaped: never markup
+                                var shown = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                                return "<font color='" + root.tone(color, theme.text) + "'>" + shown.replace(/ /g, "&nbsp;") + "</font>"
                             }
                             text: !rowItem.corner ? "" : [
                                 i18n.tr("Braking") + " " + value(rowItem.modelData.brake),
@@ -398,10 +433,13 @@ Item {
                 compact: true
                 loading: !root.hasRows && backend.loading
                 empty: !root.hasRows && !backend.loading
-                loadingText: i18n.tr("Reading laps...")
+                loadingText: i18n.tr("Reading laps…")
                 glyph: ""  // map pin
                 title: backend.legend.length === 0 ? i18n.tr("Select recorded laps to compare.")
                     : i18n.tr("No corner found: speed not recorded.")
+                // No lap shown: guided analysis (best vs last lap, worst corner)
+                actionText: backend.legend.length === 0 && backend.hasTrackLaps ? i18n.tr("Analyze My Last Lap") : ""
+                onAction: backend.analyzeLastLap()
             }
         }
     }

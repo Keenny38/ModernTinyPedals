@@ -38,6 +38,7 @@ from ...api_control import api
 from ...const_common import ENERGY_TYPE_ID, MAX_SECONDS
 from ...i18n import tr_overlay
 from ...module_info import minfo
+from ..fuel_energy_saver import signed_delta
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
 
@@ -72,6 +73,7 @@ class Realtime(ModernOverlay):
         self.dec_delta = max(int(wcfg["decimal_places_delta"]), 0)
         self.min_reserve = max(wcfg["minimum_reserve"], 0)
         self.unit_fuel = units.set_unit_fuel(self.cfg.units["fuel_unit"])
+        self.type_text = tuple(tr_overlay(text) for text in ENERGY_TYPE_ID)  # fuel, energy
 
         pad = unit * 0.3
         gap = unit * 0.14
@@ -102,7 +104,7 @@ class Realtime(ModernOverlay):
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
-        panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
+        panel(painter, QRectF(self.rect()), theme, self.panel_radius(), self.depth_effects)
         for slot in range(self.total_slot):
             column = QRectF(self.cells[0][slot].topLeft(), self.cells[2][slot].bottomRight())
             if slot == self.center_slot:
@@ -169,21 +171,24 @@ class Realtime(ModernOverlay):
         if self.pitin_bias:
             uses[self.column_bias] = self.use_text(pit_bias * fuel_est, energy_type)
             deltas[self.column_bias] = (f"{pit_bias:.1%}"[:self.char_width], 2)
-        uses[self.column_last] = self.use_text(data.lastLapConsumption, energy_type)
-        deltas[self.column_last] = (ENERGY_TYPE_ID[energy_type > 0], 2)
+        last_used = data.lastLapConsumption  # none until a lap is completed
+        uses[self.column_last] = self.use_text(last_used if last_used > 0 else -MAX_SECONDS, energy_type)
+        deltas[self.column_last] = (self.type_text[energy_type > 0], 2)
         for index in range(1 + self.column_last, self.total_slot):
             target_laps = est_runlaps + index
             if index == self.center_slot:
                 laps[index] = f"{laps_done}/{laps_done + target_laps:d}"
-            else:
+            elif target_laps > 0:
                 laps[index] = f"{laps_done + target_laps:d}"
+            else:  # less laps than none left (no estimate yet, end of stint)
+                laps[index] = DASH
             if target_laps > 0 < fuel_est:
                 target_use = total_remaining / target_laps
                 uses[index] = self.use_text(target_use, energy_type)
                 delta = fuel_est - target_use
                 if not energy_type:
                     delta = self.unit_fuel(delta)
-                deltas[index] = (f"{delta:+.{self.dec_delta}f}"[:self.char_width], int(delta >= 0))
+                deltas[index] = signed_delta(delta, self.dec_delta, self.char_width)
         self.refresh((tuple(laps), tuple(uses), tuple(deltas)))
 
     def use_text(self, value: float, energy_type: bool) -> str:

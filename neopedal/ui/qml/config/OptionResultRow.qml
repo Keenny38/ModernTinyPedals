@@ -3,7 +3,8 @@ import QtQuick.Controls.Basic
 import "../components"
 
 // Result row of Find Option page: group icon, option name (searched words in bold), overlay or section,
-// current value (on / off switch, color, text) & changed-from-default dot. Click opens the option.
+// current value (on / off switch, color, text) & changed-from-default dot. Click opens the option; more actions
+// with "⋯", right click or Menu key (as the option rows of Settings & Overlay Options).
 Item {
     id: row
     required property int index
@@ -34,16 +35,14 @@ Item {
     Accessible.role: Accessible.ListItem
     Accessible.name: sectionLabel + ", " + label.replace(/<[^>]*>/g, "") + ", " + value
 
-    Rectangle {
+    TpListRow {
         id: surface
         anchors.fill: parent
         anchors.topMargin: 2
         anchors.bottomMargin: 2
-        radius: theme.radiusMd
-        color: area.containsMouse ? theme.hover : theme.base
-        border.width: 1
-        border.color: theme.cardBorder
-        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: theme.motionFast } }
+        card: true
+        hovered: area.containsMouse
+        animate: !row.recycling
 
         MouseArea {
             id: area
@@ -71,9 +70,9 @@ Item {
 
         Column {
             anchors.left: badge.right
-            anchors.leftMargin: theme.em * 0.7
+            anchors.leftMargin: theme.padCard
             anchors.right: valueBox.left
-            anchors.rightMargin: theme.em * 0.6
+            anchors.rightMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
             spacing: 1
             Text {
@@ -86,6 +85,7 @@ Item {
             Text {
                 width: parent.width
                 text: row.sectionLabel + "  ·  " + row.groupLabel
+                textFormat: Text.PlainText
                 color: theme.dimText
                 font.pointSize: theme.fontSmall
                 elide: Text.ElideRight
@@ -94,8 +94,8 @@ Item {
 
         Row {
             id: valueBox
-            anchors.right: chevron.left
-            anchors.rightMargin: theme.em * 0.4
+            anchors.right: moreButton.left
+            anchors.rightMargin: theme.space3
             anchors.verticalCenter: parent.verticalCenter
             spacing: theme.em * 0.5
             Rectangle {
@@ -140,20 +140,38 @@ Item {
                 visible: row.kind !== "bool" && row.value !== ""
                 width: Math.min(implicitWidth, row.width * 0.3)
                 text: row.value
+                textFormat: Text.PlainText
                 color: theme.dimText
                 elide: Text.ElideMiddle
                 font.features: { "tnum": 1 }
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
+        TpButton {
+            id: moreButton
+            anchors.right: chevron.left
+            anchors.rightMargin: theme.space1
+            anchors.verticalCenter: parent.verticalCenter
+            flat: true
+            size: "sm"
+            glyph: theme.glyphs.more
+            fallback: "⋯"
+            tip: i18n.tr("More actions")
+            focusPolicy: Qt.NoFocus  // list keys: Menu key opens it for the current row (no Tab stop per row)
+            opacity: hovered || area.containsMouse || row.current ? 1 : 0  // revealed: hover, focus, current
+            onClicked: {
+                row.ListView.view.currentIndex = row.index
+                row.menuRequested(moreButton, 0, moreButton.height)
+            }
+        }
         Icon {
             id: chevron
             anchors.right: parent.right
-            anchors.rightMargin: theme.em * 0.6
+            anchors.rightMargin: theme.space4
             anchors.verticalCenter: parent.verticalCenter
             glyph: ""  // chevron right
             fallback: "›"
-            size: theme.em * 0.75
+            size: theme.iconXs
             color: area.containsMouse || row.current ? theme.dimText : theme.border  // shown on hover / focus
         }
 

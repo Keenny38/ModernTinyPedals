@@ -224,32 +224,33 @@ def test_track_infos_and_new_laps_read_in_background(ui_env, monkeypatch):
 
 
 def test_library_reads_lap_infos_once_in_background(ui_env, monkeypatch):
-    from PySide6.QtWidgets import QWidget
+    from PySide6.QtCore import QCoreApplication, QEvent
 
     from neopedal.setting import cfg
-    from neopedal.ui.lap_library import LapLibrary
+    from neopedal.ui.lap_viewer import LapViewer
     from neopedal.userfile import lap_cache
 
     import_log(cfg.path.telemetry, "Spa race", [139.5, 138.2])
     calls: list[bool] = []
     monkeypatch.setattr(lap_cache, "read_lap_info", record_threads(lap_cache, "read_lap_info", calls))
-    parent = QWidget()
+    viewer = LapViewer(None)
     try:
-        library = LapLibrary(parent, cfg.path.telemetry, lambda paths: None, lambda moved: None)
-        assert library.is_refreshing() and library.tree.topLevelItemCount() == 0
+        library = viewer.backend.library  # imported laps library panel
+        library.open()
+        assert library.is_refreshing() and library.model.rowCount() == 0
         wait_library(library)
-        group = library.tree.topLevelItem(0)
-        assert group.childCount() == 2 and group.text(library.COL_TRACK) == "Spa" and off_thread(calls)
-        group.child(1).setSelected(True)
+        rows = [dict(row) for row in library.model.rows]
+        assert len(rows) == 3 and rows[0]["track"] == "Spa" and off_thread(calls)
+        library.select(rows[2]["key"], "set")
         calls.clear()
         library.refresh()
         wait_library(library)
         assert not calls  # lap infos from index of imported log
-        group = library.tree.topLevelItem(0)
-        assert group.child(1).isSelected() and group.text(library.COL_DRIVER) == "Pro"  # selection kept
-        library.close()
+        rows = [dict(row) for row in library.model.rows]
+        assert rows[2]["selected"] and rows[0]["driver"] == "Pro"  # selection kept
     finally:
-        parent.deleteLater()
+        viewer.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 # --- Single lap exports in background

@@ -181,10 +181,10 @@ class Realtime(Overlay):
                     data /= max_rate
                 else:
                     data = 0
-                text = f"{data:+.0%}"
+                text = f"{data:+z.0%}"
                 shown = round(data * 100)
             else:
-                text = f"{data:+.2f}"
+                text = f"{data:+z.2f}"
                 shown = round(data, 2)
             target.text = text
             # Neutral color when shown as 0 (index 2), else loss or gain

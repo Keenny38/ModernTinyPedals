@@ -6,7 +6,7 @@ import "../components"
 
 // Modules page: title & counts, what modules are for, search, All / Active / Inactive, notices (modules off that
 // enabled overlays need, start errors), modules as cards (see ModuleCard), enable / disable all shown modules.
-// Keys: type to search, "/" search, arrows move, Space switches, Enter opens settings, Menu key the menu.
+// Keys: type to search, Ctrl+F or "/" search, arrows move, Space switches, Enter opens settings, Menu key the menu.
 TpPage {
     id: page
 
@@ -18,14 +18,14 @@ TpPage {
         search.selectAll()
     }
     function resetText(label) {
-        return i18n.trm("Reset " + label) + "..."
+        return i18n.trm("Reset " + label) + "…"
     }
     function openMenu(item, x, y, entry) {
         cardMenu.name = entry.key
         cardMenu.active = entry.active
         cardMenu.resets = entry.resets
         // Menu as wide as its longest entry (data names can be long)
-        var texts = [i18n.tr("Config") + "...", entry.active ? i18n.tr("Disable") : i18n.tr("Enable")]
+        var texts = [i18n.tr("Options…"), entry.active ? i18n.tr("Disable") : i18n.tr("Enable")]
         for (var i = 0; i < entry.resets.length; i++)
             texts.push(page.resetText(entry.resets[i].label))
         var widest = 0
@@ -37,6 +37,9 @@ TpPage {
         cardMenu.popup(item, x, y)
     }
 
+    // Ctrl+F (or "/", or typing in the list): search
+    Shortcut { sequences: [StandardKey.Find]; enabled: pageState.active; onActivated: page.focusSearch() }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.padPage
@@ -44,7 +47,7 @@ TpPage {
 
         // Title & counts
         TpPageHeader {
-            title: i18n.tr("Module")  // navigation bar name ("Modules" in French)
+            title: i18n.tr("Modules")
             count: i18n.trm(backend.activeCount + " / " + backend.totalCount + " enabled")
             countActive: backend.activeCount > 0
         }
@@ -53,19 +56,19 @@ TpPage {
             wrapMode: Text.WordWrap
             color: theme.dimText
             lineHeight: 1.1
-            text: i18n.tr("Modules compute the data that overlays show (lap times, fuel, positions...). A module turned off computes nothing: overlays using its data stay empty.")
+            text: i18n.tr("Modules compute the data that overlays show (lap times, fuel, positions…). A module turned off computes nothing: overlays using its data stay empty.")
         }
 
         // Search & state filter
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.6
+            spacing: theme.space4
             TpSearchField {
                 id: search
                 Layout.fillWidth: true
                 Layout.minimumWidth: theme.em * 8
                 focus: true
-                placeholderText: i18n.tr("Search modules") + "   /"
+                placeholderText: i18n.tr("Search modules") + "   Ctrl+F"
                 onSearchChanged: function(text) { backend.setSearch(text) }
                 onExitField: modules.forceActiveFocus()
                 Keys.onReturnPressed: modules.forceActiveFocus()
@@ -154,9 +157,9 @@ TpPage {
                 onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
             }
 
-            EmptyState {
+            TpStateView {
                 anchors.centerIn: parent
-                visible: modules.count === 0
+                empty: modules.count === 0
                 glyph: ""  // search
                 title: i18n.tr("No module matches the search")
                 actionText: backend.filtered ? i18n.tr("Clear Filters") : ""
@@ -175,15 +178,21 @@ TpPage {
                 text: backend.filtered
                     ? i18n.trm(backend.shownCount + " of " + backend.totalCount + " modules shown")
                     : i18n.trm(backend.totalCount + " modules")
+                textFormat: Text.PlainText
             }
+            // At once with Undo in the toast (as on the Overlays page), counts of what each one switches
             TpButton {
-                text: backend.filtered ? i18n.tr("Enable Shown") : i18n.tr("Enable All")
-                enabled: backend.shownCount > 0
+                objectName: "enableShownButton"
+                text: i18n.tr("Enable") + " (" + (backend.shownCount - backend.shownActiveCount) + ")"
+                tip: backend.filtered ? i18n.tr("Enable the modules shown") : i18n.tr("Enable every module")
+                enabled: backend.shownCount - backend.shownActiveCount > 0
                 onClicked: backend.enableShown()
             }
             TpButton {
-                text: backend.filtered ? i18n.tr("Disable Shown") : i18n.tr("Disable All")
-                enabled: backend.shownCount > 0
+                objectName: "disableShownButton"
+                text: i18n.tr("Disable") + " (" + backend.shownActiveCount + ")"
+                tip: backend.filtered ? i18n.tr("Disable the modules shown") : i18n.tr("Disable every module")
+                enabled: backend.shownActiveCount > 0
                 onClicked: backend.disableShown()
             }
         }
@@ -196,7 +205,7 @@ TpPage {
         property bool active: false
         property var resets: []
         onClosed: modules.forceActiveFocus()  // menus give focus back to the window
-        Action { text: i18n.tr("Config") + "..."; onTriggered: backend.openConfig(cardMenu.name) }
+        Action { text: i18n.tr("Options…"); onTriggered: backend.openConfig(cardMenu.name) }
         Action {
             text: cardMenu.active ? i18n.tr("Disable") : i18n.tr("Enable")
             onTriggered: backend.toggle(cardMenu.name)
@@ -214,4 +223,7 @@ TpPage {
             onObjectRemoved: function(index, object) { cardMenu.removeAction(object) }
         }
     }
+
+    // Dialogs & toasts asked by the backend (ui/quick/dialogs.py, ui/toast.show_toast)
+    TpDialogHost {}
 }

@@ -35,8 +35,8 @@ from ...api_control import api
 from ...demo_state import drawing_demo
 from ...i18n import tr_overlay
 from ...module_info import minfo
-from .._common import player_race_laps
-from .base import ModernOverlay, clock_samples
+from .._common import player_race_laps, system_clock_samples
+from .base import DASH, ModernOverlay, signed
 from .stats import Stat, StatsMixin, Value
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ class Realtime(StatsMixin, ModernOverlay):
             sample = self.widest("strong", self.session_names)
             stats.append(Stat("session_name", "Session", sample, "strong"))
         if wcfg["show_system_clock"]:
-            sample = self.widest("value", clock_samples(wcfg["system_clock_format"]))
+            sample = self.widest("value", system_clock_samples(wcfg["system_clock_format"]))
             stats.append(Stat("system_clock", "Clock", sample))
         if wcfg["show_session_time"]:
             stats.append(Stat("session_time", "Remaining", "~88:88:88", "strong", theme.accent))
@@ -111,7 +111,7 @@ class Realtime(StatsMixin, ModernOverlay):
                 values.append(Value(strftime(self.wcfg["system_clock_format"]), theme.text_dim))
             elif key == "session_time":
                 if offset:
-                    text = f"~{calc.sec2countdown(max(est_remaining, 0)):.7}"
+                    text = f"~{calc.sec2countdown(max(est_remaining, 0))}"
                 else:
                     text = calc.sec2sessiontime(max(remaining, 0))
                 values.append(Value(text))
@@ -139,8 +139,8 @@ class Realtime(StatsMixin, ModernOverlay):
             level = field_level(names)
             driver, safety = level.driver, level.safety
         if driver is None and safety is None:
-            return Value("- · -", theme.text_dim)
-        text = f"{driver.short if driver else '-'} · {safety.short if safety else '-'}"
+            return Value(f"{DASH} · {DASH}", theme.text_dim)
+        text = f"{driver.short if driver else DASH} · {safety.short if safety else DASH}"
         if driver is None:
             return Value(text, theme.text)
         colors = self.rank_colors
@@ -155,5 +155,5 @@ class Realtime(StatsMixin, ModernOverlay):
         laps = max(lap_total - laps_done, 0)
         text = f"{laps:.3f}"[:7]
         if self.wcfg["show_predicted_extra_laps"]:
-            return f"{text} ({minfo.vehicles.finishLapOffset:+.0f})"
+            return f"{text} ({signed(minfo.vehicles.finishLapOffset)})"
         return text

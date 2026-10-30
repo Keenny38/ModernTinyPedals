@@ -37,7 +37,7 @@ from .. import realtime_state
 from ..async_request import HttpConnection, forget_hostname, resolve_hostname_async, set_header_get
 from ..const_common import TYPE_JSON
 from ..game_rest_cache import rest_cache
-from ..thread_guard import run_supervised
+from ..thread_guard import run_supervised, wait_all_stopped
 
 logger = logging.getLogger(__name__)
 json_decoder = json.JSONDecoder()
@@ -175,7 +175,7 @@ class AppendedListDecoder:
         if prefix and len(text) > len(prefix) and text.startswith(prefix):
             tail = text[len(prefix):].lstrip()
             if tail.startswith(","):
-                with suppress(ValueError):
+                with suppress(ValueError, RecursionError):  # RecursionError: nested too deeply
                     added = json_decoder.decode(f"[{tail[1:]}")
                     if isinstance(added, list):
                         items = items + added
@@ -295,11 +295,12 @@ class RestAPIConnector:
         self._active_interval = max(self._cfg["restapi_update_interval"], 100) / 1000
 
     def start(self) -> None:
-        """Start update thread"""
+        """Start update thread
+
+        A previous thread still stopping (stop timed out) is not waited: it has its own stop event & task
+        state (never resumes, never resets the new thread's data, see _reset_if_current).
+        """
         if not self._updating and self._cfg["enable_restapi_access"]:
-            previous = self._update_thread
-            if previous is not None and previous.is_alive():  # still stopping, see stop()
-                previous.join(STOP_TIMEOUT)
             self._updating = True
             # Own stop event & task state for each thread, so a previous thread still stopping never resumes
             self._event = threading.Event()
@@ -312,14 +313,37 @@ class RestAPIConnector:
     def stop(self) -> None:
         """Stop update thread, wait a bounded time (requests are cancelled within 0.1s)"""
         if self._updating:
+            self.request_stop()
+            self.wait_stopped()
+
+    def request_stop(self) -> None:
+        """Signal update thread to stop, returns at once: wait_stopped joins it
+
+        Split so every API thread is signalled before any is waited (threads stop in parallel).
+        """
+        if self._updating:
             self._event.set()
             self._state.wake.set()
-            if self._update_thread is not None:
-                self._update_thread.join(STOP_TIMEOUT)
-                if self._update_thread.is_alive():
-                    logger.warning("RestAPI: UPDATING: thread still stopping in background")
-            self._updating = False
-            logger.info("RestAPI: UPDATING: thread stopped")
+
+    def wait_stopped(self, timeout: float = STOP_TIMEOUT, deadline: float | None = None) -> bool:
+        """Wait (bounded) for signalled update thread, returns True if it stopped
+
+        Args:
+            timeout: maximum wait (seconds), see thread_guard.wait_all_stopped.
+            deadline: monotonic time to give up at instead (shared with other threads stopping).
+        """
+        if not self._updating:
+            return True
+        stopped = True
+        self.request_stop()
+        thread = self._update_thread
+        if thread is not None:
+            stopped = wait_all_stopped((("RestAPI", lambda: not thread.is_alive(), thread.join),), timeout, deadline)
+            if not stopped:
+                logger.warning("RestAPI: UPDATING: thread still stopping in background")
+        self._updating = False
+        logger.info("RestAPI: UPDATING: thread stopped")
+        return stopped
 
     def status(self) -> tuple[EndpointStatus, ...]:
         """Status of every resource (any thread)"""
@@ -619,7 +643,7 @@ class RestAPIConnector:
         if last_hash != new_hash:
             try:
                 resource_output = (json_decoder.decode if decoder is None else decoder)(raw_bytes.decode())
-            except ValueError:
+            except (ValueError, RecursionError):  # RecursionError: nested too deeply
                 return self.request_failed(
                     uri_path, output_set, last_hash, "invalid JSON" if raw_bytes else "no answer")
             self.apply_outputs(uri_path, output_set, resource_output)
@@ -695,7 +719,7 @@ async def get_resource(request: bytes, connection: HttpConnection,
         received(raw_bytes)
     try:
         resource_output = json_decoder.decode(raw_bytes.decode())
-    except ValueError as error:
+    except (ValueError, RecursionError) as error:  # RecursionError: nested too deeply
         raise RestError("invalid JSON") from error
     if not isinstance(resource_output, TYPE_JSON):
         raise RestError("no data")  # null outside session

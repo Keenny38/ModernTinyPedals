@@ -20,8 +20,8 @@ Rectangle {
 
     implicitWidth: theme.em * 14
     implicitHeight: column.implicitHeight + padding * 2
-    radius: theme.radiusXl
-    color: area.containsMouse ? (theme.dark ? Qt.lighter(theme.base, 1.18) : Qt.darker(theme.base, 1.025)) : theme.base
+    radius: theme.radiusLg
+    color: area.containsMouse ? theme.surfaceHover : theme.surfaceCard
     border.width: checked ? 2 : 1
     border.color: checked ? theme.accent : theme.cardBorder
     scale: area.pressed ? 0.985 : 1
@@ -52,7 +52,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: theme.em * 0.8
+            spacing: theme.space5
 
             Rectangle {
                 visible: (card.glyph !== "" && theme.iconFont !== "") || card.tileText !== ""
@@ -66,12 +66,13 @@ Rectangle {
                     anchors.centerIn: parent
                     glyph: card.glyph
                     color: card.checked ? theme.accent : theme.text
-                    size: theme.em * 1.15
+                    size: theme.iconMd
                 }
                 Text {
                     anchors.centerIn: parent
                     visible: card.glyph === "" || theme.iconFont === ""
                     text: card.tileText
+                    textFormat: Text.PlainText
                     color: card.checked ? theme.accent : theme.text
                     font.weight: Font.Bold
                     font.pointSize: theme.fontLabel
@@ -81,13 +82,14 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.alignment: card.text !== "" ? Qt.AlignTop : Qt.AlignVCenter
-                spacing: theme.em * 0.2
+                spacing: theme.space1
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: theme.em * 0.5
                     Text {
                         Layout.fillWidth: true
                         text: card.title
+                        textFormat: Text.PlainText
                         color: theme.text
                         font.weight: Font.DemiBold
                         font.pointSize: theme.fontSubtitle
@@ -105,6 +107,7 @@ Rectangle {
                     Layout.fillWidth: true
                     visible: text !== ""
                     text: card.text
+                    textFormat: Text.PlainText
                     color: theme.dimText
                     wrapMode: Text.WordWrap
                     font.pointSize: theme.fontLabel
@@ -126,8 +129,8 @@ Rectangle {
                     visible: card.checked && card.multi
                     fallback: "✓"
                     glyph: ""  // check
-                    color: "white"
-                    size: theme.em * 0.7
+                    color: theme.accentInk
+                    size: theme.iconXs
                 }
                 Rectangle {
                     anchors.centerIn: parent
@@ -135,7 +138,7 @@ Rectangle {
                     width: Math.round(parent.width * 0.42)
                     height: width
                     radius: width / 2
-                    color: "white"
+                    color: theme.accentInk
                 }
             }
         }

@@ -31,14 +31,22 @@ from typing import Any, NamedTuple
 
 from PySide6.QtCore import QUrl
 
-from ... import calculation as calc
 from ... import units
-from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
+from ...const_common import MAX_SECONDS
+from ...const_file import FileExt
 from ...formatter import strip_invalid_char
 from ...i18n import current_language, tr, trm
 from ...process import driver_ranks as dr
 from ...process import results_index as ri
-from ...process.results_text import gap_seconds_text, laps_behind_text
+from ...process.results_text import (
+    MISSING,
+    SESSION_FILTER_LABELS,
+    gap_seconds_text,
+    laps_behind_text,
+    laptime_text,
+    place_tone,
+    position_text,
+)
 from ...rank_info import ranks
 from ...setting import cfg
 from ...userfile.brands import select_brand_name
@@ -50,7 +58,7 @@ from ...userfile.driver_stats import (
 )
 from ...userfile.lap_reference import LEVELS
 from ..lap_viewer import number_text
-from .formatting import format_date, localized_number
+from .formatting import format_date, localized_number, temperature_text
 from .game_pictures import LogoCache
 from .stats_analysis import rank_chart
 
@@ -119,7 +127,8 @@ RAW_UNITS = {"pb": "s", "qb": "s", "rb": "s", "theory": "s", "potential": "s", "
 # Level colors easier to tell apart with color vision deficiency (Okabe & Ito palette)
 COLORBLIND_LEVEL_COLORS = ("#CC79A7", "#0072B2", "#009E73", "#F0E442", "#E69F00", "#999999")
 SESSION_NAMES = ("Test day", "Practice", "Qualifying", "Warmup", "Race")
-SESSION_FILTERS = ("All", "Practice", "Qualifying", "Race")
+SESSION_CODES = ("T", "P", "Q", "W", "R")  # badge letters of SESSION_NAMES
+SESSION_FILTERS = SESSION_FILTER_LABELS
 CONDITION_FILTERS = ("All Conditions", "Dry Road", "Wet Road")  # road of session best lap (see SessionRecord.wet)
 ONLINE_FILTERS = ("Online & Offline", "Online Only", "Offline Only")
 RUST_DAYS = 30  # combos not driven for this many days marked in Last Driven column
@@ -134,6 +143,7 @@ MAX_STINTS = 12  # stints & sessions listed with their consistency, newest first
 ACTIVITY_WEEKS = 53  # weeks of daily driving activity (All Tracks), page shows the last ones that fit
 ACTIVITY_STEPS = (1800, 3600, 7200)  # driving time (seconds) of activity levels 1 to 4 (above last)
 RECENT_SESSIONS = 8  # latest sessions of every track (All Tracks)
+STATS_TABS = 3  # page tabs: overview, progression, compare
 LOGO_EM = 2.6  # room of game logo before cell text (em)
 HISTORY_COLUMNS = (  # session history CSV export
     "Date", "Track", "Vehicle", "Class", "Session", "Best Lap (s)", "Valid Laps", "Invalid Laps", "Distance (m)",
@@ -222,6 +232,43 @@ def lap_folder_stamp(folder: str) -> int:
         return 0
 
 
+def folder_stamp(path: str) -> int:
+    """Modification time (ns) of a folder (changes when an entry is added or removed), 0 if none"""
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return 0
+
+
+def sector_file_times() -> dict[str, float]:
+    """Modified time of every sector best file (track & class name: seconds), one listing (worker thread)"""
+    times: dict[str, float] = {}
+    try:
+        with os.scandir(cfg.path.sector_best) as entries:
+            for entry in entries:
+                name, extension = os.path.splitext(entry.name)
+                if extension == FileExt.SECTOR and entry.is_file():
+                    times[name] = entry.stat().st_mtime
+    except OSError:
+        pass
+    return times
+
+
+def list_lap_folders() -> tuple[int, dict[str, int]]:
+    """Recorded laps folders (track & class name: modified time ns, see lap_folder_stamp) & the telemetry folder
+    stamp they were listed at, one listing (worker thread)"""
+    stamp = folder_stamp(cfg.path.telemetry)
+    folders: dict[str, int] = {}
+    try:
+        with os.scandir(cfg.path.telemetry) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    folders[entry.name] = entry.stat().st_mtime_ns
+    except OSError:
+        pass
+    return stamp, folders
+
+
 def other_account_rows(others: list[dr.OtherAccount]) -> list[dict]:
     """Driver card rows of other game accounts of this computer: Steam name, picture URL, ranks (short label,
     value, colors), badge (name, colors), date ranks were seen"""
@@ -268,6 +315,11 @@ def session_name(session: int) -> str:
     return tr(SESSION_NAMES[session]) if 0 <= session < len(SESSION_NAMES) else ""
 
 
+def session_code(session: int) -> str:
+    """Letter of session badge, same as Results & Replays pages (ResultsBadge): T, P, Q, W, R, "" if unknown"""
+    return SESSION_CODES[session] if 0 <= session < len(SESSION_CODES) else ""
+
+
 def race_result(record: SessionRecord) -> str:
     """Finish position (P3), DNF or DQ, empty if no result"""
     if record.finish == 1 and record.position > 0:
@@ -275,12 +327,15 @@ def race_result(record: SessionRecord) -> str:
     return FINISH_TEXTS.get(record.finish, "")
 
 
+def result_tone(record: SessionRecord) -> str:
+    """Tone of race result, same rule as Results page: podium gold, silver, bronze, DNF & DQ in loss tone"""
+    return place_tone(record.position if record.finish == 1 else 0, True, retired=record.finish in (2, 3))
+
+
 def parse_display_value(key: str, value: float) -> str | float:
     """Parse stats display value"""
     if DriverStats.is_lap_time(key) or key == "theory":
-        if 0 < value < MAX_SECONDS:
-            return calc.sec2laptime_full(value)
-        return TEXT_NOLAPTIME
+        return laptime_text(value) if value < MAX_SECONDS else MISSING
     if key == "meters":
         if cfg.units["odometer_unit"] == "Kilometer":
             return round(units.meter_to_kilometer(value), 1)
@@ -363,7 +418,7 @@ def derived_value(key: str, data: dict) -> float | None:
 def format_derived(key: str, value: float | None) -> str:
     """Derived figure text in units of setting"""
     if value is None:
-        return "-"
+        return MISSING
     if key in ("valid_rate", "win_rate", "podium_rate"):
         return f"{number_text(value)} %"
     if key == "speed":
@@ -401,7 +456,7 @@ def valid_laptime(value) -> float:
 
 
 def level_text(level: int) -> str:
-    return tr(LEVELS[level]) if level >= 0 else "-"
+    return tr(LEVELS[level]) if level >= 0 else MISSING
 
 
 def level_letter(level: int) -> str:
@@ -484,9 +539,9 @@ def result_details(summary: ri.ResultSummary) -> list[str]:
     """Tooltip lines of a session from its results file: classification, gap, incidents, setting, version"""
     lines = []
     if summary.position > 0:
-        place = trm(f"Position P{summary.position} of {summary.cars}")
+        place = f"{tr('Position')} {position_text(summary.position, summary.cars)}"  # "P3/12": one form everywhere
         if summary.class_cars != summary.cars and summary.class_position > 0:
-            place += " · " + trm(f"P{summary.class_position} of {summary.class_cars} in class")
+            place += f" · {tr('Class')} {position_text(summary.class_position, summary.class_cars)}"
         lines.append(place)
     gap = gap_text(summary)
     if gap:
@@ -504,7 +559,7 @@ def summary_rank(summary: ri.ResultSummary) -> str:
     """Class position of player in session: "P3/12", "" if not classified"""
     if summary.class_position <= 0:
         return ""
-    return f"P{summary.class_position}/{summary.class_cars}"
+    return position_text(summary.class_position, summary.class_cars)
 
 
 # Session history: conditions, game versions, race starts
@@ -549,12 +604,13 @@ def signed_places(value: int) -> str:
 
 
 def conditions_text(record: SessionRecord) -> str:
-    """Road & track temperature of session best lap: "Wet road 35 % · Track 28 °C", "" if not recorded"""
+    """Road & track temperature of session best lap: "Wet road 35 % · Track Temp 28 °C" (user temperature unit),
+    "" if not recorded"""
     if not record.conditions_known:
         return ""
     road = (trm(f"Wet road {localized_number(record.wetness * 100, 0)} %") if record.wet
             else tr("Dry road"))
-    return f"{road} · {trm(f'Track {localized_number(record.track_temp, 0)} °C')}"
+    return f"{road} · {tr('Track Temp')} {temperature_text(record.track_temp)}"
 
 
 def parse_laptime(text: str) -> float:

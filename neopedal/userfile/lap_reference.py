@@ -36,6 +36,7 @@ import re
 import unicodedata
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -321,5 +322,5 @@ def save_cache(filepath: str, text: str) -> None:
     """Keep sheet CSV text for offline use"""
     from . import atomic_write
 
-    with atomic_write(os.path.join(filepath, CACHE_NAME)) as file:
-        file.write(text)
+    with suppress(OSError), atomic_write(os.path.join(filepath, CACHE_NAME), raise_error=True) as file:
+        file.write(text)  # cache only: a failed write (already logged) is fetched again next time

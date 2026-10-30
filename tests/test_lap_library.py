@@ -90,96 +90,87 @@ def wait_library(library, timeout: float = 10.0):
 
 
 def open_library(viewer):
-    from neopedal.ui.lap_library import LapLibrary
-
-    viewer.backend.openLibrary()
-    library = next(widget for widget in viewer.findChildren(LapLibrary) if widget.isVisible())
+    """Imported laps library panel of the viewer (backend.library), listed as when opened"""
+    viewer.backend.openLibrary()  # Import menu: panel asked to open
+    library = viewer.backend.library
+    library.open()  # panel shown: logs listed in background
     wait_library(library)
     return library
 
 
+def library_rows(library) -> list[dict]:
+    """Rows listed by the library panel: logs & laps of expanded logs"""
+    return [dict(row) for row in library.model.rows]
+
+
 def test_library_lists_and_adds_to_viewer(viewer):
     library = open_library(viewer)
-    group = library.tree.topLevelItem(0)
-    assert group.text(library.COL_NAME) == "Spa race" and group.childCount() == 2
-    assert group.text(library.COL_TIME) == "2:18.200" and group.text(library.COL_TRACK) == "Spa"
-    assert not library.label_empty.isVisibleTo(library)
-    library.add_to_viewer([group])  # group: every lap, fastest as reference
+    group = library_rows(library)[0]
+    assert group["title"] == "Spa race" and group["count"] == 2 and len(library_rows(library)) == 3
+    assert group["time"] == "2:18.200" and group["track"] == "Spa"
+    assert not library.property("empty")
+    library.addRow(group["key"])  # group: every lap, fastest as reference
     assert len(viewer.backend.external) == 2
     assert viewer.backend.reference_key.endswith("2m18.200s.csv")
     assert len(viewer.backend.ordered_checked()) == 2
-    library.add_to_viewer([group.child(0)])  # already shown: not added twice
+    library.addRow(library_rows(library)[1]["key"])  # already shown: not added twice
     assert len(viewer.backend.external) == 2
-    library.close()
 
 
-def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
-    from neopedal.ui import lap_library
-
+def test_library_rename_and_delete_update_viewer(viewer):
     library = open_library(viewer)
-    library.add_to_viewer([library.tree.topLevelItem(0)])
-    inputs = []
-    monkeypatch.setattr(lap_library.TextInputDialog, "show", lambda self: inputs.append(self))
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
-
-    library.tree.topLevelItem(0).child(1).setSelected(True)  # lap selected: its log renamed
-    library.rename()
-    assert not inputs[0]._on_accept("bad/name") and warnings
-    assert inputs[0]._on_accept("Spa best")
+    library.addRow(library_rows(library)[0]["key"])
+    library.select(library_rows(library)[2]["key"], "set")  # lap selected: its log renamed
+    assert library.property("renameTarget") == "Spa race"
+    assert not library.rename("Spa race", "bad/name") and library.nameError("Spa race", "bad/name")
+    assert library.rename("Spa race", "Spa best")
     wait_library(library)
-    assert library.tree.topLevelItem(0).text(library.COL_NAME) == "Spa best"
+    assert library_rows(library)[0]["title"] == "Spa best"
     assert all("Spa best" in entry.file.path for entry in viewer.backend.external)
     assert all(os.path.exists(path) for path in viewer.backend.ordered_checked())
     assert "Spa best" in viewer.backend.reference_key
 
-    library.tree.clearSelection()
-    library.tree.topLevelItem(0).child(0).setSelected(True)
-    library.delete()
+    library.select(library_rows(library)[1]["key"], "set")
+    library.deleteSelected()
     wait_library(library)
-    assert len(viewer.backend.external) == 1 and library.tree.topLevelItem(0).childCount() == 1
-    library.tree.topLevelItem(0).setSelected(True)
-    library.delete()
+    assert len(viewer.backend.external) == 1 and library_rows(library)[0]["count"] == 1
+    library.select(library_rows(library)[0]["key"], "set")
+    library.deleteSelected()
     wait_library(library)
-    assert not viewer.backend.external and library.tree.topLevelItemCount() == 0
-    assert library.label_empty.isVisibleTo(library)
-    library.close()
+    assert not viewer.backend.external and not library_rows(library)
+    assert library.property("empty")
 
 
 # --- Import, search, drop
 def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
-    from neopedal.ui import lap_library
+    from neopedal.ui.quick import lap_library_panel
     from tests.test_motec_import import logger_channels, write_logger_ld
 
     log = tmp_path / "Monza run.ld"
     write_logger_ld(str(log), logger_channels(), venue="Monza", vehicle="LMP2", driver="Ace")
     (tmp_path / "empty.ld").write_bytes(b"not a log")
     library = open_library(viewer)
-    monkeypatch.setattr(lap_library.QFileDialog, "getOpenFileNames",
+    monkeypatch.setattr(lap_library_panel.QFileDialog, "getOpenFileNames",
                         staticmethod(lambda *args, **kwargs: ([str(log), str(tmp_path / "empty.ld")], "")))
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
-    library.import_logs()
-    assert not library.button_import.isEnabled()  # import running in background
+    library.importLogs()
+    assert library.property("importing")  # import running in background
     viewer.backend.wait_jobs()  # imports are lap viewer page jobs
     wait_library(library)
-    assert library.button_import.isEnabled()
-    names = [item.text(library.COL_NAME) for item in library.top_items()]
-    assert names == ["Monza run", "Spa race"] and warnings  # broken log reported
-    monza = library.top_items()[0]
-    assert monza.isExpanded() and monza.childCount() == 3  # complete laps only
-    assert monza.text(library.COL_DATE)[:2] == "20"  # import date
+    assert not library.property("importing")
+    groups = [row for row in library_rows(library) if row["kind"] == "group"]
+    assert [row["title"] for row in groups] == ["Monza run", "Spa race"] and library.property("problem")  # broken log
+    monza = groups[0]
+    assert monza["open"] and monza["count"] == 3  # complete laps only, shown expanded
+    assert monza["imported"].endswith(":" + monza["imported"][-2:]) and len(monza["imported"]) > 6  # import date & time
 
-    library.edit_filter.setText("monza lmp2")  # every word, any column
-    assert not monza.isHidden() and library.top_items()[1].isHidden()
-    library.edit_filter.setText("spa 2:18")  # lap of a group matching group words
-    spa = library.top_items()[1]
-    visible = [spa.child(index).text(library.COL_TIME) for index in range(spa.childCount())
-               if not spa.child(index).isHidden()]
-    assert not spa.isHidden() and visible == ["2:18.200"] and monza.isHidden()
-    library.edit_filter.clear()
-    assert not monza.isHidden() and not spa.isHidden()
-    library.close()
+    library.setSearch("monza lmp2")  # every word, any column
+    assert [row["title"] for row in library_rows(library) if row["kind"] == "group"] == ["Monza run"]
+    library.setSearch("spa 2:18")  # lap of a group matching group words
+    listed = library_rows(library)
+    assert [row["title"] for row in listed if row["kind"] == "group"] == ["Spa race"]
+    assert [row["time"] for row in listed if row["kind"] == "lap"] == ["2:18.200"]
+    library.setSearch("")
+    assert len([row for row in library_rows(library) if row["kind"] == "group"]) == 2
 
 
 def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):

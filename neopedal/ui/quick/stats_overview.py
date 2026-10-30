@@ -31,7 +31,9 @@ from PySide6.QtCore import Property, QDateTime, QLocale, QUrl, Slot
 from ... import calculation as calc
 from ...i18n import current_language, tr, trm
 from ...process import results_index as ri
+from ...process.results_text import MISSING, laptime_text
 from ...rank_info import online_enabled, ranks
+from ...setting import cfg
 from ..lap_viewer import signed
 from .formatting import country_name, date_locale, format_date, format_day, localized_number
 from .stats_analysis import (
@@ -41,8 +43,10 @@ from .stats_analysis import (
     distribution,
     history_years,
     period_bounds,
+    record_day,
     rivals,
     stats_track,
+    weekly_progress,
 )
 from .stats_common import (
     ACTIVITY_STEPS,
@@ -59,6 +63,8 @@ from .stats_common import (
     race_result,
     rank_info_text,
     rank_rows,
+    result_tone,
+    session_code,
     session_kind,
     session_name,
     valid_laptime,
@@ -70,6 +76,18 @@ from .stats_io import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_WEEKLY_ROWS = 6  # rows of the progress card (most important first: goals reached, records, goals near)
+
+
+def race_preparation():
+    """prepare_race(parent, track, vehicle, lap_time) of the race calculator, None if it has none (looked up
+    when a menu opens: the calculator page is imported only then)"""
+    try:
+        from .. import race_calculator
+    except ImportError:
+        return None
+    prepare = getattr(race_calculator, "prepare_race", None)
+    return prepare if callable(prepare) else None
 
 
 class StatsOverview(StatsHost):
@@ -110,12 +128,12 @@ class StatsOverview(StatsHost):
                 {"label": tr("Wins"), "value": str(record.wins)},
                 {"label": tr("Podiums"), "value": str(record.podiums)},
                 {"label": tr("Avg. Finish"),
-                 "value": f"P{localized_number(record.average_finish, 1)}" if record.average_finish else "-"},
+                 "value": f"P{localized_number(record.average_finish, 1)}" if record.average_finish else MISSING},
                 {"label": tr("Clean Races"), "value": f"{record.clean}/{record.races}"},
                 {"label": tr("Contacts/Race"), "value": localized_number(record.contacts / record.races, 1)},
                 {"label": tr("Clean Streak"), "value": str(streak),
                  "tip": tr("Latest races in a row without contact nor penalty")},
-                {"label": tr("Places Gained"), "value": signed(gained, 1) if counted else "-",
+                {"label": tr("Places Gained"), "value": signed(gained, 1) if counted else MISSING,
                  "tip": trm(f"Average class places gained from start to finish, {counted} races") if counted else ""},
             ]
         fixes = len(self._fixes)
@@ -183,7 +201,9 @@ class StatsOverview(StatsHost):
         seconds: dict[date, float] = {}
         sessions: dict[date, int] = {}
         for record in reversed(self.history):  # newest first: older records skipped at once
-            day = date.fromtimestamp(record.time)
+            day = record_day(record)
+            if day is None:
+                continue
             if day < start:
                 break
             if day > end:
@@ -255,9 +275,13 @@ class StatsOverview(StatsHost):
     def rivals_data(self) -> list[dict]:
         """Rivals shown: name, races together, ahead / behind, best lap gap, last race date"""
         rows = []
+        summaries = {summary.path: summary for summary in self.results}
         for rival in rivals(self.results):
+            track, vehicle = self.result_combo(summaries.get(rival.path))
             rows.append({
                 "name": rival.name, "races": rival.races, "ahead": rival.ahead, "behind": rival.behind,
+                # last race together: results file, its track & your vehicle in stats ("" if not in stats)
+                "path": rival.path, "track": track, "vehicle": vehicle,
                 "record": f"{rival.ahead}-{rival.behind}",
                 "tone": "gain" if rival.ahead > rival.behind else "loss" if rival.behind > rival.ahead else "",
                 "gap": signed(rival.gap, 3) if rival.gap is not None else "",
@@ -269,6 +293,19 @@ class StatsOverview(StatsHost):
                    if rival.gap is not None else ""),
             })
         return rows
+
+    def result_combo(self, summary: ri.ResultSummary | None) -> tuple[str, str]:
+        """Driver stats track & vehicle of a results session ("" when not in stats)"""
+        if summary is None:
+            return "", ""
+        track = next((key for key in self.stats_temp if key and ri.same_track(key, summary)), "")
+        vehicles = self.stats_temp.get(track, {}) if track else {}
+        if not isinstance(vehicles, dict):
+            return track, ""
+        vehicle = (self._linked or {}).get(summary.path, "")
+        if vehicle not in vehicles:
+            vehicle = ri.vehicle_key(summary, vehicles, self.classification(), cfg.user.brands)
+        return track, vehicle
 
     def rivals_card(self) -> list[dict]:
         """Rivals, made again only when results files were read again"""
@@ -300,7 +337,7 @@ class StatsOverview(StatsHost):
         if not force and time.monotonic() - self._upcoming_time < UPCOMING_EVERY and self._upcoming_time:
             return
         self._upcoming_time = time.monotonic()
-        self._upcoming_note = tr("Reading official races...") if not self._upcoming_events else self._upcoming_note
+        self._upcoming_note = tr("Reading official races…") if not self._upcoming_events else self._upcoming_note
         self.publish_upcoming()
         self.jobs.run("upcoming", read_official_races, self.upcoming_read, self.upcoming_failed, key="upcoming")
 
@@ -341,7 +378,8 @@ class StatsOverview(StatsHost):
                 reference = self.reference_for(track, vehicle)
                 level = reference.level(best) if reference else -1
                 bests.append({"vehicleClass": name, "best": calc.sec2laptime_full(best), "level": level_text(level),
-                              "color": self.level_color(level), "letter": level_letter(level)})
+                              "color": self.level_color(level), "letter": level_letter(level), "vehicle": vehicle,
+                              "seconds": best})
             driven = self.track_last_driven.get(track, 0.0) if track else 0.0
             races.append({
                 "tier": tr(event.tier.capitalize()), "title": event.title, "track": track or event.track,
@@ -396,9 +434,12 @@ class StatsOverview(StatsHost):
                 "track": record.track, "vehicle": record.vehicle, "date": format_date(record.time),
                 "trackLogo": self.logos.track(record.track),
                 "session": session_name(record.session), "kind": session_kind(record.session),
-                "best": calc.sec2laptime_full(laptime) if laptime else "-",
+                "code": session_code(record.session),
+                "best": laptime_text(laptime),
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005), "result": race_result(record),
+                "resultTone": result_tone(record),
                 "podium": record.position if record.finish == 1 and 0 < record.position <= 3 else 0,
+                "results": summary.path if (summary := self.record_result(record)) is not None else "",
             })
             if len(rows) >= RECENT_SESSIONS:
                 break
@@ -408,6 +449,101 @@ class StatsOverview(StatsHost):
     def recent(self) -> list[dict]:
         """Latest sessions (All Tracks): track, vehicle, date, session, kind, best lap, pb, result"""
         return self._recent
+
+    # Progress of the last days (All Tracks card, see stats_analysis.weekly_progress)
+    def weekly_card(self) -> dict:
+        """Progress of the last WEEK_DAYS days: summary text, rows (kind, glyph, text, detail, tone, track,
+        vehicle), more (rows left out); made again only when history, stats, goals, language or the hour changed"""
+        now = time.time()
+        goals = self.goals()
+        key = (self._history_stamp, self._stats_serial, int(now // 3600), current_language(),
+               tuple(sorted(goals.items())))
+        if key == self._weekly_key:
+            return self._weekly
+        self._weekly_key = key
+        bests = {(str(track), str(vehicle)): valid_laptime(data.get("pb", 0))
+                 for track, vehicles in self.stats_temp.items() if track and isinstance(vehicles, dict)
+                 for vehicle, data in vehicles.items() if isinstance(data, dict)}
+        rows = []
+        summary = ""
+        for item in weekly_progress(self.history, goals, now, bests=bests):
+            kind = item["kind"]
+            if kind == "summary":
+                summary = " · ".join((plural(item["sessions"], "session", "sessions"),
+                                      format_duration(item["seconds"]), plural(item["laps"], "lap", "laps")))
+                continue
+            if kind == "goal_reached":
+                row = {"glyph": "\ue73e", "tone": "gain",  # check mark
+                       "detail": f"{tr('Goal reached')} {calc.sec2laptime_full(item['goal'])}"}
+            elif kind == "record":
+                first = not item["previous"]
+                gain = "" if first else f" ({signed(-item['gain'], 3)} s)"
+                row = {"glyph": "\ue735", "tone": "" if first else "gain",  # star
+                       "detail": f"{tr('First lap time') if first else tr('New personal best')} "
+                                 f"{calc.sec2laptime_full(item['best'])}{gain}"}
+            else:  # goal_near
+                row = {"glyph": "\uf272", "tone": "",  # target
+                       "detail": f"{tr('Gap to goal')} {signed(item['gap'], 3)} s "
+                                 f"({calc.sec2laptime_full(item['goal'])})"}
+            row.update({"kind": kind, "text": f"{item['track']} · {item['vehicle']}", "track": item["track"],
+                        "vehicle": item["vehicle"]})
+            rows.append(row)
+        self._weekly = {"summary": summary, "rows": rows[:MAX_WEEKLY_ROWS],
+                        "more": max(len(rows) - MAX_WEEKLY_ROWS, 0)}
+        return self._weekly
+
+    @Property(dict, notify=StatsCore.weeklyChanged)
+    def weekly(self) -> dict:
+        """Progress of the last days (All Tracks): summary ("" when nothing driven), rows, more (rows left out)"""
+        return self._published.get("weekly", {"summary": "", "rows": [], "more": 0})
+
+    # Menu of a track & vehicle shown outside the table (official race, rival, progress row)
+    @Slot(str, str, str, result=list)
+    def comboActions(self, track: str, vehicle: str, path: str) -> list[dict]:
+        """Entries of the menu of a track & vehicle (vehicle may be empty: track only), path: results file
+        ("" if none): id, text, enabled"""
+        known = bool(track) and track in self.stats_temp
+        actions = [
+            {"id": "stats", "text": tr("Show this track & car") if vehicle else tr("Track Stats"),
+             "enabled": known},
+            {"id": "laps", "text": tr("Open Recorded Laps"), "enabled": bool(self.lap_folder_of(track, vehicle))},
+            {"id": "prepare", "text": tr("Prepare Race in Calculator"),
+             "enabled": bool(track) and race_preparation() is not None},
+        ]
+        if path:
+            actions.append({"id": "results", "text": tr("Results"), "enabled": True})
+        return actions
+
+    @Slot(str, str, str, str)
+    def runComboAction(self, action: str, track: str, vehicle: str, path: str):
+        """Entry of comboActions chosen"""
+        if action == "stats":
+            if vehicle:
+                self.openSession(track, vehicle)
+            elif track in self.stats_temp:
+                self.selectTrack(track)
+        elif action == "laps":
+            self.open_laps(track, vehicle)
+        elif action == "prepare":
+            self.prepare_race(track, vehicle)
+        elif action == "results":
+            self.openResults(path)
+
+    def prepare_race(self, track: str, vehicle: str) -> bool:
+        """Race calculator opened for a track & vehicle (its personal best as lap time), False if unavailable"""
+        prepare = race_preparation()
+        if prepare is None or not track:
+            return False
+        vehicles = self.stats_temp.get(track, {})
+        data = vehicles.get(vehicle, {}) if vehicle and isinstance(vehicles, dict) else {}
+        best = valid_laptime(data.get("pb", 0)) if isinstance(data, dict) else 0.0
+        window = self._window
+        parent = window.window() if getattr(window, "in_app_page", False) else window
+        try:
+            return bool(prepare(parent, track, vehicle, best))
+        except Exception:  # calculator of another page: logged, never breaks this page
+            logger.exception("DRIVER STATS: race calculator not prepared for %s, %s", track, vehicle)
+            return False
 
     @Slot(str, str)
     def openSession(self, track: str, vehicle: str):
