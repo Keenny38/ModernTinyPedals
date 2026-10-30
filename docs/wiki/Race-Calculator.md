@@ -4,7 +4,7 @@ The **Race Calculator** plans fuel, virtual energy and tyres of a race on one pa
 
 Open it with the `Race` entry of the navigation bar, or `Tools` > `Race Calculator`.
 
-![Race calculator: safety car, 2 drivers, strategy and pit stop plan](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator.png)
+![Race calculator: safety car, 2 drivers, strategy and pit stop plan](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-race-calculator.png)
 
 ## Page layout
 
@@ -98,7 +98,7 @@ The LMU garage screens are asked every 10 seconds while the tab is shown or `Fol
 - **Tyre stock**: pick a compound (colored dot), add tyres (`+`), set compound options (gear button), sort by compound or by stints, remove unused tyres or all tyres. Each tyre shows the stints it runs.
 - The tyre plan (`File` menu) can be saved as a `.tyre-strategy` file or exported as CSV. `Ctrl+Z` / `Ctrl+Y` undo and redo.
 
-![Race calculator: tyre plan and stock](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator-tyres.png)
+![Race calculator: tyre plan and stock](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-race-calculator-tyres.png)
 
 ## Team tab
 
@@ -132,4 +132,4 @@ Turn on the **Race Plan** overlay (`Overlays` page) to see the next stop of your
 
 The overlay uses the last inputs of the calculator, even when the calculator page is closed, and is replanned at each lap during a race (option `enable_live_replan`), with the driver in the car, penalties and pending repair. With `enable_live_consumption` (on by default), the rest of the race is planned with the lap time and consumption of the latest 5 valid laps at race pace (3 at least), as the `Game Session` source, even with the page closed.
 
-All options: [Race calculator](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#race-calculator) and [Race plan](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#race-plan).
+All options: [Race calculator](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#race-calculator) and [Race plan](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#race-plan).

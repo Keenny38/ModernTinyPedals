@@ -6,7 +6,7 @@ Open it with the `Stats` entry of the navigation bar, or `Tools` > `Driver Stats
 
 | Track: goal, filters, wet PB, sessions | All tracks: driving time by track & class, official races |
 |---|---|
-| ![Driver stats](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-goal-filters.png) | ![All tracks](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-all-tracks.png) |
+| ![Driver stats](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-20-driver-stats-goal-filters.png) | ![All tracks](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-20-driver-stats-all-tracks.png) |
 
 ## Tabs
 
@@ -72,7 +72,7 @@ The **Lap Time Goal** card (`Overview` tab) keeps a lap time to beat for the sel
 - **Recent Sessions**: your latest sessions on every track, with the best lap (★ when it was your personal best), the race result and the session type. Click one to open its track with its car selected.
 - **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty), contacts per race, your current **clean streak** and the average **places gained** from start to finish. Positions are class positions. With Le Mans Ultimate, your **Driver Rank** and **Safety Rank** too, as the game menu shows them, each in its color with the progress to the next tier, and the change since your previous rank (`▲ +10%`): every change of rank is kept in `driver_ranks.history` of the global config folder, and drawn as a small **rank history** line under the ranks. Your **badge** as well (`Good Driver`, `Trusted Racer`, `Rookie`, `Warning`...), with the game's icon, name and description; the icon is downloaded once from Studio 397's public image server (no sign-in) and kept in `gameimage/badge`. **Several game accounts** on one computer (several Steam accounts): ranks are kept per account, the account in use is the one signed in to Steam (followed live), and your other accounts are listed below with their Steam name and picture, last ranks seen, badge and date. When the game rewrites its menu file without your ranks, the last ranks seen of the account in use are shown with their date (ranks saved before 0.24.0, without their account, go to the account in use when no other account has saved ranks).
 
-![Driver card with ranks](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-card-ranks.png)
+![Driver card with ranks](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-driver-card-ranks.png)
 
 
 ### Complete lap times from race results
@@ -148,4 +148,4 @@ The viewer never lets you edit a value, only reset or remove:
 
 Before each change, the stats file is backed up (the last 10 are kept): `⋯` > `Restore Backup`. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) work while the page is open (they wait while an edit is being saved), and stats recorded meanwhile are kept. `⋯` > `Reload` (`F5`) reads the stats file again (the page also reloads by itself when the Stats module saves).
 
-All options: [Driver stats viewer](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#driver-stats-viewer) and [Stats module](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#stats-module).
+All options: [Driver stats viewer](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#driver-stats-viewer) and [Stats module](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#stats-module).

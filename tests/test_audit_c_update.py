@@ -162,14 +162,15 @@ def test_run_installer_checks_signature(monkeypatch, tmp_path, signature, starte
 
 
 @pytest.mark.parametrize("repo, signature, started", [
-    ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNSIGNED, True),  # official releases unsigned
-    ("keenny38/moderntinypedals", update.SIGNATURE_UNSIGNED, True),
+    ("Keenny38/NeoPedal", update.SIGNATURE_UNSIGNED, True),  # official releases unsigned
+    ("keenny38/neopedal", update.SIGNATURE_UNSIGNED, True),
     ("Keenny38/overlays", update.SIGNATURE_UNSIGNED, True),  # renamed official repository
+    ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNSIGNED, True),  # its name until 2026-10-31
     ("someone/fork", update.SIGNATURE_UNSIGNED, False),  # other repository: signature required
     ("", update.SIGNATURE_UNSIGNED, False),
     ("someone/fork", update.SIGNATURE_VALID, True),
     ("someone/fork", update.SIGNATURE_UNKNOWN, False),  # not checked: signature required too
-    ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNKNOWN, True),
+    ("Keenny38/NeoPedal", update.SIGNATURE_UNKNOWN, True),
     ("someone/fork", update.SIGNATURE_INVALID, False),
 ])
 def test_run_installer_custom_repository_requires_signature(ui_env, monkeypatch, tmp_path, repo, signature, started):
@@ -342,7 +343,7 @@ def checker(ui_env, monkeypatch):
     checker = update.UpdateChecker()
     states = []
     app_signal.updates.connect(states.append)
-    cfg.application["update_repository"] = "Keenny38/ModernTinyPedals"
+    cfg.application["update_repository"] = "Keenny38/NeoPedal"
     yield checker, states
     app_signal.updates.disconnect(states.append)
 
@@ -542,11 +543,22 @@ def test_installer_keeps_repository_of_check(monkeypatch):
 
 
 @pytest.mark.parametrize("repo, official", [
-    (update.FORK_REPO_NAME, True), ("keenny38/moderntinypedals/", True), ("Keenny38/overlays", True),
+    (update.FORK_REPO_NAME, True), ("keenny38/neopedal/", True), ("Keenny38/overlays", True),
+    ("Keenny38/ModernTinyPedals", True), ("keenny38/moderntinypedals/", True),  # name until 2026-10-31
     ("someone/fork", False), ("", False),
 ])
 def test_is_official_repository(repo, official):
     assert update.is_official_repository(repo) is official
+
+
+@pytest.mark.parametrize("saved, expected", [
+    ("Keenny38/ModernTinyPedals", "Keenny38/NeoPedal"),  # default saved by versions until 0.28.0
+    ("keenny38/overlays/", "Keenny38/NeoPedal"),
+    ("Keenny38/NeoPedal", "Keenny38/NeoPedal"), ("someone/fork", "someone/fork"), ("", ""),
+])
+def test_update_repository_follows_renames(ui_env, monkeypatch, saved, expected):
+    monkeypatch.setitem(cfg.application, "update_repository", saved)
+    assert update.update_repository() == expected
 
 
 def test_download_keeps_repository_of_check(updates, monkeypatch, messages):

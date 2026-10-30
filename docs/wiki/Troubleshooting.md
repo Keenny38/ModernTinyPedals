@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Answers to common problems. If yours is not here, create a bug report (see [Report a bug](#report-a-bug)) and open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues).
+Answers to common problems. If yours is not here, create a bug report (see [Report a bug](#report-a-bug)) and open an [issue](https://github.com/Keenny38/NeoPedal/issues).
 
 ## Overlay not visible
 
@@ -81,7 +81,7 @@ If another program (antivirus, OneDrive or another sync tool, a backup tool) hol
 ## Report a bug
 
 1. `Help` > `Create Bug Report…`, describe what you did, what happened and what you expected, then `Save Report…`. The ZIP contains logs, settings and system info; your user folder name, access codes, stream overlay access token and repository names are removed.
-2. Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues/new): one problem per issue, with the app version (`Help` > `About`), the game, your system, the steps, and the report attached. `Open GitHub Issue…` of the bug report page opens a new issue in your browser with the app version, your system and your description already filled in (nothing is sent until you submit it there): attach the report to it.
+2. Open an [issue](https://github.com/Keenny38/NeoPedal/issues/new): one problem per issue, with the app version (`Help` > `About`), the game, your system, the steps, and the report attached. `Open GitHub Issue…` of the bug report page opens a new issue in your browser with the app version, your system and your description already filled in (nothing is sent until you submit it there): attach the report to it.
 
 Many problems come from other apps or plugins: turn them off to rule them out first. Security problems must be reported privately: see [Updates and Security](Updates-and-Security.md#reporting-a-vulnerability).
 
@@ -125,6 +125,6 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 
 ## Updates
 
-- **Download refused** ("does not match its sha256 hash"): the download was corrupted or altered. Try again later, or download the setup from the [Releases page](https://github.com/Keenny38/ModernTinyPedals/releases/latest) and verify it (see [Updates and Security](Updates-and-Security.md#verifying-a-download)).
+- **Download refused** ("does not match its sha256 hash"): the download was corrupted or altered. Try again later, or download the setup from the [Releases page](https://github.com/Keenny38/NeoPedal/releases/latest) and verify it (see [Updates and Security](Updates-and-Security.md#verifying-a-download)).
 - **No `Download And Install`**: the app only installs updates itself in the Windows installed version. See [Updates and Security](Updates-and-Security.md#when-the-app-cannot-install-the-update).
 - **SmartScreen warning**: see [Installation](Installation.md#smartscreen-warning).

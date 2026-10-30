@@ -388,7 +388,7 @@ jobs:
         python tools/sign_release.py "$APP_VER" --dist builds --verify
 
     # Signed proof that the files were built by this workflow from this commit, checked with
-    # "gh attestation verify <file> --repo Keenny38/ModernTinyPedals"
+    # "gh attestation verify <file> --repo Keenny38/NeoPedal"
     - name: Attest build provenance
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
       with:

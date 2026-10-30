@@ -50,7 +50,9 @@ CONFIG_ID = "NeoPedal"  # user config & data folders
 DESKTOP_FILE_NAME = "NeoPedal"  # Linux desktop entry (NeoPedal.desktop)
 RESTART_ENVIRONMENT = "NEOPEDAL_RESTART"  # set by restart, skips single instance check
 REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
-FORK_REPO_NAME = "Keenny38/ModernTinyPedals"  # this fork (releases, updates)
+FORK_REPO_NAME = "Keenny38/NeoPedal"  # this fork (releases, updates)
+# Names of this fork repository before it was renamed (GitHub redirects them): still official
+FORMER_FORK_REPO_NAMES = ("Keenny38/ModernTinyPedals", "Keenny38/overlays")
 COPYRIGHT = "Copyright (C) 2022-2026 TinyPedal developers"
 # Modified version notice (GPL v3 section 5a), upstream copyright above is kept
 MODIFICATION_NOTICE = (

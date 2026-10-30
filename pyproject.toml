@@ -17,9 +17,9 @@ vr = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Keenny38/ModernTinyPedals"
-Changelog = "https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md"
-Issues = "https://github.com/Keenny38/ModernTinyPedals/issues"
+Homepage = "https://github.com/Keenny38/NeoPedal"
+Changelog = "https://github.com/Keenny38/NeoPedal/blob/master/CHANGELOG.md"
+Issues = "https://github.com/Keenny38/NeoPedal/issues"
 
 [build-system]
 requires = ["setuptools>=68"]

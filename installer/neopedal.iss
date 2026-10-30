@@ -18,7 +18,7 @@
 #define AppExe "neopedal.exe"
 ; Name of versions until 0.23.0 (neopedal/const_app.py LEGACY_NAME): old executable & VR layer removed
 #define LegacyName "tinypedal"
-#define RepoUrl "https://github.com/Keenny38/ModernTinyPedals"
+#define RepoUrl "https://github.com/Keenny38/NeoPedal"
 
 [Setup]
 AppId={{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}

@@ -6,7 +6,7 @@ NeoPedal runs on **64-bit Windows** (installer) and on **Linux** (from source). 
 
 ### Install
 
-1. Open the [latest release](https://github.com/Keenny38/ModernTinyPedals/releases/latest) and download the installer `NeoPedal-<version>-windows-setup.exe` (`NeoPedal-<version>-setup.zip` holds the same installer, zipped).
+1. Open the [latest release](https://github.com/Keenny38/NeoPedal/releases/latest) and download the installer `NeoPedal-<version>-windows-setup.exe` (`NeoPedal-<version>-setup.zip` holds the same installer, zipped).
 2. Run the installer. It is available in English and French, asks you to accept the license (GPL v3) and can create a desktop shortcut.
 3. Start NeoPedal from the Start menu (or let the installer start it). The [setup wizard](Getting-Started.md#first-launch) opens on first launch.
 
@@ -74,10 +74,10 @@ You can also install the Python packages in a virtual environment with `pip inst
 
 ### Get the source and run
 
-Download `NeoPedal-<version>-source.zip` from the [latest release](https://github.com/Keenny38/ModernTinyPedals/releases/latest), or clone the repository:
+Download `NeoPedal-<version>-source.zip` from the [latest release](https://github.com/Keenny38/NeoPedal/releases/latest), or clone the repository:
 
 ```bash
-git clone https://github.com/Keenny38/ModernTinyPedals.git
+git clone https://github.com/Keenny38/NeoPedal.git
 ```
 
 ```bash
@@ -122,7 +122,7 @@ Known Linux issues (KDE, compositing) are listed in [Troubleshooting](Troublesho
 Useful to test the latest code or to contribute. You need [Python](https://www.python.org/) 3.11 or newer.
 
 ```bash
-git clone https://github.com/Keenny38/ModernTinyPedals.git
+git clone https://github.com/Keenny38/NeoPedal.git
 ```
 
 ```bash

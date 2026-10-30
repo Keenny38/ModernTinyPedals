@@ -1,7 +1,7 @@
 # Journal des modifications
 
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
-C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
+C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/NeoPedal/releases).
 
 ## 0.28.0 (2026-10-30)
 
@@ -42,14 +42,15 @@ Des raccourcis sur ton volant et ta button box, des mises à jour signées, une 
 - **Carburant et Énergie virtuelle : chaque valeur à part** (les deux designs) : `show_remaining`, `show_refueling` / `show_refilling`, `show_estimated_laps`, `show_estimated_minutes`, `show_estimated_consumption`, `show_saving_target`, `show_early_pitstop_count`, `show_delta_consumption`, `show_end_remaining`, `show_fuel_ratio`, `show_fuel_bias` remplacent les options qui affichaient les valeurs par paires (tes réglages sont convertis).
 - **Notes de pilotage** (design moderne) sur la carte de Notes de piste : la note en gras, les commentaires dessous.
 
-![Carré de catégorie : position dans la catégorie sur sa couleur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-class-square.png)
+![Carré de catégorie : position dans la catégorie sur sa couleur](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-30-class-square.png)
 
-![Carburant : minutes, arrêts anticipés et écart masqués un par un](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-fuel-values-on-their-own.png)
+![Carburant : minutes, arrêts anticipés et écart masqués un par un](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-30-fuel-values-on-their-own.png)
 
-![Notes de pilotage sur la carte de notes moderne](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-pace-notes-card.png)
+![Notes de pilotage sur la carte de notes moderne](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-30-pace-notes-card.png)
 
 ### Améliorations
 
+- **Dépôt renommé `Keenny38/NeoPedal`** (c'était `Keenny38/ModernTinyPedals`). GitHub redirige les anciens liens, les apps depuis la 0.23.0 suivent la redirection quand elles vérifient les mises à jour, et un `update_repository` resté sur l'ancien nom est lu comme le nouveau. Les apps d'avant la 0.23.0 ne voient plus les nouvelles versions : installe celle-ci une fois depuis la [page des versions](https://github.com/Keenny38/NeoPedal/releases).
 - **Dialogues dans la page** : confirmations, alertes et saisies de texte ou de nombre s'ouvrent dans la page au lieu de fenêtres Windows ; `Entrée` lance l'action, les actions qui effacent quelque chose sont en rouge avec le focus sur `Annuler`. `Annuler` au lieu d'une confirmation partout où un message le propose (page Overlays, Stream, Régie de course, pneus, Statistiques pilote, tours). Les sélecteurs de fichiers retiennent le dernier dossier.
 - **Paramètres** : filtre `Modifiées seulement`, recherche surlignée, une barre `Appliquer` et une alerte pour les changements non enregistrés. `Appliquer` ne recharge plus toute l'app : les paramètres d'application et de notification s'appliquent tout de suite, le style des overlays ne redémarre que les overlays, contrôle à distance, tableau de bord web, stream et VR ne redémarrent que leur serveur. Les interrupteurs des raccourcis globaux, du chargement auto des presets, des aperçus d'overlays, du contrôle à distance, du tableau de bord web, des overlays de stream et de la VR s'appliquent dès que tu les bascules. Unités, options de l'API et police globale sont passées dans les Paramètres.
 - **Éditeurs de tableaux** (freins, heatmaps, infos de piste, gommes, marques, catégories) : un seul tableau partagé : tri, filtre, saisie dans les cellules, unités de ton choix, aperçu des heatmaps en direct, `Ctrl+S` enregistre.
@@ -61,7 +62,7 @@ Des raccourcis sur ton volant et ta button box, des mises à jour signées, une 
 - **Moins de blocages de la fenêtre** : tout désactiver (overlays ou modules), supprimer ou restaurer beaucoup de tours, ouvrir de grandes pistes, recharger un preset dont un fichier est tenu par OneDrive ou un antivirus, arrêter l'enregistreur, redémarrer l'API ou un serveur, et enregistrer les données de delta, carburant, secteurs et relais se font en arrière-plan. Les overlays ne se redessinent que quand leur texte change, les tours de télémétrie se chargent avec beaucoup moins de mémoire.
 - **Classements** : un espace entre les places de tête et les places autour de toi quand des places entre les deux ne sont pas montrées (mode combiné, les deux designs) ; avec la colonne Catégorie gardée à côté des en-têtes de catégorie, le badge de position montre la place générale ; colonne `Tendance` centrée. Les options que Classements et Rivaux héritent de Relatif montrent maintenant leur aide dans la page Options des overlays et dans la recherche d'options (55 et 67 options) ; aide pour `time_interval_width` et `mixed_compound_symbol`.
 
-![LED lever et laisser rouler : LED doubles verticales côte à côte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-30-lift-coast-double-leds.png)
+![LED lever et laisser rouler : LED doubles verticales côte à côte](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-30-lift-coast-double-leds.png)
 
 ### Corrections
 
@@ -100,7 +101,7 @@ Une nouvelle page d'accueil avec le débrief de ta dernière session, une page N
 - Sans aucune carte, Carte de piste affiche `Carte après un tour` au lieu d'un cercle inventé.
 - rFactor 2, ou API REST désactivée : il faut toujours un tour complet.
 
-![Circuit officiel avant le premier tour](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-official-track-map.png)
+![Circuit officiel avant le premier tour](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-21-official-track-map.png)
 
 #### Page d'accueil
 
@@ -110,7 +111,7 @@ Une nouvelle page d'accueil avec le débrief de ta dernière session, une page N
 - **Carte pilote** : évolution depuis ton Driver Rank et Safety Rank précédents, et une courbe de chaque rang dans le temps.
 - La page est maintenant dessinée en Qt Quick (1 à 3 colonnes) et ne lit le jeu et les fichiers que lorsqu'elle est affichée.
 
-![Page d'accueil avec le débrief de session](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-home-page.png)
+![Page d'accueil avec le débrief de session](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-21-home-page.png)
 
 #### Page Nouveautés
 
@@ -120,7 +121,7 @@ Une nouvelle page d'accueil avec le débrief de ta dernière session, une page N
 - **Les noms d'options sont des liens** : un clic ouvre cette option. Un sujet qui nomme un overlay propose de l'essayer (il l'active), puis ses options.
 - **Après une mise à jour**, la page s'ouvre une fois au premier démarrage de la nouvelle version (`show_release_notes_after_update`, ou l'interrupteur `Afficher après chaque mise à jour` de la page).
 
-![Page Nouveautés](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-whats-new-page.png)
+![Page Nouveautés](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-21-whats-new-page.png)
 
 #### Page Overlays
 
@@ -132,9 +133,9 @@ Une nouvelle page d'accueil avec le débrief de ta dernière session, une page N
 - Activer ou désactiver beaucoup d'overlays d'un coup se fait en une étape (un enregistrement, un redémarrage des modules).
 - **Options des overlays** : l'aperçu fait tourner l'overlay sur la course simulée (pédales, vitesse, rapport, G, freins qui chauffent, charges), avec un bouton lecture / pause dessous ; les overlays qui montrent un exemple fixe restent immobiles.
 
-![Page Overlays avec favoris, badges et preset](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-page.png)
+![Page Overlays avec favoris, badges et preset](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-21-overlays-page.png)
 
-![Vue écran de la page Overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-21-overlays-screen-view.png)
+![Vue écran de la page Overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-21-overlays-screen-view.png)
 
 #### Calculateur de course
 
@@ -167,9 +168,9 @@ Une nouvelle page d'accueil avec le débrief de ta dernière session, une page N
 - `Prochaines courses officielles (RaceControl)` (désactivé par défaut) avec tes meilleurs tours sur leur circuit.
 - **Partage** de ton record en image ou en code à coller dans un chat (`Copier la carte du record`, `Copier le code du record`, `Comparer un code de record...`).
 
-![Statistiques pilote : objectif, filtres et record sur le mouillé](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-goal-filters.png)
+![Statistiques pilote : objectif, filtres et record sur le mouillé](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-20-driver-stats-goal-filters.png)
 
-![Statistiques pilote : temps de conduite par circuit et par catégorie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-20-driver-stats-all-tracks.png)
+![Statistiques pilote : temps de conduite par circuit et par catégorie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-20-driver-stats-all-tracks.png)
 
 ### Améliorations
 
@@ -199,7 +200,7 @@ Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en lig
   - **Frein** : la distance jusqu'au point de freinage du tour de référence, puis dès que vous freinez `Pile`, `8 m tôt` ou `8 m tard` (`show_braking_point`, `braking_point_tolerance` 3 m par défaut), ou `Sans freinage` pour un virage passé à fond.
   - **Corde** : vitesse minimale du virage que vous venez de passer et son écart avec le tour de référence, en vert quand vous êtes plus rapide (`show_apex_speed`).
 
-![Overlay Coach de virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-coach.png)
+![Overlay Coach de virages](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-18-corner-coach.png)
 
 #### Driver Rank et Safety Rank en ligne (Le Mans Ultimate)
 
@@ -209,7 +210,7 @@ Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en lig
   - **force du plateau** de chaque catégorie dans les en-têtes de catégorie du Classement (`show_class_sof`) et moyenne du plateau dans l'overlay Session (`show_field_level`) ;
   - Driver Rank et Safety Rank sur les cartes pilote de la **Régie de course**.
 
-![Colonne Driver Rank et Safety Rank](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-17-driver-ranks-column.png)
+![Colonne Driver Rank et Safety Rank](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-17-driver-ranks-column.png)
 
 #### Drapeau : nouvelles alertes
 
@@ -221,11 +222,11 @@ Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en lig
 
 #### Panneaux plus sombres et opacité de tous les overlays
 
-- **`enable_black_background`** : les panneaux des thèmes modernes sombres en noir neutre au lieu du bleu ardoise ([issue #5](https://github.com/Keenny38/ModernTinyPedals/issues/5)).
+- **`enable_black_background`** : les panneaux des thèmes modernes sombres en noir neutre au lieu du bleu ardoise ([issue #5](https://github.com/Keenny38/NeoPedal/issues/5)).
 - **`background_opacity_percentage`** : opacité des panneaux modernes (92 par défaut, comme avant ; 100 plein).
 - **`overlay_opacity_percentage`** : tous les overlays plus transparents d'un coup, à l'écran, sur le stream et en VR. Elle multiplie l'opacité de chaque overlay, qui garde la sienne.
 
-![Fond noir uni](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-black-background.png)
+![Fond noir uni](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-18-black-background.png)
 
 #### Repris de TinyPedal 2.51
 
@@ -240,7 +241,7 @@ Un coach de virages, le Driver Rank et le Safety Rank de tous les pilotes en lig
 - **Numéros de virage** : les numéros officiels (ou noms) des virages sur la Carte de piste et sous le profil d'Altitude (`show_corner_numbers`, désactivé par défaut).
 - **Relatif** : colonne écart au tour (`column_delta_laptime`), comme dans Classement et Rivaux.
 
-![Numéros de virage sur la carte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-numbers.png)
+![Numéros de virage sur la carte](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-18-corner-numbers.png)
 
 #### App
 
@@ -300,7 +301,7 @@ Des options plus sûres partout : chaque nombre a des limites visibles, les pres
 
 - **Toutes les mesures des pneus, une carte par pneu** (désactivé par défaut, catégorie `Pneus et roues`), placées comme sur la voiture vue de dessus (design moderne : voiture au centre, chaque pneu dessiné à son coin) : températures de surface intérieur / milieu / extérieur sur le pneu, colorées selon la heatmap, badge de gomme ou alerte (roue détachée, crevaison, méplat) avec le pneu mis en évidence, températures de la carcasse et de la couche intérieure, pression en bleu sous la plage cible et en rouge au-dessus avec sa place sur une échelle cible (mêmes plages que le Compteur ATH, par gomme aussi), jauge de gomme, usure par tour et tours restants. Chaque partie a sa propre option d'activation, la voiture et le pneu dessiné aussi.
 
-![Overlay Pneus (vue d'ensemble)](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-16-tyre-overview.png)
+![Overlay Pneus (vue d'ensemble)](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-16-tyre-overview.png)
 
 #### Presets et options
 
@@ -338,15 +339,15 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Plusieurs comptes Steam sur un même PC** : rangs et badge sont gardés par compte, le compte connecté à Steam est suivi en direct, et tes autres comptes s'affichent sous ta carte pilote. Les rangs d'un compte ne sont jamais affichés comme ceux d'un autre.
 - Les rangs sont seulement lus dans le dossier du jeu (`coherent_local_storage.json`) : rien n'est envoyé, aucune connexion.
 
-![Overlay Rang pilote](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
+![Overlay Rang pilote](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-driver-rank-overlay.png)
 
-![Statistiques pilote : rangs sur la carte pilote](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-card-ranks.png)
+![Statistiques pilote : rangs sur la carte pilote](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-driver-card-ranks.png)
 
 #### Accueil : carte pilote
 
 - **Nouvelle carte `Pilote` sur la page Accueil** : ton nom, tes rangs, ton badge, ton pays, ton équipe et ton numéro, et ton bilan tiré des fichiers de résultats du jeu (courses, victoires, podiums, place moyenne, courses propres). Un clic ouvre les `Statistiques pilote`.
 
-![Accueil : carte pilote](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-home-driver-card.png)
+![Accueil : carte pilote](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-home-driver-card.png)
 
 #### Classement, Relatif et Rivaux comme une tour de timing
 
@@ -358,11 +359,11 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Nouvelle colonne `Limites de piste`** (Le Mans Ultimate, désactivée par défaut) : points de limites de piste de chaque pilote, en orange dès le premier, en rouge un point avant la pénalité.
 - Écart en course avec son signe (`+12.3`, `+1L`), dernier tour en vert quand c'est le record personnel du pilote.
 
-![Classement : chrono du tour, arrêts et vraies pénalités](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-standings-timing.png)
+![Classement : chrono du tour, arrêts et vraies pénalités](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-13-standings-timing.png)
 
-![Classement : libellés des colonnes, colonne limites de piste, signe de l'écart](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-standings-column-labels.png)
+![Classement : libellés des colonnes, colonne limites de piste, signe de l'écart](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-standings-column-labels.png)
 
-![Relatif et Rivaux : chrono du tour, arrêts, vraies pénalités, badges de gommes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-relative-rivals-timing.png)
+![Relatif et Rivaux : chrono du tour, arrêts, vraies pénalités, badges de gommes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-relative-rivals-timing.png)
 
 #### Compteur ATH (ex-Black box) : pop-up de réglage, nouvelles infos, tes propres profils
 
@@ -373,13 +374,13 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Tes propres profils d'affichage** : `User 1`, `User 2` et `User 3`, enregistrés avec `Enregistrer comme profil...`. Modifier une option d'un profil le passe en `Personnalisé` au lieu de bloquer l'option.
 - **Options des overlays** : clique sur une partie de l'image du Compteur ATH (pneu, colonne centrale, dégâts, trace...) pour aller à ses options. Le mode simple n'affiche que les éléments principaux (46 options au lieu de 89).
 
-![Compteur ATH : pop-up de réglage](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-black-box-setting-popup.png)
+![Compteur ATH : pop-up de réglage](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-13-black-box-setting-popup.png)
 
-![Compteur ATH : limites de piste, écarts, lift & coast et essuie-glaces](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-black-box-new-items.png)
+![Compteur ATH : limites de piste, écarts, lift & coast et essuie-glaces](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-13-black-box-new-items.png)
 
-![Compteur ATH : options des overlays, profils et aperçu en direct](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-dashboard-hud-options.png)
+![Compteur ATH : options des overlays, profils et aperçu en direct](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-dashboard-hud-options.png)
 
-![Compteur ATH : badge de gomme à côté de l'usure](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-dashboard-hud-compound-wear.png)
+![Compteur ATH : badge de gomme à côté de l'usure](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-dashboard-hud-compound-wear.png)
 
 #### Résultats & rejeux : une seule page
 
@@ -387,14 +388,14 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Chaque rejeu est relié à ses résultats** : un drapeau sur les rejeux qui ont un fichier de résultats, `Afficher les résultats` dans leur menu, et le rejeu d'une session choisi avec elle.
 - **Revoir un événement ou un tour** : le bouton lecture d'un événement (contact, pénalité, limites de piste) ouvre le rejeu quelques secondes avant, caméra sur la voiture concernée ; celui d'un tour ouvre le rejeu au début de ce tour.
 
-![Résultats & rejeux : rejeux reliés à leurs résultats](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-results-replays.png)
+![Résultats & rejeux : rejeux reliés à leurs résultats](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-results-replays.png)
 
 #### Interrupteur marche / arrêt pour la Régie de course et le Calculateur de course
 
 - **Interrupteur en haut à gauche des deux pages** (activé par défaut, gardé pour la prochaine fois) : coupée, la page n'interroge plus le jeu, ne change plus de caméra, et elle est libérée après 10 minutes cachée. Rallume-la avec l'interrupteur ou le bouton de la page.
 - **Point sur leur entrée de la barre de navigation** : vert activé, gris coupé. Nouveaux raccourcis `director_toggle` et `race_calculator_toggle` (aussi depuis la télécommande) et entrées dans la palette de commandes (`Ctrl+K`). Nouvelle notification `Régie de course active` en bas de la fenêtre principale.
 
-![Interrupteur marche / arrêt : Régie de course et Calculateur de course](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-director-calculator-switch.png)
+![Interrupteur marche / arrêt : Régie de course et Calculateur de course](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-director-calculator-switch.png)
 
 #### Régie de course : carrousel de la tour de classement et interface du jeu
 
@@ -405,14 +406,14 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 
 - **Barres de pédales à côté des courbes** (désactivées par défaut) : accélérateur, frein, embrayage et retour de force, entrée brute et filtrée côte à côte, avec repère du maximum et valeurs en option.
 
-![Historique : barres de pédales](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-13-trailing-pedal-bars.png)
+![Historique : barres de pédales](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-13-trailing-pedal-bars.png)
 
 #### Partager les réglages d'overlays
 
 - **Partage les réglages d'un overlay ou de plusieurs que tu choisis**, dans un fichier `.zip` : `Partager` > `Exporter des réglages d'overlays...` sur les pages `Overlays` et `Options des overlays` (ou `Exporter les réglages...` dans le menu d'une carte d'overlay), coche les overlays, enregistre. Seules les options changées par rapport aux réglages par défaut sont écrites : ton ami retrouve exactement ton rendu.
 - **Importer** avec `Partager` > `Importer des réglages d'overlays...` ou en glissant le fichier sur la fenêtre : décoche les overlays que tu ne veux pas, `Garder mes positions` est coché par défaut (sinon les positions sont adaptées à ton écran). Les réglages arrivent comme modifications en attente des `Options des overlays`, gardées avec `Appliquer`, annulées avec `Ctrl+Z`.
 
-![Partager les réglages d'overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-share-overlay-settings.png)
+![Partager les réglages d'overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-share-overlay-settings.png)
 
 #### Importer des réglages
 
@@ -427,20 +428,20 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Mêmes couleurs de gommes partout** : tendre blanc, medium jaune, dur rouge, pluie bleu, intermédiaire vert. Les gommes encore aux anciennes couleurs par défaut changent une fois ; les couleurs que tu as choisies sont gardées.
 - **Badges de catégorie, noms courts des pilotes (`L. Hartmann`) et écarts de course (`+1 tour`)** écrits de la même façon sur chaque page, dans la langue de l'app.
 
-![Mêmes couleurs d'état partout](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-status-colors.png)
+![Mêmes couleurs d'état partout](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-status-colors.png)
 
-![Overlays modernes : une seule palette pour meilleur, gain, perte et alerte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-overlay-status-palette.png)
+![Overlays modernes : une seule palette pour meilleur, gain, perte et alerte](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-overlay-status-palette.png)
 
-![Badges de gommes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-tyre-compound-badges.png)
+![Badges de gommes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-tyre-compound-badges.png)
 
-![Couleurs des gommes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-compound-colors.png)
+![Couleurs des gommes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-compound-colors.png)
 
 #### Carte de piste et limites de piste
 
 - **Secteurs de la carte de piste colorés comme le timing en direct du jeu** : violet meilleur de ta catégorie dans la session, vert ton meilleur, orange plus lent, comme les barres de secteur du Classement.
 - **Points de limites de piste affichés de la même façon partout** (`1.25`, `1.5`, `3`) : `Tours et position` dans les deux designs, Rang pilote, Classement et Compteur ATH. La limite (`1.25/5`) n'est affichée qu'en course, les essais et la qualification n'ayant pas de pénalité.
 
-![Carte de piste : couleurs des secteurs comme le timing du jeu](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-14-track-map-sector-colors.png)
+![Carte de piste : couleurs des secteurs comme le timing du jeu](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-14-track-map-sector-colors.png)
 
 #### Statistiques pilote
 
@@ -499,21 +500,21 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 
 - **Nouvel overlay `Delta de vitesse`** : ta différence de vitesse avec quatre tours de référence au même endroit du tour (record absolu, meilleur de la session, meilleur du relais et dernier tour), positive quand tu es plus rapide, lissée (`speed_delta_smoothing_samples`). Chaque référence peut être affichée ou masquée, avec son préfixe et ses couleurs. Un tiret tant qu'il n'y a pas encore de tour de référence, sur un tour de sortie ou dans la voie des stands avant la ligne de départ. Désactivé par défaut : active-le dans la page `Overlays`.
 
-![Nouvel overlay Delta de vitesse](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
+![Nouvel overlay Delta de vitesse](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-speed-delta-overlay.png)
 
 - **Relatif : colonne `Tendance d'écart`** (design moderne, `column_gap_trend`, activée) : l'évolution de l'écart avec chaque voiture par tour, moyennée sur environ 30 s. Flèche verte quand tu gagnes (tu reviens sur la voiture devant, tu t'éloignes de celle derrière), rouge quand tu perds, un tiret quand c'est stable (moins de 0,05 s par tour) ou pour une voiture aux stands.
 - **Classement : nom de la catégorie** (design moderne, `show_class_header`, activé) : en mode multi-catégories séparées, ou avec une seule catégorie affichée, chaque catégorie commence par son nom dans une pastille de sa couleur ; la colonne catégorie disparaît et la pastille de position montre la place dans la catégorie.
 - **Classement : ordre des catégories** (`class_order`, les deux designs) : les catégories du mode multi-catégories séparées dans l'ordre que tu choisis (Hypercar, LMP2, LMP3, GT3... par défaut), réglé dans les `Options des overlays` en les glissant ou avec les flèches (`Ordre par défaut` remet l'ordre d'origine). Les catégories absentes de la liste viennent après, la plus rapide d'abord, comme avant. `maximum_vehicles_per_split_others` accepte maintenant toute valeur, `0` masque les autres catégories.
 
-![Classement : nom et ordre des catégories](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
+![Classement : nom et ordre des catégories](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-standings-class-header.png)
 
 - **Carte de piste : performance par secteur et voitures proches** (design moderne) : chaque secteur de la route prend la couleur de ton dernier passage (violet meilleur de la session, vert plus rapide que ton meilleur tour, orange plus lent ; `show_sector_performance`), et les voitures à moins d'1 s devant ou derrière sont entourées d'un anneau (`show_nearby_vehicle_highlight`, `nearby_vehicle_threshold`). Les deux sont activés par défaut.
 
-![Carte de piste : performance par secteur et voitures proches](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
+![Carte de piste : performance par secteur et voitures proches](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
 
 - **Black box** : le mouvement des suspensions est amplifié 8 fois par défaut (`suspension_motion_scale`) pour être visible ; les presets encore à 1 passent à 8 une fois, une autre valeur que tu as choisie est gardée. L'overlay est un peu plus haut (environ 15 %) pour laisser la place au débattement des roues ; remets l'échelle à 1 pour retrouver l'ancienne taille.
 
-![Black box : mouvement des suspensions x8 par défaut](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-black-box-suspension-scale.png)
+![Black box : mouvement des suspensions x8 par défaut](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-black-box-suspension-scale.png)
 
 - **Chat** : les messages s'effacent à la fin de leur durée d'affichage aussi au garage et dans les menus (ils restaient à l'écran pendant que les overlays étaient en pause). Design moderne : ton propre nom dans la couleur d'accent, messages du jeu atténués.
 
@@ -532,7 +533,7 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Mêmes canaux dans les deux vues** : un seul menu `Afficher`, à la place de `Canaux`, choisit ce que montrent les deux vues (un canal tracé en vue avancée est une jauge ou une tuile en vue simple), par groupe ou par canal, avec recherche, préréglages et toutes les options des graphiques (lissage, fenêtre gain/perte, bande min / max, delta par rapport au tour idéal, canaux calculés). Les canaux d'une seule roue se trouvent avec la recherche.
 - **Une seule barre de lecture sous les deux vues** : retour, lecture, avance, boucle A-B et vitesse passent sous les graphiques, avec une barre à faire glisser le long du tour et la position du curseur. Elle reste au même endroit en vue simple, où les graphiques sont masqués.
 
-![Visualiseur de tours : commutateur Vue simple / Vue avancée, un seul menu Afficher et une seule barre de lecture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-lap-viewer-simple-advanced-views.png)
+![Visualiseur de tours : commutateur Vue simple / Vue avancée, un seul menu Afficher et une seule barre de lecture](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-lap-viewer-simple-advanced-views.png)
 
 - Les tours enregistrés gardent maintenant l'angle de rotation du volant, pour que le volant tourne de son vrai angle.
 - Les longs tours ne figent plus la page : graphiques, carte, delta du meilleur tour et export MoTeC sont faits en arrière-plan, les onglets latéraux s'ouvrent sans à-coup.
@@ -548,7 +549,7 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 
 ### Régie de course (LMU)
 
-![Régie de course : voitures, pupitre caméras avec la file du réalisateur, événements de course et fiche voiture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-director.png)
+![Régie de course : voitures, pupitre caméras avec la file du réalisateur, événements de course et fiche voiture](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.23.0-broadcast-director.png)
 
 - **Dans la barre de navigation pour tout le monde** (`Régie`), à la place de `Spectateur` : la barre de chaque utilisateur est remise une fois sur le nouveau défaut (Accueil, Overlays, Stats, Résultats, Rejeux, Régie, Télémétrie, Course, Preset). `Spectateur` reste dans la palette de commandes, `Réglages` dans le bouton engrenage sous la barre et `Ctrl+,` ; les deux peuvent être remis avec `Personnaliser la barre de navigation...`.
 - **Nouvel outil `Régie de course`** pour réaliser une course, en direct (au volant ou en spectateur d'une course en ligne) ou sur un rejeu. Trois colonnes :
@@ -565,7 +566,7 @@ Ton Driver Rank et ton Safety Rank partout, un classement comme une tour de timi
 - **Verrouiller** la voiture à l'antenne pour que le réalisateur automatique attende.
 - **Habillage de diffusion fait pour la régie** : une seule source navigateur (1920 x 1080) pour OBS, Streamlabs, XSplit ou vMix, donnée par la page (`Habillage`, `Copier l'adresse`) et alimentée par elle seule : tour de classement (général, chaque catégorie à tour de rôle, ou la catégorie de la voiture à l'antenne), fiche pilote à chaque changement de voiture, carte de duel, bandeaux (meilleur tour, pénalités, drapeaux, changements de leader, gros contacts...), pit radar, bandeau REPLAY, horloge de session et météo. Chaque graphisme activable, `Masquer l'habillage` d'un coup.
 
-![Habillage de diffusion : tour de classement, bandeau meilleur tour, carte de duel, pit radar, horloge](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-graphics.png)
+![Habillage de diffusion : tour de classement, bandeau meilleur tour, carte de duel, pit radar, horloge](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.23.0-broadcast-graphics.png)
 
 - **Pit radar** : quand la voiture à l'antenne est dans la voie des stands, les voitures proches s'affichent avec leur distance, `À côté` en rouge, dans la page et sur l'habillage.
 - **Gravité des contacts** : un contact qui fait perdre à une voiture l'essentiel de sa vitesse (ou l'arrête) passe en premier, une touchette dont les deux voitures repartent devient une action mineure. Mesuré à partir de la vitesse des voitures : marche aussi en spectateur en ligne, sur un rejeu et depuis un autre PC.
@@ -821,7 +822,7 @@ Placer les overlays sur l'écran de jeu se fait maintenant dans un vrai **mode �
 
 Un overlay déjà déverrouillé au démarrage ne lance pas le mode édition : comme avant, son contour n'apparaît que sous la souris, donc rien ne reste à l'écran si tu roules avec l'overlay déverrouillé.
 
-![Mode édition des overlays : barre d'outils, overlay sélectionné, guide d'alignement et position](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
+![Mode édition des overlays : barre d'outils, overlay sélectionné, guide d'alignement et position](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.22.0-overlay-edit-mode.png)
 
 #### Corrections et performances
 
@@ -844,7 +845,7 @@ Les dix overlays graphiques ont leur propre design moderne, dessiné pour lui au
 - **Trailing** : zones douces sous les courbes d'accélérateur et de frein.
 - **Notes de piste** : note sur une carte.
 
-![Radar, carte du circuit et navigation, avant et après](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-map-overlays-design.png)
+![Radar, carte du circuit et navigation, avant et après](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-06-map-overlays-design.png)
 
 **Black box**, **chat**, **altitude**, **drapeau**, **jauge de direction**, **notifications de course** et **LED RPM** ont aussi un nouveau design moderne : tous les overlays en ont un maintenant (`enable_classic_layout` ou un thème Legacy ramènent l'aspect classique).
 
@@ -872,7 +873,7 @@ Avec Le Mans Ultimate, l'app affiche les vrais **logos des marques**, **logos de
 - **Overlay de stream** : la source des résultats de course affiche le logo du circuit et les logos des marques.
 - Un logo PNG à toi dans le dossier `brandlogo` passe toujours en premier (un mot de la marque suffit : `Corvette.png` pour « Chevrolet Corvette »). Les logos ont une copie lisible sur fond sombre et sur fond clair, et leurs marges vides sont rognées. Avec rFactor 2, tes propres fichiers sont les seuls logos.
 
-![Colonne du logo de marque activée par défaut](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-brand-logo-column.png)
+![Colonne du logo de marque activée par défaut](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-06-brand-logo-column.png)
 
 ### Options des overlays
 
@@ -898,7 +899,7 @@ Une nouvelle page **Résultats de course** (`Résultats` dans la barre de naviga
 
 | Classement d'une course multicatégorie | Positions tour par tour |
 |---|---|
-| ![Résultats de course](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results.png) | ![Positions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results-positions.png) |
+| ![Résultats de course](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-race-results.png) | ![Positions](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-race-results-positions.png) |
 
 ### Overlays de stream (OBS Studio, Streamlabs, XSplit, vMix)
 
@@ -910,9 +911,9 @@ Les overlays peuvent maintenant être ajoutés à ton stream comme **sources nav
 - Léger : les images ne sont capturées que pendant qu'une source est affichée, copiées depuis ce qui est déjà à l'écran, et renvoyées seulement quand elles changent (15, 30 ou 60 images par seconde au plus).
 - Chaque adresse contient un jeton d'accès (`Nouveau jeton d'accès` si l'une a été montrée en stream par erreur), et `Autre ordinateur (réseau local)` sert un PC de stream de ton réseau local. Les réglages sont aussi dans la page Réglages (`Overlay de stream`).
 
-![Page Overlays de stream](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-overlays.png)
+![Page Overlays de stream](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-stream-overlays.png)
 
-![Résultats de course en source navigateur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
+![Résultats de course en source navigateur](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-stream-race-results.png)
 
 ### Overlay Comparaison de télémétrie
 
@@ -922,7 +923,7 @@ Un nouvel overlay **Comparaison de télémétrie** (désactivé par défaut, cat
 - **Écart de vitesse** et **delta** avec le tour de référence à la même distance, avec le temps du tour de référence.
 - `reference_lap_source` : `Visionneuse` (le tour choisi comme référence dans la visionneuse de télémétrie, sinon le meilleur tour valide), `Meilleur` ou `Dernier` tour enregistré. Un nouveau meilleur tour, ou une référence changée dans la visionneuse, est pris en compte pendant que tu roules.
 
-![Overlay Comparaison de télémétrie : point de freinage du tour de référence devant la voiture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-telemetry-compare.png)
+![Overlay Comparaison de télémétrie : point de freinage du tour de référence devant la voiture](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-telemetry-compare.png)
 
 ### Visionneuse de télémétrie
 
@@ -947,7 +948,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 - **Adresses et code d'accès du tableau de bord web** avec boutons de copie, adresses de commande et de flux du contrôle à distance, aperçu de chaque notification avec ses couleurs.
 - Unités, police globale et options de l'API (enregistrées dans le preset) à un clic.
 
-![Page Réglages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-config-page.png)
+![Page Réglages](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-config-page.png)
 
 #### Page Presets
 
@@ -957,7 +958,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 - Nouveau, dupliquer et renommer dans une boîte qui **vérifie le nom pendant la frappe** (caractères interdits dans un nom de fichier, preset existant). `Ctrl+N`, `F2`, `Suppr`, `Ctrl+Z` remet le dernier preset supprimé.
 - Les fichiers de presets ne sont relus que s'ils ont changé, et seulement quand la page est affichée.
 
-![Page Presets](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-presets-page.png)
+![Page Presets](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-presets-page.png)
 
 #### Page Spectateur
 
@@ -965,7 +966,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 - **Clique sur un pilote pour le suivre** (le mode spectateur s'active tout seul). La carte du haut montre le pilote suivi, avec pilote précédent et suivant au classement (`Alt+Gauche`, `Alt+Droite`) et `Arrêt`.
 - Les pilotes ne sont lus que quand la page est affichée.
 
-![Page Spectateur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-spectate-page.png)
+![Page Spectateur](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-spectate-page.png)
 
 #### Page Modules
 
@@ -975,7 +976,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 - Clic droit sur une carte : `Réglages...`, activer ou désactiver, et **réinitialiser ses données enregistrées** (delta meilleur tour, delta de carburant et d'énergie, historique de consommation, meilleurs secteurs, carte du circuit).
 - Clavier comme la page Overlays : taper pour chercher, `/`, flèches, `Espace`, `Entrée`.
 
-![Page Modules](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-modules-page.png)
+![Page Modules](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-modules-page.png)
 
 #### Rechercher une option (`Ctrl+F`)
 
@@ -984,7 +985,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 - `Modifiées seulement` liste toutes les options que tu as changées, même sans mot cherché. Des puces limitent les résultats aux overlays, modules, preset ou application.
 - Un résultat ouvre la page Options des overlays, la page Réglages ou la page du module sur l'option. Clic droit : `Réinitialiser`, `Copier la clé de l'option`.
 
-![Rechercher une option](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-find-option.png)
+![Rechercher une option](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-find-option.png)
 
 #### Assistant de configuration
 
@@ -999,7 +1000,7 @@ Toutes les options globales de l'app dans **une seule page**, `Réglages` dans l
 
 | Apparence | Preset et overlays |
 |---|---|
-| ![Apparence de l'assistant](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-appearance.png) | ![Overlays de l'assistant](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-overlays.png) |
+| ![Apparence de l'assistant](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-setup-wizard-appearance.png) | ![Overlays de l'assistant](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-setup-wizard-overlays.png) |
 
 ### Thèmes
 
@@ -1011,7 +1012,7 @@ L'app et les overlays ont maintenant **quatre thèmes**, choisis séparément : 
 - **Supprimés** : les thèmes d'overlay `Contraste élevé`, `Adapté aux daltoniens` et `Classique`, le thème propre à chaque overlay (`widget_theme`), l'`Éditeur de thème de l'overlay` et ses thèmes personnalisés (`overlay_themes.json` n'est plus lu), et le thème de fenêtre `Système`. Le `Thème de couleurs...` du Black box garde `Par défaut` et `Adapté aux daltoniens`.
 - **Moderne sombre pour tout le monde** après cette mise à jour, pour la fenêtre et les overlays, quel que soit le thème que tu utilisais (l'ancien thème d'overlay `Adapté aux daltoniens` devient `Moderne sombre` avec les couleurs pour daltoniens). Choisis un autre thème ensuite, il est gardé.
 
-![Thèmes des overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-overlay-themes.png)
+![Thèmes des overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-06-overlay-themes.png)
 
 ### Options des overlays
 
@@ -1027,7 +1028,7 @@ Les options de tous les overlays sont maintenant dans **une seule page**, `Optio
 
 | Un overlay en sections, aperçu avec les valeurs non enregistrées | L'opacité de tous les overlays dans une seule recherche |
 |---|---|
-| ![Page Options des overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options.png) | ![Recherche dans tous les overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options-search.png) |
+| ![Page Options des overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-overlay-options.png) | ![Recherche dans tous les overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-overlay-options-search.png) |
 
 ### Barre de navigation et accès rapide de l'accueil
 
@@ -1086,9 +1087,9 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Alertes de course** : places gagnées ou perdues (générale et classe), pénalité, meilleur tour de la classe, drapeau bleu, neutralisation, tour invalidé. Chaque type se coupe séparément.
 - **Tendance des températures pneus** : température de chaque pneu sur les dernières secondes ou par tour, avec la température idéale donnée par LMU.
 
-![Nouveaux overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
+![Nouveaux overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
 
-![Aide en voie des stands](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-aide-voie-des-stands.png)
+![Aide en voie des stands](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-aide-voie-des-stands.png)
 
 ### Design moderne : tout ce que faisait l'ancien
 
@@ -1097,7 +1098,7 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Ordre des lignes** : les options `display_order_*` s'appliquent au design moderne dès que tu en changes une, et le bouton `Ordre d'affichage` est de retour.
 - Couleurs réglables des overlays redessinés (radar, carte, drapeaux…), repère du ressort central (suspension), repère de la pédale (pression de frein), régime, batterie et conso sur le rapport engagé, indicateur 100 % des pédales, noms de session personnalisés, style inversé du delta, dégâts en intégrité.
 
-![Classements : nouvelles colonnes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-classements-nouvelles-colonnes.png)
+![Classements : nouvelles colonnes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-classements-nouvelles-colonnes.png)
 
 ### Le Mans Ultimate : nouvelles données dans les overlays
 
@@ -1106,7 +1107,7 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Heatmap automatique** des pneus centrée sur la température idéale donnée par le jeu (option).
 - **Drapeaux jaunes par secteur** et phases de neutralisation (FCY), **vent** dans la météo, **hauteur de caisse** avant et arrière, **rappel du limiteur** dans la voie des stands.
 
-![Race plan, météo et rapport](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-overlays-nouvelles-tuiles.png)
+![Race plan, météo et rapport](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-overlays-nouvelles-tuiles.png)
 
 ### Visionneuse de télémétrie
 
@@ -1146,9 +1147,9 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Historique de consommation** : sélection avec `Ctrl` / `Maj`, `Ctrl+A`, double-clic pour ajouter un tour, `Suppr` supprime les tours sélectionnés.
 - **Plus léger** : la page est construite à son premier affichage, les onglets `Pneus` et `Équipe` à leur première ouverture, et seules les parties des résultats qui changent sont redessinées. L'image du plan (`Enregistrer l'image...`, `Copier l'image`) a toujours la même taille, quelle que soit la taille de la fenêtre.
 
-![Calculateur de course : stratégie, carburant dans le réservoir et plan d'arrêts](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator.png)
+![Calculateur de course : stratégie, carburant dans le réservoir et plan d'arrêts](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-race-calculator.png)
 
-![Calculateur de course : plan pneus et stock](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator-tyres.png)
+![Calculateur de course : plan pneus et stock](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-race-calculator-tyres.png)
 
 #### Stratégie
 
@@ -1170,9 +1171,9 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Tableau** : niveaux en badges colorés, record en gras, valeurs manquantes estompées, ligne sélectionnée marquée, lignes qui glissent à leur place quand on trie. `Suppr` retire le véhicule (ou le circuit) sélectionné, `Retour arrière` revient à `Tous les circuits`, `F5` recharge, `/` cherche un circuit.
 - États vides plus clairs, `Supprimer toutes les statistiques de ce circuit` et `Restaurer une sauvegarde` déplacés dans le menu `⋯`, menus en icônes seules quand la fenêtre est étroite.
 
-![Statistiques pilote : échelle des niveaux, progression et sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-driver-stats.png)
+![Statistiques pilote : échelle des niveaux, progression et sessions](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-driver-stats.png)
 
-![Statistiques pilote, tous les circuits : calendrier d'activité et sessions récentes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-driver-stats-career.png)
+![Statistiques pilote, tous les circuits : calendrier d'activité et sessions récentes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-driver-stats-career.png)
 
 #### Plus rapide
 
@@ -1194,7 +1195,7 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - **Nouvelle page d'accueil** : version et bouton **`Nouveautés`** de la version installée (lisible hors ligne), mise à jour disponible mise en avant, état du jeu avec la session en cours (circuit, session, position, tour), verrouillage de l'overlay en un clic, dernière session roulée, rappel du réglage du jeu tant qu'il n'est pas lancé, **accès rapide personnalisable** (outils, pages et actions au choix, dans l'ordre voulu, avec `Personnaliser...` ou clic droit). Cartes cliquables et mise en page sur 1 à 3 colonnes selon la largeur.
 - **Page `Overlays` repensée** : chaque overlay est une carte avec un **aperçu dessiné avec tes réglages** (redessiné quand tu enregistres ses options), sa catégorie et son interrupteur, ou une liste compacte (aperçu en infobulle) ; la vue choisie est mémorisée. La recherche ignore les accents et la casse et accepte plusieurs mots, les puces de catégorie indiquent combien d'overlays correspondent, filtre `Tous` / `Actifs` / `Inactifs`, liste animée. `Activer les affichés` / `Désactiver les affichés` ne basculent que les overlays filtrés. Un overlay activé qui n'a pas pu démarrer affiche un badge `Erreur`, avec un lien vers le journal. Menu au clic droit, clavier (taper pour chercher, `/`, flèches, `Espace`, `Entrée`). Plus rapide : la page est construite au premier affichage et les aperçus sont dessinés en arrière-plan, seulement quand la page est visible.
 
-![Page Overlays : cartes avec aperçu, recherche et puces de catégorie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-overlays-page.png)
+![Page Overlays : cartes avec aperçu, recherche et puces de catégorie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-overlays-page.png)
 
 - **Personnaliser la barre de navigation, l'accès rapide et l'ordre d'affichage** : nouvelle présentation avec les entrées affichées à gauche (numérotées, avec leur raccourci `Ctrl+1` à `Ctrl+9` pour la barre) et les entrées disponibles à droite, classées par type et avec recherche. Glisser-déposer, boutons monter / descendre / retirer sur chaque ligne, `Alt+↑` / `Alt+↓` et `Suppr` au clavier, annuler / rétablir, modifications signalées tant qu'elles ne sont pas enregistrées, `Ctrl+S` pour enregistrer.
 - **Modifications non enregistrées** signalées par un point sur la page, la barre de navigation et la liste des pages ouvertes. **`Ctrl+S`** enregistre la page affichée.
@@ -1224,13 +1225,13 @@ Tous sont désactivés par défaut, à activer dans l'onglet `Overlays`.
 - Réglages gardés (secondes avant, tri, filtres, onglet, rejeux protégés), liste des rejeux mise à jour à la fin d'une session, `Aujourd'hui` / `Hier` mis à jour à minuit, noms des boutons pour les lecteurs d'écran.
 - Plus léger pour le jeu : interrogé seulement quand la page est affichée, sur une seule connexion par mise à jour et un seul thread en arrière-plan, moins souvent quand le jeu est fermé, classement demandé seulement quand il sert.
 
-![Page Rejeux du jeu : rejeux par jour, lecture, caméra, carte du circuit avec les voitures](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-game-replays.png)
+![Page Rejeux du jeu : rejeux par jour, lecture, caméra, carte du circuit avec les voitures](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.20.0-game-replays.png)
 
 ### Releases et documentation
 
 - **Notes de version dans la langue de l'app** : la page `Nouveautés` affiche le changelog en français quand l'app est en français (mise à jour disponible comme version installée), en anglais sinon.
 - **Releases plus simples** : deux fichiers seulement, `ModernTinyPedals-<version>-setup.zip` (l'installeur Windows) et `ModernTinyPedals-<version>-source.zip`. La mise à jour depuis l'app télécharge le ZIP, vérifie son empreinte SHA-256 et lance l'installeur qu'il contient. Le ZIP portable n'est plus publié : pour passer une copie portable en version installée, installe le setup dans son dossier (presets et données conservés).
-- **Wiki** : un guide complet en anglais (installation, réglage du jeu, overlays, visionneuse de télémétrie, calculateur de course, connexions, dépannage, développement) sur le [wiki du projet](https://github.com/Keenny38/ModernTinyPedals/wiki).
+- **Wiki** : un guide complet en anglais (installation, réglage du jeu, overlays, visionneuse de télémétrie, calculateur de course, connexions, dépannage, développement) sur le [wiki du projet](https://github.com/Keenny38/NeoPedal/wiki).
 - README, changelog et notes de release sur GitHub en anglais, guide de contribution réécrit pour Modern Tiny Pedals.
 
 ### Fiabilité et sécurité
@@ -1265,13 +1266,13 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **L'ancien look reste disponible** : pour tous les overlays (désactiver `enable_modern_style` dans `Style d'overlay`) ou pour un seul (`enable_classic_layout`).
 - Police du design réglable (`modern_design_font_name`), couleurs du thème d'overlay comme avant.
 
-![Nouveau design : classements](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
+![Nouveau design : classements](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-design-classements.png)
 
-![Nouveau design : carburant et énergie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-carburant.png)
+![Nouveau design : carburant et énergie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-design-carburant.png)
 
-![Nouveau design : voiture et pneus](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-voiture.png)
+![Nouveau design : voiture et pneus](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-design-voiture.png)
 
-![Nouveau design : chronos](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-chrono.png)
+![Nouveau design : chronos](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-design-chrono.png)
 
 ### Nouvelle icône et interface
 
@@ -1288,7 +1289,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Hors-piste** (2 roues ou plus dans l'herbe, la terre ou le gravier) et **limites de piste dépassées** (4 roues dehors) marqués sur la carte et comptés par tour (hors-pistes : tours enregistrés avec cette version). Pour les tours enregistrés avant cette version, les bords sont déduits des trajectoires.
 - Deux nouvelles colorations de la carte : **mini-secteurs** (la trajectoire de référence colorée par le tour le plus rapide de chaque mini-secteur, avec le **tour idéal des tours affichés**) et **écart par virage**.
 
-![Carte : tracé officiel, bords de piste, mini-secteurs et mini-carte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
+![Carte : tracé officiel, bords de piste, mini-secteurs et mini-carte](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-track-map.png)
 
 #### Nouveaux onglets Session et XY
 
@@ -1296,9 +1297,9 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Rythme en long run** : moyenne des tours propres en écartant les tours lents (trafic, erreurs), et **tendance** du temps au tour au fil de la session (usure, carburant, évolution de la piste), aussi par % d'usure des pneus.
 - **XY** : un canal contre un autre au même endroit de la piste, en **nuage de points** (vitesse / G latéral, direction / G latéral, accélérateur / glissement…), ou en **histogramme** (part du tour passée dans chaque plage de valeurs). Limité à la partie zoomée des courbes quand on zoome.
 
-![Onglet Session : rythme en long run et tendance](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-session.png)
+![Onglet Session : rythme en long run et tendance](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-session.png)
 
-![Onglet XY : vitesse / G latéral](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-xy.png)
+![Onglet XY : vitesse / G latéral](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-xy.png)
 
 #### Où le temps est perdu
 
@@ -1306,7 +1307,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - Option **delta par rapport au tour idéal** (tour propre le plus rapide de chaque mini-secteur) au lieu du tour de référence.
 - **Écart des points de freinage** d'un tour à l'autre, pour juger de la régularité.
 
-![Onglet Virages : où le temps est perdu](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-coaching.png)
+![Onglet Virages : où le temps est perdu](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-coaching.png)
 
 #### Nouveaux canaux enregistrés
 
@@ -1348,7 +1349,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Plan contre course** (relais roulés comparés au plan) et **rivaux de la catégorie** (tours, arrêts, prochain arrêt attendu).
 - **Onglet Équipe (LMU)** : relais de chaque pilote de la voiture lus dans le jeu, coéquipiers compris, avec carburant, énergie et usure par tour à reporter dans le calculateur. **Pneus autorisés** repris de la session du jeu.
 
-![Calculateur de course : voiture de sécurité, 2 pilotes, comparaison des stratégies](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-race-calculator.png)
+![Calculateur de course : voiture de sécurité, 2 pilotes, comparaison des stratégies](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-race-calculator.png)
 
 ### Statistiques pilote
 
@@ -1361,9 +1362,9 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Annuler / rétablir** les suppressions et réinitialisations, **sauvegarde automatique** avant chaque modification (les 10 dernières, restaurables).
 - Bouton **`Télémétrie`** : ouvre les tours enregistrés du véhicule dans la visionneuse, avec ton record comme référence.
 
-![Statistiques pilote : niveau, progression et sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-driver-stats.png)
+![Statistiques pilote : niveau, progression et sessions](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-driver-stats.png)
 
-![Statistiques pilote : tous les circuits](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-career.png)
+![Statistiques pilote : tous les circuits](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-career.png)
 
 ### Le Mans Ultimate : nouvelles données du jeu
 
@@ -1373,7 +1374,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - Widget **Plan de course** : **distance jusqu'à l'entrée des stands**, plan recalculé à chaque tour en course, **vérification du menu des stands** (le plein réglé dans le jeu contre le plan) et **conso cible** pour atteindre le prochain arrêt.
 - **Estimation de conso du jeu** : tant qu'aucun tour de la voiture n'est enregistré sur ce circuit, les overlays carburant et énergie et le calculateur partent de la conso par tour estimée par le jeu.
 
-![Widget Chat](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-chat.png)
+![Widget Chat](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-chat.png)
 
 ### Corrections
 
@@ -1399,7 +1400,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Clic droit sur les courbes** : repères, zoom sur le secteur ou entre les repères, copier les valeurs ou l'image, ouvrir le replay à cet endroit.
 - **Clic sur `S1`, `S2`, `S3`** dans les courbes, ou sur un temps de secteur dans la liste : zoom sur le secteur.
 
-![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-telemetry-viewer.png)
+![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.18.0-telemetry-viewer.png)
 
 ### Onglet Virages
 
@@ -1408,7 +1409,7 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Tour idéal** : le meilleur passage de chaque virage et de chaque ligne droite parmi les tours affichés, avec l'écart au tour de référence.
 - La sensibilité de détection s'affiche dans ton unité de vitesse, et les virages sont recalculés au relâchement du curseur (3 fois plus vite qu'avant).
 
-![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-corners.png)
+![Onglet Virages](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.18.0-corners.png)
 
 ### Carte de trajectoire
 
@@ -1420,9 +1421,9 @@ La plus grosse mise à jour depuis le début : tous les overlays changent de loo
 - **Grande carte** par-dessus les courbes (bouton ⤢), **orientation auto** pour remplir la carte et rotation par quart de tour.
 - Étiquettes de virages qui ne se chevauchent plus (les plus gros écarts d'abord).
 
-![Carte : points de freinage, de corde et de sortie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-track-map.png)
+![Carte : points de freinage, de corde et de sortie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.18.0-track-map.png)
 
-![Carte : coloration trajectoire](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-racing-line.png)
+![Carte : coloration trajectoire](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.18.0-racing-line.png)
 
 ### Liste des tours et outils
 
@@ -1470,7 +1471,7 @@ La visionneuse est entièrement refaite en Qt Quick : courbes, carte et cercle G
 - **Onglet Virages** : barre de temps gagné/perdu par virage et, sous chaque virage, point de freinage, plein gaz, freinage dégressif, roue libre et chevauchement des pédales.
 - **Mémoire** : les tours chargés sont libérés après 3 minutes en arrière-plan, puis rechargés avec le même zoom.
 
-![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-telemetry-viewer.png)
+![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.17.0-telemetry-viewer.png)
 
 ### Carte de trajectoire
 
@@ -1488,7 +1489,7 @@ Les virages portent leur numéro officiel (`T1`, `T10a`…, `V1` en français) s
 - **Placés sur le vrai tracé** : chaque virage est calé sur l'apex du virage correspondant de ton tour (ou de la carte du circuit). La carte montre tous les virages, même ceux passés à fond, et un virage détecté qui en couvre plusieurs s'appelle `T2-4`.
 - Les autres circuits et tracés gardent la numérotation dans l'ordre du tour.
 
-![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-corners.png)
+![Onglet Virages](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.17.0-corners.png)
 
 ### Track Map Viewer refait
 
@@ -1498,7 +1499,7 @@ Les virages portent leur numéro officiel (`T1`, `T10a`…, `V1` en français) s
 - **Navigation** : clic sur la carte, curseur, flèches du clavier, bouton `Play` pour parcourir le circuit, `Suivre la position` pour garder la position au centre.
 - Menu `Afficher` pour chaque élément ; couleurs, largeurs et seuils de courbe de la configuration existante conservés.
 
-![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-track-map-viewer.png)
+![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.17.0-track-map-viewer.png)
 
 ### Et aussi
 

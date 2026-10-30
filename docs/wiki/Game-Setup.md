@@ -57,7 +57,7 @@ If REST data does not show up, check `API` > `Options` (with `Le Mans Ultimate` 
 - `url_port` (default `6397`) must match the `WebUI port` value of the game file `UserData\player\Settings.JSON`. This value can change in some situations.
 - `enable_vehicle_info`, `enable_race_info`, `enable_garage_setup_info`, `enable_session_info` and `enable_weather_info` turn individual data groups on or off.
 
-The performance monitor (`Help` > `Overlay Performance`, `Game data` section) shows the age of the shared memory data and the state of each REST data group. Details of each option: [Le Mans Ultimate API](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#le-mans-ultimate-api).
+The performance monitor (`Help` > `Overlay Performance`, `Game data` section) shows the age of the shared memory data and the state of each REST data group. Details of each option: [Le Mans Ultimate API](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#le-mans-ultimate-api).
 
 ## rFactor 2
 
@@ -77,7 +77,7 @@ Use the [Wine build of the plugin](https://github.com/schlegp/rF2SharedMemoryMap
 
 ### rFactor 2 REST API
 
-rFactor 2 also has a REST API (port `5397` by default, `WebUI port` in `UserData\player\player.JSON`), used for garage setup, session and weather data. See [rFactor 2 API](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#rfactor-2-api).
+rFactor 2 also has a REST API (port `5397` by default, `WebUI port` in `UserData\player\player.JSON`), used for garage setup, session and weather data. See [rFactor 2 API](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#rfactor-2-api).
 
 ## Auto backup of car setups
 

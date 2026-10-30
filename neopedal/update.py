@@ -44,7 +44,7 @@ from typing import IO, NamedTuple
 
 from . import app_signal, realtime_state, version
 from .async_request import get_response, set_header_get
-from .const_app import APP_NAME, EXECUTABLE, FORK_REPO_NAME, LEGACY_EXECUTABLE
+from .const_app import APP_NAME, EXECUTABLE, FORK_REPO_NAME, FORMER_FORK_REPO_NAMES, LEGACY_EXECUTABLE
 from .const_common import DATE_NA, VERSION_NA
 from .const_file import ConfigType
 from .i18n import current_language
@@ -82,7 +82,9 @@ def skip_version(version_tuple: tuple[int, int, int]):
     logger.info("UPDATES: version %s skipped", ".".join(map(str, version_tuple)))
 
 
-RENAMED_REPOS = {"keenny38/overlays": FORK_REPO_NAME}
+# Former names of the official repository (lower case) -> current name: update_repository saved before a rename
+RENAMED_REPOS = {name.lower(): FORK_REPO_NAME for name in FORMER_FORK_REPO_NAMES}
+OFFICIAL_REPOS = {FORK_REPO_NAME.lower(), *RENAMED_REPOS}  # lower case, former names included
 
 
 def update_repository() -> str:
@@ -336,7 +338,7 @@ def check_manifest(manifest: ReleaseManifest, tag: str, checked_version: tuple[i
     Args:
         version_tag: development tag of running app (version.DEVELOPMENT), see is_new_version.
     """
-    if manifest.repository.lower() != FORK_REPO_NAME.lower():
+    if manifest.repository.lower() not in OFFICIAL_REPOS:  # former name: release signed before a rename
         raise ManifestError(f"release manifest is for another repository: {manifest.repository}")
     if manifest.tag != tag or manifest.version != tag_version(tag):
         raise ManifestError(f"release manifest is for another release: {manifest.tag} ({manifest.version})")
@@ -500,7 +502,7 @@ def changelog_image_name(url: str) -> str:
     match = CHANGELOG_IMAGE_URL.fullmatch(url)
     if match is None:
         return ""
-    repos = {FORK_REPO_NAME.lower(), update_repository().lower()}
+    repos = {*OFFICIAL_REPOS, update_repository().lower()}  # former names: screenshots of earlier changelogs
     return match.group(2) if match.group(1).lower() in repos else ""
 
 
@@ -1092,7 +1094,7 @@ class RevocationUnknownError(ValueError):
 def is_official_repository(repo: str) -> bool:
     """Repository is the official one (also its name before it was renamed)"""
     repo = repo.strip().strip("/").lower()
-    return RENAMED_REPOS.get(repo, repo).lower() == FORK_REPO_NAME.lower()
+    return repo in OFFICIAL_REPOS
 
 
 def verify_installer(path: str, repository: str | None = None, handle: int | None = None,

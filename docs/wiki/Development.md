@@ -1,13 +1,13 @@
 # Development
 
-This page is for contributors and maintainers: running from source, checks, project layout, Windows build and release process. The contribution rules are in [CONTRIBUTING.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/CONTRIBUTING.md).
+This page is for contributors and maintainers: running from source, checks, project layout, Windows build and release process. The contribution rules are in [CONTRIBUTING.md](https://github.com/Keenny38/NeoPedal/blob/master/CONTRIBUTING.md).
 
 ## Set up
 
 You need Python 3.11 or newer (CI tests 3.11, 3.13 and 3.14 on Windows and Linux).
 
 ```bash
-git clone https://github.com/Keenny38/ModernTinyPedals.git
+git clone https://github.com/Keenny38/NeoPedal.git
 ```
 
 ```bash
@@ -286,7 +286,7 @@ iscc /DAppVersion=0.20.0 installer\neopedal.iss
 
 The installer `NeoPedal-<version>-windows-setup.exe` is written to `dist`. Its shortcut icon follows the Windows light or dark mode (`images/icon.ico` or `images/icon_dark.ico`). Icons are generated from `images/src/icon.webp` and `images/src/icon_dark.webp` with `images/export_icon.sh` (ImageMagick 7).
 
-User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). `Settings` > `Import Settings…` (`ui/settings_import.py`) saves an import request in the config folder and restarts; `userfile/settings_import.py` applies it on next start, before settings are loaded (current folder renamed aside, chosen folder copied, Linux data folder of the same name and `user_path` values too). Single instance mode holds a system lock named after the config folder (`main.instance_lock_name`: Windows named mutex `Local\NeoPedal-<hash>`, Linux `flock` of a file in `XDG_RUNTIME_DIR`), taken in one step and released by the system when the app exits, even after a crash; a restarted app waits for the previous one to release it. The executable is `neopedal.exe` (`APP_ID`, build folder `dist\NeoPedal`). Versions until 0.23.0 used another name (`LEGACY_NAME` in `const_app.py`), only read for compatibility: the installer removes the old executable and points shortcuts to `neopedal.exe` (older updaters run it with the folder of the running copy), `update.installed_app_folder` finds both names, plugins importing the old package name get this package (`plugin_loader.LegacyPackageFinder`), presets get their option keys renamed (`setting_preupdate`, 2.50.9), old preset packages still import, the remote control still accepts the old header besides `X-NeoPedal`, and the old OpenXR layer registration is replaced or removed (`vr_shared.LAYER_MANIFESTS`). The restart variable is `NEOPEDAL_RESTART`, the Linux desktop entry `NeoPedal.desktop` (`DESKTOP_FILE_NAME`), the SteamVR overlay key `neopedal.overlay`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
+User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). `Settings` > `Import Settings…` (`ui/settings_import.py`) saves an import request in the config folder and restarts; `userfile/settings_import.py` applies it on next start, before settings are loaded (current folder renamed aside, chosen folder copied, Linux data folder of the same name and `user_path` values too). Single instance mode holds a system lock named after the config folder (`main.instance_lock_name`: Windows named mutex `Local\NeoPedal-<hash>`, Linux `flock` of a file in `XDG_RUNTIME_DIR`), taken in one step and released by the system when the app exits, even after a crash; a restarted app waits for the previous one to release it. The executable is `neopedal.exe` (`APP_ID`, build folder `dist\NeoPedal`). Versions until 0.23.0 used another name (`LEGACY_NAME` in `const_app.py`), only read for compatibility: the installer removes the old executable and points shortcuts to `neopedal.exe` (older updaters run it with the folder of the running copy), `update.installed_app_folder` finds both names, plugins importing the old package name get this package (`plugin_loader.LegacyPackageFinder`), presets get their option keys renamed (`setting_preupdate`, 2.50.9), old preset packages still import, the remote control still accepts the old header besides `X-NeoPedal`, and the old OpenXR layer registration is replaced or removed (`vr_shared.LAYER_MANIFESTS`). The restart variable is `NEOPEDAL_RESTART`, the Linux desktop entry `NeoPedal.desktop` (`DESKTOP_FILE_NAME`), the SteamVR overlay key `neopedal.overlay`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/NeoPedal` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
 
 ## Release process
 
@@ -332,8 +332,8 @@ python tools/gen_release_notes.py v0.20.0
 
 Before publishing, run `git fetch --tags` (to start from the real last release) and `python tools/next_version.py`, then add the section of that version, `## X.Y.Z (YYYY-MM-DD)`, to **both** files:
 
-- [`CHANGELOG.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md), in English: the start of the GitHub release notes, and the notes the app shows in English;
-- [`CHANGELOG.fr.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.fr.md), in French: the notes the app shows in French (fetched at the release tag for an available update, bundled file for the installed version).
+- [`CHANGELOG.md`](https://github.com/Keenny38/NeoPedal/blob/master/CHANGELOG.md), in English: the start of the GitHub release notes, and the notes the app shows in English;
+- [`CHANGELOG.fr.md`](https://github.com/Keenny38/NeoPedal/blob/master/CHANGELOG.fr.md), in French: the notes the app shows in French (fetched at the release tag for an available update, bundled file for the installed version).
 
 `python tools/gen_release_notes.py --draft-changelog X.Y.Z` prints a draft of the section from the commits since the last release (titles under `New`, `Improvements` and `Fixes`, images added in `docs/changes`), to rewrite for users.
 
@@ -351,7 +351,7 @@ python tools/make_change_visual.py black_box --title "Dashboard HUD: engine map"
 
 ### Changelog screenshots
 
-Screenshots of new app pages go in `docs/changes` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/…` address, so they show on GitHub, in the release notes and in the app's What's New page (shipped with the app for the newest version, else downloaded once; other image addresses are skipped).
+Screenshots of new app pages go in `docs/changes` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/…` address, so they show on GitHub, in the release notes and in the app's What's New page (shipped with the app for the newest version, else downloaded once; other image addresses are skipped).
 
 The README preview image is generated from the real overlays, on the simulated race of `neopedal/demo_data.py` (the one the app's overlay pictures show: widget modules read it only while a picture is drawn, see `demo_globals`; `demo_state` keeps simulated cars out of user presets):
 
@@ -386,15 +386,15 @@ This wiki is generated from `docs/wiki/` in the repository by the `.github/workf
 
 - One Markdown file per page (`Home.md`, `Getting-Started.md`...), plus `_Sidebar.md` and `_Footer.md`.
 - Link pages with their file name, `.md` included (`[Installation](Installation.md#linux)`), so links also work when browsing the repository; the workflow removes `.md` for the wiki.
-- Link repository files with absolute `https://github.com/Keenny38/ModernTinyPedals/blob/master/<path>` addresses, and images with `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/<path>`.
+- Link repository files with absolute `https://github.com/Keenny38/NeoPedal/blob/master/<path>` addresses, and images with `https://raw.githubusercontent.com/Keenny38/NeoPedal/master/<path>`.
 - GitHub creates the wiki repository only once a first page exists: the wiki must have been initialized once from the `Wiki` tab.
 
 ## Contributing
 
-- Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues) first for a large feature.
+- Open an [issue](https://github.com/Keenny38/NeoPedal/issues) first for a large feature.
 - Every bug fix comes with a regression test in `tests/`.
 - Test UI changes in light and dark theme, and if possible on Windows and Linux.
 - AI-assisted code is accepted on the same terms as other code: you understand it, reviewed it, it follows the rules and its tests pass. Mention it in the pull request.
 - Contributions are distributed under the project license, the GNU GPL v3 or later.
 
-Full rules: [CONTRIBUTING.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/CONTRIBUTING.md). Security issues: [SECURITY.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md).
+Full rules: [CONTRIBUTING.md](https://github.com/Keenny38/NeoPedal/blob/master/CONTRIBUTING.md). Security issues: [SECURITY.md](https://github.com/Keenny38/NeoPedal/blob/master/SECURITY.md).

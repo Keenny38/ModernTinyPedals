@@ -14,17 +14,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><img src="https://img.shields.io/github/v/release/Keenny38/ModernTinyPedals?label=version&color=c9a227" alt="Latest version"></a>
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases"><img src="https://img.shields.io/github/downloads/Keenny38/ModernTinyPedals/total?label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/Keenny38/NeoPedal/releases/latest"><img src="https://img.shields.io/github/v/release/Keenny38/NeoPedal?label=version&color=c9a227" alt="Latest version"></a>
+  <a href="https://github.com/Keenny38/NeoPedal/releases"><img src="https://img.shields.io/github/downloads/Keenny38/NeoPedal/total?label=downloads" alt="Downloads"></a>
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPL%20v3-blue" alt="GPL v3 license"></a>
   <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-555" alt="Windows and Linux">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><b>Download</b></a> ·
+  <a href="https://github.com/Keenny38/NeoPedal/releases/latest"><b>Download</b></a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#features">Features</a> ·
-  <a href="https://github.com/Keenny38/ModernTinyPedals/wiki">Wiki</a> ·
+  <a href="https://github.com/Keenny38/NeoPedal/wiki">Wiki</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
@@ -40,7 +40,7 @@ NeoPedal is a telemetry overlay and analysis app: a modern design, a clear inter
 
 ## Quick start
 
-1. **Download** `NeoPedal-<version>-windows-setup.exe` from the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page and run it. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\NeoPedal`).
+1. **Download** `NeoPedal-<version>-windows-setup.exe` from the [Releases](https://github.com/Keenny38/NeoPedal/releases/latest) page and run it. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\NeoPedal`).
 2. **Prepare the game**: `Borderless` or `Windowed` display mode (exclusive fullscreen hides the overlay), then the setting of your game below.
 3. **On first launch**, the setup wizard asks for the language, the game (a running game is picked for you), metric or imperial units, the themes (previewed) and the overlays to start with (shown as pictures).
 4. **Start a session**: the overlay shows up as soon as the car is on track and hides otherwise.
@@ -51,13 +51,13 @@ Then:
 - **Configure an overlay**: gear of its card in the `Overlays` tab (or right-click the overlay) opens the Overlay Options page, where every overlay is one click away. `Ctrl+F` searches for an option by name.
 - **Updates**: the app tells you about a new version (checked at startup, then every 12 hours while it runs), shows its release notes in your language (with the versions you skipped, searchable, screenshots, option names that open the option) and can download and install it (`Download And Install`). After an update, what's new opens once at the first start.
 
-Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) for details and for verifying your download.
+Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/NeoPedal/wiki/Installation) for details and for verifying your download.
 
 ### Game setup
 
 | Game | Windows | Linux |
 |---|---|---|
-| **Le Mans Ultimate** | Nothing to install. Enable `Settings > Gameplay > Enable Plugins`. | Needs a third-party plugin, see [Game setup](https://github.com/Keenny38/ModernTinyPedals/wiki/Game-Setup). |
+| **Le Mans Ultimate** | Nothing to install. Enable `Settings > Gameplay > Enable Plugins`. | Needs a third-party plugin, see [Game setup](https://github.com/Keenny38/NeoPedal/wiki/Game-Setup). |
 | **rFactor 2** | [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download) plugin. | [Wine version of the plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build). |
 
 For rFactor 2: copy `rFactor2SharedMemoryMapPlugin64.dll` into `rFactor 2\Bin64\Plugins` (create the folder if it is missing), enable it in `Settings > Gameplay > Plugins`, then restart the game. If the plugin does not show up, install the `Visual C++ 2013` runtime found in the game's `Support\Runtimes` folder.
@@ -269,14 +269,14 @@ Cast a race live (driving or spectating an online race) or in a replay, from the
 
 ## Documentation
 
-The [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki) is the user and developer guide:
+The [wiki](https://github.com/Keenny38/NeoPedal/wiki) is the user and developer guide:
 
 | Use | Develop |
 |---|---|
-| [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) · [Game setup](https://github.com/Keenny38/ModernTinyPedals/wiki/Game-Setup) · [Getting started](https://github.com/Keenny38/ModernTinyPedals/wiki/Getting-Started) | [Development](https://github.com/Keenny38/ModernTinyPedals/wiki/Development): run from source, checks, architecture, Windows build, release process |
-| [Overlays](https://github.com/Keenny38/ModernTinyPedals/wiki/Overlays) · [Presets and settings](https://github.com/Keenny38/ModernTinyPedals/wiki/Presets-and-Settings) | [Contributing guide](CONTRIBUTING.md) |
-| [Telemetry viewer](https://github.com/Keenny38/ModernTinyPedals/wiki/Telemetry-Viewer) · [Race calculator](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Calculator) · [Driver stats](https://github.com/Keenny38/ModernTinyPedals/wiki/Driver-Stats) · [Race results](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Results) · [Broadcast director](https://github.com/Keenny38/ModernTinyPedals/wiki/Broadcast-Director) | [Roadmap](docs/ROADMAP.md) |
-| [Connections](https://github.com/Keenny38/ModernTinyPedals/wiki/Connections) · [Updates and security](https://github.com/Keenny38/ModernTinyPedals/wiki/Updates-and-Security) · [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting) | [Security policy](SECURITY.md) |
+| [Installation](https://github.com/Keenny38/NeoPedal/wiki/Installation) · [Game setup](https://github.com/Keenny38/NeoPedal/wiki/Game-Setup) · [Getting started](https://github.com/Keenny38/NeoPedal/wiki/Getting-Started) | [Development](https://github.com/Keenny38/NeoPedal/wiki/Development): run from source, checks, architecture, Windows build, release process |
+| [Overlays](https://github.com/Keenny38/NeoPedal/wiki/Overlays) · [Presets and settings](https://github.com/Keenny38/NeoPedal/wiki/Presets-and-Settings) | [Contributing guide](CONTRIBUTING.md) |
+| [Telemetry viewer](https://github.com/Keenny38/NeoPedal/wiki/Telemetry-Viewer) · [Race calculator](https://github.com/Keenny38/NeoPedal/wiki/Race-Calculator) · [Driver stats](https://github.com/Keenny38/NeoPedal/wiki/Driver-Stats) · [Race results](https://github.com/Keenny38/NeoPedal/wiki/Race-Results) · [Broadcast director](https://github.com/Keenny38/NeoPedal/wiki/Broadcast-Director) | [Roadmap](docs/ROADMAP.md) |
+| [Connections](https://github.com/Keenny38/NeoPedal/wiki/Connections) · [Updates and security](https://github.com/Keenny38/NeoPedal/wiki/Updates-and-Security) · [Troubleshooting](https://github.com/Keenny38/NeoPedal/wiki/Troubleshooting) | [Security policy](SECURITY.md) |
 
 Every option is described in the [settings reference](docs/customization.md) (also bundled with the app), and what changed in each version in the [changelog](CHANGELOG.md) ([en français](CHANGELOG.fr.md)). The wiki is generated from [docs/wiki](docs/wiki): edit it there.
 
@@ -285,7 +285,7 @@ Every option is described in the [settings reference](docs/customization.md) (al
 Requires [Python](https://www.python.org/) 3.11 or newer.
 
 ```bash
-git clone https://github.com/Keenny38/ModernTinyPedals.git
+git clone https://github.com/Keenny38/NeoPedal.git
 ```
 
 ```bash
@@ -314,13 +314,13 @@ The shared memory libraries (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) are 
 
 On Windows, `Download And Install` of an update found while running from source installs the Windows app (your installed copy is updated, then started); update the source folder itself with `git pull`.
 
-On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `NeoPedal` command in `/usr/local/`. Settings are in `$HOME/.config/NeoPedal/` and data in `$HOME/.local/share/NeoPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
+On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `NeoPedal` command in `/usr/local/`. Settings are in `$HOME/.config/NeoPedal/` and data in `$HOME/.local/share/NeoPedal/`. See [Installation](https://github.com/Keenny38/NeoPedal/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
 
 > Settings and data folders are named `NeoPedal` (`%APPDATA%\NeoPedal`, `~/.config/NeoPedal/`, `~/.local/share/NeoPedal/`). The executable is `neopedal.exe` (Linux: `NeoPedal` command, `/usr/local/share/NeoPedal`).
 
 ## Contributing
 
-Report a problem or suggest an idea in the [issues](https://github.com/Keenny38/ModernTinyPedals/issues). The contribution rules (development setup, checks, project rules) are in [CONTRIBUTING.md](CONTRIBUTING.md), and what is left to do in the [roadmap](docs/ROADMAP.md). A security vulnerability is reported privately, not in an issue: see [SECURITY.md](SECURITY.md).
+Report a problem or suggest an idea in the [issues](https://github.com/Keenny38/NeoPedal/issues). The contribution rules (development setup, checks, project rules) are in [CONTRIBUTING.md](CONTRIBUTING.md), and what is left to do in the [roadmap](docs/ROADMAP.md). A security vulnerability is reported privately, not in an issue: see [SECURITY.md](SECURITY.md).
 
 ## License and credits
 

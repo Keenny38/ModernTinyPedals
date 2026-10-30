@@ -111,7 +111,7 @@ GLOBAL_DEFAULT = {
         "recent_overlays": "",  # Overlays page: overlays last edited in Overlay Options, newest first
         "check_for_updates_on_startup": True,
         "number_of_hours_between_update_checks": 12,  # checked again while app runs, 0 = startup only
-        "update_repository": "Keenny38/ModernTinyPedals",
+        "update_repository": "Keenny38/NeoPedal",
         # What's New of the versions since the newest one run (last_run_version), once at first start of a newer one
         "show_release_notes_after_update": True,
         "last_run_version": "",

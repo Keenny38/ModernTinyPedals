@@ -39,7 +39,7 @@ def published_suffixes() -> set[str]:
 
 def release_response(version: str = "9.9.9") -> bytes:
     """GitHub API response of a release with the files the workflow publishes"""
-    base = f"https://github.com/Keenny38/ModernTinyPedals/releases/download/v{version}/"
+    base = f"https://github.com/Keenny38/NeoPedal/releases/download/v{version}/"
     names = [f"NeoPedal-{version}{suffix}" for suffix in sorted(published_suffixes())]
     return b"HTTP/1.1 200 OK\r\n\r\n" + json.dumps({
         "tag_name": f"v{version}", "published_at": "2026-10-06T00:00:00Z", "body": "",

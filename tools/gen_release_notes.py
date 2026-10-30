@@ -31,8 +31,8 @@ import sys
 import zlib
 from typing import NamedTuple
 
-REPO_URL = "https://github.com/Keenny38/ModernTinyPedals"
-RAW_URL = "https://raw.githubusercontent.com/Keenny38/ModernTinyPedals"
+REPO_URL = "https://github.com/Keenny38/NeoPedal"
+RAW_URL = "https://raw.githubusercontent.com/Keenny38/NeoPedal"
 VISUALS_DIR = "docs/changes"
 CHANGELOG = "CHANGELOG.md"
 CHANGELOG_VERSION = re.compile(r"^## (\d+\.\d+\.\d+)\b")

@@ -1,6 +1,6 @@
 # Overlays
 
-NeoPedal has **93 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+NeoPedal has **93 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#widgets).
 
 To give the settings of one overlay or of several to someone else, use `Share` on the `Overlays` page or in `Overlay Options`: see [Share overlay settings](Presets-and-Settings.md#share-overlay-settings).
 
@@ -8,9 +8,9 @@ The pictures of the `Overlays` page, of `Overlay Options` and of the setup wizar
 
 On the game screen, overlays show only real game data. The sample content of `Chat`, `Spotter`, `Race Notifications` and `Pit Lane Helper` is drawn only in edit mode (right-click an overlay > `Edit Mode`), to place the overlay.
 
-![Standings, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
+![Standings, before and after the modern design](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-design-classements.png)
 
-![Radar, track map and navigation, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-map-overlays-design.png)
+![Radar, track map and navigation, before and after the modern design](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-06-map-overlays-design.png)
 
 ## Modern design and classic layout
 
@@ -56,7 +56,7 @@ Light themes invert gray panels and text, keep colored backgrounds (flags, warni
 
 The window of the app has the same four themes (`window_color_theme` in `Settings` > `Application` > `Interface`). Window and overlays have separate themes.
 
-![Overlay themes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-overlay-themes.png)
+![Overlay themes](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-06-overlay-themes.png)
 
 ## Visibility by session and pit
 
@@ -78,7 +78,7 @@ Seven overlays added in 0.20.0 help during a race. They are off by default: turn
 | **Race Notifications** | Short messages: places gained or lost (overall and class), penalty, class fastest lap, blue flag, full course yellow, invalid lap. Each type can be turned off. |
 | **Tyre Temp Trend** | Surface temperature of each tyre over the last seconds or per lap, with the optimal temperature given by LMU. |
 
-![New race aid overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
+![New race aid overlays](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
 
 ## Telemetry Compare
 
@@ -107,7 +107,7 @@ The **Speed Delta** overlay (off by default, `Timing` category) shows your speed
 - Each reference can be shown or hidden (`show_all_time_best`, `show_session_best`, `show_stint_best`, `show_last_lap`), with its own prefix (`prefix_*`) and colors.
 - A dash is shown while there is no reference lap yet, on an out lap, or in the pit lane before the start line.
 
-![New Speed Delta overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
+![New Speed Delta overlay](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-speed-delta-overlay.png)
 
 ## Driver Rank
 
@@ -118,7 +118,7 @@ The **Driver Rank** overlay (off by default, `Timing` category, Le Mans Ultimate
 - The game folder is found like for race results (folder chosen on the `Results` page, else your Steam libraries); you are found by the Steam account last signed in, else by your game profile name.
 - `show_progress` shows the progress to the next tier; each item can be shown or hidden (`show_driver_rank`, `show_safety_rank`, `show_track_limits`), with its own prefix and colors in the classic design. The modern design shows each rank in its color, with the progress as a bar.
 
-![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
+![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-12-driver-rank-overlay.png)
 
 ## Tyre Overview
 
@@ -131,7 +131,7 @@ The **Tyre Overview** overlay (off by default, `Tyres & Wheels` category) shows 
 
 Each part has its own on/off option (car body, wheel name, tyre drawing and its grooves, alert highlight, pressure unit and target scale, tread gauge…); the cards get smaller. Tyre drawing off, surface temperatures move to a row of the readings. Try it without driving with the race situations of the preview (`Damage`) and `Test on Screen` on the Overlay Options page.
 
-![Tyre Overview overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-16-tyre-overview.png)
+![Tyre Overview overlay](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-16-tyre-overview.png)
 
 ## Relative, Standings and Track Map
 
@@ -151,14 +151,14 @@ Each part has its own on/off option (car body, wheel name, tyre drawing and its 
 - **Relative, Standings, Rivals: `Track Limits` column** (modern design, Le Mans Ultimate, off by default): the track limits points of each driver, amber once any, red one point before the penalty in races.
 - **Relative, Standings, Rivals: `Driver & Safety Rank` column** (modern design, Le Mans Ultimate, `column_driver_ranks`, off by default): `S2 P3` in rank colors, dashes while unknown. Yours and your team members' always; every other driver's with `enable_online_driver_ranks` on: while the game is on an online server (practice, race, private server), the app asks RaceControl the profiles of the drivers of the session by name (drivers joining the session asked at once, known ones again every 5 minutes and after each session; drivers leaving are no longer shown). The game badge of each driver is a column of its own (`Driver Badge`, `column_driver_badge`, off by default): shown with or without the ranks, moved on its own (the badge alone is enough to spot a risky driver ahead). The **Session** overlay can show the average of the field (`show_field_level`, `S3 · G1`), and Standings the strength of field of each class at the end of its class header (`show_class_sof`, `SoF S2 40% · G1 15%`).
 
-![Standings: class header and class order](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
+![Standings: class header and class order](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-standings-class-header.png)
 
 - **Track map: sector performance** (modern design, `show_sector_performance`, on by default): each sector of the road is colored by your most recent time there, as the game live timing: purple for the best of your class in the session, green for your personal best, orange slower.
 - **Track map: nearby cars** (modern design, `show_nearby_vehicle_highlight`, on by default): cars less than `nearby_vehicle_threshold` (`1.0` s) ahead or behind get a ring.
 - **Track map, Elevation: corner numbers** (both designs, `show_corner_numbers`, off by default): the official corner numbers (or names, translated) of the track, beside each bend of the map and under the elevation profile. `V5` in French, so they never read as a car position.
 - **Relative: lap time delta column** (modern design, `column_delta_laptime`, off by default): the last laps of each car against yours, as in Standings and Rivals.
 
-![Track map: sector performance colors and nearby cars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
+![Track map: sector performance colors and nearby cars](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
 
 ## List of overlays
 
@@ -314,7 +314,7 @@ In the Overlay Options page its options are in its own sections (profile, size a
 
 ## Widget plugins
 
-You can add your own overlays as plugins: a folder in `plugins` (next to the app) with a `setting.json` and a `widget.py`. `Tools` > `Plugin Manager` shows their state, enables or disables them, reloads their code and installs plugins from a `.zip`. A plugin runs only once you trusted it, and any change of a file in its folder asks you to trust it again; plugins with native code files (`.pyd`, `.dll`, `.so`, `.pth`) are refused. See [Widget plugins](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widget-plugins).
+You can add your own overlays as plugins: a folder in `plugins` (next to the app) with a `setting.json` and a `widget.py`. `Tools` > `Plugin Manager` shows their state, enables or disables them, reloads their code and installs plugins from a `.zip`. A plugin runs only once you trusted it, and any change of a file in its folder asks you to trust it again; plugins with native code files (`.pyd`, `.dll`, `.so`, `.pth`) are refused. See [Widget plugins](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#widget-plugins).
 
 > [!WARNING]
 > Plugins are normal Python code with full access to your computer. Only install plugins from sources you trust.

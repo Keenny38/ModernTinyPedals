@@ -72,13 +72,13 @@ def test_changelog_check_and_image_pin(git_repo, monkeypatch):
 
     (git_repo / "CHANGELOG.md").write_text(
         "# Changelog\n\n## 0.11.0 (2026-10-05)\n\n![Shot](https://raw.githubusercontent.com/Keenny38/"
-        "ModernTinyPedals/master/docs/changes/shot.png)\n", encoding="utf-8")
+        "NeoPedal/master/docs/changes/shot.png)\n", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["gen_release_notes.py", "--check-changelog", "0.11.0"])
     assert gen_release_notes.main() == 0
     monkeypatch.setattr(sys, "argv", ["gen_release_notes.py", "--check-changelog", "v0.12.0"])
     assert gen_release_notes.main() == 1
     pinned = gen_release_notes.pin_image_urls(gen_release_notes.changelog_section("0.11.0"), "abc123")
-    assert "/ModernTinyPedals/abc123/docs/changes/shot.png" in pinned
+    assert "/NeoPedal/abc123/docs/changes/shot.png" in pinned
     assert "/master/" not in pinned
 
 

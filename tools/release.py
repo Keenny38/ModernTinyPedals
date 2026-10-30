@@ -23,7 +23,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO = "Keenny38/ModernTinyPedals"
+REPO = "Keenny38/NeoPedal"
 WORKFLOW = "build-release.yml"
 # Files of every release (name: NeoPedal-<version><suffix>). Apps up to 0.19 update only with the
 # installer .exe & its .sha256 file, apps since 0.20 with the setup ZIP (else the .exe), see neopedal/update.py

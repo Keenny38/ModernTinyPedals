@@ -4,14 +4,14 @@ Thank you for your interest in **NeoPedal**! Every contribution is welcome: bug 
 
 Report here what concerns this project (license and credits: [NOTICE.md](NOTICE.md)).
 
-Before opening an issue, check the [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki), especially [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting), and search the [existing issues](https://github.com/Keenny38/ModernTinyPedals/issues?q=is%3Aissue) to avoid duplicates.
+Before opening an issue, check the [wiki](https://github.com/Keenny38/NeoPedal/wiki), especially [Troubleshooting](https://github.com/Keenny38/NeoPedal/wiki/Troubleshooting), and search the [existing issues](https://github.com/Keenny38/NeoPedal/issues?q=is%3Aissue) to avoid duplicates.
 
 > [!IMPORTANT]
 > **One request or problem per issue**, with a short title that describes it. Issues in English or French are both fine.
 
 ## Reporting a problem
 
-Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues/new) with:
+Open an [issue](https://github.com/Keenny38/NeoPedal/issues/new) with:
 
 - the app version (`Help > About`), the game (Le Mans Ultimate or rFactor 2) and your system;
 - what you were doing, what happened and what you expected;
@@ -20,15 +20,15 @@ Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues/new) with:
 Many problems come from other apps or plugins: disable them before testing, to rule out outside causes.
 
 > [!WARNING]
-> A **security vulnerability** must not be reported in a public issue: use [private reporting](https://github.com/Keenny38/ModernTinyPedals/security/advisories/new), as explained in [SECURITY.md](SECURITY.md).
+> A **security vulnerability** must not be reported in a public issue: use [private reporting](https://github.com/Keenny38/NeoPedal/security/advisories/new), as explained in [SECURITY.md](SECURITY.md).
 
 ## Suggesting an idea
 
-Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues/new) that describes the need (what you want to see or do while racing) rather than the solution. What is already planned is in the [roadmap](docs/ROADMAP.md). The project is made in spare time: no promise on delays.
+Open an [issue](https://github.com/Keenny38/NeoPedal/issues/new) that describes the need (what you want to see or do while racing) rather than the solution. What is already planned is in the [roadmap](docs/ROADMAP.md). The project is made in spare time: no promise on delays.
 
 ## Contributing code
 
-Open a [pull request](https://github.com/Keenny38/ModernTinyPedals/pulls). For a big feature, open an issue first to discuss it. Pull requests must pass the `Checks` workflow before they are merged.
+Open a [pull request](https://github.com/Keenny38/NeoPedal/pulls). For a big feature, open an issue first to discuss it. Pull requests must pass the `Checks` workflow before they are merged.
 
 ### Setting up
 
@@ -46,7 +46,7 @@ mypy neopedal
 pytest
 ```
 
-`pre-commit install` runs ruff (with fixes) and mypy automatically on every commit; run the tests yourself. The [Development](https://github.com/Keenny38/ModernTinyPedals/wiki/Development) wiki page explains the project layout, the architecture and the release process.
+`pre-commit install` runs ruff (with fixes) and mypy automatically on every commit; run the tests yourself. The [Development](https://github.com/Keenny38/NeoPedal/wiki/Development) wiki page explains the project layout, the architecture and the release process.
 
 ### Project rules
 

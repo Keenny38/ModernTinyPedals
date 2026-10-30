@@ -58,7 +58,7 @@ def test_manifest_round_trip(monkeypatch):
     data = signed_release.manifest_bytes(VERSION, release_files())
     assert data == release_manifest.canonical_json(__import__("json").loads(data))  # canonical bytes
     manifest = release_manifest.verify_manifest(data, sign(data))
-    assert manifest.repository == "Keenny38/ModernTinyPedals" and manifest.tag == "v99.0.0"
+    assert manifest.repository == "Keenny38/NeoPedal" and manifest.tag == "v99.0.0"
     assert manifest.assets[f"NeoPedal-{VERSION}-setup.zip"] == (hashlib.sha256(SETUP).hexdigest(), len(SETUP))
 
 
@@ -128,7 +128,7 @@ def write_build(folder, version: str = VERSION):
 def test_sign_release_writes_verifiable_manifest(tmp_path, tool_test_key, monkeypatch):
     write_build(tmp_path)
     manifest_path, signature_path = sign_release.write_manifest(
-        VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/ModernTinyPedals", "a" * 40, pem_key())
+        VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/NeoPedal", "a" * 40, pem_key())
     assert os.path.basename(manifest_path) == f"NeoPedal-{VERSION}-manifest.json"
     with open(manifest_path, "rb") as file:
         data = file.read()
@@ -136,9 +136,9 @@ def test_sign_release_writes_verifiable_manifest(tmp_path, tool_test_key, monkey
         signature = file.read()
     manifest = release_manifest.verify_manifest(data, signature)
     assert set(manifest.assets) == set(release_files())
-    assert sign_release.verify_release(VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/ModernTinyPedals") == []
+    assert sign_release.verify_release(VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/NeoPedal") == []
     (tmp_path / f"NeoPedal-{VERSION}-setup.zip").write_bytes(b"tampered")
-    problems = sign_release.verify_release(VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/ModernTinyPedals")
+    problems = sign_release.verify_release(VERSION, str(tmp_path), f"v{VERSION}", "Keenny38/NeoPedal")
     assert problems == [f"NeoPedal-{VERSION}-setup.zip does not match the signed manifest"]
     # Files published by the workflow: what the app updater reads (signature, hashes & sizes)
     files = {name: (tmp_path / name).read_bytes() for name in os.listdir(tmp_path)}
@@ -226,13 +226,22 @@ def test_official_update_refused_without_valid_manifest(monkeypatch, caplog, cas
 
 
 def test_manifest_must_be_newer_than_running_app():
-    manifest = release_manifest.ReleaseManifest("Keenny38/ModernTinyPedals", "v1.2.0", "1.2.0", {})
+    manifest = release_manifest.ReleaseManifest("Keenny38/NeoPedal", "v1.2.0", "1.2.0", {})
     update.check_manifest(manifest, "v1.2.0", (1, 2, 0), (1, 1, 9))
     with pytest.raises(release_manifest.ManifestError, match="not newer"):
         update.check_manifest(manifest, "v1.2.0", (1, 2, 0), (1, 2, 0))
     update.check_manifest(manifest, "v1.2.0", (1, 2, 0), (1, 2, 0), "rc1")  # pre-release: final is newer
     with pytest.raises(release_manifest.ManifestError, match="differs"):
         update.check_manifest(manifest, "v1.2.0", (1, 3, 0), (1, 1, 0))
+
+
+def test_manifest_of_former_repository_name_accepted():
+    """Release signed before the repository was renamed (Keenny38/ModernTinyPedals until 2026-10-31)"""
+    manifest = release_manifest.ReleaseManifest("Keenny38/ModernTinyPedals", "v1.2.0", "1.2.0", {})
+    update.check_manifest(manifest, "v1.2.0", (1, 2, 0), (1, 1, 9))
+    other = release_manifest.ReleaseManifest("someone/fork", "v1.2.0", "1.2.0", {})
+    with pytest.raises(release_manifest.ManifestError, match="another repository"):
+        update.check_manifest(other, "v1.2.0", (1, 2, 0), (1, 1, 9))
 
 
 def test_installer_not_listed_in_manifest_not_offered(monkeypatch):
@@ -297,7 +306,7 @@ def test_refused_message_translated():
 
 # --- Finding 22: redirects limited to GitHub hosts over https
 @pytest.mark.parametrize("url, allowed", [
-    ("https://github.com/Keenny38/ModernTinyPedals/releases/download/v1/x.zip", True),
+    ("https://github.com/Keenny38/NeoPedal/releases/download/v1/x.zip", True),
     ("https://release-assets.githubusercontent.com/x", True),
     ("https://objects.githubusercontent.com/x", True),
     ("https://raw.githubusercontent.com/a/b/v1/CHANGELOG.md", True),

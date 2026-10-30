@@ -5,7 +5,7 @@ NeoPedal keeps two kinds of settings:
 - **Presets**: the layout and options of all overlays and modules, one JSON file per preset in the `settings` folder. You can have as many as you want.
 - **Global config**: app-wide options (window, language, units, overlay style, remote control, web dashboard...), in `config.json` of the global config folder.
 
-Every option is described in the [settings reference (customization.md)](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md).
+Every option is described in the [settings reference (customization.md)](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md).
 
 ## Presets
 
@@ -143,4 +143,4 @@ Another language can be added without changing code, with a JSON language pack:
 2. Fill in the empty values. Empty values stay in English, so a partial translation works. In `messages`, keep the pattern (first item) and translate the replacement (second item).
 3. Copy the file to the `languages` folder of the global config folder (`Settings` > `Open Folder` > `Config`), restart, then select the language in `Settings` > `Application` > `language`.
 
-Overlay labels (the `overlay` table) must stay short. Invalid packs are skipped and reported in the log. A pack cannot replace English or French. Format details: [Language packs](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#language-packs).
+Overlay labels (the `overlay` table) must stay short. Invalid packs are skipped and reported in the log. A pack cannot replace English or French. Format details: [Language packs](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#language-packs).

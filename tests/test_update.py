@@ -24,7 +24,7 @@ def release_body(assets, body=""):
 
 
 def test_parse_installer():
-    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
+    base = "https://github.com/Keenny38/NeoPedal/releases/download/v2.60.0/"
     found = update.parse_installer(release_body([
         ("NeoPedal-2.60.0-source.zip", base + "NeoPedal-2.60.0-source.zip", f"sha256:{'cd' * 32}"),
         ("NeoPedal-2.60.0-setup.zip", base + "NeoPedal-2.60.0-setup.zip", f"sha256:{DIGEST.upper()}"),
@@ -35,7 +35,7 @@ def test_parse_installer():
 
 def test_parse_installer_hash_from_release_notes():
     """No asset digest: hash from SHA256 list of release notes"""
-    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
+    base = "https://github.com/Keenny38/NeoPedal/releases/download/v2.60.0/"
     notes = (f"### SHA256\n\n- `{'cd' * 32}  NeoPedal-2.60.0-source.zip`\n"
              f"- `{DIGEST}  NeoPedal-2.60.0-setup.zip`\n")
     found = update.parse_installer(release_body([
@@ -47,7 +47,7 @@ def test_parse_installer_hash_from_release_notes():
 
 def test_parse_installer_of_older_release():
     """Releases before setup.zip: installer attached itself"""
-    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v0.19.3/"
+    base = "https://github.com/Keenny38/NeoPedal/releases/download/v0.19.3/"
     found = update.parse_installer(release_body([
         ("NeoPedal-0.19.3-windows.zip", base + "NeoPedal-0.19.3-windows.zip", f"sha256:{'cd' * 32}"),
         ("NeoPedal-0.19.3-windows-setup.exe", base + "NeoPedal-0.19.3-windows-setup.exe",
@@ -194,10 +194,10 @@ def test_release_notes_visuals(tmp_path):
     assert png_title(b"") == ""
     notes = format_visuals([Visual("abc123", "docs/changes/x.png", "MAP")])
     assert notes.startswith("### Visuals\n")
-    assert "![MAP](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/abc123/docs/changes/x.png)" in notes
+    assert "![MAP](https://raw.githubusercontent.com/Keenny38/NeoPedal/abc123/docs/changes/x.png)" in notes
     assert format_visuals([]) == ""
     shown = Visual("abc123", "docs/changes/shown.png", "SHOWN")
-    summary = "![Shown](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/shown.png)"
+    summary = "![Shown](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/shown.png)"
     assert unshown_visuals([shown, Visual("abc123", "docs/changes/x.png", "MAP")], summary)[0].title == "MAP"
     assert unshown_visuals([shown], "") == [shown]  # no changelog section: every visual shown
 
@@ -206,7 +206,7 @@ def test_old_repository_name_is_migrated(ui_env):
     from neopedal.setting import cfg
 
     cfg.application["update_repository"] = "Keenny38/overlays"
-    assert update.update_repository() == "Keenny38/ModernTinyPedals"
+    assert update.update_repository() == "Keenny38/NeoPedal"
 
 
 def test_release_notes_start_with_changelog_section(tmp_path):

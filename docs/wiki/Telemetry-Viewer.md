@@ -4,7 +4,7 @@ Every lap you drive is recorded, and the **Lap Telemetry Viewer** compares them:
 
 Open it with the `Telemetry` entry of the navigation bar, or `Tools` > `Lap Telemetry Viewer`.
 
-![Telemetry viewer: gap to reference, markers A and B, range statistics](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-telemetry-viewer.png)
+![Telemetry viewer: gap to reference, markers A and B, range statistics](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.18.0-telemetry-viewer.png)
 
 ## Lap recording
 
@@ -62,7 +62,7 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 
 ### Track Map
 
-![Track map: official layout, track edges, mini-sectors and minimap](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
+![Track map: official layout, track edges, mini-sectors and minimap](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-track-map.png)
 
 - Driving line of each lap over the circuit. With LMU, the **official circuit path** (a racing line) and pit lane come from the game and are kept for offline use; track edges come from laps that recorded them, else from the spread of your laps.
 - **Driving points** of each lap in each corner: braking, apex (minimum speed), exit (back to full throttle) and track-out, with the margin to the track edge.
@@ -73,7 +73,7 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 
 ### Corners
 
-![Corners tab: where time is lost](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-coaching.png)
+![Corners tab: where time is lost](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.19.0-coaching.png)
 
 - **Where time is lost**: the corners that cost the most, with the cause in plain words (brakes earlier, lower minimum speed, longer coasting, later full throttle).
 - For each corner: time lost or gained, entry, minimum and exit speed, gear, brake pressure, braking point, full throttle point, trail braking, coasting and pedal overlap, and the fastest lap in that corner (ideal lap).
@@ -144,6 +144,6 @@ On a narrow window (below about 56 characters wide), the lap list moves into a d
 - elevation profile of the whole lap;
 - `Play` (or `Space`) drives around the track, `Follow Position` keeps the position centered.
 
-![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-track-map-viewer.png)
+![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.17.0-track-map-viewer.png)
 
-All options: [Lap telemetry viewer](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#lap-telemetry-viewer), [Track map viewer](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#track-map-viewer) and [Recorder module](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#recorder-module).
+All options: [Lap telemetry viewer](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#lap-telemetry-viewer), [Track map viewer](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#track-map-viewer) and [Recorder module](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#recorder-module).

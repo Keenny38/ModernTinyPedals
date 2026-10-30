@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Only the latest version published on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page receives fixes. Check that the problem still exists in that version before reporting it.
+Only the latest version published on the [Releases](https://github.com/Keenny38/NeoPedal/releases/latest) page receives fixes. Check that the problem still exists in that version before reporting it.
 
 ## Reporting a vulnerability
 
 **Do not open a public issue** for a security vulnerability: everyone would see it before it is fixed.
 
-Use GitHub private reporting: `Security` tab of the repository, then [`Report a vulnerability`](https://github.com/Keenny38/ModernTinyPedals/security/advisories/new). Only you and the maintainer can see the report.
+Use GitHub private reporting: `Security` tab of the repository, then [`Report a vulnerability`](https://github.com/Keenny38/NeoPedal/security/advisories/new). Only you and the maintainer can see the report.
 
 Include:
 
@@ -35,17 +35,17 @@ Every release is built and published by GitHub Actions from the code of this rep
 - **Build provenance attestation** (since 0.20.0): signed proof that the file was built by the `Build and Release` workflow from a commit of this repository. The installer and both ZIP files are attested. With [GitHub CLI](https://cli.github.com/):
 
   ```bash
-  gh attestation verify NeoPedal-0.20.1-windows-setup.exe --repo Keenny38/ModernTinyPedals
+  gh attestation verify NeoPedal-0.20.1-windows-setup.exe --repo Keenny38/NeoPedal
   ```
 
   ```bash
-  gh attestation verify NeoPedal-0.20.0-windows-setup.exe --repo Keenny38/ModernTinyPedals
+  gh attestation verify NeoPedal-0.20.0-windows-setup.exe --repo Keenny38/NeoPedal
   ```
 
 - **Immutable releases**: once published, a release can no longer be changed (files and tag).
 
-More in the [Updates and security](https://github.com/Keenny38/ModernTinyPedals/wiki/Updates-and-Security) wiki page.
+More in the [Updates and security](https://github.com/Keenny38/NeoPedal/wiki/Updates-and-Security) wiki page.
 
 ## Français
 
-Signale une faille en privé avec le [signalement privé de GitHub](https://github.com/Keenny38/ModernTinyPedals/security/advisories/new), jamais dans une issue publique. Seule la dernière version reçoit des correctifs. Les fichiers d'une release se vérifient avec `gh attestation verify <fichier> --repo Keenny38/ModernTinyPedals`. Depuis la 0.28.0, l'app n'installe une mise à jour officielle que si son manifeste signé (`NeoPedal-<version>-manifest.json` et sa signature `.sig`) est valide.
+Signale une faille en privé avec le [signalement privé de GitHub](https://github.com/Keenny38/NeoPedal/security/advisories/new), jamais dans une issue publique. Seule la dernière version reçoit des correctifs. Les fichiers d'une release se vérifient avec `gh attestation verify <fichier> --repo Keenny38/NeoPedal`. Depuis la 0.28.0, l'app n'installe une mise à jour officielle que si son manifeste signé (`NeoPedal-<version>-manifest.json` et sa signature `.sig`) est valide.

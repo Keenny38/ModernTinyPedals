@@ -4,7 +4,7 @@ NeoPedal is a free, open-source telemetry overlay and analysis app for **Le Mans
 
 The app is built with PySide6 (Qt 6) and runs in English or French.
 
-![93 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/images/readme_preview.png)
+![93 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/images/readme_preview.png)
 
 ## Key features
 
@@ -40,19 +40,19 @@ The app is built with PySide6 (Qt 6) and runs in English or French.
 | [Troubleshooting](Troubleshooting.md) | FAQ: overlay not visible, game not detected, safe mode, logs, bug reports |
 | [Development](Development.md) | Running from source, checks, architecture, Windows build, release process |
 
-Every option of every overlay, module and tool is described in the [settings reference (customization.md)](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md), which is also bundled with the app.
+Every option of every overlay, module and tool is described in the [settings reference (customization.md)](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md), which is also bundled with the app.
 
 ## Links
 
-- [Download the latest release](https://github.com/Keenny38/ModernTinyPedals/releases/latest) and [all releases](https://github.com/Keenny38/ModernTinyPedals/releases)
-- [Issues](https://github.com/Keenny38/ModernTinyPedals/issues): bug reports and ideas
-- [Changelog](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md) (English) and [CHANGELOG.fr.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.fr.md) (French)
-- [Roadmap](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/ROADMAP.md)
-- [Contributing](https://github.com/Keenny38/ModernTinyPedals/blob/master/CONTRIBUTING.md)
-- [Security policy](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md): report vulnerabilities privately, never in a public issue
+- [Download the latest release](https://github.com/Keenny38/NeoPedal/releases/latest) and [all releases](https://github.com/Keenny38/NeoPedal/releases)
+- [Issues](https://github.com/Keenny38/NeoPedal/issues): bug reports and ideas
+- [Changelog](https://github.com/Keenny38/NeoPedal/blob/master/CHANGELOG.md) (English) and [CHANGELOG.fr.md](https://github.com/Keenny38/NeoPedal/blob/master/CHANGELOG.fr.md) (French)
+- [Roadmap](https://github.com/Keenny38/NeoPedal/blob/master/docs/ROADMAP.md)
+- [Contributing](https://github.com/Keenny38/NeoPedal/blob/master/CONTRIBUTING.md)
+- [Security policy](https://github.com/Keenny38/NeoPedal/blob/master/SECURITY.md): report vulnerabilities privately, never in a public issue
 
 ## License and credits
 
-Copyright (C) 2022-2026 TinyPedal developers (see [contributors](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/contributors.md) and [NOTICE.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/NOTICE.md)).
+Copyright (C) 2022-2026 TinyPedal developers (see [contributors](https://github.com/Keenny38/NeoPedal/blob/master/docs/contributors.md) and [NOTICE.md](https://github.com/Keenny38/NeoPedal/blob/master/NOTICE.md)).
 
-It is free software under the [GNU GPL v3](https://github.com/Keenny38/ModernTinyPedals/blob/master/LICENSE.txt) or any later version, distributed WITHOUT ANY WARRANTY. The icon and images of the `images` folder are under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), the [Barlow](https://github.com/jpt/barlow) font under the SIL Open Font License 1.1. Third-party licenses are listed in [docs/licenses](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/licenses/THIRDPARTYNOTICES.txt).
+It is free software under the [GNU GPL v3](https://github.com/Keenny38/NeoPedal/blob/master/LICENSE.txt) or any later version, distributed WITHOUT ANY WARRANTY. The icon and images of the `images` folder are under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), the [Barlow](https://github.com/jpt/barlow) font under the SIL Open Font License 1.1. Third-party licenses are listed in [docs/licenses](https://github.com/Keenny38/NeoPedal/blob/master/docs/licenses/THIRDPARTYNOTICES.txt).

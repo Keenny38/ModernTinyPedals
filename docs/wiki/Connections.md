@@ -69,7 +69,7 @@ Security:
 
 Stream overlays put your overlays in your stream as **browser sources**: no window capture, no chroma key, a transparent background and the overlays exactly as on your screen. It also works with the game in exclusive fullscreen, where window capture cannot see the overlays.
 
-![Stream overlays page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-overlays.png)
+![Stream overlays page](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-stream-overlays.png)
 
 1. Open the `Stream Overlays` page (`Tools` page, `Stream` in the navigation bar, or the command palette) and turn on `Enabled` (port `8339` by default).
 2. Click `Copy Address` next to a source.
@@ -87,7 +87,7 @@ Sources:
 
 **Race results source**: the classification of the last race from the game results files (see [Race Results](Race-Results.md)), refreshed when a new file is written, with the circuit logo and car brand logos of Le Mans Ultimate when the app has them. Options on the page (saved in the address): session (`Race`, `Qualifying` or `Any`), `All Classes` or `Class by class`, cars per page, time per page. In the address: `&class=<class name>` for one class only, `&animate=0` without animation.
 
-![Race results source](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
+![Race results source](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-stream-race-results.png)
 
 Good to know:
 
@@ -116,7 +116,7 @@ How the OpenXR layer is installed and removed:
 - With `enable_vr_overlay` and `enable_openxr_layer` on, the app registers the layer for your Windows user account only (registry key `HKEY_CURRENT_USER\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, no admin rights) while it runs.
 - Closing the app, turning an option off, or uninstalling the app removes it. Since 0.22.4 every start removes it unless `enable_openxr_layer` is on (0.22.3 registered it with `enable_vr_overlay` alone).
 - To keep it out of one game, set the environment variable `DISABLE_NEOPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
-- Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite). If an OpenXR game misbehaves or no longer starts in VR, turn `enable_openxr_layer` off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
+- Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite). If an OpenXR game misbehaves or no longer starts in VR, turn `enable_openxr_layer` off and [open an issue](https://github.com/Keenny38/NeoPedal/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
 - After an app update, restart an OpenXR game that was already running: it keeps the layer it started with, which draws nothing for a newer app (`Help` > `Show Log` says so). The SteamVR overlay and the mirror window still work meanwhile.
 - Overlays far apart on your desktop cost nothing more in VR: only the overlays themselves are sent to the game, not the empty space between them.
 - From source: build the layer with CMake (`native/openxr_layer/CMakeLists.txt`), and `pip install openvr` for SteamVR.
@@ -164,4 +164,4 @@ The page asks the game only while the replays list or the `Replay` tab is shown,
 
 `Broadcast` in the navigation bar (or `Tools` > `Broadcast Director`) casts a race: live, driving or spectating an online race, or in a replay. Cars with live timing, every game camera in one click, an assisted or automatic director, a commentator screen, and its own **broadcast graphics** as a browser source (1920 x 1080) served by the stream overlay server, placed with a layout editor in your browser. See [Broadcast Director](Broadcast-Director.md).
 
-All options: [Remote Control](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#remote-control), [Web Dashboard](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#web-dashboard), [VR Overlay](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#vr-overlay), [Session recorder](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#session-recorder) and [Game replays](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#game-replays).
+All options: [Remote Control](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#remote-control), [Web Dashboard](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#web-dashboard), [VR Overlay](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#vr-overlay), [Session recorder](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#session-recorder) and [Game replays](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#game-replays).

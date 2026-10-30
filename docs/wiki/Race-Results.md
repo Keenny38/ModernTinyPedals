@@ -4,7 +4,7 @@ The **Results & Replays** page shows the results of every session you played: cl
 
 Open it with the `Results` entry of the navigation bar, `Tools` > `Results & Replays`, or the command palette (`Ctrl+K`). It replaces the former `Race Results` and `Game Replays` pages (a `Replays` entry kept in your navigation bar or quick access opens it on the replays list).
 
-![Race results: classification of a multiclass race](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results.png)
+![Race results: classification of a multiclass race](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-race-results.png)
 
 ## Where results come from
 
@@ -58,7 +58,7 @@ Position (with places gained or lost from the grid in races), class and class po
 
 ### Positions (races)
 
-![Positions lap by lap](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results-positions.png)
+![Positions lap by lap](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.21.0-race-results-positions.png)
 
 The place of every car at the end of each lap, starting from the grid. Your car is in the accent color, the car you picked in white, the others in their class color. Hover a line to see who it is, click to pick that car.
 

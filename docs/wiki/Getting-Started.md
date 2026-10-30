@@ -78,7 +78,7 @@ The toolbar has `Snap` (option `enable_magnetic_snap`), `Grid` and `Guides` togg
 
 Without the edit mode (and for an overlay already unlocked when the app starts), the outline and corner handle only show under the mouse, so nothing stays on screen if you drive with the overlay unlocked.
 
-![Overlay edit mode](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
+![Overlay edit mode](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.22.0-overlay-edit-mode.png)
 
 Positions are saved in the preset, and remembered per screen setup (screens plugged, resolution). To make every overlay bigger or smaller at once, set `overlay_scale` in `Settings` > `Overlay Style`.
 
@@ -97,7 +97,7 @@ A card shows a small badge when its overlay is not always shown: the sessions or
 
 The screen view shows the running overlays at their place on your screens, with their picture, one screen at a time (the main screen first; a choice per screen, or `All Screens`, when several are plugged). Overlays covering part of another one are outlined, with their number at top. Drag an overlay to move it: it snaps to the edges and centers of the other overlays and of the screens, with guide lines (`Snap` switch, or hold `Alt` to move it freely). Or press `Tab` to reach an overlay (focus ring), then the arrows move it by 1 pixel (`Shift`: 10 pixels) and `Enter` opens its options; a click opens them too. Every move is saved and can be undone (`Undo` in the message shown after, or `Ctrl+Z` on an unlocked overlay). Locked overlays (`Lock Overlay`) cannot be moved here either, as in game: `Overlays locked` says so, with `Unlock Overlay`. In a locked preset, moves are not saved (`Preset Locked`, with `Unlock Preset`): the message says it.
 
-At the bottom, `Enable (12)` and `Disable (3)` switch at once the overlays shown that are off, or on (every overlay without a search or filter, which then also shows how many overlays are shown), with `Undo` in the message shown after. An overlay that is on but could not start shows an `Error` badge, with a notice at top to open the log. Every option is described in its tooltip and in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+At the bottom, `Enable (12)` and `Disable (3)` switch at once the overlays shown that are off, or on (every overlay without a search or filter, which then also shows how many overlays are shown), with `Undo` in the message shown after. An overlay that is on but could not start shows an `Error` badge, with a notice at top to open the log. Every option is described in its tooltip and in the [settings reference](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md#widgets).
 
 Keyboard: type anywhere on the page to search, `Ctrl+F` or `/` jumps to the search box, arrows move between overlays, `Space` switches the selected overlay, `Enter` opens its options, `Ctrl+D` marks it as favorite, `Esc` clears the search.
 
@@ -121,7 +121,7 @@ Press `Ctrl+F` (`Settings` > `Find Option…`) to search all options of all over
 - Click a result (or `Enter`) to open it: the `Overlay Options` page or the `Settings` page scrolled to the option, or a module page filtered on it.
 - On / off options have a switch in the list (or `Space`): the change is saved and applied at once, with `Undo` in the notice; `Ctrl+Z` / `Ctrl+Y` undo and redo switches and resets of the page.
 - The chips (`Overlays`, `Modules`, `Preset`, `Application`) narrow the results; `Changed Only` lists every option set apart from its default, even without search words.
-- Right-click a result: `Reset to Default`, `Copy Option Key` (the name used in setting files and in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md)).
+- Right-click a result: `Reset to Default`, `Copy Option Key` (the name used in setting files and in the [settings reference](https://github.com/Keenny38/NeoPedal/blob/master/docs/customization.md)).
 
 ### Units
 

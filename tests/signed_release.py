@@ -18,7 +18,7 @@ from neopedal import release_manifest, update
 
 TEST_KEY = Ed25519PrivateKey.generate()
 TEST_PUBLIC_KEY = base64.b64encode(TEST_KEY.public_key().public_bytes_raw()).decode("ascii")
-REPO = "Keenny38/ModernTinyPedals"
+REPO = "Keenny38/NeoPedal"
 
 
 def use_test_key(monkeypatch) -> None:

@@ -62,11 +62,11 @@ The SHA-256 check detects a corrupt or altered download. For the official reposi
 - **Running from source on Linux**: `Download And Install` opens the download in your browser. Update your source folder instead (`git pull`, or a new `-source.zip`).
 - **Portable copy** (ZIP from releases up to 0.19): the app opens the releases page. Turn it into an installed copy once: see [Moving from a portable copy](Installation.md#moving-from-a-portable-copy).
 
-To turn update checks off, uncheck `check_for_updates_on_startup`. `number_of_hours_between_update_checks` set to `0` keeps the check at startup only. `update_repository` (default `Keenny38/ModernTinyPedals`) sets the GitHub repository checked; an empty value disables checks. Since 0.23.0 the check also follows GitHub redirects, so updates keep working if the repository is renamed later.
+To turn update checks off, uncheck `check_for_updates_on_startup`. `number_of_hours_between_update_checks` set to `0` keeps the check at startup only. `update_repository` (default `Keenny38/NeoPedal`) sets the GitHub repository checked; an empty value disables checks. Since 0.23.0 the check also follows GitHub redirects, so updates keep working if the repository is renamed later. The repository was renamed `Keenny38/NeoPedal` on 2026-10-31 (it was `Keenny38/ModernTinyPedals`): apps since 0.23.0 keep updating through the redirect, and an `update_repository` still set to the old name is read as the new one. Apps before 0.23.0 no longer see new versions: install a newer one once from the [releases page](https://github.com/Keenny38/NeoPedal/releases).
 
 ## Release files
 
-Every release on the [Releases page](https://github.com/Keenny38/ModernTinyPedals/releases) has these files (0.20.0 only has the two ZIP files):
+Every release on the [Releases page](https://github.com/Keenny38/NeoPedal/releases) has these files (0.20.0 only has the two ZIP files):
 
 | File | Content |
 |---|---|
@@ -106,11 +106,11 @@ sha256sum NeoPedal-<version>-source.zip
 Every release file has a signed **build provenance attestation**: proof that the file was built by the `Build and Release` workflow of this repository, from a commit of this repository. Verify it with the [GitHub CLI](https://cli.github.com/):
 
 ```bash
-gh attestation verify NeoPedal-<version>-windows-setup.exe --repo Keenny38/ModernTinyPedals
+gh attestation verify NeoPedal-<version>-windows-setup.exe --repo Keenny38/NeoPedal
 ```
 
 ```bash
-gh attestation verify NeoPedal-<version>-source.zip --repo Keenny38/ModernTinyPedals
+gh attestation verify NeoPedal-<version>-source.zip --repo Keenny38/NeoPedal
 ```
 
 Attestations exist from version 0.20.0.
@@ -168,7 +168,7 @@ Once published, a release cannot be modified: its files and tag stay as they wer
 
 **Do not open a public issue** for a security problem: it would be visible to everyone before it is fixed.
 
-Use GitHub private vulnerability reporting: [Report a vulnerability](https://github.com/Keenny38/ModernTinyPedals/security/advisories/new) (repository `Security` tab). Only you and the maintainer see the report. Include:
+Use GitHub private vulnerability reporting: [Report a vulnerability](https://github.com/Keenny38/NeoPedal/security/advisories/new) (repository `Security` tab). Only you and the maintainer see the report. Include:
 
 - the app version (`Help` > `About`), your system and game;
 - what the vulnerability allows, and to whom (another program on the PC, a device on the local network, a website, an imported file...);
@@ -176,4 +176,4 @@ Use GitHub private vulnerability reporting: [Report a vulnerability](https://git
 
 Only the latest release receives fixes: check that the problem still exists in it. The project is maintained on free time; expect an answer within about 7 days. A confirmed vulnerability is fixed in a new release, then described in a security advisory, with your name if you wish.
 
-In scope: the app and its overlays, the web dashboard and command server, the updater, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain. Full policy: [SECURITY.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md).
+In scope: the app and its overlays, the web dashboard and command server, the updater, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain. Full policy: [SECURITY.md](https://github.com/Keenny38/NeoPedal/blob/master/SECURITY.md).

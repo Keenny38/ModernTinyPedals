@@ -27,19 +27,19 @@ NOTES = """Intro of the version.
 
 ### Added
 
-- Add lap viewer analysis ([b31940e](https://github.com/Keenny38/ModernTinyPedals/commit/b31940e))
+- Add lap viewer analysis ([b31940e](https://github.com/Keenny38/NeoPedal/commit/b31940e))
 
 ### Visuals
 
 **Carte avant / après**
 
-![Carte avant / après](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/abc123/docs/changes/map.png)
+![Carte avant / après](https://raw.githubusercontent.com/Keenny38/NeoPedal/abc123/docs/changes/map.png)
 
 ### SHA256
 
 - `f2a9  NeoPedal-0.15.0-source.zip`
 """
-SHOT = "https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-18-corner-coach.png"
+SHOT = "https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changes/2026-10-18-corner-coach.png"
 
 
 @pytest.fixture
@@ -77,8 +77,10 @@ def test_changelog_screenshots_kept_in_order(update_repo):
     assert [item.text for item in themes[0].items] == ["Coaching par virage", f"![Coach]({SHOT})", "Suite"]
     assert notes_image(themes[0].items[1].text) == ("Coach", SHOT)
     assert notes_image("Coaching") is None
-    other = SHOT.replace("Keenny38/ModernTinyPedals", "someone/else")
+    other = SHOT.replace("Keenny38/NeoPedal", "someone/else")
     assert notes_image(f"![x]({other})") is None  # other repository
+    former = SHOT.replace("Keenny38/NeoPedal", "Keenny38/ModernTinyPedals")
+    assert notes_image(f"![x]({former})") == ("x", former)  # earlier changelogs: repository name until 2026-10-31
     assert notes_image(f"![x]({SHOT.replace('docs/changes', 'images')})") is None
     assert notes_image(f"![x]({SHOT.replace('.png', '.svg')})") is None
 
@@ -213,14 +215,14 @@ def test_update_check_lists_skipped_versions(monkeypatch, language):
     monkeypatch.setattr(update, "current_language", lambda: language)
     monkeypatch.setattr(version, "__version__", "0.24.0")
     checker = update.UpdateChecker()
-    checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
+    checker._UpdateChecker__checking("Keenny38/NeoPedal")
     assert checker.is_updates() and checker.notes(language) == body
     assert [entry.version for entry in checker.earlier_notes(language)] == ["0.25.1", "0.25.0"]
     assert fetched == (["en"] if language == "en" else ["fr", "en"])
-    checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
+    checker._UpdateChecker__checking("Keenny38/NeoPedal")
     assert len(fetched) == (1 if language == "en" else 2)  # same release checked again: not fetched again
     monkeypatch.setattr(version, "__version__", "0.25.1")
-    checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
+    checker._UpdateChecker__checking("Keenny38/NeoPedal")
     assert checker.earlier_notes(language) == []  # previous release installed
 
 
@@ -329,7 +331,7 @@ def test_page_rows_folds_and_header(notes_page, update_repo):
     assert '<a href="option:show_apex_speed">' in card["items"][1]["html"]  # option key of an overlay
     backend.toggleFold("0:visuals")
     assert backend.imageList == [{
-        "url": "https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/abc123/docs/changes/map.png",
+        "url": "https://raw.githubusercontent.com/Keenny38/NeoPedal/abc123/docs/changes/map.png",
         "caption": "Carte avant / après"}]
 
 

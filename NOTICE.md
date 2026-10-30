@@ -6,7 +6,7 @@ copyright (C) 2022-2026 TinyPedal developers (see [docs/contributors.md](docs/co
 Modifications copyright (C) 2026 Steven Vezzu ([Keenny38](https://github.com/Keenny38)) and NeoPedal
 contributors, since September 2026: modern overlay design, Qt Quick telemetry viewer, track map viewer and
 driver stats, race calculator, French translation, installer & updater, and the changes listed in
-[CHANGELOG.md](CHANGELOG.md) and the commit history of <https://github.com/Keenny38/ModernTinyPedals>.
+[CHANGELOG.md](CHANGELOG.md) and the commit history of <https://github.com/Keenny38/NeoPedal>.
 
 Source files keep their original "This file is part of TinyPedal" header: the program as a whole is
 modified, see the commit history for what changed in each file.

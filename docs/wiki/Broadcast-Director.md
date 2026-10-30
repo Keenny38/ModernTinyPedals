@@ -4,7 +4,7 @@ The **Broadcast Director** casts a race of **Le Mans Ultimate**: live (driving, 
 
 Open it with the `Broadcast` entry of the navigation bar, `Tools` > `Broadcast Director`, or the command palette (`Ctrl+K`). The game must be running: cars, cameras and race events come from its REST API (nothing to set up, see [Game Setup](Game-Setup.md#lmu-rest-api-automatic)).
 
-![Broadcast Director: cars, camera desk with the director queue, race events and car sheet](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-director.png)
+![Broadcast Director: cars, camera desk with the director queue, race events and car sheet](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.23.0-broadcast-director.png)
 
 ## Page layout
 
@@ -76,7 +76,7 @@ The sliders button opens the director settings: shortest and longest shot, battl
 
 ## Broadcast graphics
 
-![Broadcast graphics: standings tower, fastest lap banner, battle card, pit lane radar, session clock](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-graphics.png)
+![Broadcast graphics: standings tower, fastest lap banner, battle card, pit lane radar, session clock](https://raw.githubusercontent.com/Keenny38/NeoPedal/master/docs/changelog/0.23.0-broadcast-graphics.png)
 
 TV graphics made for the director, as one **browser source (1920 x 1080)** for OBS Studio, Streamlabs, XSplit or vMix. They are served by the stream overlay server: turn on stream overlays first (`Tools` > `Stream Overlays`, see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)). The source is not listed with the other stream sources: click `Graphics` on the director page, then `Copy Address`, and add it as a browser source. It is fed by the director page only.
 
