@@ -102,7 +102,7 @@ def test_rename_locked_file_told(presets, monkeypatch):
     def locked(*args):
         raise PermissionError("locked by another program")
 
-    monkeypatch.setattr(preset_management.os, "rename", locked)
+    monkeypatch.setattr(preset_management, "replace_retry", locked)  # held after every retry
     error = create(mode="rename", source="b.json", name="other")
     assert "locked by another program" in error and exists("b.json")
 
@@ -201,8 +201,8 @@ def test_rename_loaded_preset_follows_new_name(loaded_a, monkeypatch):
     from neopedal.ui import preset_management
 
     calls, reloaded = loaded_a
-    rename = os.rename
-    monkeypatch.setattr(preset_management.os, "rename", lambda *args: calls.append("rename") or rename(*args))
+    rename = os.replace
+    monkeypatch.setattr(preset_management, "replace_retry", lambda *args: calls.append("rename") or rename(*args))
     create(mode="rename", source="a.json", name="renamed")
     assert calls == ["flush", "rename"]  # queued save written before rename, not re-creating a.json
     assert exists("renamed.json") and not exists("a.json")

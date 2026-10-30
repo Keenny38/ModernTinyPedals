@@ -200,7 +200,7 @@ def test_french_preset_access_error(ui_env, warnings, monkeypatch, french):
         raise PermissionError("locked")
 
     write_preset("race.json")
-    monkeypatch.setattr(preset_management.os, "rename", locked)
+    monkeypatch.setattr(preset_management, "replace_retry", locked)
     assert create(mode="rename", source="race.json", name="other").startswith("Impossible d'accéder au fichier du preset")
     flush()
 

@@ -146,7 +146,7 @@ def test_rename_locked_file_shows_error(ui_env, no_message_box, monkeypatch):
     def locked(*args):
         raise PermissionError(13, "file used by another process")
 
-    monkeypatch.setattr(preset_management.os, "rename", locked)
+    monkeypatch.setattr(preset_management, "replace_retry", locked)
     error = preset_management.apply_preset_name("endurance", "rename", "race.json")  # must not raise
     assert "file used by another process" in error  # told by the name box of the Presets page
     assert os.path.exists(f"{cfg.path.settings}race.json")

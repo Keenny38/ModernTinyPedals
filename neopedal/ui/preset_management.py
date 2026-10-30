@@ -46,6 +46,7 @@ from ..i18n import current_language, tr, trm
 from ..setting import RELOAD_ACCESS_TIMEOUT, cfg, load_setting_json_file, save_and_verify_json_file
 from ..template.setting_classes import CLASS_PRESET_KEYS, SESSION_PRESET_KEYS
 from ..template.setting_shortcuts import SHORTCUTS_PRESET
+from ..userfile import replace_retry
 from ..userfile.json_setting import rename_preset_backups
 from ..userfile.layout_profile import profile_filename
 from ..userfile.preset_trash import (
@@ -262,9 +263,9 @@ def apply_preset_name(name: str, mode: str = "", source_filename: str = "") -> s
         # Duplicate preset
         if mode == "duplicate":
             shutil.copy(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
-        # Restore or rename preset
+        # Restore or rename preset (retried while an antivirus or cloud sync holds the file for a moment)
         elif mode in ("restore", "rename"):
-            os.rename(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
+            replace_retry(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
     except OSError as error:  # locked file (cloud sync, antivirus), permission
         logger.error("USERDATA: unable to %s %s: %s", mode, source_filename, error)
         return trm(f"Unable to access preset file, it may be used by another program.<br><br>{html.escape(str(error))}")
