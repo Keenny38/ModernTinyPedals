@@ -681,6 +681,9 @@ def page(dialogs, monkeypatch):
     viewer = DriverStatsViewer(None)
     yield viewer
     viewer.close()
+    # Deleted by Qt now, not by the garbage collector during a later test's event processing (Python 3.11 cells
+    # crashed with an access violation / segmentation fault in the next test's processEvents)
+    viewer.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
@@ -759,7 +762,9 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
         assert not view.errors(), [error.toString() for error in view.errors()]
     finally:
         QQuickWidget.setSource = set_source
+        parent.hide()
         parent.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # view gone while its backend lives
 
 
 def test_open_map_loaded_in_page_already_open(backend, monkeypatch):
