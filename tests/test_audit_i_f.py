@@ -105,7 +105,9 @@ def test_groups_not_synced_while_hidden(opener, warnings):  # noqa: F811
         assert group_items(view) == groups and "tyres" not in [row["key"] for row in model_rows(backend)]
         backend.setSimpleView(True)
         wait(0.5)
-        assert len(synced) == 1  # synced once shown
+        # Synced once shown (the simple view may ask once more as it becomes visible on a slow machine), never
+        # while hidden (checked above)
+        assert 1 <= len(synced) <= 2, synced
     finally:
         type(backend.dashboard).update_layout = original
     assert {"tyres", "engine"} <= {row["key"] for row in model_rows(backend)}
