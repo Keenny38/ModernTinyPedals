@@ -37,6 +37,20 @@ def test_json_nesting_checked_before_parsing():
     assert json_loads_checked(b'[1, {"a": "]]]]"}]') == [1, {"a": "]]]]"}]
 
 
+# CodeQL py/polynomial-redos: unterminated string of escaped quotes took quadratic time (41 s for 160 KB)
+def test_json_nesting_unterminated_string_linear():
+    import time
+
+    from neopedal.validator import MAX_JSON_DEPTH, check_json_nesting
+
+    hostile = "[" * (MAX_JSON_DEPTH + 1) + '"' + '\\"' * 80_000  # openers first: scan never skipped
+    start = time.perf_counter()
+    with pytest.raises(RecursionError):  # brackets before the string still counted
+        check_json_nesting(hostile)
+    assert time.perf_counter() - start < 2
+    check_json_nesting("[" * MAX_JSON_DEPTH + '"' + "[" * 10 + "]" * MAX_JSON_DEPTH)  # inside the open string
+
+
 def test_load_json_strict_allow_nan_still_checks_nesting():
     assert load_json_strict('{"a": NaN}', allow_nan=True)["a"] != 0  # NaN kept
     with pytest.raises(ValueError):

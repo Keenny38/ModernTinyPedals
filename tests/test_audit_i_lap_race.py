@@ -135,7 +135,9 @@ def test_lost_columns_told_in_page_status(backend):  # noqa: F811
 
     path = lap_path(backend, 1)
     backend._lap_cache[path] = None
-    threading.Thread(target=lap_cache.columns_unreadable, args=(path, "gone")).start()  # from a reading thread
+    reader = threading.Thread(target=lap_cache.columns_unreadable, args=(path, "gone"))  # from a reading thread
+    reader.start()
+    reader.join(5)  # else the 50 event loops can all run before the thread posts its event (slow runner)
     for _ in range(50):
         QCoreApplication.processEvents()
         if "gone" in backend._status:

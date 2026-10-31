@@ -34,7 +34,7 @@ Open a [pull request](https://github.com/Keenny38/NeoPedal/pulls). For a big fea
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements-dev.txt   # Linux: .venv/bin/python
+.venv/Scripts/python -m pip install -r requirements-dev-lock.txt   # Linux: .venv/bin/python
 .venv/Scripts/python run.py
 ```
 

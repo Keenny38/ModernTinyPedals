@@ -177,7 +177,9 @@ def load_json_strict(data: str | bytes | bytearray, allow_nan: bool = False) -> 
 # (presets, game answers, share codes) nests a few levels. CPython up to 3.13 raised RecursionError itself near
 # depth 1000; 3.14 parses as deep as the C stack allows, so the check is explicit and the same on every version.
 MAX_JSON_DEPTH = 500
-_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+# Closing quote optional: an unterminated string ends the text in one pass (required, each later quote
+# started a new failed scan: quadratic time on '"\"\"\"...', CodeQL py/polynomial-redos)
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?')
 _JSON_BRACKET = re.compile(r"[\[\]{}]")
 
 
