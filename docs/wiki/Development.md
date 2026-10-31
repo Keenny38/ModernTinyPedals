@@ -25,14 +25,14 @@ python -m venv .venv
 On Linux: `source .venv/bin/activate`.
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev-lock.txt
 ```
 
 ```bash
 python run.py
 ```
 
-`requirements-dev.txt` adds pytest (with coverage and timeout plugins), ruff, mypy and pre-commit to `requirements.txt`. `requirements-lock.txt` pins the runtime versions tested for releases. From a git checkout, the app shows the last release tag and the commits since (for example `0.19.1+3.g8a0f9f3`) and does not offer to update to the release it started from.
+`requirements-dev.txt` adds pytest (with coverage, timeout and xdist plugins), ruff, mypy and pre-commit to `requirements.txt`. `requirements-dev-lock.txt` pins all of them, and their dependencies, at the exact versions `Checks` install (every OS and Python of the matrix): install that one, so a check that passes on your PC passes in CI. `requirements-lock.txt` pins the runtime versions tested for releases. From a git checkout, the app shows the last release tag and the commits since (for example `0.19.1+3.g8a0f9f3`) and does not offer to update to the release it started from.
 
 ## Checks
 
@@ -58,7 +58,7 @@ pytest --cov=neopedal
 - **Recorded game sessions** (`tests/test_recorded_sessions.py`): real Le Mans Ultimate recordings in `tests/fixtures/sessions` are played frame by frame through the reader of the app, every data module (in lock step: each module computes every frame once, in the same order every run) and every overlay in both designs. Module values are checked against the game values of the recording (fuel, lap times, field, pit stops, consumption history, driver stats distance), and the facts written in the `.json` next to each recording. To add one (rain, multiclass race, safety car...): record a session with `Tools` > `Advanced` > session recorder, then `python tools/make_replay_fixture.py SOURCE.tpreplay tests/fixtures/sessions/NAME.tpreplay --start S --end S` keeps that part at 2 frames per second without the telemetry of the other cars (a few MB for 4 minutes), replaces your driver name everywhere and removes chat messages; write `NAME.json` with what the session holds (see the existing one).
 - **Startup ratchet** (`tests/test_startup_imports.py`): imports of app start are measured with `python -X importtime` in a new interpreter. Tool pages, overlays, services, QML and charts must load when first used; the number of app modules imported at startup and their import time have a ceiling. Lower `MAX_APP_MODULES` when startup gets lighter.
 - `python tools/check.py` runs every check of CI in one command: ruff, mypy for Windows **and** Linux, tests with coverage spread over every CPU when `pytest-xdist` is installed (`--quick`: without tests). It also warns when a changelog lacks the section of the next version, and lints changed workflows when `actionlint` / `zizmor` are installed. `python tools/check.py --install-hook` runs it before each push to `master` (a failed check refuses the push, pushes to other branches are not checked).
-- CI installs `requirements-dev.txt` with `requirements-lock.txt` as constraints (`pip install -r requirements-dev.txt -c requirements-lock.txt`): runtime packages at the versions of release builds, the latest `ruff`, `mypy` and `pytest`. If a check fails in CI but passes locally, update them: `pip install -U ruff mypy pytest` (pytest 9.2 undoes a patch of an instance attribute with `delattr`: never `monkeypatch.setattr` an attribute of a widget whose instance dict the test then clears, assign it instead, or the undo raises and every other patch of the test stays in place for the rest of the run). `pyproject.toml` reads its dependencies from `requirements.txt`.
+- CI installs `requirements-dev-lock.txt` (`pip install -r requirements-dev-lock.txt`): dev tools and runtime at exact versions, the runtime ones those of release builds. `tools/check.py` compares the installed versions with it (only the packages of your OS and Python): a difference is a warning, and the pre-push hook refuses the push. Fix: `pip install -r requirements-dev-lock.txt`. To take newer tools, or after changing `requirements-dev.txt` or `requirements-lock.txt`, regenerate it with the `uv pip compile` command written at its top, run `python tools/ci_preflight.py`, and commit it once green; `tests/test_ci_preflight.py` fails when it no longer pins the release runtime versions. (Up to 0.28.0 CI took the latest `ruff`, `mypy` and `pytest` by itself: pytest 9.2 undoes a patch of an instance attribute with `delattr`: never `monkeypatch.setattr` an attribute of a widget whose instance dict the test then clears, assign it instead, or the undo raises and every other patch of the test stays in place for the rest of the run). `pyproject.toml` reads its dependencies from `requirements.txt`.
 - `pre-commit install` runs JSON / YAML checks, `ruff --fix` and `mypy` before each commit (not the tests).
 - The `visual-regression` job renders every overlay with the base commit and with your changes and compares them. An overlay change fails the check unless a before / after image is added in `docs/changes` (see [Visuals](#before--after-visuals)) or a commit message contains `[visual]`.
 - Pull requests that change requirements go through a dependency review (known vulnerabilities fail it).
@@ -293,9 +293,10 @@ User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). `Settings` > 
 
 Releases are published **on demand**: pushes to `master` only run the `Checks` workflow, so fixes can follow each other until everything is green. When `master` is ready:
 
-1. `python tools/check.py` passes (automatic before each push to `master` once the hook is installed), everything is pushed;
-2. both changelogs have the section of the next version (see [Changelog](#changelog));
-3. publish with **one** command, by one person (or one Claude session) at a time:
+1. `Checks` passed on the code to release, on GitHub, **before** the release commit is written. Work not pushed yet goes through `python tools/ci_preflight.py`: it commits the whole working tree (new files included, after asking; ignored files left out) on top of `HEAD` with a temporary index, so the working tree, the index and the branch stay untouched, pushes it to a `preflight/<date>` branch, starts `Checks` there (whole matrix, no pre-push hook, `master` untouched), and waits for the result (`--no-wait`: start only; `--status`: has the current code passed?). Run it at the end of each working day too: 0.28.0 met the CI after nine days of work, nine red runs in one night. The 5 newest preflight branches are kept on GitHub. The pre-push hook refuses a push to `master` that adds a version section to `CHANGELOG.md` when no passed `Checks` run (on `master` or a preflight branch) has the same code: only the changelogs, `README*.md`, `docs/changes/` and `docs/wiki/` may differ (`NEOPEDAL_SKIP_PREFLIGHT=1` skips this, for emergencies only);
+2. `python tools/check.py` passes (automatic before each push to `master` once the hook is installed), everything is pushed;
+3. both changelogs have the section of the next version (see [Changelog](#changelog));
+4. publish with **one** command, by one person (or one Claude session) at a time:
 
 ```bash
 python tools/release.py

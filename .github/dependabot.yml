@@ -14,7 +14,8 @@ updates:
       actions:
         patterns: ["*"]
 
-  # Pinned versions of release builds (requirements-lock.txt, requirements-build.txt)
+  # Pinned versions of release builds (requirements-lock.txt, requirements-build.txt) and of Checks
+  # (requirements-dev-lock.txt: tests/test_ci_preflight.py checks its runtime pins match requirements-lock.txt)
   - package-ecosystem: pip
     directory: /
     schedule:

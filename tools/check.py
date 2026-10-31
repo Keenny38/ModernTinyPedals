@@ -5,6 +5,10 @@ Same commands as the Checks workflow, so a push to master is not the first time 
 Also warns when the changelogs have no section for the next version (needed to publish it),
 and lints edited workflows when actionlint / zizmor are installed.
 
+Installed tools must be the versions of requirements-dev-lock.txt (what Checks install): else a warning, and
+the pre-push hook refuses the push. The hook also refuses a release commit (new version section in
+CHANGELOG.md) whose code never passed Checks: run tools/ci_preflight.py first.
+
 Tests are spread over every CPU when pytest-xdist is installed (requirements-dev.txt), as on Linux CI.
 
 Usage (from project root):
@@ -90,6 +94,62 @@ def workflow_linters() -> list[tuple[str, list[str]]]:
     return linters
 
 
+def lock_mismatches(lock: str = "requirements-dev-lock.txt") -> list[str]:
+    """Installed packages not at the version of the lock Checks install (only those for this OS & Python)"""
+    from importlib import metadata
+
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:
+        return ["packaging not installed"]
+    mismatches = []
+    with open(os.path.join(ROOT, lock), encoding="utf-8") as file:
+        for line in file:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            requirement = Requirement(line)
+            if requirement.marker and not requirement.marker.evaluate():
+                continue
+            wanted = next(iter(requirement.specifier)).version
+            try:
+                installed = metadata.version(requirement.name)
+            except metadata.PackageNotFoundError:
+                installed = "not installed"
+            if installed != wanted:
+                mismatches.append(f"{requirement.name} {installed} (Checks: {wanted})")
+    return mismatches
+
+
+def new_release_versions(base: str, head: str) -> list[str]:
+    """Versions whose section the commits base..head add to CHANGELOG.md (a release commit)"""
+    diff = git("diff", "--unified=0", base, head, "--", "CHANGELOG.md")
+    return [line[4:].split()[0] for line in diff.splitlines()
+            if line.startswith("+## ") and line[4:5].isdigit()]
+
+
+def release_without_checks() -> str:
+    """Refusal message when a push to master adds a release section to the changelog while its code never
+    passed Checks (master or tools/ci_preflight.py), empty if fine. NEOPEDAL_SKIP_PREFLIGHT=1: not checked"""
+    if os.environ.get("NEOPEDAL_SKIP_PREFLIGHT") == "1":
+        return ""
+    head = git("rev-parse", "HEAD")
+    base = git("rev-parse", "--verify", "--quiet", "origin/master")
+    versions = new_release_versions(base, head) if base else []
+    if not versions:
+        return ""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from ci_preflight import passed_base
+
+        if passed_base(head):
+            return ""
+    except (OSError, ValueError, subprocess.CalledProcessError, SystemExit) as error:
+        return f"release {', '.join(versions)}: Checks state not read ({error})"
+    return (f"release {', '.join(versions)}: Checks never passed on this code. Run python tools/ci_preflight.py "
+            "first (whole matrix on a branch, master untouched), then push again")
+
+
 def parallel_test_args() -> list[str]:
     """pytest-xdist arguments: tests spread over every CPU, none if not installed (one process)"""
     import importlib.util
@@ -128,6 +188,18 @@ def main() -> int:
         print("Push to master refused: commit or stash your changes first, the checks would not test what you push:")
         print("\n".join(uncommitted_changes()))
         return 1
+    if options.pre_push and (refusal := release_without_checks()):
+        print(f"Push to master refused: {refusal}")
+        return 1
+
+    mismatches = lock_mismatches()
+    if mismatches:
+        print("Installed versions differ from the ones of Checks (requirements-dev-lock.txt):")
+        print("\n".join(f"  {item}" for item in mismatches))
+        print(f"Fix: {sys.executable} -m pip install -r requirements-dev-lock.txt")
+        if options.pre_push:
+            print("Push to master refused: the checks would not test what Checks run")
+            return 1
 
     python = sys.executable
     checks: list[tuple[str, list[str], dict | None]] = [

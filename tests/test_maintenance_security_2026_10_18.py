@@ -156,7 +156,7 @@ def test_checks_install_dev_list_with_lock():
     for job in ("checks", "visual-regression"):
         installs = [step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == "Install dependencies"]
         assert len(installs) == 1
-        assert "pip install -r requirements-dev.txt -c requirements-lock.txt" in installs[0]
+        assert "pip install -r requirements-dev-lock.txt" in installs[0]
 
 
 # --- 4a. Updater: private temporary folder, hash checked on the file used

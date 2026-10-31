@@ -1,0 +1,43 @@
+# Exact versions of requirements-dev.txt (dev tools + runtime) for every OS & Python of Checks: the CI and the
+# local venv install the same thing, so a check that passes here passes there (0.28.0: CI took pytest 9.2.0 alone).
+#   pip install -r requirements-dev-lock.txt
+# tools/check.py refuses a push to master when the installed versions differ.
+# Update (after changing requirements-dev.txt or requirements-lock.txt, or to take newer tools):
+#    uv pip compile --universal --python-version 3.11 --no-annotate requirements-dev.txt -c requirements-lock.txt -o requirements-dev-lock.txt
+ast-serialize==0.13.1
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+cfgv==3.5.0
+colorama==0.4.6 ; sys_platform == 'win32'
+coverage==7.17.0
+cryptography==50.0.2
+distlib==0.4.4
+execnet==2.1.2
+filelock==4.2.5
+identify==2.6.20
+iniconfig==2.3.1
+librt==0.16.0 ; platform_python_implementation != 'PyPy'
+mypy==2.4.1
+mypy-extensions==1.1.0
+nodeenv==1.11.1
+packaging==26.3
+pathspec==1.1.1
+platformdirs==4.14.0
+pluggy==1.7.0
+pre-commit==4.7.0
+psutil==7.2.2
+pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pygments==2.21.0
+pyside6==6.11.2
+pyside6-addons==6.11.2
+pyside6-essentials==6.11.2
+pytest==9.2.0
+pytest-cov==7.1.0
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+python-discovery==1.9.0
+pyxdg==0.28 ; sys_platform == 'linux'
+pyyaml==6.0.3
+ruff==0.17.3
+shiboken6==6.11.2
+typing-extensions==4.16.0
+virtualenv==21.15.2
