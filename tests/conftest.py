@@ -45,6 +45,17 @@ def isolated_user_paths(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def fonts_like_app():
+    """Bundled fonts (Barlow...) loaded before the first window, as the app does (main.load_bundled_fonts
+    runs before AppWindow): font choices cached at the first window (display font, button label metrics)
+    are the same in every test order. Loaded after a main window was built, a hidden probe button and the
+    shown button of a toolbar measured their label a pixel or two apart (test_audit_i_g1)."""
+    from neopedal.main import load_bundled_fonts
+
+    load_bundled_fonts()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def quit_like_app(isolated_user_paths):
     """Session end does what app exit does: lap viewer worker process stopped, lap & setting saving finished
 
