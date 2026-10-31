@@ -40,6 +40,9 @@ def run_delta(sim: LapSim, tmp_path, on_tick=None) -> DeltaInfo:
         if on_tick:
             on_tick(sim, output)
         sim.tick()
+    from neopedal.userfile.data_saver import wait_data_saver
+
+    assert wait_data_saver(10)  # best & session files are written by the data saver thread
     return output
 
 
