@@ -267,6 +267,13 @@ def set_language(name: str) -> str:
     if len(_reverse) != len(_translation):
         logger.warning("I18N: duplicated translation found, some menu actions may not work")
     _load_message_rules(code)
+    # Qt built-in texts & key names ("Ctrl+Maj+F" in French) follow the language once an app exists: a Qt
+    # translation left installed after a switch back to English changed the shortcut texts of later windows
+    from PySide6.QtCore import QCoreApplication
+
+    app = QCoreApplication.instance()
+    if app is not None:
+        install_qt_translation(app, code)
     logger.info("I18N: language %s (%s)", name, code)
     return code
 

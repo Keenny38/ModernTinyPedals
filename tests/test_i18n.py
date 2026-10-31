@@ -174,6 +174,23 @@ def test_pack_language_kept_at_launch(tmp_path, monkeypatch):
         regex_pattern.LANGUAGE_NAMES[:] = list(LANGUAGES)
 
 
+def test_qt_translation_follows_language():
+    """set_language installs the Qt translation of the language and removes it back in English: key names
+    (shortcuts sheet, menus) read "Ctrl+Shift+F" again, not "Ctrl+Maj+F" left by an earlier French window"""
+    from PySide6.QtGui import QKeySequence
+
+    def native() -> str:
+        return QKeySequence("Ctrl+Shift+F").toString(QKeySequence.SequenceFormat.NativeText)
+
+    i18n.set_language("Français")
+    try:
+        french = native()
+        assert french in ("Ctrl+Maj+F", "Ctrl+Shift+F")  # translated where PySide ships qtbase_fr
+    finally:
+        i18n.set_language("English")
+    assert native() == "Ctrl+Shift+F"
+
+
 def test_language_template_covers_french():
     import sys
 
