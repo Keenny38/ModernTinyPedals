@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from neopedal.hotkey import common, joystick
+from neopedal.hotkey import common, joystick, keymap
 from neopedal.hotkey.common import load_hotkey, set_hotkey, validate_hotkey
 from neopedal.hotkey.joystick import JOY_MAX_BUTTONS, joystick_code
 
@@ -19,7 +19,8 @@ GUID_WHEEL = b"w" * 16
 def test_buttons_above_32_bindable():
     assert JOY_MAX_BUTTONS == 128
     assert validate_hotkey("joy3_button_100") == "joy3_button_100"
-    assert validate_hotkey("ctrl+joy1_button_128") == "ctrl+joy1_button_128"
+    # Keyboard modifiers exist on Windows only (KEYMAP_MODIFIER is empty elsewhere): the Windows map is given
+    assert validate_hotkey("ctrl+joy1_button_128", key_modifier=keymap._WIN_KEYMAP_MODIFIER) == "ctrl+joy1_button_128"
     assert validate_hotkey("joy1_button_129") == ""
     assert load_hotkey("joy3_button_100") == (joystick_code(2, 99),)
     assert set_hotkey(lambda code: code == joystick_code(2, 99)) == ("", "", "", "joy3_button_100")

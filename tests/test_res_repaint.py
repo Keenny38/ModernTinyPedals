@@ -66,9 +66,11 @@ def test_request_update_without_limit(make_widget, monkeypatch):
     assert len(calls) == 2 and "_repaint_timer" not in widget.__dict__
 
 
-def test_deferred_repaint_after_stop_does_nothing(make_widget, monkeypatch):
+def test_deferred_repaint_after_stop_does_nothing(make_widget):
     widget = make_widget("track_map", True)
-    calls = count_updates(monkeypatch, widget)
+    calls: list = []
+    # Assigned, not monkeypatched: the dict is cleared below, the undo of pytest (delattr since 9.2) would raise
+    widget.update = lambda *args: calls.append(args)  # type: ignore[method-assign]
     widget.__dict__.clear()  # unloaded (stopped)
     widget._deferred_repaint()
     assert not calls

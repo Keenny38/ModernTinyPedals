@@ -33,7 +33,6 @@ caching "no picture" answers know when to look again; `logos_version` only with 
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import os
@@ -46,7 +45,7 @@ from urllib.parse import quote
 
 from ..process import game_images as gi
 from ..setting import cfg
-from ..validator import avoid_reserved_filename
+from ..validator import avoid_reserved_filename, json_loads_checked
 from . import atomic_replace, read_json, write_json
 
 CATALOG_FILE = "catalog.json"
@@ -373,7 +372,7 @@ class GameImages:
             if status != 200:
                 continue
             try:
-                data = json.loads(body)
+                data = json_loads_checked(body)
             except (ValueError, RecursionError):  # RecursionError: nested too deeply
                 continue
             if route == gi.TRACKS_ROUTE:

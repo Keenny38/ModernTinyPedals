@@ -45,6 +45,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import IO, TYPE_CHECKING, Any, NamedTuple
 
+from ..validator import json_loads_checked
 from .driver_ranks import DriverRanks, parse_rank
 
 if TYPE_CHECKING:
@@ -139,7 +140,7 @@ def http_request(method: str, url: str, body: bytes | None, headers: dict[str, s
 
 def _json(body: bytes) -> Any:
     try:
-        return json.loads(body)
+        return json_loads_checked(body)
     except (ValueError, RecursionError):  # UnicodeDecodeError too, RecursionError: nested too deeply
         return None
 

@@ -46,7 +46,7 @@ from collections.abc import Callable, Iterator, Sequence
 from typing import Any, NamedTuple, Protocol
 
 from ..userfile import append_line, atomic_replace
-from ..validator import load_json_strict
+from ..validator import json_loads_checked, load_json_strict
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ def _nodes(value: Any) -> Iterator[dict]:
             text = value.strip()
             if text[:1] in ("{", "["):
                 try:
-                    push((json.loads(text), depth + 1))
+                    push((json_loads_checked(text), depth + 1))
                 except (ValueError, RecursionError):  # RecursionError: nested too deeply
                     continue
             continue
@@ -368,7 +368,7 @@ def read_history(path: str) -> list[HistoryEntry]:
         with open(path, encoding="utf-8", errors="replace") as file:
             for line in file:
                 try:
-                    data = json.loads(line)
+                    data = json_loads_checked(line)
                 except (ValueError, RecursionError):  # RecursionError: nested too deeply
                     continue
                 if isinstance(data, dict) and isinstance(data.get("time"), (int, float)):

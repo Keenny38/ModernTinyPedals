@@ -102,9 +102,8 @@ def _redact_ip(match: re.Match) -> str:
 def redact_text(text: str) -> str:
     """Remove user home folder, LAN & IPv6 addresses, and access code & token query values (logged URL)
     from text"""
-    flags = re.IGNORECASE if os.name == "nt" else 0  # Windows paths in any case (c:\users\...)
-    for variant in home_variants():
-        text = re.sub(re.escape(variant), "~", text, flags=flags)
+    for variant in home_variants():  # any case: Windows paths (c:\users\...), text upper or lower cased by a logger
+        text = re.sub(re.escape(variant), "~", text, flags=re.IGNORECASE)
     if "." in text:
         text = _IPV4.sub(_redact_ip, text)
     if "::" in text or text.count(":") >= 7:

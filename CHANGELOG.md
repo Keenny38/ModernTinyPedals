@@ -66,6 +66,7 @@ Hotkeys on your wheel and button box, signed updates, a command palette and a no
 
 ### Fixes
 
+- System Clock overlay: an unknown directive in the clock format (`%Q`) sizes the overlay from the format itself on Linux too.
 - **Hotkeys**: modifiers must match exactly (`C` no longer runs with `Ctrl+C`, `Ctrl+A` no longer with `Ctrl+Shift+A`); while you bind a key, app shortcuts (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Enter`, `Space`) no longer run, so any combination can be bound; a short press of a wheel button or a rotary step is no longer missed.
 - **Electric Motor** (Le Mans Ultimate): power was about 6.7 times too high; it now comes from the game, and `Regen` shows the power recovered.
 - **Flag**: `pit closed` under full course yellow, blue flag gap and class from the same car, yellow flag distance without cars stopped in the pit lane, no traffic chip in the garage. **Pit Lane Helper**: no false limiter alarm at pit exit. **Spotter** and **Radar** leave out cars in the pit lane or garage.
@@ -79,6 +80,8 @@ Hotkeys on your wheel and button box, signed updates, a command palette and a no
 
 ### Security
 
+- **Nesting depth of JSON checked before parsing** (game answers, RaceOS, language packs, layout profiles, share codes, remote commands): refused beyond 500 levels on every Python version. Python 3.14 parses deeper data than the versions before, which refused it by themselves.
+- Bug report: the user folder is removed from the text whatever its case on Linux too.
 - **Signed updates**: each official release comes with a signed manifest (`NeoPedal-<version>-manifest.json` and `.sig`); the app installs an official update only with a valid signature, else it shows why it refused it. A custom update repository needs an Authenticode-signed installer.
 - **Remote control**: commands with an effect on the whole app (`quit_application`, `restart_application`, `restart_api`, API and preset selection, every `preset_*`) now need the access token (`enable_access_token`, `access_token`): turn it on and put the token in your Stream Deck, Companion or SimHub actions.
 - **Web dashboard**: `access_code` of at least 8 characters (a shorter one is replaced), a login valid only on the device that made it, pages of other sites can no longer try codes, repeated wrong codes blocked.

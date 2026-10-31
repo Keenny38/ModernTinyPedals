@@ -18,10 +18,25 @@ from neopedal.validator import (
     load_json_strict,
 )
 
-DEEP = "[" * 100_000 + "]" * 100_000  # RecursionError in json.loads
+DEEP = "[" * 100_000 + "]" * 100_000  # refused by check_json_nesting (json.loads raised RecursionError itself before 3.14)
 
 
 # Finding 14: deeply nested JSON & numbers out of range
+def test_json_nesting_checked_before_parsing():
+    from neopedal.validator import MAX_JSON_DEPTH, check_json_nesting, json_loads_checked
+
+    check_json_nesting("[" * MAX_JSON_DEPTH + "]" * MAX_JSON_DEPTH)  # at the limit
+    check_json_nesting('{"a": "' + "[" * (MAX_JSON_DEPTH + 1) + '"}')  # brackets inside strings never count
+    check_json_nesting(b'["\\"", "]]]]", {"\\\\": [[]]}]')  # escaped quotes & backslashes
+    with pytest.raises(RecursionError):
+        check_json_nesting("[" * (MAX_JSON_DEPTH + 1) + "]" * (MAX_JSON_DEPTH + 1))
+    with pytest.raises(RecursionError):
+        check_json_nesting(b'{"a": [' + b"{" * MAX_JSON_DEPTH + b"}" * MAX_JSON_DEPTH + b"]}")
+    with pytest.raises(RecursionError):
+        json_loads_checked(DEEP.encode())
+    assert json_loads_checked(b'[1, {"a": "]]]]"}]') == [1, {"a": "]]]]"}]
+
+
 def test_load_json_strict_allow_nan_still_checks_nesting():
     assert load_json_strict('{"a": NaN}', allow_nan=True)["a"] != 0  # NaN kept
     with pytest.raises(ValueError):
@@ -39,8 +54,6 @@ def test_pb_code_hostile_values():
     from neopedal.userfile import pb_code
 
     deep = "[" * 30_000 + "]" * 30_000  # within decompressed size read (64 KB)
-    with pytest.raises(RecursionError):
-        json.loads(deep)
     assert pb_code.decode(make_pb_code(deep)) is None  # nested too deeply: refused, no RecursionError
     data = {"track": "Spa", "vehicle": "Car", "laptime": 120.5}
     for when in (1e308, 10 ** 400, -5, pb_code.MAX_TIME + 1):  # date overflowing date formatting: unknown date

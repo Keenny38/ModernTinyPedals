@@ -66,6 +66,7 @@ Des raccourcis sur ton volant et ta button box, des mises à jour signées, une 
 
 ### Corrections
 
+- Overlay Horloge : une directive inconnue dans le format (`%Q`) dimensionne l'overlay d'après le format lui-même, sur Linux aussi.
 - **Raccourcis** : les touches de modification doivent correspondre exactement (`C` ne se lance plus avec `Ctrl+C`, ni `Ctrl+A` avec `Ctrl+Maj+A`) ; pendant l'attribution d'une touche, les raccourcis de l'app (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Entrée`, `Espace`) ne se lancent plus, donc toute combinaison peut être attribuée ; un appui bref sur un bouton du volant ou un cran de rotacteur n'est plus manqué.
 - **Moteur électrique** (Le Mans Ultimate) : la puissance était environ 6,7 fois trop haute ; elle vient maintenant du jeu, et la récupération affiche la puissance récupérée.
 - **Drapeau** : « stands fermés » sous full course yellow, écart et catégorie du drapeau bleu pris sur la même voiture, distance du drapeau jaune sans les voitures arrêtées dans la voie des stands, pas de puce de trafic au garage. **Aide voie des stands** : plus de fausse alerte de limiteur à la sortie des stands. **Spotter** et **Radar** ignorent les voitures dans la voie des stands ou au garage.
@@ -79,6 +80,8 @@ Des raccourcis sur ton volant et ta button box, des mises à jour signées, une 
 
 ### Sécurité
 
+- **Profondeur du JSON vérifiée avant l'analyse** (réponses du jeu, RaceOS, packs de langue, profils de mise en page, codes de partage, commandes à distance) : refusée au-delà de 500 niveaux quelle que soit la version de Python. Python 3.14 accepte des données plus profondes que les versions précédentes, qui les refusaient d'elles-mêmes.
+- Rapport de bug : le dossier utilisateur est retiré du texte quelle que soit sa casse, sur Linux aussi.
 - **Mises à jour signées** : chaque version officielle est livrée avec un manifeste signé (`NeoPedal-<version>-manifest.json` et `.sig`) ; l'app n'installe une mise à jour officielle qu'avec une signature valide, sinon elle indique pourquoi elle la refuse. Un dépôt de mise à jour personnalisé exige un installateur signé Authenticode.
 - **Contrôle à distance** : les commandes qui agissent sur toute l'app (`quit_application`, `restart_application`, `restart_api`, choix de l'API ou du preset, toutes les commandes `preset_*`) exigent maintenant le jeton d'accès (`enable_access_token`, `access_token`) : active-le et mets le jeton dans tes actions Stream Deck, Companion ou SimHub.
 - **Tableau de bord web** : `access_code` d'au moins 8 caractères (un code plus court est remplacé), une connexion valable uniquement sur l'appareil qui l'a faite, les pages d'autres sites ne peuvent plus essayer de codes, les codes faux répétés sont bloqués.

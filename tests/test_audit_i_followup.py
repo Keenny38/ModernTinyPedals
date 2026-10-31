@@ -210,7 +210,10 @@ def test_list_presets_by_one_scan(tmp_path):
         os.utime(folder / name, (1000 + number, 1000 + number))
     (folder / "folder.json").mkdir()  # a folder is never a preset
     listed = list_presets(str(folder))
-    assert [filename for filename, _ in listed] == ["new.json", "old.json"]  # newest first
+    expected = ["new.json", "old.json"]  # newest first
+    if "bad:name.json" in os.listdir(folder):  # name accepted by the file system (Linux): a preset like any other
+        expected.insert(0, "bad:name.json")
+    assert [filename for filename, _ in listed] == expected
     assert all(stat.st_mtime_ns and stat.st_size == 2 for _, stat in listed)
     assert list_presets(str(tmp_path / "missing")) == []
 

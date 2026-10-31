@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import struct
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -187,7 +188,7 @@ def test_key_state_latches_controller_buttons_only_when_asked(clock):
     reader = FakeReader({2: ((100.1, 100.2, 1),)}, clock)
     keyboard = {65: 0x8001}
     key_state = common.KeyState(lambda code: keyboard.get(code, 0), reader)
-    assert key_state(65) == 0x8001 and key_state(common.KEYMAP_MODIFIER["ctrl"]) == 0
+    assert key_state(65) == 0x8001 and key_state(0x11) == 0  # VK_CONTROL: keyboard key not held
     assert key_state(button) == 0
     clock[0] = 100.15
     assert key_state(joystick_code(2, 1)) == 0  # device read while button held
@@ -235,6 +236,7 @@ def test_hotkey_loop_runs_tapped_controller_button_once(ui_env, monkeypatch, clo
     assert ran == ["overlay_lock"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="keyboard bindings: KEYMAP_GENERAL has keys on Windows only")
 def test_hotkey_loop_keeps_slow_checks_without_controller_buttons(ui_env, monkeypatch):
     """Keyboard only bindings: 200 ms checks kept (GetAsyncKeyState reports taps itself)"""
     from neopedal import hotkey_control

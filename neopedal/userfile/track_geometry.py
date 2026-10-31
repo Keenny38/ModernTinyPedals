@@ -39,6 +39,7 @@ from contextlib import suppress
 from itertools import pairwise
 from typing import Any, NamedTuple
 
+from ..validator import json_loads_checked
 from . import write_json
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ def rest_get(host: str, port: int, resource: str, timeout: float = REQUEST_TIMEO
     try:
         address = resolve_hostname(host, port, timeout)
         raw = asyncio.run(get_response(set_header_get(resource, address), address, port, timeout))
-        return json.loads(raw) if raw else None
+        return json_loads_checked(raw) if raw else None
     except (TimeoutError, OSError):  # connection error: host resolved again next time
         forget_hostname(host, port)
         return None

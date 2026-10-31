@@ -43,6 +43,7 @@ from .game_rest_cache import lmu_address, rest_cache
 from .http_limits import MAX_BODY, BodyTooLarge, deadline_response_class, read_body
 from .jobs import Job, WorkerPool, get_courier, weak_callback
 from .perf_monitor import timed_call
+from .validator import check_json_nesting
 
 COMMAND_TIMEOUT = 3.0  # seconds per connection step & read
 # Seconds an answer (status, headers, body) is read in at most, at least: another program listening on the game port
@@ -187,6 +188,7 @@ class GameConnection:
         if not status or not data:
             return None
         try:
+            check_json_nesting(data)
             return json.loads(data) if decode is None else decode(data.decode("utf-8"))
         except (ValueError, RecursionError):  # also UnicodeDecodeError, RecursionError: nested too deeply
             return None

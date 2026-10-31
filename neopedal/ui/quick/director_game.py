@@ -49,6 +49,7 @@ from ...process.game_info import (
     parse_standings,
     standings_time,
 )
+from ...validator import check_json_nesting
 from . import game_camera as gc
 from .director_shared import (
     HIDDEN_POLL_MS,
@@ -97,6 +98,7 @@ class SharedConnection:
         if not status or not data:
             return None
         try:
+            check_json_nesting(data)
             return json.loads(data) if decode is None else decode(data.decode("utf-8"))
         except (ValueError, RecursionError):  # also UnicodeDecodeError, RecursionError: nested too deeply
             return None

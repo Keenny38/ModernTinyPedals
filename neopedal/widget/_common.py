@@ -66,12 +66,15 @@ def system_clock_samples(clock_format: str) -> tuple[str, ...]:
     """Texts of system clock format to size its value: every day & month name (Wednesday, September...), morning &
     afternoon, every digit as 8 (widest digit, digits are tabular); format itself if invalid"""
     try:
-        return tuple(
+        samples = tuple(
             re.sub(r"\d", "8", strftime(clock_format, (2021, month, 28, 10 + month % 2 * 12, 58, 58, month % 7, 1, 0)))
             for month in range(1, 13)
         )
-    except ValueError:
+    except ValueError:  # Windows: unknown directive
         return (clock_format,)
+    if samples[0] == clock_format and len(set(samples)) == 1:  # glibc: unknown directive kept as is ("%Q")
+        return (clock_format,)
+    return samples
 
 
 class SessionBestLap:

@@ -36,13 +36,13 @@ no longer holds its last body).
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from .const_api import API_LMU_CONFIG
+from .validator import json_loads_checked
 
 Address = tuple[str, int]
 Fetch = Callable[[Address, str, float], tuple[int, bytes]]
@@ -226,7 +226,7 @@ class GameRestCache:
         if not answer.ok:
             return None
         try:
-            return json.loads(answer.body)
+            return json_loads_checked(answer.body)
         except (ValueError, RecursionError):  # RecursionError: nested too deeply
             return None
 

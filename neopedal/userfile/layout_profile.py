@@ -31,6 +31,7 @@ import logging
 import os
 from collections.abc import Iterable
 
+from ..validator import json_loads_checked
 from . import write_text_file
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ def load_profiles(filename: str) -> dict[str, dict]:
     """Load layout profiles, empty if missing or invalid"""
     try:
         with open(filename, encoding="utf-8-sig") as file:  # BOM if edited by user
-            data = json.load(file)
+            data = json_loads_checked(file.read())
     except FileNotFoundError:
         return {}
     except (OSError, ValueError, RecursionError) as error:  # RecursionError: nested too deeply

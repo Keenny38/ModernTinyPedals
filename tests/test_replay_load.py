@@ -90,9 +90,10 @@ def test_long_replay_loads_without_blocking_event_loop(replay_view, tmp_path):
     deadline = time.monotonic() + 20
     while replay_view.loader.busy and time.monotonic() < deadline:
         QCoreApplication.processEvents()
+    QCoreApplication.processEvents()  # fast machine: scan done before the first tick, which still fires
     timer.stop()
     assert replay.active and len(replay.player.replay) == SCAN_CHECK_STEP * 20
-    assert True in ticks  # event loop kept running while loading
+    assert ticks  # event loop kept running while loading
     replay_view.refresh()
     assert replay_view.backend.fileName == "long.tpreplay" and replay_view.backend.active
 

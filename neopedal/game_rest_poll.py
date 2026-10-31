@@ -26,7 +26,6 @@ passed (never blocking), its parsed value kept in value. Answers shared with oth
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -36,6 +35,7 @@ from typing import Any, Generic, TypeVar
 
 from .game_rest_cache import rest_cache
 from .log_handler import ErrorThrottle
+from .validator import json_loads_checked
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class RoutePoller(Generic[T]):
             return
         self._digest = digest  # same body never decoded or parsed again, even when it fails (value kept)
         try:
-            data = json.loads(body)
+            data = json_loads_checked(body)
         except (ValueError, RecursionError):  # RecursionError: nested too deeply
             return
         try:

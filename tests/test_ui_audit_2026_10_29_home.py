@@ -45,7 +45,10 @@ def keys(rows) -> list[str]:
 
 def on_track(monkeypatch, remaining=1500.0, finish=0, laps=0):
     from neopedal.api_control import api
+    from neopedal.const_api import API_LMU_NAME
 
+    # Le Mans Ultimate (Director card): the default API is LMU Legacy on Linux
+    monkeypatch.setattr(type(api), "name", property(lambda self: API_LMU_NAME))
     read = api.read
     monkeypatch.setattr(read.state, "version", lambda: "1.4200")
     monkeypatch.setattr(read.state, "active", lambda: True)

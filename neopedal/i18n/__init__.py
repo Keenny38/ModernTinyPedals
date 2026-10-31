@@ -27,7 +27,6 @@ Qt built-in dialogs & standard buttons use Qt's own translation files.
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import os
 import re
@@ -37,6 +36,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ..const_app import FORMAT_PREFIX, LEGACY_FORMAT_PREFIX
+from ..validator import json_loads_checked
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def read_language_pack(filename: str) -> dict:
     if len(content) > MAX_PACK_SIZE:
         raise ValueError("file too large")
     try:
-        data = json.loads(content)
+        data = json_loads_checked(content)
     except RecursionError as error:
         raise ValueError("JSON data nested too deeply") from error
     if not isinstance(data, dict) or data.get("format") not in LANGUAGE_PACK_FORMATS:

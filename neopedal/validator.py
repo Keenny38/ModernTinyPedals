@@ -165,11 +165,50 @@ def load_json_strict(data: str | bytes | bytearray, allow_nan: bool = False) -> 
             may hold them), only nesting checked.
     """
     try:
+        check_json_nesting(data)
         if allow_nan:
             return json.loads(data)
         return json.loads(data, parse_constant=_reject_json_constant, parse_float=_finite_json_float)
     except RecursionError as error:
         raise ValueError("JSON data nested too deeply") from error
+
+
+# Arrays & objects nested deeper than this are refused before parsing (check_json_nesting): the data of the app
+# (presets, game answers, share codes) nests a few levels. CPython up to 3.13 raised RecursionError itself near
+# depth 1000; 3.14 parses as deep as the C stack allows, so the check is explicit and the same on every version.
+MAX_JSON_DEPTH = 500
+_JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+_JSON_BRACKET = re.compile(r"[\[\]{}]")
+
+
+def check_json_nesting(data: str | bytes | bytearray, limit: int = MAX_JSON_DEPTH) -> None:
+    """Raise RecursionError if JSON text nests arrays or objects deeper than limit
+
+    Called before json.loads of untrusted text. Cheap for usual text (fewer openers than the limit: one count,
+    no scan); brackets inside strings are not counted.
+    """
+    if isinstance(data, (bytes, bytearray)):
+        if data.count(b"[") + data.count(b"{") <= limit:
+            return
+        text = bytes(data).decode("utf-8", errors="replace")
+    else:
+        if data.count("[") + data.count("{") <= limit:
+            return
+        text = data
+    depth = 0
+    for match in _JSON_BRACKET.finditer(_JSON_STRING.sub("", text)):
+        if match[0] in "[{":
+            depth += 1
+            if depth > limit:
+                raise RecursionError(f"JSON data nested deeper than {limit}")
+        elif depth:
+            depth -= 1
+
+
+def json_loads_checked(data: str | bytes | bytearray, **kwargs: Any) -> Any:
+    """json.loads of untrusted text, RecursionError if nested too deeply (on Python 3.14 too)"""
+    check_json_nesting(data)
+    return json.loads(data, **kwargs)
 
 
 def is_string_number(value: str) -> bool:

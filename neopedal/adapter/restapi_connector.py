@@ -38,9 +38,20 @@ from ..async_request import HttpConnection, forget_hostname, resolve_hostname_as
 from ..const_common import TYPE_JSON
 from ..game_rest_cache import rest_cache
 from ..thread_guard import run_supervised, wait_all_stopped
+from ..validator import check_json_nesting
 
 logger = logging.getLogger(__name__)
-json_decoder = json.JSONDecoder()
+
+
+class _CheckedDecoder(json.JSONDecoder):
+    """JSON decoder refusing arrays & objects nested too deeply: RecursionError, as CPython up to 3.13 raised itself"""
+
+    def decode(self, s: str, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        check_json_nesting(s)
+        return super().decode(s, *args, **kwargs)
+
+
+json_decoder = _CheckedDecoder()
 
 MAX_UPDATE_INTERVAL = 5.0  # default maximum update interval while repeated resource data is unchanged
 MISSING_RETRY_MAX = 10.0  # maximum delay between requests of resource without data (game answers null)
