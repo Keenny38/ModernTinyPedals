@@ -50,7 +50,7 @@ mypy neopedal
 pytest --cov=neopedal
 ```
 
-- CI fails when total coverage drops under `fail_under` in `pyproject.toml` (88 % at the time of writing; current coverage is about 91 %). There are more than 2,300 tests.
+- CI fails when total coverage drops under `fail_under` in `pyproject.toml` (88 % at the time of writing; current coverage is about 95 %). There are about 8,000 tests. Coverage is measured on the Python 3.13 cells only: on 3.11, coverage's C tracer crashed the Qt tests (access violation in event processing, on both OS), never seen without coverage.
 - Tests run headless in CI with `QT_QPA_PLATFORM=offscreen`, and a hung test fails after 300 seconds (`--timeout=300`).
 - `pytest -n auto` (pytest-xdist) spreads the tests over every CPU, about 3 times faster; CI does it on Linux. A test opening a server uses a port of its own per worker (`PYTEST_XDIST_WORKER`).
 - The bundled fonts (Barlow...) are loaded once at session start (conftest `fonts_like_app`), before the first window, as the app does: a font loaded after a main window was built made a toolbar probe and its shown button measure a label a pixel or two apart, depending on the test order.

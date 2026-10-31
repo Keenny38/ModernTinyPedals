@@ -55,11 +55,14 @@ jobs:
     - name: Type check
       run: mypy neopedal
 
-    - name: Tests (with coverage)
+    - name: Tests (coverage on Python 3.13)
       # A hung test (QML page load, worker process) fails after 5 minutes instead of blocking the runner.
       # Linux: tests spread over every CPU (pytest-xdist, about 3x faster); Windows kept in one process until
-      # a run confirms its exit (see conftest pytest_unconfigure)
-      run: pytest -v --timeout=300 ${{ runner.os == 'Linux' && '-n auto' || '' }} --cov=neopedal --cov-report=term --cov-report=xml:coverage.xml
+      # a run confirms its exit (see conftest pytest_unconfigure).
+      # Coverage measured on the 3.13 cells only: on 3.11 the C tracer of coverage (sys.monitoring from 3.12)
+      # crashed the process (access violation / segmentation fault) in Qt event processing of the driver
+      # stats viewer tests, on both OS, reproduced locally with coverage and never without.
+      run: pytest -v --timeout=300 ${{ runner.os == 'Linux' && '-n auto' || '' }} ${{ matrix.python-version == '3.13' && '--cov=neopedal --cov-report=term --cov-report=xml:coverage.xml' || '' }}
 
     - name: Widget benchmark
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
