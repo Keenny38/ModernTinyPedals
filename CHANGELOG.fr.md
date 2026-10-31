@@ -66,6 +66,7 @@ Des raccourcis sur ton volant et ta button box, des mises à jour signées, une 
 
 ### Corrections
 
+- Visionneuse de télémétrie : la limite de taille du cache des tours retire aussi les fichiers écrits dans le même pas d'une horloge grossière.
 - Overlay Horloge : une directive inconnue dans le format (`%Q`) dimensionne l'overlay d'après le format lui-même, sur Linux aussi.
 - **Raccourcis** : les touches de modification doivent correspondre exactement (`C` ne se lance plus avec `Ctrl+C`, ni `Ctrl+A` avec `Ctrl+Maj+A`) ; pendant l'attribution d'une touche, les raccourcis de l'app (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Entrée`, `Espace`) ne se lancent plus, donc toute combinaison peut être attribuée ; un appui bref sur un bouton du volant ou un cran de rotacteur n'est plus manqué.
 - **Moteur électrique** (Le Mans Ultimate) : la puissance était environ 6,7 fois trop haute ; elle vient maintenant du jeu, et la récupération affiche la puissance récupérée.

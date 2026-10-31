@@ -272,6 +272,7 @@ def test_help_cache_kept_while_another_option_page_is_open(ui_env, monkeypatch):
     from neopedal.i18n import options
     from neopedal.ui import app_settings
 
+    monkeypatch.setattr(options, "_help_holders", 0)  # option pages left open by earlier tests of the process
     options.option_help("cruise", "enable")
     assert options._help.cache_info().currsize == 1
     options.hold_help_cache()

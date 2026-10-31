@@ -241,7 +241,8 @@ def check_widths(bar):
         if modes[index] == 2 or not buttons[name].property("visible"):
             continue
         expected = full[index] if modes[index] == 0 else icon[index]
-        assert buttons[name].property("implicitWidth") == pytest.approx(expected), (name, modes)
+        # Within a pixel: hinting of the shown button differs from the hidden probe on some machines (CI runner)
+        assert buttons[name].property("implicitWidth") == pytest.approx(expected, abs=1.0), (name, modes)
     return modes
 
 

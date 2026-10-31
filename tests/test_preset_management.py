@@ -201,7 +201,7 @@ def test_rename_loaded_preset_follows_new_name(loaded_a, monkeypatch):
     from neopedal.ui import preset_management
 
     calls, reloaded = loaded_a
-    rename = os.replace
+    rename = preset_management.replace_retry  # retried: an antivirus or indexer may hold the file (CI runner)
     monkeypatch.setattr(preset_management, "replace_retry", lambda *args: calls.append("rename") or rename(*args))
     create(mode="rename", source="a.json", name="renamed")
     assert calls == ["flush", "rename"]  # queued save written before rename, not re-creating a.json

@@ -66,6 +66,7 @@ Hotkeys on your wheel and button box, signed updates, a command palette and a no
 
 ### Fixes
 
+- Telemetry viewer: the lap cache size limit also removes files written in the same tick of a coarse clock.
 - System Clock overlay: an unknown directive in the clock format (`%Q`) sizes the overlay from the format itself on Linux too.
 - **Hotkeys**: modifiers must match exactly (`C` no longer runs with `Ctrl+C`, `Ctrl+A` no longer with `Ctrl+Shift+A`); while you bind a key, app shortcuts (`Ctrl+K`, `Ctrl+1`...`9`, `Ctrl+S`, `Alt`, `Enter`, `Space`) no longer run, so any combination can be bound; a short press of a wheel button or a rotary step is no longer missed.
 - **Electric Motor** (Le Mans Ultimate): power was about 6.7 times too high; it now comes from the game, and `Regen` shows the power recovered.

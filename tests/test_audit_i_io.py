@@ -8,6 +8,7 @@ import errno
 import json
 import logging
 import os
+import sys
 import threading
 import time
 import zipfile
@@ -287,7 +288,8 @@ def test_transient_errors_only():
     assert not json_setting.is_transient_access_error(OSError(errno.EIO, "disk"))
     held = OSError(errno.EACCES, "sharing violation", "x", 32)
     assert json_setting.is_transient_access_error(held)
-    assert not json_setting.is_transient_access_error(OSError(errno.EACCES, "other", "x", 123))
+    if sys.platform == "win32":  # winerror exists on Windows only: elsewhere EACCES alone is transient
+        assert not json_setting.is_transient_access_error(OSError(errno.EACCES, "other", "x", 123))
 
 
 def test_reload_waits_less_for_held_files(config, monkeypatch):

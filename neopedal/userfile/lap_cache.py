@@ -499,7 +499,8 @@ def prune_cache(folder: str, limit: int = CACHE_LIMIT, keep: Collection[str] = (
                     removed += 1
             continue
         total += size
-        if total > limit and modified < now - recent and os.path.normcase(os.path.abspath(path)) not in kept:
+        if total > limit and (not recent or modified < now - recent) \
+                and os.path.normcase(os.path.abspath(path)) not in kept:
             with suppress(OSError):
                 os.remove(path)
                 removed += 1

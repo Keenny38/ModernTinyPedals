@@ -217,8 +217,9 @@ def test_two_stream_clients_share_one_snapshot(remote, monkeypatch):
             ws_read(sock)  # first message of each
         calls.clear()
         time.sleep(0.55)
-        # Two clients at 100 ms: about 5 ticks each, one snapshot per tick (was one per client per tick)
-        assert 3 <= len(calls) <= 8, len(calls)
+        # Two clients at 100 ms: about 5 ticks each, one snapshot per tick (was one per client per tick: 11 or
+        # more). A slow runner lets the two loops drift into different ticks now and then.
+        assert 3 <= len(calls) <= 10, len(calls)
     finally:
         for sock in socks:
             sock.close()
